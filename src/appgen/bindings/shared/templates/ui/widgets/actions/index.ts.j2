@@ -1,0 +1,4 @@
+{{ trace_header("app") }}
+{% for page_name in ui_views.page_action_bars %}
+export { {{ page_name | pascal }}PageActions } from "./ui/{{ page_name | kebab }}-actions";
+{% endfor %}

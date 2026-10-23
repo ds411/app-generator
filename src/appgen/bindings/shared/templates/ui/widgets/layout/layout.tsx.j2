@@ -5,6 +5,7 @@
 {% set breadcrumbs = topbar is not none and plan.breadcrumbs.shown %}
 {% set search = topbar is not none and plan.search.shown %}
 {% set mode_toggle = topbar is not none and plan.mode_toggle.shown and ui_plan.mode_toggle %}
+{% set topbar_actions = topbar is not none and ui_views.action_bar(topbar.id).actions %}
 {% set modes = plan.sidebar_modes %}
 {% set can_hide = "hidden" in modes %}
 "use client";
@@ -48,6 +49,10 @@ import { Link } from "@/shared/lib/router";
 {% endif %}
 {% if plan.sidebar_steps %}
 import { useMediaQuery } from "@/shared/lib/use-media-query";
+{% endif %}
+{% if topbar_actions %}
+
+import { {{ name | pascal }}TopbarActions } from "./{{ name | kebab }}-topbar-actions";
 {% endif %}
 {% if sidebar is not none %}
 
@@ -94,6 +99,9 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
       <PageBreadcrumbs className="{{ plan.breadcrumbs.classes('block') }} min-w-0 overflow-hidden" />
 {% endif %}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+{% if topbar_actions %}
+        <{{ name | pascal }}TopbarActions />
+{% endif %}
 {% if search %}
         <div className="{{ plan.search.classes('block') }}">
           <PageSearch />

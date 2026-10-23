@@ -1,0 +1,73 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.action_bar(element_id) %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ns = namespace(icons=[]) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+{% if plan.forms %}
+import { useState } from "react";
+{% endif %}
+
+{% if plan.entity %}
+import { {{ plan.var }}Api, type {{ plan.type }} } from "@/entities/{{ plan.entity | kebab }}";
+{% endif %}
+{% for line in plan.imports %}
+{{ line }}
+{% endfor %}
+{% if plan.needs("pageHref") %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% if plan.entity or plan.forms | selectattr("route_params") | list %}
+import { useParams } from "@/shared/lib/router";
+{% endif %}
+{% if plan.entity %}
+import { useResource } from "@/shared/lib/use-resource";
+{% endif %}
+import { ActionButton, type ActionSpec, useActionRunner } from "@/shared/ui/actions";
+{% for f in plan.forms %}
+import { {{ f.component }}Dialog } from "{{ f.module }}";
+{% endfor %}
+
+{{ m.action_group("actions", plan.actions, plan.type).rstrip() }}
+
+/** The actions of {{ "the page " ~ js(element_id.split(".")[1]) if plan.component.endswith("PageActions") else "the top bar" }}{% if plan.entity %}, for the record of the path{% endif %}. */
+export function {{ plan.component }}() {
+{% if plan.entity %}
+  const id = useParams()[{{ js(plan.param) }}] ?? "";
+  const resource = useResource(
+    `{{ element_id }}:${id}`,
+    () => {{ plan.var }}Api.get(id),
+    (listener) => {{ plan.var }}Api.subscribe(listener),
+  );
+  const record = resource.status === "success" ? resource.data : undefined;
+{% endif %}
+{% if plan.forms %}
+{{ m.runner(plan) }}
+{% else %}
+  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{% endif %}
+  return (
+    <>
+{% for a in plan.actions %}
+{% if a.name in plan.record_actions %}
+      <ActionButton
+        action={actions.{{ a.name | camel }}}
+        records={record ? [record] : []}
+        onRun={run}
+        disabled={!record}
+      />
+{% else %}
+      <ActionButton action={actions.{{ a.name | camel }}} records={[]} onRun={run} />
+{% endif %}
+{% endfor %}
+      {dialog}
+{% if plan.forms %}
+{{ m.form_dialogs(plan).rstrip() }}
+{% endif %}
+    </>
+  );
+}

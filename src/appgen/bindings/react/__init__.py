@@ -257,6 +257,8 @@ BINDING = Binding(
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
         | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
         | {"custom_widget", "custom_rule", "custom_action"}
+        | {"page_content", "navigate_action", "form_action", "operation_action"}
+        | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     context=context,
     filters={"json": to_json},

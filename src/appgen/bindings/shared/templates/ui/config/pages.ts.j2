@@ -1,6 +1,9 @@
-{{ trace_header("app") }}
+{% set ui_ids = ["ui"] + (["ui.defaults"] if definition.ui.defaults else []) if definition.ui else [] %}
+{{ trace_header("app", *ui_ids) }}
 // The pages of the app: the paths, the titles, and the parents. The
-// breadcrumbs, the search, and the links use them.
+// breadcrumbs, the search, and the links use them. The UI part of the
+// definition and its defaults (the layout, the page size, and the
+// states) apply to all pages.
 
 export type PageName = {{ ui_plan.pages | map("camel") | map("tojson") | join(" | ") or "never" }};
 
