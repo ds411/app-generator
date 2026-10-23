@@ -9,6 +9,7 @@ from appgen.dsl.model import AppDefinition
 from appgen.gen.binding import Binding, Output
 from appgen.gen.elements import DefinitionElement, iter_elements
 from appgen.gen.render import GenerationError, make_environment, normalize_content, normalize_path
+from appgen.gen.tokens import resolve_tokens
 from appgen.gen.traces import comment_style, trace_globals
 
 
@@ -56,6 +57,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     """
     environment = make_environment(binding.template_dir)
     environment.globals.update(trace_globals(definition))
+    base = _base_context(binding, definition)
     elements = list(iter_elements(definition))
     gap_elements = [e for e in elements if e.kind not in binding.covers]
     files: dict[str, GeneratedFile] = {}
@@ -66,7 +68,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
         files[generated.path] = generated
 
     for output in binding.outputs:
-        for context in _contexts(binding, output, definition, elements):
+        for context in _contexts(base, output, elements):
             add(_render(environment, output, context))
 
     gaps: list[Gap] = []
@@ -75,7 +77,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
             gaps.append(Gap(element.id, element.kind))
             continue
         rule = replace(binding.gap_rule, for_each=element.kind, extension=True)
-        context = _element_context(_base_context(binding, definition), element)
+        context = _element_context(base, element)
         generated = _render(environment, rule, context)
         if "TODO(appgen)" not in generated.content:
             raise GenerationError(
@@ -117,24 +119,26 @@ def _render(
 
 
 def _contexts(
-    binding: Binding, output: Output, definition: AppDefinition, elements: list[DefinitionElement]
+    base: dict[str, Any], output: Output, elements: list[DefinitionElement]
 ) -> list[dict[str, Any]]:
-    """Return the template context for each file that an output rule makes.
-
-    The context holds no clock or random values. A set has no order, so
-    the context gives the covered kinds as a sorted list.
-    """
-    base = _base_context(binding, definition)
+    """Return the template context for each file that an output rule makes."""
     if output.for_each is None:
         return [base]
     return [_element_context(base, e) for e in elements if e.kind == output.for_each]
 
 
 def _base_context(binding: Binding, definition: AppDefinition) -> dict[str, Any]:
+    """Return the context that all templates share.
+
+    The context holds no clock or random values. A set has no order, so
+    the context gives the covered kinds as a sorted list. `tokens` holds
+    the resolved design tokens, sorted by path.
+    """
     return {
         "definition": definition,
         "app": definition.app,
         "binding": {"name": binding.name, "covers": sorted(binding.covers)},
+        "tokens": resolve_tokens(definition),
     }
 
 

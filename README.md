@@ -93,6 +93,13 @@ run for an ID that is not an element. Each file that can hold comments
 must have a trace. For a file without comments (for example JSON), the
 manifest records the traces.
 
+Templates get the design tokens as `tokens`: a flat list of
+`ResolvedToken`, sorted by path. Each entry has the final value for the
+light and the dark mode, with all references resolved, and keeps its
+element ID for traces. The kind of an element is its class name in
+snake case, for example `entity`, `token`, or `menu_item`. A `Field`
+in `params` has the kind `param`.
+
 A binding can declare a `gap_rule`: an output rule that the generator
 renders once for each element of a kind that the binding does not
 cover. Each such file is an extension file (ADR 0005) with a gap trace
