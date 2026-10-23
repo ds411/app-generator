@@ -1,13 +1,15 @@
 from textwrap import dedent
 
 import pytest
+from ui_support import UI_TOKENS
 
 from appgen.dsl import AppDefinition, DefinitionError, Diagnostic, load_definition_text
 from appgen.dsl.ui.forms import CompareRule, CustomRule, Form
 from appgen.dsl.validator import validate_definition
 
-VALID = dedent(
-    """\
+VALID = (
+    dedent(
+        """\
     version: 0
     app: { name: demo, title: Demo }
     entities:
@@ -112,6 +114,8 @@ VALID = dedent(
             note: { widget: textarea }
             notify: {}
     """
+    )
+    + UI_TOKENS
 )
 
 

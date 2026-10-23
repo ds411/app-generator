@@ -1,0 +1,20 @@
+# expect: missing-selection
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+ui:
+  views:
+    task_table:
+      kind: table
+      entity: Task
+      columns: { title: {} }
+      bulk_actions:
+        delete: { kind: operation, operation: delete_task }

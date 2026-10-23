@@ -10,8 +10,15 @@ from typing import cast
 
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
-from appgen.dsl.model import AppDefinition, Field
-from appgen.dsl.ui.common import State, States
+from appgen.dsl.model import AppDefinition, Field, Page
+from appgen.dsl.ui.common import (
+    FormAction,
+    Grid,
+    NavigateAction,
+    OperationAction,
+    State,
+    States,
+)
 from appgen.dsl.ui.dashboards import (
     FILTER_OPS,
     RELATIVE_DATES,
@@ -34,7 +41,10 @@ from appgen.dsl.ui.fields import (
     resolve_path,
 )
 from appgen.dsl.ui.forms import CompareRule, Form, FormField
-from appgen.dsl.ui.tokens import check_tokens
+from appgen.dsl.ui.layout import Layout, Sidebar
+from appgen.dsl.ui.model import Defaults
+from appgen.dsl.ui.page import PageContent
+from appgen.dsl.ui.tokens import TokenTable, check_tokens
 from appgen.dsl.ui.views import (
     BadgeRef,
     BadgeSet,
@@ -627,3 +637,167 @@ def _error(
         element_id=element.id or None,
         hint=hint,
     )
+
+
+TOKEN_GROUPS = {"width": "size", "max_width": "size", "padding": "spacing", "gap": "spacing"}
+"""The token group that each style key needs. `color` keys need a color token."""
+PAGE_KEYS = ("page", "link", "navigate")
+"""The keys of UI elements that name a page (a route)."""
+
+
+def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Each token, page, layout, menu, view, form, and operation that the UI names must exist."""
+    if definition.ui is None and not any(_has_ui_keys(page) for page in definition.pages.values()):
+        return
+    ui = definition.ui
+    tokens = TokenTable.build(ui.tokens if ui else None)
+    layouts = ui.layouts if ui else {}
+    for element_id, element in definition.elements.items():
+        if not element_id.startswith(("ui.", "pages.")) or element_id.startswith("ui.tokens"):
+            continue
+        yield from _check_token_refs(tokens, element)
+        yield from _check_page_refs(definition, element)
+        match element:
+            case Page():
+                if element.layout is not None and element.layout not in layouts:
+                    yield _missing(element, "layout", "layout", element.layout, layouts)
+                if element.content is not None:
+                    yield from _check_page_content(definition, element, element.content)
+            case Defaults():
+                if element.layout is not None and element.layout not in layouts:
+                    yield _missing(element, "layout", "layout", element.layout, layouts)
+            case Sidebar():
+                menus = ui.navigation if ui else {}
+                if element.navigation is not None and element.navigation not in menus:
+                    yield _missing(element, "navigation", "menu", element.navigation, menus)
+            case Layout() | Grid():
+                for breakpoint in element.responsive:
+                    yield from _check_breakpoint(tokens, element, "responsive", breakpoint)
+            case Column():
+                if element.hide_below is not None:
+                    yield from _check_breakpoint(tokens, element, "hide_below", element.hide_below)
+            case FormAction():
+                forms = ui.forms if ui else {}
+                if element.form not in forms:
+                    yield _missing(element, "form", "form", element.form, forms)
+            case OperationAction():
+                operations = definition.operations
+                if element.operation not in operations:
+                    yield _missing(element, "operation", "operation", element.operation, operations)
+            case NavigateAction():
+                page = definition.pages.get(element.page)
+                params = _path_params(page.path) if page else set[str]()
+                for param in element.params:
+                    if page is not None and param not in params:
+                        yield _missing(element, "params", "path parameter", param, params)
+            case BoardView():
+                yield from _check_board_move(definition, element)
+            case _:
+                pass
+
+
+def _has_ui_keys(page: Page) -> bool:
+    return page.layout is not None or page.content is not None or bool(page.actions)
+
+
+def _path_params(path: str) -> set[str]:
+    return set(re.findall(r"\{([a-z][a-z0-9_]*)\}", path))
+
+
+def _check_token_refs(tokens: TokenTable, element: Element) -> Iterator[Diagnostic]:
+    for key in type(element).model_fields:
+        value = getattr(element, key)
+        if not isinstance(value, str) or not value.startswith("{"):
+            continue
+        group = "color" if key == "color" else TOKEN_GROUPS.get(key)
+        if group is None:
+            continue
+        path = tokens.reference_target(value)
+        entry = tokens.tokens.get(path or "")
+        if entry is None:
+            yield _missing(element, key, "token", path or value, tokens.tokens)
+        elif entry.group != group:
+            yield _error(
+                "unsuitable-token",
+                f"The key '{key}' needs a token in '{group}', but '{path}' is in '{entry.group}'.",
+                element,
+                at=key,
+            )
+
+
+def _check_breakpoint(
+    tokens: TokenTable, element: Element, key: str, name: str
+) -> Iterator[Diagnostic]:
+    path = f"breakpoint.{name}"
+    if path not in tokens.tokens:
+        breakpoints = [
+            p.removeprefix("breakpoint.") for p in tokens.tokens if p.startswith("breakpoint.")
+        ]
+        yield _missing(element, key, "breakpoint token", name, breakpoints)
+
+
+def _check_page_refs(definition: AppDefinition, element: Element) -> Iterator[Diagnostic]:
+    for key in PAGE_KEYS:
+        if key not in type(element).model_fields:
+            continue
+        name = getattr(element, key)
+        if isinstance(name, str) and name not in definition.pages:
+            yield _missing(element, key, "page", name, definition.pages)
+
+
+def _check_page_content(
+    definition: AppDefinition, page: Page, content: PageContent
+) -> Iterator[Diagnostic]:
+    ui = definition.ui
+    if content.view is not None:
+        views = ui.views if ui else {}
+        view = views.get(content.view)
+        if view is None:
+            yield _missing(content, "view", "view", content.view, views)
+        elif isinstance(view, DetailView) and not _path_params(page.path):
+            yield _error(
+                "unsuitable-view",
+                f"The detail view '{content.view}' shows one record, so the page path needs "
+                "a path parameter.",
+                content,
+                at="view",
+                hint="Use a path such as /tasks/{id}.",
+            )
+        elif page.entity is not None and view.entity != page.entity:
+            yield _error(
+                "unsuitable-view",
+                f"The view '{content.view}' shows '{view.entity}', but the page shows "
+                f"'{page.entity}'.",
+                content,
+                at="view",
+            )
+    if content.form is not None:
+        forms = ui.forms if ui else {}
+        if content.form not in forms:
+            yield _missing(content, "form", "form", content.form, forms)
+    if content.dashboard is not None:
+        dashboards = ui.dashboards if ui else {}
+        if content.dashboard not in dashboards:
+            yield _missing(content, "dashboard", "dashboard", content.dashboard, dashboards)
+
+
+def _check_board_move(definition: AppDefinition, view: BoardView) -> Iterator[Diagnostic]:
+    if view.move is None:
+        return
+    operation = definition.operations.get(view.move)
+    if operation is None:
+        yield _missing(view, "move", "operation", view.move, definition.operations)
+        return
+    suits = operation.entity == view.entity and (
+        operation.kind == "update"
+        or (operation.kind == "custom" and view.group_by in operation.params)
+    )
+    if not suits:
+        yield _error(
+            "unsuitable-operation",
+            f"A board move needs an update operation on '{view.entity}', or a custom "
+            f"operation with the parameter '{view.group_by}'. '{view.move}' is a "
+            f"{operation.kind} operation on '{operation.entity}'.",
+            view,
+            at="move",
+        )

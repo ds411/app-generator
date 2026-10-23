@@ -1,6 +1,7 @@
 from textwrap import dedent
 
 import pytest
+from ui_support import UI_TOKENS
 
 from appgen.dsl import AppDefinition, load_definition_text
 from appgen.dsl.ui.common import State
@@ -8,8 +9,9 @@ from appgen.dsl.ui.states import BUILT_IN_STATES, effective_states
 from appgen.dsl.ui.views import CardsView, TableView
 from appgen.dsl.validator import validate_definition
 
-VALID = dedent(
-    """\
+VALID = (
+    dedent(
+        """\
     version: 0
     app: { name: demo, title: Demo }
     entities:
@@ -65,6 +67,9 @@ VALID = dedent(
           loading: { indicator: skeleton }
           error: { title: Something broke, icon: triangle-alert, action: retry }
     """
+    )
+    + UI_TOKENS
+    + "  forms:\n    new_task: { entity: Task, operation: create_task, fields: { title: {} } }\n"
 )
 
 

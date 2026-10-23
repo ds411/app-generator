@@ -1,0 +1,14 @@
+# expect: unknown-reference
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+pages:
+  tasks: { path: /tasks, title: Tasks, content: { view: task_list } }
