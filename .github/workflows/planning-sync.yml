@@ -1,0 +1,29 @@
+name: Planning sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/planning/**"
+      - ".github/scripts/planning_sync.py"
+      - ".github/workflows/planning-sync.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: planning-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: Create or update labels and milestones
+        run: uv run .github/scripts/planning_sync.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

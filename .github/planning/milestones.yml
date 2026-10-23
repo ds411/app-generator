@@ -1,0 +1,155 @@
+# Milestones for this repository. The "Planning sync" workflow creates or
+# updates them on each push to main. It matches milestones by title.
+# Write each description with .github/MILESTONE_TEMPLATE.md.
+
+- title: "M0: Repository foundation"
+  description: |
+    **Goal:** The repo has a Python project, CI, and the workflow templates.
+
+    **Scope**
+    - In: GitHub workflow templates, CONTRIBUTING.md, the uv Python project, the CI workflow, and the ADR folder.
+    - Out: Generator code.
+
+    **Exit criteria**
+    - [ ] CI runs lint, type checks, and tests on each pull request.
+    - [ ] The README gives the setup, lint, and test commands.
+
+    **Demo:** Open a pull request and see the CI checks run.
+
+    **Depends on:** None.
+
+- title: "M1: App definition DSL"
+  description: |
+    **Goal:** An app author can write and validate the data model of an app in YAML.
+
+    **Scope**
+    - In: the DSL v0 ADR, extensibility (a version field, a rule for unknown keys), a YAML loader with source positions, stable element IDs, validation, a JSON Schema, example definitions, and `appgen validate`.
+    - Out: The UI part of the DSL (M2). Authentication, authorization, workflows, and translations.
+
+    **Exit criteria**
+    - [ ] `appgen validate` accepts the project tracker example.
+    - [ ] Each validation error shows the file, the line, and the column.
+    - [ ] Each definition element has a stable ID.
+
+    **Demo:** `appgen validate` on the example and on a broken copy.
+
+    **Depends on:** M0.
+
+- title: "M2: UI DSL and design tokens"
+  description: |
+    **Goal:** An app author can describe a detailed UI and its design tokens in YAML.
+
+    **Scope**
+    - In: the UI DSL ADR, design tokens (color with light and dark modes, typography, spacing, radius, shadow, breakpoints), layouts and navigation, data views, forms, detail views and dashboards, UI states and responsive rules, validation of UI references, and the UI of the project tracker example.
+    - Out: Code generation for the UI (M5 and M7).
+
+    **Exit criteria**
+    - [ ] `appgen validate` accepts the project tracker with its full UI.
+    - [ ] Validation reports each reference to a missing token, field, operation, or route.
+
+    **Demo:** `appgen validate` on the project tracker and on a copy with a missing token.
+
+    **Depends on:** M1.
+
+- title: "M3: Generator core"
+  description: |
+    **Goal:** The generator writes deterministic code with traces and generation gaps.
+
+    **Scope**
+    - In: the trace format ADR, the generation gap ADR, the binding contract, deterministic Jinja2 rendering, trace emission, generation gaps, design token resolution, the output manifest, and `appgen generate`.
+    - Out: The real bindings (M5 to M7). The trace checker (M4).
+
+    **Exit criteria**
+    - [ ] Two runs of `appgen generate` give the same output, byte for byte.
+    - [ ] Each generated file carries traces to the definition.
+    - [ ] Regeneration keeps the hand-written extension files.
+
+    **Demo:** `appgen generate` with the test binding, two times, and a diff that shows no change.
+
+    **Depends on:** M2.
+
+- title: "M4: Trace checker"
+  description: |
+    **Goal:** A maintainer can see what the code covers and which traces are wrong.
+
+    **Scope**
+    - In: the trace scanner, the coverage report, the invalid trace report, text and JSON output, CI exit codes, and `appgen check`.
+    - Out: An IDE integration.
+
+    **Exit criteria**
+    - [ ] `appgen check` lists uncovered definition elements and open gaps.
+    - [ ] `appgen check` lists malformed traces and traces to unknown elements.
+    - [ ] CI fails for invalid traces.
+
+    **Demo:** `appgen check` on the test binding output, before and after a change to the definition.
+
+    **Depends on:** M3.
+
+- title: "M5: Next.js 16 binding"
+  description: |
+    **Goal:** The generator writes a full-stack Next.js app with a detailed UI.
+
+    **Scope**
+    - In: Next.js 16 App Router with TypeScript, FSD, shadcn/ui, the theme from design tokens, Drizzle and Postgres, server actions, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile and Docker Compose file, and CI.
+    - Out: Authentication.
+
+    **Exit criteria**
+    - [ ] The generated project tracker installs, type checks, lints, and builds with pnpm.
+    - [ ] The app runs in Docker with Postgres, in light and dark mode.
+    - [ ] The trace check reports no invalid traces.
+
+    **Demo:** `docker compose up` for the generated project tracker.
+
+    **Depends on:** M4.
+
+- title: "M6: FastAPI binding"
+  description: |
+    **Goal:** The generator writes a standalone FastAPI REST API.
+
+    **Scope**
+    - In: FastAPI 0.161 on Python 3.14 with uv, vertical slices, Pydantic schemas, SQLAlchemy and Alembic with Postgres, endpoints, API tests, generation gaps, the Dockerfile and Docker Compose file, and CI.
+    - Out: Authentication. A UI.
+
+    **Exit criteria**
+    - [ ] The generated API passes its generated tests.
+    - [ ] The API runs in Docker with Postgres.
+    - [ ] The trace check reports no invalid traces.
+
+    **Demo:** `docker compose up`, then open the OpenAPI docs of the generated API.
+
+    **Depends on:** M4.
+
+- title: "M7: React 19 binding"
+  description: |
+    **Goal:** The generator writes a standalone React app with a detailed UI and mock data.
+
+    **Scope**
+    - In: React 19 with TypeScript, Vite, React Router, FSD, shadcn/ui, the theme from design tokens, entity types and mock data, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile, and CI.
+    - Out: Calls to a real API.
+
+    **Exit criteria**
+    - [ ] The generated project tracker installs, type checks, lints, and builds with pnpm.
+    - [ ] The app runs in Docker and shows the mock data, in light and dark mode.
+    - [ ] The trace check reports no invalid traces.
+
+    **Demo:** `docker run` for the generated project tracker.
+
+    **Depends on:** M4.
+
+- title: "M8: End-to-end proof of concept"
+  description: |
+    **Goal:** One definition drives all three apps, and the traces stay correct after a change.
+
+    **Scope**
+    - In: the generation of all three apps from one definition, end-to-end smoke tests, Playwright UI tests, a change scenario, the user docs, and the evaluation report.
+    - Out: Production hardening.
+
+    **Exit criteria**
+    - [ ] CI generates, builds, and runs all three apps.
+    - [ ] The Playwright UI tests pass in light and dark mode.
+    - [ ] After a change to the definition, the gap code stays and the checker reports the drift.
+    - [ ] The evaluation report is complete.
+
+    **Demo:** One CI run that generates, builds, tests, and checks all three apps.
+
+    **Depends on:** M5, M6, and M7.
