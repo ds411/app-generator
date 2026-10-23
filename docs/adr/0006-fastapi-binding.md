@@ -140,6 +140,14 @@ fields. The binding makes them from the field type and options. For a
 cannot, the app author gives a value with the extension key
 `x-example`.
 
+Each operation has a test module with the success case and the main
+error cases: input that is not valid (422), a missing record (404), a
+reference to a missing record (422), and a duplicate unique value
+(409). Factories store the records for a test through the repository
+of each slice, with the records that a required relation needs. The
+generated tests of a custom operation check only its errors, because
+the generator does not know its logic.
+
 ## Consequences
 
 - The code of a feature is in one folder, so a developer finds the

@@ -46,6 +46,13 @@ The tests need Postgres. By default, they start Postgres in a container
 with Testcontainers, so Docker must run. To use a database that runs
 already, set `TEST_DATABASE_URL`. The tests delete all data in it.
 
+Each operation has a test module in `tests/features/<slice>/`, with
+the success case and the main error cases. The factories in
+`tests/factories.py` give valid input and store records, with the
+records that they need. The generated tests of a custom operation check
+only its errors (404 and 422). Write the tests of its logic in your own
+test modules, which appgen does not change.
+
 ## Layout
 
 Each entity of the definition is a vertical slice: one folder with all

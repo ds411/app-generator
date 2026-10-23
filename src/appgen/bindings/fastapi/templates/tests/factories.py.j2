@@ -1,0 +1,57 @@
+{{ trace_header("app") }}
+"""Factories for the tests: valid input, and records in the test database.
+
+A factory stores the records that a new record needs (its required
+references) first. Each call uses the next number of its entity, so
+that the values of unique fields do not repeat in a test.
+"""
+
+{% set entities = py.entity_order() %}
+{% set ns = namespace(lines=[
+    "import itertools",
+    "from typing import Any",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+], payloads=[]) %}
+{% for e in entities %}
+{% set ns.payloads = ns.payloads + [e.snake ~ "_payload"] %}
+{% set ns.lines = ns.lines + [
+    "from app.features." ~ e.slice ~ " import repository as " ~ e.snake ~ "_repository",
+    "from app.features." ~ e.slice ~ ".models import " ~ e.name,
+    "from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Create",
+] %}
+{% endfor %}
+{{ py.imports(ns.lines + [py.from_import("tests.payloads", ns.payloads)]) }}
+
+_numbers = {
+{% for e in entities %}
+    "{{ e.name }}": itertools.count(1),
+{% endfor %}
+}
+{% for e in entities %}
+
+
+{{ trace(e.id) }}
+async def {{ e.snake }}_input(session: AsyncSession, **values: Any) -> dict[str, Any]:
+    """Return valid JSON input for a new {{ e.name }}. Store the records that it needs."""
+    n = next(_numbers["{{ e.name }}"])
+{% for r in e.required_parents %}
+    if "{{ r.fk_attr }}" not in values:
+        values["{{ r.fk_attr }}"] = str((await make_{{ e.target(r).snake }}(session)).id)
+{% endfor %}
+{% if e.optional_fks %}
+    defaults: dict[str, Any] = {
+{% for r in e.optional_fks %}
+        "{{ r.fk_attr }}": None,
+{% endfor %}
+    }
+    return {{ e.snake }}_payload(n, **{**defaults, **values})
+{% else %}
+    return {{ e.snake }}_payload(n, **values)
+{% endif %}
+
+
+async def make_{{ e.snake }}(session: AsyncSession, **values: Any) -> {{ e.name }}:
+    """Store a valid {{ e.name }} record, and return it."""
+    data = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session, **values))
+    return await {{ e.snake }}_repository.create(session, data)
+{% endfor %}

@@ -306,12 +306,14 @@ REST API: FastAPI 0.161 on Python 3.14, with uv. Each entity is a
 vertical slice in `app/features/<slice>/`, with a SQLAlchemy model,
 Pydantic schemas, a repository, and one module for each operation. A
 custom operation has a generated endpoint and an extension file for its
-logic, and each entity has an extension file for its custom validation. Errors use the problem details format (RFC 9457). An Alembic
+logic, and each entity has an extension file for its custom validation.
+Each operation has generated API tests that run against Postgres in a
+container. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. Pages and the UI are out of
 the scope of the binding. The binding is in
-`src/appgen/bindings/fastapi/`, and
-[ADR 0006](docs/adr/0006-fastapi-binding.md) describes its design. To
-try the output:
+`src/appgen/bindings/fastapi/`, and [ADR
+0006](docs/adr/0006-fastapi-binding.md) describes its design. To try the
+output:
 
 ```sh
 uv run appgen generate examples/project-tracker/app.yaml -b fastapi -o /tmp/tracker-api

@@ -107,6 +107,13 @@ BINDING = Binding(
             path=_TESTS + "/test_schemas.py",
             for_each="entity",
         ),
+        Output(
+            template="tests/features/slice/test_operation.py.j2",
+            path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}.py",
+            for_each="operation",
+        ),
+        Output(template="tests/factories.py.j2", path="tests/factories.py"),
+        Output(template="tests/problems.py.j2", path="tests/problems.py"),
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
     ),

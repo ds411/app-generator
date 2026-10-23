@@ -1,0 +1,11 @@
+{{ trace_header("app") }}
+"""Checks of the error responses: problem details (RFC 9457)."""
+
+from httpx import Response
+
+
+def assert_problem(response: Response, status: int) -> None:
+    """Check that a response is a problem details document with a status code."""
+    assert response.status_code == status, response.text
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["status"] == status

@@ -496,6 +496,26 @@ class PyEntity:
     def custom_operations(self) -> list[PyOperation]:
         return [o for o in self.operations if o.custom]
 
+    @property
+    def required_parents(self) -> list[PyRelation]:
+        """The foreign keys that a test factory fills with a new record of the target."""
+        return [r for r in self.fk_relations if r.required and r.target != self.name]
+
+    @property
+    def optional_fks(self) -> list[PyRelation]:
+        """The foreign keys that a test factory leaves empty."""
+        return [r for r in self.fk_relations if r not in self.required_parents]
+
+    @property
+    def exact_fields(self) -> list[PyField]:
+        """The fields with JSON values that a test can compare with the response."""
+        return [f for f in self.fields if f.exact]
+
+    @property
+    def has_unique_input(self) -> bool:
+        """True if two records with the same input break a unique constraint."""
+        return any(f.unique for f in self.fields) or any(r.unique for r in self.fk_relations)
+
     def target(self, rel: PyRelation) -> PyEntity:
         return self.app_entities[rel.target]
 
@@ -715,6 +735,10 @@ class PyApp:
     def imports(self, lines: list[str]) -> str:
         """Return import lines in the groups and the order of the Ruff import sorter."""
         return import_block(set(lines))
+
+    def from_import(self, module: str, names: list[str]) -> str:
+        """Return a `from` import with the names in the order of the Ruff import sorter."""
+        return from_import(module, set(names))
 
     def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
