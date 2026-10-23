@@ -202,7 +202,15 @@ create, update, and delete. The CRUD and list operations of the
 definition call it. The mock records come from a fixed seed, so the
 output stays the same, and each relation refers to a record that
 exists. An entity sets the number of records with the extension key
-`x-mock-count` (default: 12). To try the output:
+`x-mock-count` (default: 12).
+
+Each custom element of the definition is a generation gap (ADR 0005):
+custom operations, custom page contents, detail tabs and sections,
+dashboard widgets, form widgets, form rules, and actions. For each one,
+the binding writes a generated file (`*.gen.ts` or `*.gen.tsx`) with the
+typed signature, and an extension file (`*.ext.ts` or `*.ext.tsx`) with
+a stub that the app developer replaces. The app builds with the stubs.
+`src/appgen/bindings/react/gaps.py` lists the paths. To try the output:
 
 ```sh
 uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker

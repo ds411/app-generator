@@ -123,3 +123,78 @@ def test_each_file_has_a_file_trace_and_the_check_finds_no_invalid_traces(
     for name, operation in definition.operations.items():
         if operation.kind != "custom":
             assert f"operations.{name}" in covered
+
+
+GAPS = Path(__file__).parent / "fixtures" / "react-gaps.yaml"
+
+GAP_FILES = {
+    "operations.publish_note": "src/features/publish-note/api/publish-note",
+    "pages.report.content": "src/pages/report/ui/report-content",
+    "pages.note_report.content": "src/pages/note-report/ui/note-report-content",
+    "ui.views.note_detail.tabs.graph": "src/widgets/note-detail/ui/graph-tab",
+    "ui.views.note_detail.sections.history": "src/widgets/note-detail/ui/history-section",
+    "ui.views.note_detail.tabs.more.sections.stats": (
+        "src/widgets/note-detail/ui/more-stats-section"
+    ),
+    "ui.dashboards.home.widgets.chart": "src/widgets/home/ui/chart-widget",
+    "ui.forms.new_note.fields.title": "src/features/new-note-form/ui/title-widget",
+    "ui.forms.new_note.rules.nice": "src/features/new-note-form/model/nice-rule",
+    "pages.notes.actions.export": "src/features/notes-actions/model/export-action",
+    "ui.layouts.shell.topbar.actions.help": "src/features/shell-actions/model/help-action",
+    "ui.views.note_table.row_actions.share": (
+        "src/features/note-table-actions/model/row-share-action"
+    ),
+    "ui.views.note_table.bulk_actions.tag": "src/features/note-table-actions/model/bulk-tag-action",
+    "ui.views.note_detail.actions.print": "src/features/note-detail-actions/model/print-action",
+}
+
+
+def test_each_custom_element_has_a_generated_file_and_an_extension_file(react: Binding) -> None:
+    files = {f.path: f for f in generate(load_definition(GAPS), react).files}
+
+    for element_id, base in GAP_FILES.items():
+        suffix = ".ts" if "/api/" in base or "/model/" in base else ".tsx"
+        generated, extension = files[base + ".gen" + suffix], files[base + ".ext" + suffix]
+        assert generated.kind == "generated"
+        assert f"@trace {element_id} file" in generated.content
+        assert f'from "./{base.rsplit("/", 1)[1]}.ext";' in generated.content
+        assert extension.kind == "extension"
+        assert f"@trace:gap {element_id} file" in extension.content
+        assert "TODO(appgen):" in extension.content
+    assert len([f for f in files.values() if f.kind == "extension"]) == len(GAP_FILES)
+
+
+def test_the_gaps_have_typed_signatures(react: Binding) -> None:
+    files = _files(generate(load_definition(GAPS), react))
+
+    assert (
+        "export async function publishNote(id: string): Promise<void> {"
+        in files["src/features/publish-note/api/publish-note.gen.ts"]
+    )
+    assert (
+        "_records: Note[]" in files["src/features/note-table-actions/model/bulk-tag-action.ext.ts"]
+    )
+    assert "value: string | null;" in files["src/features/new-note-form/ui/title-widget.gen.tsx"]
+    assert (
+        "_values: Partial<NoteInput>" in files["src/features/new-note-form/model/nice-rule.ext.ts"]
+    )
+    page = files["src/pages/note-report/ui/note-report-page.tsx"]
+    assert "<NoteReportContent params={params} />" in page
+
+
+def test_regeneration_keeps_the_code_in_the_extension_files(
+    tmp_path: Path, definition: AppDefinition, react: Binding
+) -> None:
+    write_result(generate(definition, react), tmp_path, "react")
+    extension = tmp_path / "src/widgets/task-detail/ui/activity-tab.ext.tsx"
+    hand_written = extension.read_text().replace("@trace:gap", "@trace:manual")
+    extension.write_text(hand_written)
+
+    write_result(generate(definition, react), tmp_path, "react")
+
+    assert extension.read_text() == hand_written
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    statuses = {e.element_id: e.status for e in report.coverage.elements}
+    assert statuses["ui.views.task_detail.tabs.activity"] == "covered"
+    assert statuses["operations.assign_task.params.note"] == "covered"

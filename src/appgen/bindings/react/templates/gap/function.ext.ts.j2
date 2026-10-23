@@ -1,0 +1,17 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{{ trace_header(element_id) }}
+{% for line in spec.imports %}
+{{ line }}
+{% endfor %}
+{% if spec.imports %}
+
+{% endif %}
+export {{ "async " if spec.returns.startswith("Promise") }}function {{ spec.name }}({% for key, type in spec.params %}_{{ key }}: {{ type }}{{ ", " if not loop.last }}{% endfor %}): {{ spec.returns }} {
+  // TODO(appgen): write {{ spec.what }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+{% if spec.returns == "boolean" %}
+  return true;
+{% else %}
+  throw new Error("Not implemented yet: {{ spec.element_id }}");
+{% endif %}
+}

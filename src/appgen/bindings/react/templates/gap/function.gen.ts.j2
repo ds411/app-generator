@@ -1,0 +1,11 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{{ trace_header(element_id) }}
+{% for line in spec.imports %}
+{{ line }}
+{% endfor %}
+import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
+
+/** Generated: calls the hand-written {{ spec.name }} of the extension file. */
+export function {{ spec.name }}({% for key, type in spec.params %}{{ key }}: {{ type }}{{ ", " if not loop.last }}{% endfor %}): {{ spec.returns }} {
+  return {{ spec.name }}Ext({{ spec.params | map(attribute=0) | join(", ") }});
+}

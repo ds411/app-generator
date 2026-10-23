@@ -32,3 +32,12 @@ export const {{ name | camel }}Defaults: Partial<Omit<{{ type }}, "id">> = {
   {{ m.key }}: {{ ts_value(m.default) }},
 {% endfor %}
 };
+{% for op_name, op in operations_of(definition, name) if op.kind == "custom" and op.params %}
+
+/** The parameters of the operation {{ op_name }}. */
+export type {{ op_name | pascal }}Params = {
+{% for param_name, param in op.params.items() %}
+  {{ param_name | camel }}{{ "" if param.required else "?" }}: {{ param_type(param) }}{{ "" if param.required else " | null" }}; {{ trace(param.id) }}
+{% endfor %}
+};
+{% endfor %}

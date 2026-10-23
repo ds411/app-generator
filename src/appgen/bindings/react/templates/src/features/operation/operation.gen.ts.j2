@@ -1,0 +1,27 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{% set entity = element.entity %}
+{{ trace_header(element_id) }}
+{% for line in spec.imports[1:] %}
+{{ line }}
+{% endfor %}
+import {
+  {{ entity | camel }}Api,
+{% if element.returns == entity %}
+  type {{ entity | pascal }},
+{% endif %}
+{% if element.params %}
+  type {{ name | pascal }}Params,
+{% endif %}
+} from "@/entities/{{ entity | kebab }}";
+
+import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
+
+{% if element.description %}
+/** {{ element.description }} The logic is in the extension file. */
+{% else %}
+/** The operation {{ name }}. The logic is in the extension file. */
+{% endif %}
+export async function {{ spec.name }}(id: string{% if element.params %}, params: {{ name | pascal }}Params{% endif %}): {{ spec.returns }} {
+  const record = await {{ entity | camel }}Api.get(id);
+  return {{ spec.name }}Ext(record{% if element.params %}, params{% endif %});
+}

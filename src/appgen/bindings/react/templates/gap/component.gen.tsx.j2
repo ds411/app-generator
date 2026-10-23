@@ -1,0 +1,25 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{{ trace_header(element_id) }}
+{% for line in spec.imports %}
+{{ line }}
+{% endfor %}
+import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
+{% if spec.params %}
+
+export type {{ spec.name }}Props = {
+{% for key, type in spec.params %}
+  {{ key }}: {{ type }};
+{% endfor %}
+};
+
+/** Generated: renders the hand-written {{ spec.name }} of the extension file. */
+export function {{ spec.name }}(props: {{ spec.name }}Props) {
+  return <{{ spec.name }}Ext {...props} />;
+}
+{% else %}
+
+/** Generated: renders the hand-written {{ spec.name }} of the extension file. */
+export function {{ spec.name }}() {
+  return <{{ spec.name }}Ext />;
+}
+{% endif %}
