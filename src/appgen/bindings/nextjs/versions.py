@@ -27,3 +27,31 @@ DEV_DEPENDENCIES: dict[str, str] = {
     "typescript": "5.9.3",
 }
 """The development packages that each generated app needs."""
+
+UI_DEPENDENCIES: dict[str, str] = {
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "next-themes": "0.4.6",
+    "tailwind-merge": "3.7.0",
+}
+"""The runtime packages of the shadcn/ui setup: `cn()` and the theme hook."""
+
+UI_DEV_DEPENDENCIES: dict[str, str] = {
+    "tw-animate-css": "1.4.0",
+}
+"""The development packages of the shadcn/ui setup: the animations of the components."""
+
+COMPONENT_PACKAGES: dict[str, str] = {
+    "class-variance-authority": "0.7.1",
+    "cmdk": "1.1.1",
+    "lucide-react": "1.61.0",
+    "radix-ui": "1.8.1",
+    "react-day-picker": "9.14.0",
+    "recharts": "3.10.1",
+    "sonner": "2.0.8",
+}
+"""The npm packages that the shadcn/ui components import, by package name.
+
+`appgen.bindings.shared.shadcn` lists the packages of each component.
+A test checks that this mapping has a version for each of them.
+"""

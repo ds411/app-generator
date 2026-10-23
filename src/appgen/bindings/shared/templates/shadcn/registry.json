@@ -1,0 +1,274 @@
+{
+  "source": "shadcn-ui/ui@3d98900e new-york-v4",
+  "components": {
+    "alert-dialog": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [
+        "button"
+      ],
+      "hooks": []
+    },
+    "avatar": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "badge": {
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "breadcrumb": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "button": {
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "calendar": {
+      "dependencies": [
+        "lucide-react",
+        "react-day-picker"
+      ],
+      "components": [
+        "button"
+      ],
+      "hooks": []
+    },
+    "card": {
+      "dependencies": [],
+      "components": [],
+      "hooks": []
+    },
+    "chart": {
+      "dependencies": [
+        "recharts"
+      ],
+      "components": [
+        "card"
+      ],
+      "hooks": []
+    },
+    "checkbox": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "collapsible": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "command": {
+      "dependencies": [
+        "cmdk",
+        "lucide-react"
+      ],
+      "components": [
+        "dialog"
+      ],
+      "hooks": []
+    },
+    "dialog": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "dropdown-menu": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "empty": {
+      "dependencies": [
+        "class-variance-authority"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "field": {
+      "dependencies": [
+        "class-variance-authority"
+      ],
+      "components": [
+        "label",
+        "separator"
+      ],
+      "hooks": []
+    },
+    "input": {
+      "dependencies": [],
+      "components": [],
+      "hooks": []
+    },
+    "input-group": {
+      "dependencies": [
+        "class-variance-authority"
+      ],
+      "components": [
+        "button",
+        "input",
+        "textarea"
+      ],
+      "hooks": []
+    },
+    "label": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "pagination": {
+      "dependencies": [
+        "lucide-react"
+      ],
+      "components": [
+        "button"
+      ],
+      "hooks": []
+    },
+    "popover": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "radio-group": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "scroll-area": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "select": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "separator": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "sheet": {
+      "dependencies": [
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "sidebar": {
+      "dependencies": [
+        "class-variance-authority",
+        "lucide-react",
+        "radix-ui"
+      ],
+      "components": [
+        "button",
+        "input",
+        "separator",
+        "sheet",
+        "skeleton",
+        "tooltip"
+      ],
+      "hooks": [
+        "use-mobile"
+      ]
+    },
+    "skeleton": {
+      "dependencies": [],
+      "components": [],
+      "hooks": []
+    },
+    "sonner": {
+      "dependencies": [
+        "lucide-react",
+        "sonner"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "spinner": {
+      "dependencies": [
+        "lucide-react"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "switch": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "table": {
+      "dependencies": [],
+      "components": [],
+      "hooks": []
+    },
+    "tabs": {
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    },
+    "textarea": {
+      "dependencies": [],
+      "components": [],
+      "hooks": []
+    },
+    "tooltip": {
+      "dependencies": [
+        "radix-ui"
+      ],
+      "components": [],
+      "hooks": []
+    }
+  }
+}

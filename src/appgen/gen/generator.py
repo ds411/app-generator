@@ -58,7 +58,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     two output rules write the same path, or if a file that can hold
     comments has no trace (ADR 0004).
     """
-    environment = make_environment(binding.template_dir)
+    environment = make_environment(binding.template_dir, binding.shared_template_dirs)
     environment.globals.update(binding.helpers)
     environment.globals.update(trace_globals(definition))
     environment.filters.update(binding.filters)

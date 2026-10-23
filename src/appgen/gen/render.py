@@ -6,6 +6,7 @@ the output has LF line endings and one final newline, and the context
 has no clock or random values.
 """
 
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 import jinja2
@@ -17,14 +18,15 @@ class GenerationError(Exception):
     """The generator cannot render a template, or the output is not valid."""
 
 
-def make_environment(template_dir: Path) -> jinja2.Environment:
+def make_environment(template_dir: Path, shared_dirs: Sequence[Path] = ()) -> jinja2.Environment:
     """Return a Jinja2 environment for the templates of a binding.
 
-    The environment has the naming filters of `appgen.gen.naming`, for
-    example `{{ name | camel }}`.
+    The loader looks for a template in `template_dir` first, and then in
+    each folder of `shared_dirs`, in order. The environment has the
+    naming filters of `appgen.gen.naming`, for example `{{ name | camel }}`.
     """
     environment = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(template_dir),
+        loader=jinja2.FileSystemLoader([template_dir, *shared_dirs]),
         undefined=jinja2.StrictUndefined,
         autoescape=False,
         trim_blocks=True,

@@ -106,7 +106,10 @@ gets the context of each element, so `when="element.kind == 'custom'"`
 writes a file only for the custom operations. A binding can also
 declare a `context` function, which returns more template values for a
 definition (it cannot replace the values of the generator, and it must
-be deterministic), and more Jinja2 `filters`.
+be deterministic), and more Jinja2 `filters`. `shared_template_dirs`
+gives more template folders: the generator looks for a template in the
+folder of the binding first, and then in these folders. The front-end
+bindings share the templates in `src/appgen/bindings/shared/templates/`.
 
 Templates get the design tokens as `tokens`: a flat list of
 `ResolvedToken`, sorted by path. Each entry has the final value for the
@@ -158,13 +161,27 @@ CSS, and pnpm. The Next.js `app/` folder in the root holds only the
 routes. Each route renders a page slice of Feature-Sliced Design in
 `src/pages`, and the other FSD layers are in `src/` too. Each element
 of a kind that the binding does not cover yet gets an extension file in
-`src/gaps/`. The exact package versions are in
+`src/gaps/`. The app gets the shadcn/ui components that its UI uses, in
+`src/shared/ui/`, and their npm packages. The exact package versions are in
 `src/appgen/bindings/nextjs/versions.py`. To try the output:
 
 ```sh
 uv run appgen generate examples/project-tracker/app.yaml -b nextjs -o /tmp/tracker-next
 cd /tmp/tracker-next && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 ```
+
+### Shared shadcn/ui templates
+
+The Next.js and the React bindings write the same shadcn/ui components.
+`src/appgen/bindings/shared/templates/shadcn/` holds one template for
+each component, with the FSD import paths of the generated apps
+(`@/shared/ui/<name>`, `@/shared/lib/utils`, and `@/shared/lib/theme`,
+which each binding writes). `registry.json` lists the npm packages, the
+components, and the hooks that each component imports.
+`appgen.bindings.shared.shadcn.used_components()` gives the components
+that the UI of a definition needs. To update the components, change the
+commit or the list in `scripts/vendor_shadcn.py`, and run
+`uv run scripts/vendor_shadcn.py`.
 
 ### React binding
 

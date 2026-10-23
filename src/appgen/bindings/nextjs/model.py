@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from appgen.bindings.nextjs import versions
+from appgen.bindings.shared import shadcn
 from appgen.dsl.model import AppDefinition, Page
 from appgen.gen.naming import kebab, pascal
 
@@ -79,7 +80,17 @@ def page_info(name: str, page: Page) -> PageInfo:
 
 
 def package_json(definition: AppDefinition) -> dict[str, Any]:
-    """Return the content of `package.json`, with the packages sorted by name."""
+    """Return the content of `package.json`, with the packages sorted by name.
+
+    The app gets the npm packages of the shadcn/ui components that it uses.
+    """
+    components = shadcn.used_components(definition)
+    dependencies = {
+        **versions.DEPENDENCIES,
+        **versions.UI_DEPENDENCIES,
+        **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
+    }
+    dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,
         "version": "0.1.0",
@@ -94,16 +105,19 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
             "lint": "eslint --max-warnings 0",
             "typecheck": "next typegen && tsc --noEmit",
         },
-        "dependencies": dict(sorted(versions.DEPENDENCIES.items())),
-        "devDependencies": dict(sorted(versions.DEV_DEPENDENCIES.items())),
+        "dependencies": dict(sorted(dependencies.items())),
+        "devDependencies": dict(sorted(dev_dependencies.items())),
     }
 
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
     pages = {name: page_info(name, page) for name, page in definition.pages.items()}
+    components = shadcn.used_components(definition)
     return {
         "nextjs": {
+            "shadcn": [component.name for component in components],
+            "hooks": shadcn.hooks(components),
             "layers": FSD_LAYERS,
             "pages": pages,
             "package_json": package_json(definition),

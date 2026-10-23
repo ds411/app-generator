@@ -154,6 +154,7 @@ def test_templates_can_call_the_helpers_and_the_naming_filters(tmp_path: Path) -
 
 
 def _templates(tmp_path: Path, templates: dict[str, str]) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     for name, text in templates.items():
         (tmp_path / name).write_text(text, newline="")
     return tmp_path
@@ -231,3 +232,21 @@ def test_elements_of_excluded_kinds_and_under_them_are_not_gaps(minimal: Binding
         "entities.Task.relations.project",
     ]
     assert result.excluded_kinds == ("operation", "page")
+
+
+def test_a_binding_can_use_and_replace_shared_templates(tmp_path: Path) -> None:
+    own = _templates(tmp_path / "own", {"b.md.j2": "<!-- @trace app file -->\nown b\n"})
+    shared = _templates(
+        tmp_path / "shared",
+        {"a.md.j2": "<!-- @trace app file -->\nshared a\n", "b.md.j2": "shared b\n"},
+    )
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=own,
+        outputs=(Output("a.md.j2", "a.md"), Output("b.md.j2", "b.md")),
+        covers=frozenset({"app"}),
+        shared_template_dirs=(shared,),
+    )
+    files = {f.path: f.content.splitlines()[-1] for f in generate(DEFINITION, binding).files}
+    assert files == {"a.md": "shared a", "b.md": "own b"}
