@@ -12,6 +12,7 @@ from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageContent
+from appgen.dsl.ui.views import Format
 
 DSL_VERSION = 0
 """The DSL version that this loader reads."""
@@ -58,6 +59,8 @@ class Field(Element):
     precision: Annotated[int, pydantic.Field(ge=1)] | None = None
     scale: Annotated[int, pydantic.Field(ge=0)] | None = None
     values: list[MemberName] | None = None
+    format: Format | None = None
+    """The display format in all views. A view column can set another format."""
 
 
 class Relation(Element):

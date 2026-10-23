@@ -1,7 +1,15 @@
 from pathlib import Path
 from textwrap import dedent
 
-from appgen.dsl import Diagnostic, check_file, load_definition_text, validate_definition
+import pytest
+
+from appgen.dsl import (
+    DefinitionError,
+    Diagnostic,
+    check_file,
+    load_definition_text,
+    validate_definition,
+)
 
 BASE = dedent(
     """\
@@ -255,3 +263,30 @@ def test_check_file_returns_validation_errors(tmp_path: Path) -> None:
 
     assert definition is not None
     assert [d.code for d in diagnostics] == ["unknown-reference"]
+
+
+def test_a_field_format_must_suit_the_field_type() -> None:
+    estimate = "estimate: { type: decimal, min: 0, max: 100, precision: 5, scale: 2 }"
+    with_format = estimate.replace("scale: 2 }", "scale: 2, format: currency }")
+    assert codes(BASE.replace(estimate, with_format)) == []
+
+    text = BASE.replace("title: { type: string }", "title: { type: string, format: currency }")
+    [diagnostic] = check(text)
+
+    assert diagnostic.code == "invalid-option"
+    assert diagnostic.element_id == "entities.Task.fields.title"
+    assert diagnostic.message == (
+        "The format 'currency' does not suit the type 'string'. It is for 'decimal', 'integer'."
+    )
+    assert diagnostic.location.line == 12
+
+
+def test_an_unknown_field_format_is_an_error() -> None:
+    text = BASE.replace("title: { type: string }", "title: { type: string, format: money }")
+
+    with pytest.raises(DefinitionError) as error:
+        load_definition_text(text, "app.yaml")
+
+    [diagnostic] = error.value.diagnostics
+    assert diagnostic.code == "invalid-value"
+    assert diagnostic.location.line == 12

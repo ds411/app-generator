@@ -1698,6 +1698,17 @@
           ],
           "default": null,
           "title": "Values"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Format"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3690,14 +3701,21 @@
           "$ref": "#/$defs/RecordFilter"
         },
         "format": {
-          "default": "number",
-          "enum": [
-            "number",
-            "currency",
-            "percent"
+          "anyOf": [
+            {
+              "enum": [
+                "number",
+                "currency",
+                "percent"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Format",
-          "type": "string"
+          "default": null,
+          "title": "Format"
         },
         "icon": {
           "anyOf": [

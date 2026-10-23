@@ -155,7 +155,16 @@ the React app.
 | `json`     | A JSON value.                        |                                       |
 
 All fields also take `description`, `label`, `required` (default
-`false`), `unique` (default `false`), and `default`.
+`false`), `unique` (default `false`), `default`, and `format`.
+
+`format` is the display format of the field in all views: the table
+columns, the cards, the detail views, the forms, and the stat widgets of
+the dashboards. The formats are the same as the formats of a table
+column (see [views](#views)), and each format must suit the field type,
+for example `currency` for an `integer` or a `decimal` field. A column
+or a stat widget can set another format. In a form, a number field with
+the format `number`, `currency`, or `percent` shows its value in the
+format next to the input. The front ends use `Intl.NumberFormat`.
 
 ```yaml
 fields:
@@ -169,7 +178,7 @@ fields:
     type: enum
     values: [planned, active, on_hold, done]
     default: planned
-  budget: { type: decimal, min: 0, precision: 12, scale: 2 }
+  budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
 ```
 
 ### Relations
@@ -462,7 +471,8 @@ A column has `field` (default: the column name), `label`, `format`,
 `sortable`, `link` (a page), and `hide_below` (a breakpoint). The
 formats are `text`, `number`, `currency`, `percent`, `date`,
 `datetime`, `relative_time`, `boolean`, `badge`, `email`, `url`, and
-`avatar`.
+`avatar`. The default format is the `format` of the field, else a
+format for the field type.
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), or `date_range` (`field`). All
@@ -565,6 +575,9 @@ widget has `kind`, `label`, and `span`:
 | `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `aggregate`, `field`, `filter`, `badge`. |
 | `list`   | `view`, `filter`, `sort`, `limit`, `link`.                                |
 | `custom` | A generation gap.                                                         |
+
+The default `format` of a stat widget is the `format` of its field (for
+`sum`, `avg`, `min`, and `max`), else `number`.
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are

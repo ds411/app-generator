@@ -51,7 +51,7 @@ import { Dialog, DialogContent, {% if form.description %}DialogDescription, {% e
 {% if plan.fields | selectattr("help") | list %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}
 {% if plan.sections %}{% set field_names = field_names + ["FieldLegend", "FieldSet"] %}{% if plan.sections | selectattr("description") | list and "FieldDescription" not in field_names %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}{% endif %}
 import { {{ field_names | sort | join(", ") }} } from "@/shared/ui/field";
-{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | list %}
+{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | rejectattr("format") | list %}
 import { Input } from "@/shared/ui/input";
 {% endif %}
 {% if form.mode == "sheet" %}
@@ -69,6 +69,9 @@ import { DateInput } from "@/shared/ui/form-widgets/date-input";
 {% endif %}
 {% if "datetime" in widgets %}
 import { DateTimeInput } from "@/shared/ui/form-widgets/date-time-input";
+{% endif %}
+{% if "number_format" in widgets %}
+import { NumberInput } from "@/shared/ui/form-widgets/number-input";
 {% endif %}
 {% if "radio" in widgets %}
 import { OptionRadio } from "@/shared/ui/form-widgets/option-radio";
@@ -284,6 +287,8 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 <DateTimeInput id={{ id }}{{ placeholder }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "textarea" %}
 <Textarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.format %}
+<NumberInput id={{ id }} format={{ js(f.format) }}{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "number" or f.kind == "number" %}
 <Input id={{ id }} type="number" inputMode="decimal"{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }} ?? ""} onChange={(event) => change({{ js(f.key) }}, event.target.value === "" ? null : Number(event.target.value))} disabled={busy} aria-invalid={ {{- invalid }}} />
 {%- else %}

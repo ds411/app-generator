@@ -22,6 +22,7 @@ from appgen.bindings.shared.views import (
     label,
     state_ids,
 )
+from appgen.dsl.model import Field
 from appgen.dsl.ui.common import Grid, States
 from appgen.dsl.ui.dashboards import (
     ChartWidget,
@@ -31,6 +32,7 @@ from appgen.dsl.ui.dashboards import (
     RecordFilter,
     StatWidget,
 )
+from appgen.dsl.ui.fields import resolve_path
 from appgen.dsl.ui.states import BUILT_IN_STATES
 from appgen.dsl.ui.views import CardsView, Sort, TableView
 from appgen.gen.naming import camel, pascal
@@ -248,7 +250,7 @@ def _stat(
     result.body.append(
         f"return {_aggregate(ctx, widget.entity, widget.aggregate, widget.field, 'rows')};"
     )
-    result.format = widget.format
+    result.format = widget.format or _field_format(ctx, widget) or "number"
     result.icon = widget.icon
     result.color = css_var(widget.color) if widget.color else None
     if widget.icon:
@@ -256,6 +258,15 @@ def _stat(
     if widget.link:
         result.href = ctx.href(widget.entity, widget.link, {}, "row")
     plan.uses.add("stat")
+
+
+def _field_format(ctx: ViewContext, widget: StatWidget) -> str | None:
+    """Return the number format of the field of an aggregate, or None."""
+    if widget.aggregate == "count" or widget.field is None:
+        return None
+    member = resolve_path(ctx.definition, widget.entity, widget.field).member
+    fmt = member.format if isinstance(member, Field) else None
+    return fmt if fmt in ("number", "currency", "percent") else None
 
 
 def _chart(

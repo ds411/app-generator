@@ -142,3 +142,16 @@ def test_grid_classes_follow_the_breakpoints() -> None:
 def test_an_unused_lookups_parameter_gets_an_underscore() -> None:
     assert lookups_param("row.title") == "_lookups"
     assert lookups_param('lookups.person.get(row.ownerId ?? "")') == "lookups"
+
+
+def test_a_field_format_applies_to_all_views_of_the_field(example: ViewContext) -> None:
+    assert example.value("Project", "budget").format == "currency"
+    assert example.value("Project", "budget", "number").format == "number"
+    column = example.view_plan("project_table").columns
+    assert next(c for c in column if c.name == "budget").cell.endswith('format="currency" />')
+    widget = next(w for w in example.dashboard_plan("overview").widgets if w.name == "total_budget")
+    assert widget.format == "currency"
+    count = next(
+        w for w in example.dashboard_plan("overview").widgets if w.name == "active_projects"
+    )
+    assert count.format == "number"

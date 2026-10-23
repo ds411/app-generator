@@ -17,6 +17,7 @@ from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Field
 from appgen.dsl.ui.checks import (
+    FORMAT_TYPES,
     check_ui_dashboards,
     check_ui_forms,
     check_ui_references,
@@ -240,6 +241,16 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
                 field,
                 at=key,
             )
+    formats = FORMAT_TYPES[field.format] if field.format is not None else None
+    if formats is not None and field.type not in formats:
+        names = ", ".join(f"'{name}'" for name in sorted(formats))
+        yield _error(
+            "invalid-option",
+            f"The format '{field.format}' does not suit the type '{field.type}'. "
+            f"It is for {names}.",
+            field,
+            at="format",
+        )
     if field.type == "enum":
         if not field.values:
             yield _error(

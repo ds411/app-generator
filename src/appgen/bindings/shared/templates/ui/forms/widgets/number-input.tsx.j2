@@ -1,0 +1,47 @@
+{{ trace_header("app") }}
+"use client";
+
+import { type Format, formatValue } from "@/shared/lib/format";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/shared/ui/input-group";
+
+/** A number input that shows its value in a display format, for example a currency. */
+export function NumberInput({
+  id,
+  value,
+  onChange,
+  format,
+  placeholder,
+  step,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+  format: Format;
+  placeholder?: string;
+  step?: number;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  return (
+    <InputGroup data-disabled={disabled}>
+      <InputGroupInput
+        id={id}
+        type="number"
+        inputMode="decimal"
+        placeholder={placeholder}
+        step={step}
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+        disabled={disabled}
+        aria-invalid={invalid}
+      />
+      <InputGroupAddon align="inline-end">
+        <InputGroupText className="tabular-nums" aria-live="polite">
+          {formatValue(value, format)}
+        </InputGroupText>
+      </InputGroupAddon>
+    </InputGroup>
+  );
+}
