@@ -40,8 +40,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 
 ## Layout
 
-| Path          | Content                          |
-| ------------- | -------------------------------- |
-| `src/appgen/` | The generator and the CLI.       |
-| `tests/`      | The tests.                       |
-| `.githooks/`  | The git hooks (pre-push checks). |
+| Path              | Content                                                    |
+| ----------------- | ---------------------------------------------------------- |
+| `src/appgen/`     | The generator and the CLI.                                 |
+| `src/appgen/dsl/` | The app definition DSL: the model, the loader, and checks. |
+| `tests/`          | The tests.                                                 |
+| `docs/adr/`       | The architecture decision records.                         |
+| `.githooks/`      | The git hooks (pre-push checks).                           |
+
+[ADR 0002](docs/adr/0002-app-definition-dsl-v0.md) describes the DSL.

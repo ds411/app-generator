@@ -1,0 +1,135 @@
+"""The typed model of an app definition (DSL version 0, see ADR 0002)."""
+
+from typing import Annotated, Literal
+
+import pydantic
+from pydantic import BaseModel, ConfigDict, JsonValue, PrivateAttr, StringConstraints
+
+from appgen.dsl.diagnostics import Location
+
+APP_NAME_PATTERN = r"^[a-z][a-z0-9-]*$"
+ENTITY_NAME_PATTERN = r"^[A-Z][A-Za-z0-9]*$"
+MEMBER_NAME_PATTERN = r"^[a-z][a-z0-9_]*$"
+
+type AppName = Annotated[str, StringConstraints(pattern=APP_NAME_PATTERN)]
+"""The name of the app, in kebab case, for example `project-tracker`."""
+type EntityName = Annotated[str, StringConstraints(pattern=ENTITY_NAME_PATTERN)]
+"""The name of an entity, in Pascal case, for example `Task`."""
+type MemberName = Annotated[str, StringConstraints(pattern=MEMBER_NAME_PATTERN)]
+"""The name of a field, relation, param, operation, page, or enum value, in snake case."""
+type Text = Annotated[str, StringConstraints(min_length=1)]
+
+type FieldType = Literal[
+    "string",
+    "text",
+    "integer",
+    "decimal",
+    "boolean",
+    "date",
+    "datetime",
+    "uuid",
+    "email",
+    "url",
+    "enum",
+    "json",
+]
+type RelationKind = Literal["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
+type OnDelete = Literal["restrict", "cascade", "set_null"]
+type OperationKind = Literal["create", "read", "update", "delete", "list", "custom"]
+
+FIELD_TYPES: tuple[str, ...] = FieldType.__value__.__args__
+RELATION_KINDS: tuple[str, ...] = RelationKind.__value__.__args__
+OPERATION_KINDS: tuple[str, ...] = OperationKind.__value__.__args__
+
+
+class Element(BaseModel):
+    """The base class of each element of an app definition."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    _location: Location | None = PrivateAttr(default=None)
+
+    @property
+    def location(self) -> Location | None:
+        """The position of the element in its source file, if it comes from a file."""
+        return self._location
+
+
+class Field(Element):
+    """A field of an entity, or a param of a custom operation."""
+
+    type: FieldType
+    description: Text | None = None
+    label: Text | None = None
+    required: bool = False
+    unique: bool = False
+    default: JsonValue = None
+    min_length: Annotated[int, pydantic.Field(ge=0)] | None = None
+    max_length: Annotated[int, pydantic.Field(ge=1)] | None = None
+    pattern: Text | None = None
+    min: float | None = None
+    max: float | None = None
+    precision: Annotated[int, pydantic.Field(ge=1)] | None = None
+    scale: Annotated[int, pydantic.Field(ge=0)] | None = None
+    values: list[MemberName] | None = None
+
+
+class Relation(Element):
+    """A relation from one entity to another entity."""
+
+    kind: RelationKind
+    target: EntityName
+    description: Text | None = None
+    label: Text | None = None
+    required: bool = False
+    inverse: MemberName | None = None
+    on_delete: OnDelete | None = None
+
+
+class Entity(Element):
+    """A kind of record that the app stores, for example a task."""
+
+    description: Text | None = None
+    label: Text | None = None
+    plural_label: Text | None = None
+    display_field: MemberName | None = None
+    fields: Annotated[dict[MemberName, Field], pydantic.Field(min_length=1)]
+    relations: dict[MemberName, Relation] = pydantic.Field(default_factory=dict[str, Relation])
+
+
+class Operation(Element):
+    """An action that the app can do on an entity."""
+
+    kind: OperationKind
+    entity: EntityName
+    description: Text | None = None
+    params: dict[MemberName, Field] = pydantic.Field(default_factory=dict[str, Field])
+    returns: Text = "none"
+    """An entity name, or `none`."""
+
+
+class Page(Element):
+    """A screen of a front-end app."""
+
+    path: Annotated[str, StringConstraints(pattern=r"^/")]
+    title: Text
+    entity: EntityName | None = None
+    description: Text | None = None
+
+
+class App(Element):
+    """The name and the description of the app."""
+
+    name: AppName
+    title: Text
+    description: Text | None = None
+
+
+class AppDefinition(Element):
+    """The root of an app definition."""
+
+    version: Literal[0]
+    app: App
+    entities: Annotated[dict[EntityName, Entity], pydantic.Field(min_length=1)]
+    operations: dict[MemberName, Operation] = pydantic.Field(default_factory=dict[str, Operation])
+    pages: dict[MemberName, Page] = pydantic.Field(default_factory=dict[str, Page])
