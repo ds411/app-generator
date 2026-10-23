@@ -1,11 +1,18 @@
 {{ trace_header(element_id) }}
 {% set params = route_params(element.path) %}
+{% set custom = element.content is not none and element.content.custom %}
 {% if params %}
 import { useParams } from "react-router";
 {% endif %}
+{% if custom %}
+
+import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
+{% endif %}
 
 export function {{ name | pascal }}Page() {
-{% if params %}
+{% if custom and element.entity %}
+  const params = useParams();
+{% elif params %}
   const { {{ params | map("camel") | join(", ") }} } = useParams();
 {% endif %}
   return (
@@ -14,9 +21,13 @@ export function {{ name | pascal }}Page() {
 {% if element.description %}
       <p>{{ element.description }}</p>
 {% endif %}
+{% if custom %}
+      <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
+{% else %}
 {% for param in params %}
       <p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>
 {% endfor %}
+{% endif %}
     </main>
   );
 }

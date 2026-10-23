@@ -1,0 +1,71 @@
+# Each kind of custom element, for the gap tests of the React binding.
+version: 0
+app: { name: gaps, title: Gaps }
+entities:
+  Note:
+    display_field: title
+    fields:
+      title: { type: string, required: true }
+      done: { type: boolean }
+operations:
+  create_note: { kind: create, entity: Note }
+  list_notes: { kind: list, entity: Note }
+  publish_note: { kind: custom, entity: Note }
+pages:
+  notes:
+    path: /notes
+    title: Notes
+    entity: Note
+    content: { view: note_table }
+    actions:
+      export: { kind: custom, label: Export }
+  note_detail:
+    path: "/notes/{id}"
+    title: Note
+    entity: Note
+    content: { view: note_detail }
+  report: { path: /report, title: Report, content: { custom: true } }
+  note_report: { path: "/notes/{id}/report", title: Note report, entity: Note, content: { custom: true } }
+ui:
+  layouts:
+    shell:
+      topbar:
+        actions:
+          help: { kind: custom, label: Help }
+  views:
+    note_table:
+      kind: table
+      entity: Note
+      columns:
+        title: {}
+      selection: true
+      row_actions:
+        share: { kind: custom, label: Share }
+      bulk_actions:
+        tag: { kind: custom, label: Tag }
+    note_detail:
+      kind: detail
+      entity: Note
+      sections:
+        history: { title: History, custom: true }
+      tabs:
+        more:
+          label: More
+          sections:
+            stats: { title: Stats, custom: true }
+        graph: { label: Graph, custom: true }
+      actions:
+        print: { kind: custom, label: Print }
+  forms:
+    new_note:
+      entity: Note
+      operation: create_note
+      fields:
+        title: { widget: custom }
+        done: {}
+      rules:
+        nice: { kind: custom, fields: [title], message: Be nice. }
+  dashboards:
+    home:
+      widgets:
+        chart: { kind: custom, label: Chart }

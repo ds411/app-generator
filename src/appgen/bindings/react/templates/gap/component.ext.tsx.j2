@@ -1,0 +1,21 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{{ trace_header(element_id) }}
+{% for line in spec.imports %}
+{{ line }}
+{% endfor %}
+{% if spec.imports %}
+
+{% endif %}
+export function {{ spec.name }}({% if spec.params %}_props: {
+{% for key, type in spec.params %}
+  {{ key }}: {{ type }};
+{% endfor %}
+}{% endif %}) {
+  // TODO(appgen): write {{ spec.what }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+  return (
+    <div role="note" className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+      Not implemented yet: {{ spec.element_id }}
+    </div>
+  );
+}

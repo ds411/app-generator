@@ -7,11 +7,40 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 
 from pathlib import Path
 
+from appgen.bindings.react.gaps import gap_spec, param_type
 from appgen.bindings.react.helpers import HELPERS, context
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
+_GAP = "{{ gap_spec(definition, element_id, element_kind).base }}"
+_CUSTOM_OP = "element.kind == 'custom'"
+
+# The generation gaps (ADR 0005): a generated file and an extension file
+# for each custom element. See `appgen.bindings.react.gaps`.
+_COMPONENT_GAPS = (
+    ("page_content", "element.custom"),
+    ("detail_tab", "element.custom"),
+    ("detail_section", "element.custom"),
+    ("custom_widget", None),
+    ("form_field", "element.widget == 'custom'"),
+)
+_FUNCTION_GAPS = ("custom_rule", "custom_action")
+
+
+def _gap_rules(template: str, suffix: str, kind: str, when: str | None = None) -> list[Output]:
+    """Return the rules of the generated file and the extension file of a gap."""
+    return [
+        Output(
+            template=f"gap/{template}.{part}.{suffix}.j2",
+            path=f"{_GAP}.{part}.{suffix}",
+            for_each=kind,
+            when=when,
+            extension=part == "ext",
+        )
+        for part in ("gen", "ext")
+    ]
+
 
 BINDING = Binding(
     name="react",
@@ -71,8 +100,36 @@ BINDING = Binding(
             path=_PAGE + "/ui/{{ name | kebab }}-page.tsx",
             for_each="page",
         ),
+        Output(
+            template="src/features/operation/index.ts.j2",
+            path="src/features/{{ name | kebab }}/index.ts",
+            for_each="operation",
+            when=_CUSTOM_OP,
+        ),
+        Output(
+            template="src/features/operation/operation.gen.ts.j2",
+            path=_GAP + ".gen.ts",
+            for_each="operation",
+            when=_CUSTOM_OP,
+        ),
+        Output(
+            template="gap/function.ext.ts.j2",
+            path=_GAP + ".ext.ts",
+            for_each="operation",
+            when=_CUSTOM_OP,
+            extension=True,
+        ),
+        *(
+            rule
+            for kind, when in _COMPONENT_GAPS
+            for rule in _gap_rules("component", "tsx", kind, when)
+        ),
+        *(rule for kind in _FUNCTION_GAPS for rule in _gap_rules("function", "ts", kind)),
     ),
-    covers=frozenset({"app", "page", "entity", "field", "relation", "operation"}),
+    covers=frozenset(
+        {"app", "page", "entity", "field", "relation", "operation", "param"}
+        | {"custom_widget", "custom_rule", "custom_action"}
+    ),
     context=context,
-    helpers=HELPERS,
+    helpers=HELPERS | {"gap_spec": gap_spec, "param_type": param_type},
 )
