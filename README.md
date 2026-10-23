@@ -33,6 +33,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Show the CLI help     | `uv run appgen --help`                                     |
 | Validate a definition | `uv run appgen validate examples/project-tracker/app.yaml` |
 | Check the traces      | `uv run appgen check <definition> <code-folder>`           |
+| Generate an app       | `uv run appgen generate <definition> -b <binding> -o <dir>`  |
 | Lint                  | `uv run ruff check`                                        |
 | Check the formatting  | `uv run ruff format --check`                               |
 | Format the code       | `uv run ruff format`                                       |
@@ -99,6 +100,12 @@ light and the dark mode, with all references resolved, and keeps its
 element ID for traces. The kind of an element is its class name in
 snake case, for example `entity`, `token`, or `menu_item`. A `Field`
 in `params` has the kind `param`.
+
+`appgen generate <definition> --binding <name> --out <folder>`
+validates the definition, generates the app, and prints a summary: the
+files written and deleted, and the gaps created. If the definition is
+not valid, it writes no file and the exit code is 1. `--force`
+overwrites generated files that have manual edits.
 
 A binding can declare a `gap_rule`: an output rule that the generator
 renders once for each element of a kind that the binding does not

@@ -10,7 +10,16 @@ import typer
 from appgen import __version__
 from appgen.dsl import Diagnostic, check_file
 from appgen.dsl.schema import json_schema_text
-from appgen.gen.manifest import ManifestError
+from appgen.gen import (
+    GenerationError,
+    ManifestError,
+    ManualEditsError,
+    UnknownBindingError,
+    WriteReport,
+    find_binding,
+    write_result,
+)
+from appgen.gen import generate as generate_files
 from appgen.trace import DEFAULT_IGNORE, check_traces, render
 
 
@@ -164,6 +173,67 @@ def check(
         raise typer.Exit(code=2) from None
     typer.echo(render(report, "json" if output_format is OutputFormat.JSON else "text"), nl=False)
     raise typer.Exit(code=report.exit_code)
+
+
+@app.command()
+def generate(
+    file: Annotated[Path, typer.Argument(help="The app definition file (YAML).")],
+    binding_name: Annotated[
+        str, typer.Option("--binding", "-b", help="The name of the binding, for example nextjs.")
+    ],
+    out: Annotated[Path, typer.Option("--out", "-o", help="The output folder of the app.")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite generated files that have manual edits."),
+    ] = False,
+) -> None:
+    """Validate an app definition, then generate the app for a binding.
+
+    The exit code is 0 if the app is generated, else 1. If the definition
+    is not valid, the command writes no file.
+    """
+    definition, diagnostics = check_file(file)
+    if definition is None or diagnostics:
+        for diagnostic in diagnostics:
+            typer.echo(str(diagnostic), err=True)
+        typer.echo(f"{file}: the definition is not valid, so no file is written.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        binding = find_binding(binding_name)
+        result = generate_files(definition, binding)
+        report = write_result(result, out, binding.name, force=force)
+    except (UnknownBindingError, GenerationError, ManifestError, ManualEditsError) as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=1) from None
+    gap_files = {gap.path: gap.element_id for gap in result.gaps if gap.path}
+    unfilled = [gap.element_id for gap in result.gaps if not gap.path]
+    typer.echo(f"Generated '{definition.app.name}' with the binding '{binding.name}' in {out}.")
+    _echo_summary(report, gap_files, unfilled)
+
+
+def _echo_summary(report: WriteReport, gap_files: dict[str, str], unfilled: list[str]) -> None:
+    def section(title: str, paths: list[str]) -> None:
+        typer.echo(f"{title}: {len(paths)}")
+        for path in paths:
+            typer.echo(f"  {path}")
+
+    section("Files written", report.written)
+    typer.echo(f"Files unchanged: {len(report.unchanged)}")
+    section("Files deleted", report.deleted)
+    created = [p for p in report.created_extensions if p in gap_files]
+    typer.echo(f"Gaps created: {len(created)}")
+    for path in created:
+        typer.echo(f"  {gap_files[path]} -> {path}")
+    kept = [p for p in report.kept_extensions if p in gap_files]
+    if kept:
+        typer.echo(f"Gaps kept (extension files exist): {len(kept)}")
+    other = [p for p in report.created_extensions if p not in gap_files]
+    if other:
+        section("Extension files created", other)
+    if unfilled:
+        section("Gaps without a gap file", unfilled)
+    if report.orphaned_extensions:
+        section("Orphaned extension files (their element is gone)", report.orphaned_extensions)
 
 
 def _diagnostic_json(diagnostic: Diagnostic) -> dict[str, object]:
