@@ -1,0 +1,37 @@
+
+
+# ----------------------------------------------------------------------
+# Commit message template. Lines that start with "#" are ignored.
+# Enable it once per clone:  git config commit.template .gitmessage
+#
+# Format:
+#
+#   <type>(<scope>): <summary>
+#
+#   <body>
+#
+#   <trailers>
+#
+# Subject line
+#   - Use the imperative mood: "add", not "added" or "adds".
+#   - Use 72 characters or fewer. Do not end with a period.
+#   - Types:  feat, fix, docs, test, refactor, perf, build, ci, chore,
+#             revert
+#   - Scopes: dsl, gen, trace, cli, nextjs, react, fastapi, examples,
+#             repo, deps. Omit the scope if the change has no one area.
+#   - Breaking change: put "!" before the colon, for example
+#     "feat(dsl)!: rename entity fields to attributes".
+#
+# Body (optional, one blank line after the subject)
+#   - Say what changes and why. The diff shows how.
+#   - Wrap lines at 72 characters.
+#
+# Trailers (one blank line after the body)
+#   Refs #<issue>                  the story that the commit is part of
+#   Closes #<issue>                only if the commit completes the story
+#   BREAKING CHANGE: <description> if the subject has "!"
+#   Co-Authored-By: <name> <email> for paired or AI-assisted work
+#
+# Do not put links to claude.ai in commit messages.
+# See CONTRIBUTING.md, section "Commits".
+# ----------------------------------------------------------------------
