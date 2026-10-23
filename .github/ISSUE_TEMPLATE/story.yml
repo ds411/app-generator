@@ -1,0 +1,82 @@
+name: Story
+description: One testable increment of work in a milestone. One PR delivers one story.
+labels: ["story"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write one story for one increment that one PR can deliver.
+        After you submit, set the milestone and the area labels in the sidebar.
+        For the rules, see [CONTRIBUTING.md](https://github.com/ds411/app-generator/blob/main/CONTRIBUTING.md#stories).
+
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: |
+        Who needs what, and why. Roles: app author (writes the YAML app definition),
+        app developer (works in the generated code), maintainer (works on the generator).
+      value: |
+        As a <role>,
+        I want <capability>,
+        so that <benefit>.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Background, links, and decisions (ADRs) that the reader must know.
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Each criterion must be testable. The story is done when all criteria are true.
+      value: |
+        - [ ] Given <state>, when <action>, then <result>.
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition-elements
+    attributes:
+      label: App definition elements
+      description: |
+        The DSL elements that this story adds, changes, or covers, for example `entities.*.fields`.
+        Write "None" if the story does not touch the DSL or the generated code.
+      placeholder: entities.*.fields
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Technical notes
+      description: The approach, the files or modules to change, and the risks.
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: The issues that must be done first.
+      placeholder: Blocked by #12
+    validations:
+      required: false
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: If the story is L, split it into smaller stories.
+      options:
+        - S (one small change in one area)
+        - M (a few files in one area)
+        - L (split this story)
+    validations:
+      required: false
