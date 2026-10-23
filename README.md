@@ -168,7 +168,10 @@ mode switch. Pages without a layout are in `app/(bare)/`, and
 shared UI code imports `@/shared/lib/router`, which the binding writes
 with `next/link` and `next/navigation`. Each table, card list, and
 board view is a widget in `src/widgets/<view>` from the shared view
-templates, and a page with the view as its content shows it. The views
+templates, and a page with the view as its content shows it. Each
+detail view and dashboard is a widget from the shared templates too: a
+page with a detail view shows the record of the ID in its path, and a
+page with a dashboard shows its widgets. The views
 read and change the records with the server actions of the entity
 slices. Each element
 of a kind that the binding does not cover yet gets an extension file in
@@ -261,7 +264,16 @@ template global `ui_views`, with the output rules of
 form from `appgen.bindings.shared.forms` (the template global
 `ui_forms`, with the output rules of `forms.form_rules()`). A binding
 that generates the forms makes `ViewContext(definition, forms=True)`, so
-that the form actions of the views open the forms. The templates are
+that the form actions of the views open the forms.
+The detail view templates in `ui/details/`
+render a `DetailPlan` from `appgen.bindings.shared.details`: a header
+with the title, subtitle, badges, and actions, the sections as cards with
+a responsive field grid, and the tabs (sections, a list view of the
+related records, or a custom component). The dashboard templates in
+`ui/dashboards/` render a `DashboardPlan` from
+`appgen.bindings.shared.dashboards`: a responsive grid of stat tiles,
+charts (line, bar, and donut with recharts), and lists, which filter and
+aggregate the records in the browser. The templates are
 client components that import only `@/shared/*`, `@/widgets/*`,
 `@/features/*`, and `@/entities/<entity>`. Each binding writes
 `@/shared/lib/router` with `Link` (prop `href`), `useNavigate`,

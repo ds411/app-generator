@@ -232,6 +232,8 @@ BINDING = Binding(
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
+        | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
+        | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),

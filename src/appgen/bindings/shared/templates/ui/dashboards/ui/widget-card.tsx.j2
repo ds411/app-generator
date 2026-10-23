@@ -1,0 +1,87 @@
+{{ trace_header("app") }}
+{% raw %}
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+
+import { Link } from "@/shared/lib/router";
+import { cn } from "@/shared/lib/utils";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
+
+/** A card of a dashboard widget, with a title and an optional link. */
+export function WidgetCard({
+  title,
+  href,
+  linkLabel = "View all",
+  className,
+  children,
+}: {
+  title: string;
+  href?: string;
+  linkLabel?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className={cn("min-w-0 gap-4", className)}>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        {href && (
+          <CardAction>
+            <Link href={href} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              {linkLabel}
+            </Link>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent className="min-w-0">{children}</CardContent>
+    </Card>
+  );
+}
+
+/** A stat tile: a label, a value, an icon, and an optional link to a page. */
+export function StatTile({
+  label,
+  value,
+  icon: Icon,
+  color,
+  href,
+  className,
+}: {
+  label: string;
+  value: string;
+  icon?: LucideIcon;
+  /** A CSS color for the icon, for example a color token. */
+  color?: string;
+  href?: string;
+  className?: string;
+}) {
+  const content = (
+    <Card className={cn("h-full gap-2 py-5 transition-shadow", href && "hover:shadow-md", className)}>
+      <CardHeader className="px-5">
+        <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+        {Icon && (
+          <CardAction>
+            <span
+              className="flex size-9 items-center justify-center rounded-md bg-muted"
+              style={color ? { color, backgroundColor: `color-mix(in oklab, ${color} 12%, transparent)` } : undefined}
+            >
+              <Icon className="size-5" />
+            </span>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent className="px-5">
+        <p className="text-3xl font-semibold tracking-tight tabular-nums">{value || "—"}</p>
+      </CardContent>
+    </Card>
+  );
+  if (!href) return content;
+  return (
+    <Link href={href} className={cn("block rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", className)}>
+      {content}
+    </Link>
+  );
+}
+{% endraw %}

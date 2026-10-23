@@ -1,0 +1,80 @@
+{{ trace_header("app") }}
+{% raw %}
+"use client";
+
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts";
+
+import type { ChartDatum } from "@/shared/lib/aggregate";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/shared/ui/chart";
+
+/** Return the color of a group: its own color, else a chart color of the theme. */
+function colorOf(datum: ChartDatum, index: number): string {
+  return datum.color ?? `var(--chart-${(index % 5) + 1})`;
+}
+
+/** A bar, line, or donut chart of the values of groups. */
+export function DashboardChart({
+  kind,
+  data,
+  valueLabel,
+}: {
+  kind: "bar" | "line" | "donut";
+  data: ChartDatum[];
+  valueLabel: string;
+}) {
+  if (data.length === 0 || data.every((datum) => datum.value === 0)) {
+    return <p className="py-10 text-center text-sm text-muted-foreground">No data yet</p>;
+  }
+  const rows = data.map((datum, index) => ({ ...datum, fill: colorOf(datum, index) }));
+  const config: ChartConfig = {
+    value: { label: valueLabel, color: "var(--chart-1)" },
+    ...Object.fromEntries(rows.map((row) => [row.key, { label: row.label, color: row.fill }])),
+  };
+  if (kind === "donut") {
+    return (
+      <ChartContainer config={config} className="mx-auto aspect-square max-h-72">
+        <PieChart>
+          <ChartTooltip content={<ChartTooltipContent nameKey="key" hideLabel />} />
+          <Pie data={rows} dataKey="value" nameKey="key" innerRadius="55%" strokeWidth={2} />
+          <ChartLegend content={<ChartLegendContent nameKey="key" className="flex-wrap gap-2" />} />
+        </PieChart>
+      </ChartContainer>
+    );
+  }
+  if (kind === "line") {
+    return (
+      <ChartContainer config={config} className="aspect-auto h-64 w-full">
+        <LineChart data={rows} margin={{ left: 4, right: 12, top: 8 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+          <YAxis tickLine={false} axisLine={false} width={40} />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Line dataKey="value" stroke="var(--color-value)" strokeWidth={2} type="monotone" dot={false} />
+        </LineChart>
+      </ChartContainer>
+    );
+  }
+  return (
+    <ChartContainer config={config} className="aspect-auto h-64 w-full">
+      <BarChart data={rows} margin={{ left: 4, right: 12, top: 8 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={0} />
+        <YAxis tickLine={false} axisLine={false} width={40} />
+        <ChartTooltip content={<ChartTooltipContent hideLabel nameKey="key" />} />
+        <Bar dataKey="value" radius={4}>
+          {rows.map((row) => (
+            <Cell key={row.key} fill={row.fill} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ChartContainer>
+  );
+}
+{% endraw %}

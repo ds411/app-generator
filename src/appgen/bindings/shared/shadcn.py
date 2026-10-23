@@ -197,9 +197,9 @@ def _list_components(definition: AppDefinition) -> set[str]:
     from appgen.bindings.shared.views import ViewContext
 
     context = ViewContext(definition)
-    if not context.list_views:
+    if not context.runtime:
         return set()
-    # The actions, the states, and the page controls of all list views.
+    # The actions, the states, and the page controls of all views.
     names = {"alert-dialog", "dropdown-menu", "empty", "skeleton", "spinner"}
     for feature in context.features:
         names.update(_LIST_COMPONENTS.get(feature, ()))
