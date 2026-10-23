@@ -3,15 +3,21 @@
 {% set custom = element.content is not none and element.content.custom %}
 {% set view = element.content.view if element.content is not none and element.content.view in ui_views.list_views else none %}
 {% set form = element.content.form if element.content is not none else none %}
+{% set detail = element.content.view if params and element.content is not none and element.content.view in ui_views.detail_views else none %}
+{% set dashboard = element.content.dashboard if element.content is not none and element.content.dashboard else none %}
+{% set id_param = params[-1] if detail else none %}
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
 {% endif %}
-{% if (params and not view) or form %}
+{% if (params and not view and not dashboard) or form %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
+{% if dashboard %}
+import { {{ dashboard | pascal }}Dashboard } from "@/widgets/{{ dashboard | kebab }}";
+{% endif %}
 import { PageHeader } from "@/widgets/page-header";
-{% if view %}
-import { {{ view | pascal }}View } from "@/widgets/{{ view | kebab }}";
+{% if view or detail %}
+import { {{ (view or detail) | pascal }}View } from "@/widgets/{{ (view or detail) | kebab }}";
 {% endif %}
 {% if custom %}
 
@@ -21,7 +27,9 @@ import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
 export function {{ name | pascal }}Page() {
 {% if (custom and element.entity) or form %}
   const params = useParams();
-{% elif params and not view %}
+{% elif detail %}
+  const { {{ id_param }}{% if id_param != id_param | camel %}: {{ id_param | camel }}{% endif %} } = useParams();
+{% elif params and not view and not dashboard %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
   return (
@@ -36,6 +44,10 @@ export function {{ name | pascal }}Page() {
       <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
 {% elif view %}
       <{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
+{% elif detail %}
+      <{{ detail | pascal }}View id={ {{- id_param | camel }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
+{% elif dashboard %}
+      <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
 {% elif form %}
       <{{ form | pascal }}FormPage routeParams={params} /> {{ trace(element.content.id, jsx=True) }}
 {% else %}

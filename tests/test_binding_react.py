@@ -469,3 +469,36 @@ def test_the_form_features_have_traces_for_each_element(react: Binding, tmp_path
     for element in iter_elements(definition):
         if element.id.startswith("ui.forms."):
             assert status.get(element.id) in ("covered", "gap"), element.id
+
+
+def test_the_pages_show_their_detail_views_and_dashboards(result: GenerationResult) -> None:
+    files = _files(result)
+    detail = files["src/pages/project-detail/ui/project-detail-page.tsx"]
+    assert 'import { ProjectDetailView } from "@/widgets/project-detail";' in detail
+    assert "const { id } = useParams();" in detail
+    assert (
+        '<ProjectDetailView id={id ?? ""} /> {/* @trace pages.project_detail.content */}' in detail
+    )
+    dashboard = files["src/pages/dashboard/ui/dashboard-page.tsx"]
+    assert "<OverviewDashboard /> {/* @trace pages.dashboard.content */}" in dashboard
+    assert "useParams" not in dashboard
+    assert '"recharts": "3.10.1"' in files["package.json"]
+    view = files["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert "EditProjectFormDialog" in view
+
+
+DETAILS = Path(__file__).parent / "fixtures" / "ui-details.yaml"
+
+
+def test_the_detail_and_dashboard_features_have_traces_for_each_element(
+    react: Binding, tmp_path: Path
+) -> None:
+    definition = load_definition(DETAILS)
+    result = generate(definition, react)
+    write_result(result, tmp_path, "react")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    for element in iter_elements(definition):
+        if element.id.startswith(("ui.views.", "ui.dashboards.")):
+            assert status.get(element.id) in ("covered", "gap"), element.id

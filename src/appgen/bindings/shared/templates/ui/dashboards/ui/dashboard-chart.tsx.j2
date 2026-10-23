@@ -65,7 +65,7 @@ export function DashboardChart({
     <ChartContainer config={config} className="aspect-auto h-64 w-full">
       <BarChart data={rows} margin={{ left: 4, right: 12, top: 8 }}>
         <CartesianGrid vertical={false} />
-        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={0} />
+        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={8} />
         <YAxis tickLine={false} axisLine={false} width={40} />
         <ChartTooltip content={<ChartTooltipContent hideLabel nameKey="key" />} />
         <Bar dataKey="value" radius={4}>

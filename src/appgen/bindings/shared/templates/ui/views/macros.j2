@@ -216,7 +216,7 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
     toast: {{ js(on_success.toast) }}, {{ trace(on_success.id) }}
 {% endif %}
 {% if a.navigate_to %}
-    navigateTo: {{ a.navigate_to }},
+    navigateTo: {{ a.navigate_to }},{{ " " ~ trace(on_success.id) if on_success and not on_success.toast }}
 {% endif %}
   },
 {%- endmacro %}

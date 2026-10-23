@@ -327,6 +327,15 @@ The actions open a page, run an operation or a custom action, ask for a
 confirmation, and show a toast. Each view shows its loading, empty, and
 error states.
 
+A page with a detail view as its content shows the record of the last
+path parameter: a header with the title, the subtitle, the badges, and
+the actions, then the sections and the tabs, with the lists of related
+records. A page with a dashboard as its content shows its stat tiles,
+charts (Recharts in the shadcn/ui chart component), and record lists in
+the grid of the dashboard. The detail views and dashboards are widgets
+from the shared templates, and compute their values from the mock data
+in the browser.
+
 Each form is a feature slice in `src/features/<form>-form`, with the
 shadcn/ui field components in the sections and the grid of the form. A
 form validates its values with the required, length, number, and pattern
