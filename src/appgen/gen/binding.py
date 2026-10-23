@@ -63,6 +63,13 @@ class Binding:
     """The output layout: the rules that map templates to output files."""
     covers: frozenset[ElementKind]
     """The element kinds that the binding generates code for."""
+    shared_template_dirs: tuple[Path, ...] = ()
+    """More template folders, for templates that bindings share.
+
+    The generator looks for a template in `template_dir` first, and then
+    in these folders, in order. Thus a binding can use a shared template
+    by name, or replace it with a template of the same name.
+    """
     context: Callable[[AppDefinition], Mapping[str, Any]] | None = None
     """A function that returns more template values for a definition.
 

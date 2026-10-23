@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.model import route_dir
-from appgen.dsl import AppDefinition, load_definition
+from appgen.bindings.shared import shadcn
+from appgen.dsl import AppDefinition, load_definition, load_definition_text
 from appgen.gen import Binding, GenerationResult, find_binding, generate, write_result
 from appgen.trace import check_traces
 
@@ -105,3 +107,36 @@ def test_each_file_has_a_trace_and_the_check_finds_no_invalid_traces(
     assert with_file_trace == {f.path for f in result.files}
     covered = {e.element_id for e in report.coverage.elements if e.status == "covered"}
     assert {"app", "pages.dashboard", "pages.project_detail"} <= covered
+
+
+def test_the_app_has_only_the_shadcn_components_that_the_ui_uses(
+    result: GenerationResult, nextjs: Binding
+) -> None:
+    files = _files(result)
+    components = {p.removeprefix("src/shared/ui/") for p in files if p.startswith("src/shared/ui/")}
+    assert {"sidebar.tsx", "table.tsx", "dialog.tsx", "chart.tsx"} <= components
+    assert "@trace app file" in files["src/shared/ui/button.tsx"]
+    assert 'from "@/shared/lib/utils"' in files["src/shared/ui/button.tsx"]
+    assert 'from "@/shared/lib/theme"' in files["src/shared/ui/sonner.tsx"]
+    aliases = json.loads(files["components.json"])["aliases"]
+    assert aliases["ui"] == "@/shared/ui"
+
+    plain = load_definition_text(
+        "version: 0\n"
+        "app: { name: plain, title: Plain }\n"
+        "entities:\n"
+        "  Note: { fields: { text: { type: text } } }\n"
+    )
+    plain_files = _files(generate(plain, nextjs))
+    assert sorted(p for p in plain_files if p.startswith("src/shared/ui/")) == [
+        "src/shared/ui/button.tsx",
+        "src/shared/ui/sonner.tsx",
+    ]
+    package = json.loads(plain_files["package.json"])
+    assert "recharts" not in package["dependencies"]
+    assert "sonner" in package["dependencies"]
+
+
+def test_each_component_package_has_a_version() -> None:
+    needed = shadcn.packages(shadcn.registry().values())
+    assert sorted(set(needed) - set(versions.COMPONENT_PACKAGES)) == []
