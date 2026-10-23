@@ -1,14 +1,16 @@
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
-from appgen.dsl import load_definition_text
+from appgen.dsl import AppDefinition, load_definition_text
 from appgen.dsl.ui import TokenGroup
 from appgen.gen import (
     Binding,
     Gap,
+    GenerationError,
     Output,
     UnknownBindingError,
     available_bindings,
@@ -149,3 +151,73 @@ def test_templates_can_call_the_helpers_and_the_naming_filters(tmp_path: Path) -
 
     assert result.files[0].path == "projects.ts"
     assert "export const projects = 'PROJECTS';" in result.files[0].content
+
+
+def _templates(tmp_path: Path, templates: dict[str, str]) -> Path:
+    for name, text in templates.items():
+        (tmp_path / name).write_text(text, newline="")
+    return tmp_path
+
+
+def test_a_false_condition_skips_the_rule_or_the_element(tmp_path: Path) -> None:
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=_templates(tmp_path, {"t.md.j2": "<!-- @trace app file -->\n"}),
+        outputs=(
+            Output("t.md.j2", "{{ name }}.md", "entity", when="element.relations | length > 0"),
+            Output("t.md.j2", "pages.md", when="definition.pages | length > 1"),
+            Output("t.md.j2", "custom-{{ name }}.md", "operation", when="element.kind == 'custom'"),
+        ),
+        covers=frozenset({"entity", "operation"}),
+    )
+    paths = [f.path for f in generate(DEFINITION, binding).files]
+    assert paths == ["Project.md", "Task.md", "custom-complete_task.md"]
+
+
+def test_a_condition_with_a_missing_value_stops_the_run(tmp_path: Path) -> None:
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=_templates(tmp_path, {"t.md.j2": "<!-- @trace app file -->\n"}),
+        outputs=(Output("t.md.j2", "t.md", when="no_such_value"),),
+        covers=frozenset({"app"}),
+    )
+    with pytest.raises(GenerationError, match=r"condition of the rule 't\.md\.j2' needs a missing"):
+        generate(DEFINITION, binding)
+
+
+def test_the_binding_context_and_filters_reach_the_templates(tmp_path: Path) -> None:
+    def context(definition: AppDefinition) -> dict[str, Any]:
+        return {"entity_count": len(definition.entities)}
+
+    def twice(value: int) -> int:
+        return value * 2
+
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=_templates(
+            tmp_path,
+            {"t.md.j2": "<!-- @trace app file -->\n{{ entity_count | twice }}\n"},
+        ),
+        outputs=(Output("t.md.j2", "t-{{ entity_count }}.md", when="entity_count == 2"),),
+        covers=frozenset({"app"}),
+        context=context,
+        filters={"twice": twice},
+    )
+    [file] = generate(DEFINITION, binding).files
+    assert (file.path, file.content.splitlines()[-1]) == ("t-2.md", "4")
+
+
+def test_the_binding_context_cannot_replace_a_generator_value(tmp_path: Path) -> None:
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=tmp_path,
+        outputs=(),
+        covers=frozenset({"app"}),
+        context=lambda definition: {"tokens": [], "name": "x"},
+    )
+    with pytest.raises(GenerationError, match="replaces values of the generator: name, tokens"):
+        generate(DEFINITION, binding)

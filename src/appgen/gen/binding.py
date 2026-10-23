@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from appgen.dsl.model import AppDefinition
+
 type ElementKind = str
 """The kind of a definition element, for example `entity` or `field`.
 
@@ -33,6 +35,14 @@ class Output:
     """The element kind to render the template for, or None to render it once."""
     extension: bool = False
     """True for an extension rule: the file is created once and never overwritten (ADR 0005)."""
+    when: str | None = None
+    """A Jinja2 expression. If it is false, the rule writes no file.
+
+    For a rule with `for_each`, the generator evaluates the expression
+    for each element, with the context of the element. Thus
+    `when="element.kind == 'custom'"` writes a file only for the custom
+    operations.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +63,23 @@ class Binding:
     """The output layout: the rules that map templates to output files."""
     covers: frozenset[ElementKind]
     """The element kinds that the binding generates code for."""
+    context: Callable[[AppDefinition], Mapping[str, Any]] | None = None
+    """A function that returns more template values for a definition.
+
+    The generator calls it once for each run, and adds the values to the
+    context of all templates and output paths. Use it for data that is
+    hard to compute in Jinja2, for example the TypeScript type of each
+    field. The function must be deterministic, and it cannot replace a
+    value of the generator, for example `definition` or `tokens`.
+    """
+    filters: Mapping[str, Callable[..., Any]] = field(
+        default_factory=dict[str, Callable[..., Any]], hash=False, compare=False
+    )
+    """More Jinja2 filters for the templates and the output paths of the binding.
+
+    All bindings have the naming filters of `appgen.gen.naming`, for example
+    `camel` and `kebab`.
+    """
     gap_rule: Output | None = None
     """The extension file for each element of a kind that the binding does not cover.
 
