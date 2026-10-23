@@ -1,0 +1,156 @@
+{{ trace_header("app") }}
+import {
+  type EntityApi,
+  type EntityRecord,
+  type Filter,
+  type ListQuery,
+  type ListResult,
+  NotFoundError,
+  type Sort,
+} from "./types";
+
+/** The time that each call waits, so that the UI shows its loading states. */
+export const MOCK_LATENCY_MS = 250;
+
+function wait(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, MOCK_LATENCY_MS));
+}
+
+function compare(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  return String(a).localeCompare(String(b));
+}
+
+function matches<T>(record: T, filter: Filter<T>): boolean {
+  const value: unknown = record[filter.field];
+  const target = filter.value;
+  switch (filter.op) {
+    case "eq":
+      return value === target;
+    case "ne":
+      return value !== target;
+    case "lt":
+      return value !== null && compare(value, target) < 0;
+    case "lte":
+      return value !== null && compare(value, target) <= 0;
+    case "gt":
+      return value !== null && compare(value, target) > 0;
+    case "gte":
+      return value !== null && compare(value, target) >= 0;
+    case "in":
+      return Array.isArray(target) && target.includes(value);
+    case "not_in":
+      return Array.isArray(target) && !target.includes(value);
+    case "contains":
+      return Array.isArray(value)
+        ? value.includes(target)
+        : String(value ?? "").toLowerCase().includes(String(target).toLowerCase());
+  }
+}
+
+function sortRecords<T>(records: T[], sort: Sort<T>[]): T[] {
+  return [...records].sort((a, b) => {
+    for (const { field, direction } of sort) {
+      const result = compare(a[field], b[field]);
+      if (result !== 0) return direction === "asc" ? result : -result;
+    }
+    return 0;
+  });
+}
+
+/**
+ * An in-memory store of the records of one entity. It starts with the
+ * mock data, and keeps the changes until the page reloads.
+ */
+export class MockStore<T extends EntityRecord, TInput extends object>
+  implements EntityApi<T, TInput>
+{
+  private records: T[];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(
+    private readonly entity: string,
+    data: readonly T[],
+    private readonly defaults: Partial<Omit<T, "id">>,
+  ) {
+    this.records = data.map((record) => ({ ...record }));
+  }
+
+  async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
+    await wait();
+    let items = this.records;
+    for (const filter of query.filters ?? []) {
+      items = items.filter((record) => matches(record, filter));
+    }
+    const search = query.search;
+    if (search && search.text.trim()) {
+      const text = search.text.trim().toLowerCase();
+      items = items.filter((record) =>
+        search.fields.some((field) => String(record[field] ?? "").toLowerCase().includes(text)),
+      );
+    }
+    if (query.sort?.length) {
+      items = sortRecords(items, query.sort);
+    }
+    const total = items.length;
+    const pageSize = query.pageSize ?? (total || 1);
+    const page = query.page ?? 1;
+    if (query.page !== undefined) {
+      items = items.slice((page - 1) * pageSize, page * pageSize);
+    }
+    return { items: items.map((record) => ({ ...record })), total, page, pageSize };
+  }
+
+  async get(id: string): Promise<T> {
+    await wait();
+    return { ...this.find(id) };
+  }
+
+  async create(input: TInput): Promise<T> {
+    await wait();
+    const record = { ...this.defaults, ...input, id: crypto.randomUUID() } as unknown as T;
+    this.records = [...this.records, record];
+    this.notify();
+    return { ...record };
+  }
+
+  async update(id: string, patch: Partial<TInput>): Promise<T> {
+    await wait();
+    const record = { ...this.find(id), ...patch, id } as T;
+    this.records = this.records.map((item) => (item.id === id ? record : item));
+    this.notify();
+    return { ...record };
+  }
+
+  async remove(id: string): Promise<void> {
+    await wait();
+    this.find(id);
+    this.records = this.records.filter((item) => item.id !== id);
+    this.notify();
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private find(id: string): T {
+    const record = this.records.find((item) => item.id === id);
+    if (!record) {
+      throw new NotFoundError(this.entity, id);
+    }
+    return record;
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}

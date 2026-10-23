@@ -11,7 +11,14 @@ import pytest
 
 from appgen.bindings.react.helpers import route_params, route_path
 from appgen.dsl import AppDefinition, load_definition
-from appgen.gen import Binding, GenerationResult, find_binding, generate, write_result
+from appgen.gen import (
+    Binding,
+    GenerationResult,
+    find_binding,
+    generate,
+    iter_elements,
+    write_result,
+)
 from appgen.trace import check_traces
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
@@ -73,6 +80,27 @@ def test_each_page_has_a_slice_and_a_route(
     )
 
 
+def test_each_entity_has_a_slice_with_types_meta_mock_data_and_an_api(
+    definition: AppDefinition, result: GenerationResult
+) -> None:
+    files = _files(result)
+    for part in ("index.ts", "model/types.ts", "model/meta.ts", "api/task-api.ts"):
+        assert f"src/entities/task/{part}" in files
+    types = files["src/entities/task/model/types.ts"]
+    assert "  dueDate: string | null; // @trace entities.Task.fields.due_date" in types
+    assert "  projectId: string; // @trace entities.Task.relations.project" in types
+    assert "export type TaskStatus = (typeof taskStatusValues)[number];" in types
+    assert '  status: "todo",' in types
+    assert (
+        "  members: string[]; // @trace entities.Project.relations.members"
+        in files["src/entities/project/model/types.ts"]
+    )
+    api = files["src/entities/task/api/task-api.ts"]
+    assert "export function createTask(input: TaskInput): Promise<Task> { // @trace" in api
+    assert "export function listTasksOfProject( // @trace entities.Project.relations.tasks" in api
+    assert '"title": "' in files["src/entities/task/api/task-mock-data.ts"]
+
+
 def test_two_runs_give_the_same_output(definition: AppDefinition, react: Binding) -> None:
     assert _files(generate(definition, react)) == _files(generate(definition, react))
 
@@ -89,3 +117,9 @@ def test_each_file_has_a_file_trace_and_the_check_finds_no_invalid_traces(
     assert with_file_trace == {f.path for f in result.files}
     covered = {e.element_id for e in report.coverage.elements if e.status == "covered"}
     assert {"app", "pages.dashboard", "pages.project_detail"} <= covered
+    for element in iter_elements(definition):
+        if element.kind in ("entity", "field", "relation", "page"):
+            assert element.id in covered, element.id
+    for name, operation in definition.operations.items():
+        if operation.kind != "custom":
+            assert f"operations.{name}" in covered

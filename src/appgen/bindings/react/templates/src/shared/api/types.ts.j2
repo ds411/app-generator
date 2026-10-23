@@ -1,0 +1,59 @@
+{{ trace_header("app") }}
+// The interface of the data access of each entity. The mock store
+// implements it in memory. A later version can replace the mock store
+// with a client of a real API that has the same interface.
+
+export type SortDirection = "asc" | "desc";
+
+export type Sort<T> = {
+  field: keyof T & string;
+  direction: SortDirection;
+};
+
+export type FilterOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in" | "contains";
+
+export type Filter<T> = {
+  field: keyof T & string;
+  op: FilterOp;
+  value: unknown;
+};
+
+export type Search<T> = {
+  text: string;
+  fields: (keyof T & string)[];
+};
+
+export type ListQuery<T> = {
+  sort?: Sort<T>[];
+  filters?: Filter<T>[];
+  search?: Search<T>;
+  /** The page number, from 1. Without it, the result has all records. */
+  page?: number;
+  pageSize?: number;
+};
+
+export type ListResult<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type EntityRecord = { id: string };
+
+export interface EntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInput>> {
+  list(query?: ListQuery<T>): Promise<ListResult<T>>;
+  get(id: string): Promise<T>;
+  create(input: TInput): Promise<T>;
+  update(id: string, patch: TPatch): Promise<T>;
+  remove(id: string): Promise<void>;
+  /** Call the listener after each change. Return a function that stops the calls. */
+  subscribe(listener: () => void): () => void;
+}
+
+export class NotFoundError extends Error {
+  constructor(entity: string, id: string) {
+    super(`${entity} ${id} does not exist.`);
+    this.name = "NotFoundError";
+  }
+}

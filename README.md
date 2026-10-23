@@ -168,7 +168,18 @@ Router, and pnpm, with the code in the layers of Feature-Sliced Design
 (`src/app`, `src/pages`, `src/widgets`, `src/features`,
 `src/entities`, and `src/shared`). Each page of the definition gets a
 route and a slice in `src/pages`. The binding is in
-`src/appgen/bindings/react/`. To try the output:
+`src/appgen/bindings/react/`.
+
+The app has no back end. Each entity gets a slice in `src/entities`
+with its TypeScript type, the labels and rules of its fields, mock
+records, and a data access object. The data access keeps the records in
+memory, and has the interface of an API client (`EntityApi` in
+`src/shared/api`): list (with sort, filters, search, and pages), get,
+create, update, and delete. The CRUD and list operations of the
+definition call it. The mock records come from a fixed seed, so the
+output stays the same, and each relation refers to a record that
+exists. An entity sets the number of records with the extension key
+`x-mock-count` (default: 12). To try the output:
 
 ```sh
 uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker

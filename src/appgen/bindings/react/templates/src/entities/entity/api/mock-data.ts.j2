@@ -1,0 +1,6 @@
+{{ trace_header(element_id) }}
+// Mock records from a fixed seed. Each relation refers to a record that
+// exists. Change the definition to change the data.
+import type { {{ name | pascal }} } from "../model/types";
+
+export const {{ name | camel }}MockData: readonly {{ name | pascal }}[] = {{ ts_value(mock[name], indent=2) }};
