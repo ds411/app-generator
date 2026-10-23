@@ -88,7 +88,19 @@ BINDING = Binding(
         Output(template="src/layer.md.j2", path="src/entities/README.md"),
         Output(template="src/shared/config/app.ts.j2", path="src/shared/config/app.ts"),
         Output(template="components.json.j2", path="components.json"),
-        Output(template="src/app/styles/index.css.j2", path="src/app/styles/index.css"),
+        Output(template="theme/globals.css.j2", path="src/app/styles/index.css"),
+        Output(template="src/app/providers/index.tsx.j2", path="src/app/providers/index.tsx"),
+        Output(template="src/app/layout/root-layout.tsx.j2", path="src/app/layout/root-layout.tsx"),
+        Output(
+            template="src/features/toggle-theme/index.ts.j2",
+            path="src/features/toggle-theme/index.ts",
+            when="react.mode_toggle",
+        ),
+        Output(
+            template="theme/mode-toggle.tsx.j2",
+            path="src/features/toggle-theme/ui/mode-toggle.tsx",
+            when="react.mode_toggle",
+        ),
         Output(template="shadcn/lib/utils.ts.j2", path="src/shared/lib/utils.ts"),
         Output(template="src/shared/lib/theme.ts.j2", path="src/shared/lib/theme.ts"),
         *_SHADCN,
@@ -159,6 +171,7 @@ BINDING = Binding(
     ),
     covers=frozenset(
         {"app", "page", "entity", "field", "relation", "operation", "param"}
+        | {"theme", "tokens", "token_group", "token"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,
