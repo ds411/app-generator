@@ -45,6 +45,16 @@ class Manifest:
     """The element IDs of each generated file that cannot hold comments (ADR 0004)."""
     excluded_kinds: tuple[str, ...] = ()
     """The element kinds that are out of the scope of the binding. The check does not count them."""
+    elements: dict[str, str] = field(default_factory=dict[str, str])
+    """The kind of each element of the definition of the last run, by ID."""
+    removed: dict[str, str] = field(default_factory=dict[str, str])
+    """The kind of each element of an earlier run that the definition does not have any more."""
+    added: tuple[str, ...] = ()
+    """The elements of the definition that an earlier run did not have, sorted.
+
+    With `removed`, the checker can suggest the element that replaced a
+    renamed element.
+    """
 
     def to_json(self) -> str:
         """Return the manifest as JSON text, with sorted keys and a final newline."""
@@ -60,6 +70,12 @@ class Manifest:
         }
         if self.excluded_kinds:
             data["excluded_kinds"] = sorted(self.excluded_kinds)
+        if self.elements:
+            data["elements"] = dict(sorted(self.elements.items()))
+        if self.removed:
+            data["removed"] = dict(sorted(self.removed.items()))
+        if self.added:
+            data["added"] = sorted(self.added)
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
     @classmethod
@@ -78,6 +94,9 @@ class Manifest:
                 },
                 traces={str(k): tuple(str(i) for i in v) for k, v in data["traces"].items()},
                 excluded_kinds=tuple(str(k) for k in data.get("excluded_kinds", [])),
+                elements={str(k): str(v) for k, v in data.get("elements", {}).items()},
+                removed={str(k): str(v) for k, v in data.get("removed", {}).items()},
+                added=tuple(str(i) for i in data.get("added", [])),
             )
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise ManifestError(f"The manifest is not valid: {error}") from None
@@ -155,6 +174,7 @@ def write_result(
 
     report = WriteReport()
     new = Manifest(binding=binding, excluded_kinds=result.excluded_kinds)
+    _record_changes(new, old, result.elements)
     for path, file in sorted(generated.items()):
         data = file.content.encode("utf-8")
         target = out_dir / path
@@ -194,6 +214,23 @@ def write_result(
     manifest_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.write_bytes(new.to_json().encode("utf-8"))
     return report
+
+
+def _record_changes(new: Manifest, old: Manifest, elements: dict[str, str]) -> None:
+    """Record the elements of a run, and the elements that changed since the earlier runs.
+
+    The records add up over the runs, so the next check still knows a
+    rename after one more run. An element that comes back is not removed
+    any more. A first run, or a run after a manifest without elements,
+    records no changes.
+    """
+    new.elements = dict(elements)
+    if not old.elements:
+        return
+    removed = {**old.removed, **{i: k for i, k in old.elements.items() if i not in elements}}
+    new.removed = {i: k for i, k in removed.items() if i not in elements}
+    added = set(old.added) | {i for i in elements if i not in old.elements}
+    new.added = tuple(sorted(i for i in added if i in elements))
 
 
 def _remove_empty_parents(folder: Path, root: Path) -> None:

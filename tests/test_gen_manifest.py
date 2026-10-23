@@ -134,3 +134,29 @@ def test_a_manifest_that_is_not_valid_is_an_error(tmp_path: Path) -> None:
     (tmp_path / MANIFEST_PATH).write_text("{}")
     with pytest.raises(ManifestError):
         read_manifest(tmp_path)
+
+
+def test_the_manifest_records_the_elements_and_their_changes(tmp_path: Path) -> None:
+    def run(elements: dict[str, str]) -> Manifest:
+        write_result(GenerationResult(elements=elements), tmp_path, "b")
+        manifest = read_manifest(tmp_path)
+        assert manifest is not None
+        return manifest
+
+    first = run({"app": "app", "entities.Comment": "entity"})
+    assert first.elements == {"app": "app", "entities.Comment": "entity"}
+    assert (first.removed, first.added) == ({}, ())
+
+    renamed = run({"app": "app", "entities.Remark": "entity"})
+    assert renamed.removed == {"entities.Comment": "entity"}
+    assert renamed.added == ("entities.Remark",)
+
+    # A run without changes keeps the record of the rename.
+    again = run({"app": "app", "entities.Remark": "entity"})
+    assert (again.removed, again.added) == (renamed.removed, renamed.added)
+    assert Manifest.from_json(again.to_json()) == again
+
+    # An element that comes back is not removed any more.
+    back = run({"app": "app", "entities.Comment": "entity"})
+    assert back.removed == {"entities.Remark": "entity"}
+    assert back.added == ("entities.Comment",)

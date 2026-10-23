@@ -30,6 +30,7 @@ from appgen.trace.scanner import (
 from appgen.trace.validity import (
     find_invalid_traces,
     generated_outside_output,
+    suggest_element,
     unknown_elements,
     valid_traces,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "render_text",
     "scan_folder",
     "scan_text",
+    "suggest_element",
     "unknown_elements",
     "valid_traces",
 ]

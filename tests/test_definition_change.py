@@ -106,5 +106,9 @@ def test_extension_code_stays_and_the_check_reports_the_drift(
     invalid = {(p.file, p.element_id) for p in report.invalid}
     assert {(path, RENAMED[0]), (path, REMOVED)} <= invalid
     assert {element_id for _, element_id in invalid} == {RENAMED[0], REMOVED}
-    # The hint comes from the spelling of the IDs, so it cannot know a rename.
-    assert all(p.code == report.invalid[0].code for p in report.invalid)
+    assert all(p.code == "unknown-element" for p in report.invalid)
+    # The manifest knows the rename, so the hint names the new entity.
+    # No page replaces the removed page, so its hint comes from the spelling.
+    hints = {p.element_id: p.hint for p in report.invalid}
+    assert hints[RENAMED[0]] == f"Did you mean '{RENAMED[1]}'?"
+    assert hints[REMOVED] == "Did you mean 'pages.projects'?"
