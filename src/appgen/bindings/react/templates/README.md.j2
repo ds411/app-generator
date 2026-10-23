@@ -1,0 +1,53 @@
+{{ trace_header("app") }}
+# {{ app.title }}
+
+{% if app.description %}
+{{ app.description }}
+
+{% endif %}
+appgen generated this app from the app definition `{{ app.name }}`, with
+the React binding. Do not edit the generated files: change the app
+definition, and run `appgen generate` again. Write your own code in the
+extension files (`*.ext.ts` and `*.ext.tsx`), which appgen creates once
+and never changes.
+
+## Stack
+
+- React 19 and TypeScript in strict mode
+- Vite and React Router
+- Feature-Sliced Design (FSD)
+- Mock data in memory (no back end)
+- pnpm
+
+## Commands
+
+| Task                   | Command          |
+| ---------------------- | ---------------- |
+| Install                | `pnpm install`   |
+| Start the dev server   | `pnpm dev`       |
+| Lint                   | `pnpm lint`      |
+| Type check             | `pnpm typecheck` |
+| Build                  | `pnpm build`     |
+| Preview the build      | `pnpm preview`   |
+
+## Layout
+
+The code follows [Feature-Sliced Design](https://feature-sliced.design).
+Each layer can import only from the layers below it.
+
+| Folder          | Layer                                                   |
+| --------------- | ------------------------------------------------------- |
+| `src/app/`      | The entry point, the providers, and the router.         |
+| `src/pages/`    | One slice for each page of the definition.              |
+| `src/widgets/`  | Large parts of a page, for example the app shell.       |
+| `src/features/` | User actions, for example the forms.                    |
+| `src/entities/` | The entity types and their data access.                 |
+| `src/shared/`   | Code that does not know the domain: UI kit, lib, config. |
+
+## Pages
+
+| Page | Path |
+| ---- | ---- |
+{% for page_name, page in definition.pages.items() %}
+| {{ page.title }} | `{{ route_path(page.path) }}` |
+{% endfor %}

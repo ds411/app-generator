@@ -1,0 +1,7 @@
+{{ trace_header("app") }}
+
+export const appConfig = {
+  name: {{ app.name | tojson }},
+  title: {{ app.title | tojson }},
+  description: {{ (app.description or "") | tojson }},
+} as const;

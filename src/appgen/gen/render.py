@@ -10,14 +10,20 @@ from pathlib import Path, PurePosixPath
 
 import jinja2
 
+from appgen.gen.naming import NAMING_FILTERS
+
 
 class GenerationError(Exception):
     """The generator cannot render a template, or the output is not valid."""
 
 
 def make_environment(template_dir: Path) -> jinja2.Environment:
-    """Return a Jinja2 environment for the templates of a binding."""
-    return jinja2.Environment(
+    """Return a Jinja2 environment for the templates of a binding.
+
+    The environment has the naming filters of `appgen.gen.naming`, for
+    example `{{ name | camel }}`.
+    """
+    environment = jinja2.Environment(
         loader=jinja2.FileSystemLoader(template_dir),
         undefined=jinja2.StrictUndefined,
         autoescape=False,
@@ -26,6 +32,8 @@ def make_environment(template_dir: Path) -> jinja2.Environment:
         keep_trailing_newline=True,
         newline_sequence="\n",
     )
+    environment.filters.update(NAMING_FILTERS)
+    return environment
 
 
 def normalize_content(content: str) -> str:

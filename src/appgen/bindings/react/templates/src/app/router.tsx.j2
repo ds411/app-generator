@@ -1,0 +1,12 @@
+{{ trace_header("app") }}
+import { createBrowserRouter } from "react-router";
+
+{% for page_name in definition.pages %}
+import { {{ page_name | pascal }}Page } from "@/pages/{{ page_name | kebab }}";
+{% endfor %}
+
+export const router = createBrowserRouter([
+{% for page_name, page in definition.pages.items() %}
+  { path: {{ route_path(page.path) | tojson }}, element: <{{ page_name | pascal }}Page /> }, {{ trace(page.id) }}
+{% endfor %}
+]);

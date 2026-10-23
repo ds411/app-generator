@@ -1,0 +1,22 @@
+{{ trace_header(element_id) }}
+{% set params = route_params(element.path) %}
+{% if params %}
+import { useParams } from "react-router";
+{% endif %}
+
+export function {{ name | pascal }}Page() {
+{% if params %}
+  const { {{ params | map("camel") | join(", ") }} } = useParams();
+{% endif %}
+  return (
+    <main>
+      <h1>{{ element.title }}</h1>
+{% if element.description %}
+      <p>{{ element.description }}</p>
+{% endif %}
+{% for param in params %}
+      <p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>
+{% endfor %}
+    </main>
+  );
+}

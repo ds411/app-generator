@@ -18,6 +18,7 @@ appgen = "appgen.cli:app"
 
 [project.entry-points."appgen.bindings"]
 minimal = "appgen.bindings.minimal:BINDING"
+react = "appgen.bindings.react:BINDING"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]

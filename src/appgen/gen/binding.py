@@ -1,7 +1,9 @@
 """The binding contract: what a binding declares to plug into the generator."""
 
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 type ElementKind = str
 """The kind of a definition element, for example `entity` or `field`.
@@ -57,4 +59,13 @@ class Binding:
     The generator renders the rule once for each gap element, as an
     extension file (ADR 0005). `for_each` and `extension` of the rule do
     not apply. Without a gap rule, the gaps are only listed.
+    """
+    helpers: Mapping[str, Callable[..., Any]] = field(
+        default_factory=dict[str, Callable[..., Any]], hash=False, compare=False
+    )
+    """Python functions that the templates of the binding can call, by name.
+
+    The generator adds them to the globals of the template environment,
+    for example `{{ ts_type(field) }}`. A helper must be deterministic: it
+    must not read a clock, random values, or files.
     """
