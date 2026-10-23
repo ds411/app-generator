@@ -168,8 +168,23 @@ next-themes switches the color mode (`ui.theme`). Each entity is a Drizzle
 table in `src/shared/db/schema/` (a foreign key column for each
 `many_to_one` and `one_to_one` relation, and a join table for each
 `many_to_many` relation), with a trace on each table, column, and
-relation. `pnpm db:generate` writes the SQL migrations with drizzle-kit,
-and the server applies them at start when `DATABASE_MIGRATE=true`. The exact package versions are in
+relation. A relation and its inverse are stored once. `pnpm db:generate`
+writes the SQL migrations with drizzle-kit, and the server applies them
+at start when `DATABASE_MIGRATE=true`.
+
+Each entity slice in `src/entities/` has the same public API as in the
+React app, so that the shared UI templates work in both apps: the types,
+the field rules (`<entity>Meta`), zod schemas from the field rules
+(`<entity>InputSchema`, `<entity>PatchSchema`), and `<entity>Api` with
+`list` (filters, search, sorting, and pages), `get`, `create`, `update`,
+`remove`, and `subscribe`. In the Next.js app, `<entity>Api` calls the
+server actions of the slice (`api/<entity>-actions.ts`), which check
+their input with the zod schemas and use the Drizzle repository of the
+slice (`server.ts`, only on the server). A server action returns its
+errors as data, and `<entity>Api` throws them again as `NotFoundError`
+or `ValidationError`. Each custom operation is a features slice with a
+server action (`.gen.ts`) that calls the extension file (`.ext.ts`),
+where the developer writes the logic. The exact package versions are in
 `src/appgen/bindings/nextjs/versions.py`. To try the output:
 
 ```sh
@@ -201,6 +216,13 @@ utility (`typography-heading`). `radius.lg` gives `--radius`. A shadcn/ui
 variable without a token keeps the shadcn/ui default. Each variable has
 a trace to its token. `theme/mode-toggle.tsx.j2` is the switch for the
 color mode.
+
+The entity templates are shared too: `src/shared/api/types.ts.j2` (the
+`EntityApi` interface and `NotFoundError`), and `model/types.ts.j2`,
+`model/meta.ts.j2`, and `model/schema.ts.j2` in `src/entities/entity/`.
+They use the template globals of `appgen.bindings.shared.typescript`
+(`HELPERS`), which both bindings add. A binding template with the same
+path wins over a shared template.
 
 ### React binding
 

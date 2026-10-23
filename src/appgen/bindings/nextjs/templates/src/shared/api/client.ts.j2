@@ -1,0 +1,71 @@
+{{ trace_header("app") }}
+import { type ActionResult, unwrap } from "./errors";
+import type { EntityApi, EntityRecord, ListQuery, ListResult } from "./types";
+
+/** The server actions of the data access of one entity. */
+export type EntityActions<T extends EntityRecord, TInput, TPatch = Partial<TInput>> = {
+  list(query?: ListQuery<T>): Promise<ActionResult<ListResult<T>>>;
+  get(id: string): Promise<ActionResult<T>>;
+  create(input: TInput): Promise<ActionResult<T>>;
+  update(id: string, patch: TPatch): Promise<ActionResult<T>>;
+  remove(id: string): Promise<ActionResult<null>>;
+};
+
+const listeners = new Map<string, Set<() => void>>();
+
+/** Call the listeners of an entity, or of all entities if there is no entity. */
+export function notifyChange(entity?: string): void {
+  const sets = entity === undefined ? [...listeners.values()] : [listeners.get(entity)];
+  for (const set of sets) {
+    for (const listener of set ?? []) {
+      listener();
+    }
+  }
+}
+
+function subscribe(entity: string, listener: () => void): () => void {
+  let set = listeners.get(entity);
+  if (!set) {
+    set = new Set();
+    listeners.set(entity, set);
+  }
+  set.add(listener);
+  return () => {
+    set.delete(listener);
+  };
+}
+
+/**
+ * Return the data access of an entity: it calls the server actions of the
+ * entity, and after each change it calls the listeners in this browser tab.
+ */
+export function createEntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInput>>(
+  entity: string,
+  actions: EntityActions<T, TInput, TPatch>,
+): EntityApi<T, TInput, TPatch> {
+  return {
+    async list(query) {
+      return unwrap(await actions.list(query));
+    },
+    async get(id) {
+      return unwrap(await actions.get(id));
+    },
+    async create(input) {
+      const record = unwrap(await actions.create(input));
+      notifyChange(entity);
+      return record;
+    },
+    async update(id, patch) {
+      const record = unwrap(await actions.update(id, patch));
+      notifyChange(entity);
+      return record;
+    },
+    async remove(id) {
+      unwrap(await actions.remove(id));
+      notifyChange(entity);
+    },
+    subscribe(listener) {
+      return subscribe(entity, listener);
+    },
+  };
+}

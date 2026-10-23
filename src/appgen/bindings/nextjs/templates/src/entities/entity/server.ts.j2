@@ -1,0 +1,6 @@
+{{ trace_header(element_id) }}
+// The public API of the slice for code on the server only, for example
+// the server actions of the features.
+import "server-only";
+
+export { {{ name | camel }}Repository } from "./api/{{ name | kebab }}-repository";

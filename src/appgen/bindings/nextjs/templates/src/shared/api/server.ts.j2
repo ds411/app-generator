@@ -1,0 +1,89 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
+import { type ActionResult, ValidationError } from "./errors";
+import { type ListQuery, NotFoundError } from "./types";
+
+/** The rules of a record ID. */
+export const idSchema = z.uuid();
+
+/** The rules of a list query. The data access checks the field names. */
+export const listQuerySchema = z.object({
+  sort: z
+    .array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }))
+    .optional(),
+  filters: z
+    .array(
+      z.object({
+        field: z.string(),
+        op: z.enum(["eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "contains"]),
+        value: z.unknown(),
+      }),
+    )
+    .optional(),
+  search: z.object({ text: z.string(), fields: z.array(z.string()) }).optional(),
+  page: z.int().min(1).optional(),
+  pageSize: z.int().min(1).max(1000).optional(),
+});
+
+/** Return a list query after a check of its rules. */
+export function parseListQuery<T>(query: unknown): ListQuery<T> {
+  return listQuerySchema.parse(query ?? {}) as ListQuery<T>;
+}
+
+// The messages of the Postgres errors that an input can cause.
+const CONSTRAINT_MESSAGES: Record<string, string> = {
+  "23503": "The record refers to a record that does not exist, or other records refer to it.",
+  "23505": "Another record has the same value, and the value must be unique.",
+};
+
+/** Return the Postgres error code of an error or of its cause, if it has one. */
+function postgresCode(error: unknown): string | undefined {
+  for (let item = error; item instanceof Error; item = item.cause) {
+    if ("code" in item && typeof item.code === "string") {
+      return item.code;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Run the body of a server action, and return its result or its error as
+ * data. After a change, the routes of the app get new data.
+ */
+export async function runAction<T>(
+  body: () => Promise<T>,
+  options: { changes?: boolean } = {},
+): Promise<ActionResult<T>> {
+  try {
+    const data = await body();
+    if (options.changes) {
+      revalidatePath("/", "layout");
+    }
+    return { ok: true, data };
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      const { message, entity, id } = error;
+      return { ok: false, error: { name: "NotFoundError", message, entity, id } };
+    }
+    if (error instanceof z.ZodError) {
+      const issues = error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      }));
+      return { ok: false, error: { name: "ValidationError", message: "The input is not valid.", issues } };
+    }
+    if (error instanceof ValidationError) {
+      return { ok: false, error: { name: "ValidationError", message: error.message, issues: error.issues } };
+    }
+    const message = CONSTRAINT_MESSAGES[postgresCode(error) ?? ""];
+    if (message) {
+      return { ok: false, error: { name: "ValidationError", message, issues: [] } };
+    }
+    console.error(error);
+    return { ok: false, error: { name: "Error", message: "The server could not do the operation." } };
+  }
+}

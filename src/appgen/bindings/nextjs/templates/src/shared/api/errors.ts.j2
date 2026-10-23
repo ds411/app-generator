@@ -1,0 +1,44 @@
+{{ trace_header("app") }}
+import { NotFoundError } from "./types";
+
+/** A problem with one value of an input. */
+export type Issue = {
+  /** The key of the value, for example `title` or `tags.0`. */
+  path: string;
+  message: string;
+};
+
+export class ValidationError extends Error {
+  readonly issues: Issue[];
+
+  constructor(message: string, issues: Issue[] = []) {
+    super(message);
+    this.name = "ValidationError";
+    this.issues = issues;
+  }
+}
+
+/** An error of a server action, as plain data that can go to the browser. */
+export type ActionError =
+  | { name: "NotFoundError"; message: string; entity: string; id: string }
+  | { name: "ValidationError"; message: string; issues: Issue[] }
+  | { name: "Error"; message: string };
+
+/** The result of a server action. Server actions return errors, because Next.js hides thrown errors in production. */
+export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ActionError };
+
+/** Return the data of a result, or throw its error again. */
+export function unwrap<T>(result: ActionResult<T>): T {
+  if (result.ok) {
+    return result.data;
+  }
+  const { error } = result;
+  switch (error.name) {
+    case "NotFoundError":
+      throw new NotFoundError(error.entity, error.id);
+    case "ValidationError":
+      throw new ValidationError(error.message, error.issues);
+    default:
+      throw new Error(error.message);
+  }
+}

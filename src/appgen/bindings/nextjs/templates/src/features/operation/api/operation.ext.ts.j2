@@ -1,0 +1,18 @@
+{% from "src/features/operation/api/macros.j2" import returns, entity_imports %}
+{{ trace_header(element_id) }}
+import "server-only";
+
+{{ entity_imports(name, element, record=True) | trim }}
+
+/**
+{% if element.description %}
+ * {{ element.description }}
+ *
+{% endif %}
+ * The repositories in `@/entities/<entity>/server` read and change the data.
+ */
+export async function {{ name | camel }}(_record: {{ element.entity | pascal }}{% if element.params %}, _params: {{ name | pascal }}Params{% endif %}): Promise<{{ returns(element) }}> {
+  // TODO(appgen): write the logic of the operation {{ name }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+  throw new Error("Not implemented yet: {{ element_id }}");
+}

@@ -1,0 +1,37 @@
+{% from "src/features/operation/api/macros.j2" import returns, entity_imports %}
+{% set fn = name | camel %}
+{% set result = "null" if element.returns == "none" else element.returns | pascal %}
+{{ trace_header(element_id) }}
+"use server";
+
+import type { ActionResult } from "@/shared/api";
+import { idSchema, runAction } from "@/shared/api/server";
+
+{% set imports = entity_imports(name, element, [fn ~ "ParamsSchema"] if element.params else []) | trim %}
+{% if imports %}
+{{ imports }}
+{% endif %}
+import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.entity | kebab }}/server";
+
+import { {{ fn }} } from "./{{ name | kebab }}.ext";
+
+/** The server action of the operation {{ name }}. The logic is in the extension file. */
+export async function {{ fn }}Action(
+  id: string,
+{% if element.params %}
+  params: {{ name | pascal }}Params,
+{% endif %}
+): Promise<ActionResult<{{ result }}>> {
+  return runAction(
+    async () => {
+      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id));
+{% if element.returns == "none" %}
+      await {{ fn }}(record{% if element.params %}, {{ fn }}ParamsSchema.parse(params){% endif %});
+      return null;
+{% else %}
+      return {{ fn }}(record{% if element.params %}, {{ fn }}ParamsSchema.parse(params){% endif %});
+{% endif %}
+    },
+    { changes: true },
+  );
+}

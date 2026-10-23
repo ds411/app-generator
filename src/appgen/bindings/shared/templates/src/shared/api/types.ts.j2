@@ -52,8 +52,13 @@ export interface EntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInp
 }
 
 export class NotFoundError extends Error {
+  readonly entity: string;
+  readonly id: string;
+
   constructor(entity: string, id: string) {
     super(`${entity} ${id} does not exist.`);
     this.name = "NotFoundError";
+    this.entity = entity;
+    this.id = id;
   }
 }

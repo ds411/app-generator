@@ -8,22 +8,17 @@ holds only the routes, and the FSD layers `app`, `pages`, `widgets`,
 route renders the page of its slice in `src/pages`.
 """
 
-import json
 from pathlib import Path
-from typing import Any
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
-from appgen.bindings.shared import shadcn
+from appgen.bindings.shared import shadcn, typescript
 from appgen.gen.binding import Binding, Output
 
-
-def to_json(value: Any) -> str:
-    """Return a value as JSON with an indent of two spaces, as the Node.js tools write it."""
-    return json.dumps(value, indent=2, ensure_ascii=False)
-
-
 _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
+_ENTITY = "src/entities/{{ name | kebab }}"
+_OPERATION = "src/features/{{ name | kebab }}"
+_CUSTOM_OP = "element.kind == 'custom'"
 
 # One rule for each shadcn/ui component and hook. The app gets only the
 # components that its UI uses (ADR 0003, "Binding map").
@@ -104,13 +99,53 @@ BINDING = Binding(
             path="src/shared/db/schema/{{ nextjs.tables_by_entity[name].module }}.ts",
             for_each="entity",
         ),
+        Output(template="src/shared/db/repository.ts.j2", path="src/shared/db/repository.ts"),
+        Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
+        Output(template="src/shared/api/errors.ts.j2", path="src/shared/api/errors.ts"),
+        Output(template="src/shared/api/client.ts.j2", path="src/shared/api/client.ts"),
+        Output(template="src/shared/api/server.ts.j2", path="src/shared/api/server.ts"),
+        Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
+        *(
+            Output(
+                template=f"src/entities/entity/{template}.j2",
+                path=f"{_ENTITY}/{path}",
+                for_each="entity",
+            )
+            for template, path in (
+                ("index.ts", "index.ts"),
+                ("server.ts", "server.ts"),
+                ("model/types.ts", "model/types.ts"),
+                ("model/meta.ts", "model/meta.ts"),
+                ("model/schema.ts", "model/schema.ts"),
+                ("api/repository.ts", "api/{{ name | kebab }}-repository.ts"),
+                ("api/actions.ts", "api/{{ name | kebab }}-actions.ts"),
+                ("api/api.ts", "api/{{ name | kebab }}-api.ts"),
+            )
+        ),
+        *(
+            Output(
+                template=f"src/features/operation/{template}.j2",
+                path=f"{_OPERATION}/{path}",
+                for_each="operation",
+                when=_CUSTOM_OP,
+                extension=template.endswith(".ext.ts"),
+            )
+            for template, path in (
+                ("index.ts", "index.ts"),
+                ("api/api.ts", "api/{{ name | kebab }}-api.ts"),
+                ("api/operation.gen.ts", "api/{{ name | kebab }}.gen.ts"),
+                ("api/operation.ext.ts", "api/{{ name | kebab }}.ext.ts"),
+            )
+        ),
         *_SHADCN,
         *_HOOKS,
     ),
     covers=frozenset(
-        {"app", "page", "entity", "field", "relation", "theme", "tokens", "token_group", "token"}
+        {"app", "page", "entity", "field", "relation", "operation", "param"}
+        | {"theme", "tokens", "token_group", "token"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
-    filters={"json": to_json},
+    filters={"json": typescript.to_json},
+    helpers=typescript.HELPERS,
 )

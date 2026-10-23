@@ -1,0 +1,48 @@
+{% set type = name | pascal %}
+{% set var = name | camel %}
+{{ trace_header(element_id) }}
+"use server";
+
+import type { ActionResult, ListQuery, ListResult } from "@/shared/api";
+import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
+
+import { {{ var }}InputSchema, {{ var }}PatchSchema } from "../model/schema";
+import type { {{ type }}, {{ type }}Input } from "../model/types";
+import { {{ var }}Repository } from "./{{ name | kebab }}-repository";
+
+// The server actions of the data access of {{ type }}. Each action checks
+// its input, because a browser can call it with any values.
+
+export async function list{{ type }}Action(
+  query?: ListQuery<{{ type }}>,
+): Promise<ActionResult<ListResult<{{ type }}>>> {
+  return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)));
+}
+
+export async function get{{ type }}Action(id: string): Promise<ActionResult<{{ type }}>> {
+  return runAction(() => {{ var }}Repository.get(idSchema.parse(id)));
+}
+
+export async function create{{ type }}Action(input: {{ type }}Input): Promise<ActionResult<{{ type }}>> {
+  return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)), { changes: true });
+}
+
+export async function update{{ type }}Action(
+  id: string,
+  patch: Partial<{{ type }}Input>,
+): Promise<ActionResult<{{ type }}>> {
+  return runAction(
+    () => {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(patch)),
+    { changes: true },
+  );
+}
+
+export async function remove{{ type }}Action(id: string): Promise<ActionResult<null>> {
+  return runAction(
+    async () => {
+      await {{ var }}Repository.remove(idSchema.parse(id));
+      return null;
+    },
+    { changes: true },
+  );
+}

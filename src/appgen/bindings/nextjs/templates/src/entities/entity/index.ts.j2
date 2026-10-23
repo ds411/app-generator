@@ -1,0 +1,23 @@
+{{ trace_header(element_id) }}
+{% set var = name | camel %}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | map(attribute=0) | map("camel") | list %}
+{% set lists = inverse_lists(definition, name) %}
+{% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
+export {
+  {{ var }}Api,
+{% for op in ops %}
+  {{ op }},
+{% endfor %}
+{% for owner, relation_name, relation in lists %}
+  list{{ relation_name | pascal }}Of{{ owner | pascal }},
+{% endfor %}
+} from "./api/{{ name | kebab }}-api";
+export { {{ var }}Meta } from "./model/meta";
+export {
+  {{ var }}InputSchema,
+  {{ var }}PatchSchema,
+{% for op in customs %}
+  {{ op }}ParamsSchema,
+{% endfor %}
+} from "./model/schema";
+export * from "./model/types";

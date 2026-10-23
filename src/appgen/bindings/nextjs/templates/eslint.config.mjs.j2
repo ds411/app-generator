@@ -7,6 +7,16 @@ export default defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    // A name that starts with _ is not used on purpose, for example a
+    // parameter of the stub in an extension file.
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  },
+  {
     // The shadcn/ui sources break two rules of the React Compiler on
     // purpose (a random skeleton width, and a media query in an effect).
     files: ["src/shared/ui/**", "src/shared/lib/use-*.ts"],
