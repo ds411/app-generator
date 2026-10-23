@@ -18,3 +18,4 @@ gives the rules.
 | Number | Title                                                                  | Status   |
 | ------ | ---------------------------------------------------------------------- | -------- |
 | 0001   | [Record architecture decisions](0001-record-architecture-decisions.md) | Accepted |
+| 0002   | [App definition DSL v0](0002-app-definition-dsl-v0.md)                 | Accepted |
