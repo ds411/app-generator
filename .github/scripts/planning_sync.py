@@ -77,7 +77,10 @@ def sync_labels(github: GitHub) -> None:
         if current is None:
             github.request("POST", "/labels", body)
             print(f"created label: {label['name']}")
-        elif current["color"].lower() != label["color"].lower() or (current["description"] or "") != label["description"]:
+        elif (
+            current["color"].lower() != label["color"].lower()
+            or (current["description"] or "") != label["description"]
+        ):
             github.request("PATCH", f"/labels/{urllib.parse.quote(label['name'], safe='')}", body)
             print(f"updated label: {label['name']}")
         else:
@@ -85,7 +88,9 @@ def sync_labels(github: GitHub) -> None:
 
 
 def sync_milestones(github: GitHub) -> None:
-    existing = {milestone["title"]: milestone for milestone in github.list_all("/milestones?state=all")}
+    existing = {
+        milestone["title"]: milestone for milestone in github.list_all("/milestones?state=all")
+    }
     for milestone in load("milestones.yml"):
         body = {"title": milestone["title"], "description": milestone["description"].strip()}
         current = existing.get(milestone["title"])
@@ -100,7 +105,9 @@ def sync_milestones(github: GitHub) -> None:
 
 
 def main() -> None:
-    github = GitHub(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_TOKEN"], "--dry-run" in sys.argv[1:])
+    github = GitHub(
+        os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_TOKEN"], "--dry-run" in sys.argv[1:]
+    )
     sync_labels(github)
     sync_milestones(github)
 
