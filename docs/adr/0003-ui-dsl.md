@@ -427,7 +427,7 @@ path parameter.
 
 | Key        | Content                                                                         |
 | ---------- | ------------------------------------------------------------------------------- |
-| `header`   | `title` (a field path), `subtitle`, `badges` (a list of `field` and `badge`).   |
+| `header`   | `title` (a field path), `subtitle`, `badges` (a list of enum fields, each with the badge set of its field). |
 | `sections` | A mapping from a section name to a section.                                     |
 | `tabs`     | A mapping from a tab name to a tab.                                             |
 | `actions`  | Actions on the record, for example edit and delete.                             |
@@ -516,7 +516,7 @@ these keys:
 
 | Kind    | Keys                                                                                     |
 | ------- | ---------------------------------------------------------------------------------------- |
-| `stat`  | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, or `max`), `field` (a number field, not for `count`), `filter`, `format`, `icon`, `color` (a color token), `link` (a page). |
+| `stat`  | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, or `max`), `field` (a number field, not for `count`), `filter`, `format` (`number`, `currency`, or `percent`), `icon`, `color` (a color token), `link` (a page). |
 | `chart` | `chart` (`bar`, `line`, or `donut`), `entity`, `group_by` (an `enum`, `date`, or relation field), `aggregate`, `field`, `filter`, `badge` (colors for the groups). |
 | `list`  | `view` (a table or a card list), `filter`, `sort`, `limit`, `link` (a page for "View all"). |
 | `custom`| A generation gap.                                                                        |
