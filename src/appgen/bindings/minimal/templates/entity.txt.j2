@@ -1,0 +1,4 @@
+Entity {{ name }} of {{ app.name }}
+{% for field_name, field in element.fields.items() %}
+- {{ field_name }}: {{ field.type }}{% if field.required %} (required){% endif %}
+{% endfor %}
