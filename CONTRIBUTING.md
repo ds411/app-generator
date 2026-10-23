@@ -19,6 +19,7 @@ the generated code refer back to the app definition.
 - [Generated code](#generated-code)
 - [Tooling](#tooling)
 - [Pre-push hook](#pre-push-hook)
+- [Cloud sessions](#cloud-sessions)
 - [AI-assisted work](#ai-assisted-work)
 
 ## Workflow
@@ -264,11 +265,34 @@ git config core.hooksPath .githooks
 - When you add a part (for example a binding), add its checks and its
   path patterns to the hook.
 - Claude Code sessions enable the hook with a SessionStart hook in
-  `.claude/settings.json`. In cloud sessions, the SessionStart hook
-  `.claude/hooks/session-start.sh` also starts the Docker daemon,
-  pulls `POSTGRES_IMAGE`, and builds the Node image
-  `localhost/appgen-node:24-alpine` (the default of `NODE_IMAGE`) that
-  trusts the CA of the session proxy.
+  `.claude/settings.json`. See [Cloud sessions](#cloud-sessions).
+
+## Cloud sessions
+
+Claude Code cloud sessions (the sandbox) need some setup for the
+checks. The repository does this setup, so a new session needs no
+manual steps.
+
+- The SessionStart hook `.claude/hooks/session-start.sh` starts the
+  Docker daemon, pulls `POSTGRES_IMAGE`, and builds the Node image
+  `localhost/appgen-node:24-alpine` that trusts the CA of the session
+  proxy.
+- Docker Hub gives status 429 and ghcr.io is blocked in the sandbox,
+  so the checks use mirror images. `scripts/sandbox.env` gives these
+  variables. The SessionStart hook loads the file into the session, and
+  the pre-push hook loads it in cloud sessions. A variable that the
+  environment settings already set keeps its value.
+
+| Variable         | Value in the sandbox                                    |
+| ---------------- | ------------------------------------------------------- |
+| `POSTGRES_IMAGE` | `mirror.gcr.io/library/postgres:18-alpine`              |
+| `UV_IMAGE`       | `mirror.gcr.io/astral/uv:0.11`                          |
+| `PYTHON_IMAGE`   | `mirror.gcr.io/library/python:3.14-slim`                |
+| `NGINX_IMAGE`    | `mirror.gcr.io/nginxinc/nginx-unprivileged:1.29-alpine` |
+| `NODE_IMAGE`     | `localhost/appgen-node:24-alpine`                       |
+
+To use the values in a shell that the hook did not prepare, run
+`. scripts/sandbox.env`.
 
 ## AI-assisted work
 
