@@ -18,6 +18,7 @@ from appgen.gen import Binding, GenerationResult, find_binding, generate, write_
 from appgen.trace import check_traces
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
+EDGE_CASES = EXAMPLE.parent.parent / "edge-cases" / "app.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -85,10 +86,10 @@ def test_each_route_renders_the_page_of_its_slice(result: GenerationResult) -> N
 
 
 def test_uncovered_elements_get_gap_files(result: GenerationResult) -> None:
-    gap = _files(result)["src/gaps/operations.complete_task.ext.ts"]
-    assert "// @trace:gap operations.complete_task file" in gap
+    gap = _files(result)["src/gaps/ui.defaults.states.error.ext.ts"]
+    assert "// @trace:gap ui.defaults.states.error file" in gap
     assert "TODO(appgen)" in gap
-    assert {g.kind for g in result.gaps} >= {"operation", "param"}
+    assert "operation" not in {g.kind for g in result.gaps}
 
 
 def test_two_runs_give_the_same_output(definition: AppDefinition, nextjs: Binding) -> None:
@@ -179,10 +180,12 @@ def test_each_entity_is_a_drizzle_table_with_traces(result: GenerationResult) ->
     assert 'completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),' in task
     assert (
         'projectId: uuid("project_id").notNull()'
-        '.references(() => projectTable.id, { onDelete: "cascade" }),'
+        '.references((): AnyPgColumn => projectTable.id, { onDelete: "cascade" }),'
     ) in task
-    assert 'assigneeId: uuid("assignee_id").references(() => personTable.id, {' in task
-    assert 'onDelete: "set null" }),' in task
+    assert (
+        'assigneeId: uuid("assignee_id")'
+        '.references((): AnyPgColumn => personTable.id, { onDelete: "set null" }),'
+    ) in task
     assert 'comments: many(commentTable, { relationName: "Comment.task" }),' in task
     index = files["src/shared/db/schema/index.ts"]
     assert 'export * from "./task"; // @trace entities.Task' in index
@@ -211,4 +214,128 @@ def test_the_check_covers_all_entities_fields_and_relations(
     write_result(result, tmp_path, "nextjs")
     report = check_traces(definition, tmp_path)
     data = [e for e in report.coverage.elements if e.element_id.startswith("entities.")]
+    assert {e.status for e in data} == {"covered"}
+
+
+@pytest.fixture(scope="module")
+def edge_files(nextjs: Binding) -> dict[str, str]:
+    return _files(generate(load_definition(EDGE_CASES), nextjs))
+
+
+def test_inverse_relations_are_stored_once(edge_files: dict[str, str]) -> None:
+    owner = edge_files["src/shared/db/schema/owner.ts"]
+    profile = edge_files["src/shared/db/schema/profile.ts"]
+    tag = edge_files["src/shared/db/schema/tag.ts"]
+    # The required side of a one_to_one relation has the foreign key.
+    assert 'profileId: uuid("profile_id").notNull().unique()' in owner
+    assert "ownerId" not in profile
+    assert "  owner: one(ownerTable),\n" in profile
+    # A many_to_many relation and its inverse share one join table.
+    assert '"owner_tags"' in owner
+    assert "pgTable(" in tag and '"tag_owners"' not in tag
+    assert 'owners: many(ownerTagsTable, { relationName: "Tag.owners" }),' in tag
+    assert 'relationName: "Tag.owners",\n  }),' in owner
+
+
+def test_a_table_can_refer_to_itself(edge_files: dict[str, str]) -> None:
+    item = edge_files["src/shared/db/schema/item.ts"]
+    assert '.references((): AnyPgColumn => itemTable.id, { onDelete: "restrict" })' in item
+    assert "import { type AnyPgColumn, pgTable, text, uuid }" in item
+
+
+def test_a_datetime_default_is_a_date(edge_files: dict[str, str]) -> None:
+    sample = edge_files["src/shared/db/schema/sample.ts"]
+    assert '.default(new Date("2026-01-31T12:00:00+00:00"))' in sample
+    assert 'import { relations } from "drizzle-orm";' not in sample
+
+
+def test_each_entity_has_a_repository_and_server_actions(result: GenerationResult) -> None:
+    files = _files(result)
+    repository = files["src/entities/project/api/project-repository.ts"]
+    assert 'import "server-only";' in repository
+    assert "export const projectRepository = new Repository<Project, ProjectInput>({" in repository
+    assert 'key: "members",' in repository
+    assert "// @trace entities.Project.relations.members begin" in repository
+    actions = files["src/entities/project/api/project-actions.ts"]
+    assert actions.splitlines()[2] == '"use server";'
+    assert "projectRepository.create(projectInputSchema.parse(input)), { changes: true }" in actions
+    assert "projectRepository.list(parseListQuery<Project>(query))" in actions
+    api = files["src/entities/project/api/project-api.ts"]
+    assert 'createEntityApi("Project", {' in api
+    assert "export function createProject(input: ProjectInput): Promise<Project> {" in api
+    assert "// @trace operations.create_project" in api
+    task_api = files["src/entities/task/api/task-api.ts"]
+    assert "export function listTasksOfProject(" in task_api
+    assert files["src/entities/project/server.ts"].endswith(
+        'export { projectRepository } from "./api/project-repository";\n'
+    )
+
+
+def test_the_entity_slice_has_the_api_of_the_shared_ui(result: GenerationResult) -> None:
+    index = _files(result)["src/entities/task/index.ts"]
+    for name in ("taskApi", "createTask", "listTasksOfProject", "taskMeta"):
+        assert f"  {name},\n" in index or f"{{ {name} }}" in index
+    assert "  taskInputSchema,\n  taskPatchSchema,\n  assignTaskParamsSchema,\n" in index
+    assert 'export * from "./model/types";' in index
+    assert "Repository" not in index
+
+
+def test_the_zod_schemas_come_from_the_field_rules(
+    result: GenerationResult, edge_files: dict[str, str]
+) -> None:
+    task = _files(result)["src/entities/task/model/schema.ts"]
+    assert "title: z.string().min(1).max(200), // @trace entities.Task.fields.title" in task
+    assert "status: z.enum(taskStatusValues).optional()," in task
+    assert "projectId: z.uuid(), // @trace entities.Task.relations.project" in task
+    assert "}) satisfies z.ZodType<TaskInput>;" in task
+    assert "export const taskPatchSchema = taskInputSchema.partial();" in task
+    assert (
+        "note: z.string().max(500).nullish(), // @trace operations.assign_task.params.note" in task
+    )
+    sample = edge_files["src/entities/sample/model/schema.ts"]
+    assert 'code: z.string().min(3).max(12).regex(new RegExp("^[A-Z0-9-]+$")),' in sample
+    assert "count: z.int32().min(-10).max(10).optional()," in sample
+    assert "ratio: z.number().min(0).max(1).optional()," in sample
+    assert "moment: z.iso.datetime({ offset: true }).optional()," in sample
+    assert "contact: z.email().max(254).nullable().optional()," in sample
+    assert "payload: z.json().optional()," in sample
+    owner = edge_files["src/entities/owner/model/schema.ts"]
+    assert "tags: z.array(z.uuid()).optional()," in owner
+
+
+def test_a_custom_operation_is_a_server_action_that_calls_a_gap(
+    result: GenerationResult,
+) -> None:
+    files = _files(result)
+    base = "src/features/assign-task/api/assign-task"
+    action = files[base + ".gen.ts"]
+    assert '"use server";' in action
+    assert "const record = await taskRepository.get(idSchema.parse(id));" in action
+    assert "return assignTask(record, assignTaskParamsSchema.parse(params));" in action
+    ext = files[base + ".ext.ts"]
+    assert "// @trace:gap operations.assign_task file" in ext
+    assert "TODO(appgen)" in ext
+    assert (
+        "export async function assignTask(_record: Task, _params: AssignTaskParams): Promise<Task>"
+        in ext
+    )
+    client = files[base + "-api.ts"]
+    assert "export async function assignTask(id: string, params: AssignTaskParams)" in client
+    assert "notifyChange();" in client
+    extensions = {f.path for f in result.files if f.kind == "extension"}
+    assert base + ".ext.ts" in extensions
+    assert (
+        'export { assignTask } from "./api/assign-task-api";'
+        in files["src/features/assign-task/index.ts"]
+    )
+
+
+def test_the_edge_cases_cover_all_elements_with_data(tmp_path: Path, nextjs: Binding) -> None:
+    definition = load_definition(EDGE_CASES)
+    write_result(generate(definition, nextjs), tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    assert not report.invalid
+    data = [
+        e for e in report.coverage.elements if e.element_id.startswith(("entities.", "operations."))
+    ]
     assert {e.status for e in data} == {"covered"}

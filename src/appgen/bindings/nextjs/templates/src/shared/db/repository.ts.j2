@@ -1,0 +1,367 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import {
+  and,
+  asc,
+  type Column,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  is,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { type PgColumn, type PgTable, PgTimestamp } from "drizzle-orm/pg-core";
+
+import {
+  type EntityApi,
+  type EntityRecord,
+  type Filter,
+  type ListQuery,
+  type ListResult,
+  NotFoundError,
+  type Sort,
+  ValidationError,
+} from "@/shared/api";
+
+import { type Database, getDb } from "./client";
+
+type Row = Record<string, unknown>;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/** A `many_to_many` relation: the record has a list of IDs, and a join table stores them. */
+export type ManyToMany = {
+  /** The key of the list in the record, for example `tags`. */
+  key: string;
+  table: PgTable;
+  /** The key of the join table column with the ID of the record, for example `taskId`. */
+  ownerKey: string;
+  /** The key of the join table column with the ID of the target, for example `tagId`. */
+  targetKey: string;
+};
+
+/** A `one_to_one` relation whose foreign key is on the target table. */
+export type InverseOne = {
+  /** The key of the ID in the record, for example `ownerId`. */
+  key: string;
+  /** The table of the target. */
+  table: PgTable & { id: PgColumn };
+  /** The key of the foreign key column of the target, for example `profileId`. */
+  foreignKey: string;
+};
+
+type JoinTable = ManyToMany & { owner: PgColumn; target: PgColumn };
+type ForeignKey = InverseOne & { column: PgColumn };
+
+export type RepositoryOptions<T> = {
+  entity: string;
+  table: PgTable & { id: PgColumn };
+  /** The value of each optional key that the create input does not have. */
+  defaults: Partial<Omit<T, "id">>;
+  manyToMany?: ManyToMany[];
+  inverseOne?: InverseOne[];
+};
+
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+/** Return a value as the column needs it: a timestamp column needs a Date. */
+function toColumnValue(column: Column, value: unknown): unknown {
+  if (is(column, PgTimestamp) && typeof value === "string") {
+    return new Date(value);
+  }
+  return value;
+}
+
+/** Return a value of a row as the record has it: a Date becomes an ISO 8601 text. */
+function toRecordValue(value: unknown): unknown {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+/**
+ * The data access of one entity in the Postgres database, with the same
+ * interface as the data access in the browser. Use it only on the server.
+ */
+export class Repository<T extends EntityRecord, TInput extends object>
+  implements Omit<EntityApi<T, TInput>, "subscribe">
+{
+  private readonly entity: string;
+  private readonly table: PgTable & { id: PgColumn };
+  private readonly columns: Record<string, Column>;
+  private readonly defaults: Partial<Omit<T, "id">>;
+  private readonly manyToMany: JoinTable[];
+  private readonly inverseOne: ForeignKey[];
+
+  constructor(options: RepositoryOptions<T>) {
+    this.entity = options.entity;
+    this.table = options.table;
+    this.columns = getTableColumns(options.table);
+    this.defaults = options.defaults;
+    this.manyToMany = (options.manyToMany ?? []).map((relation) => {
+      const columns = getTableColumns(relation.table);
+      return {
+        ...relation,
+        owner: columns[relation.ownerKey] as PgColumn,
+        target: columns[relation.targetKey] as PgColumn,
+      };
+    });
+    this.inverseOne = (options.inverseOne ?? []).map((relation) => ({
+      ...relation,
+      column: getTableColumns(relation.table)[relation.foreignKey] as PgColumn,
+    }));
+  }
+
+  async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
+    const db = getDb();
+    const where = this.where(query);
+    const total = await db.$count(this.table, where);
+    const pageSize = query.pageSize ?? (total || 1);
+    const page = query.page ?? 1;
+    const select = db
+      .select()
+      .from(this.table)
+      .where(where)
+      .orderBy(...this.orderBy(query.sort ?? []))
+      .$dynamic();
+    if (query.page !== undefined) {
+      select.limit(pageSize).offset((page - 1) * pageSize);
+    }
+    const rows: Row[] = await select;
+    return { items: await this.toRecords(db, rows), total, page, pageSize };
+  }
+
+  async get(id: string): Promise<T> {
+    const db = getDb();
+    const rows: Row[] = await db.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+    const [record] = await this.toRecords(db, this.found(rows, id));
+    return record as T;
+  }
+
+  async create(input: TInput): Promise<T> {
+    const values: Row = { ...this.defaults, ...input };
+    return getDb().transaction(async (tx) => {
+      const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
+      const [row] = rows as [Row];
+      await this.writeLinks(tx, String(row.id), values);
+      const [record] = await this.toRecords(tx, rows);
+      return record as T;
+    });
+  }
+
+  async update(id: string, patch: Partial<TInput>): Promise<T> {
+    return getDb().transaction(async (tx) => {
+      const values = this.toRow(patch);
+      const rows: Row[] =
+        Object.keys(values).length > 0
+          ? await tx.update(this.table).set(values).where(eq(this.table.id, id)).returning()
+          : await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+      this.found(rows, id);
+      await this.writeLinks(tx, id, patch);
+      const [record] = await this.toRecords(tx, rows);
+      return record as T;
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    const rows: Row[] = await getDb()
+      .delete(this.table)
+      .where(eq(this.table.id, id))
+      .returning({ id: this.table.id });
+    this.found(rows, id);
+  }
+
+  private found(rows: Row[], id: string): Row[] {
+    if (rows.length === 0) {
+      throw new NotFoundError(this.entity, id);
+    }
+    return rows;
+  }
+
+  private column(field: string): Column {
+    const column = this.columns[field];
+    if (!column) {
+      throw new ValidationError(`${this.entity} has no field ${field}.`);
+    }
+    return column;
+  }
+
+
+  private where(query: ListQuery<T>): SQL | undefined {
+    const conditions = (query.filters ?? []).map((filter) => this.condition(filter));
+    const search = query.search;
+    const text = search?.text.trim();
+    if (search && text) {
+      const pattern = `%${escapeLike(text)}%`;
+      const matches = search.fields.map((field) => ilike(sql`${this.column(field)}::text`, pattern));
+      conditions.push(or(...matches) ?? sql`false`);
+    }
+    return conditions.length > 0 ? and(...conditions) : undefined;
+  }
+
+  private condition(filter: Filter<T>): SQL {
+    const one = this.inverseOne.find((item) => item.key === filter.field);
+    if (one) {
+      if (filter.op !== "eq" || typeof filter.value !== "string") {
+        throw new ValidationError(`The filter of ${filter.field} must use eq with an ID.`);
+      }
+      const targets = getDb()
+        .select({ id: one.column })
+        .from(one.table)
+        .where(eq(one.table.id, filter.value));
+      return inArray(this.table.id, targets);
+    }
+    const relation = this.manyToMany.find((item) => item.key === filter.field);
+    if (relation) {
+      if (filter.op !== "contains") {
+        throw new ValidationError(`The filter of the list ${filter.field} must use contains.`);
+      }
+      const owners = getDb()
+        .select({ id: relation.owner })
+        .from(relation.table)
+        .where(eq(relation.target, String(filter.value)));
+      return inArray(this.table.id, owners);
+    }
+    const column = this.column(filter.field);
+    const value = toColumnValue(column, filter.value);
+    switch (filter.op) {
+      case "eq":
+        return value === null ? isNull(column) : eq(column, value);
+      case "ne":
+        return value === null ? isNotNull(column) : (or(ne(column, value), isNull(column)) as SQL);
+      case "lt":
+        return lt(column, value);
+      case "lte":
+        return lte(column, value);
+      case "gt":
+        return gt(column, value);
+      case "gte":
+        return gte(column, value);
+      case "in":
+        return Array.isArray(value) && value.length > 0
+          ? inArray(column, value.map((item) => toColumnValue(column, item)))
+          : sql`false`;
+      case "not_in":
+        return Array.isArray(value) && value.length > 0
+          ? (or(notInArray(column, value.map((item) => toColumnValue(column, item))), isNull(column)) as SQL)
+          : sql`true`;
+      case "contains":
+        return ilike(sql`${column}::text`, `%${escapeLike(String(value))}%`);
+    }
+  }
+
+  private orderBy(sort: Sort<T>[]): SQL[] {
+    const order = sort.map(({ field, direction }) =>
+      direction === "asc" ? asc(this.column(field)) : desc(this.column(field)),
+    );
+    // The ID makes the order of equal records the same in each call.
+    return [...order, asc(this.table.id)];
+  }
+
+  /** Return the values of the table columns in an input, without the lists. */
+  private toRow(input: object): Row {
+    const row: Row = {};
+    for (const [key, value] of Object.entries(input)) {
+      const column = this.columns[key];
+      if (column && key !== "id" && value !== undefined) {
+        row[key] = toColumnValue(column, value);
+      }
+    }
+    return row;
+  }
+
+  /**
+   * Write the relations that the table of the entity does not store: the
+   * foreign key on the target of each inverse `one_to_one` relation, and
+   * the IDs in the join table of each list.
+   */
+  private async writeLinks(tx: Transaction, id: string, input: object): Promise<void> {
+    const values = input as Row;
+    for (const relation of this.inverseOne) {
+      if (!(relation.key in values) || values[relation.key] === undefined) {
+        continue;
+      }
+      const target = values[relation.key];
+      // A required foreign key keeps its old value: the target must change it.
+      if (!relation.column.notNull) {
+        await tx
+          .update(relation.table)
+          .set({ [relation.foreignKey]: null })
+          .where(eq(relation.column, id));
+      }
+      if (typeof target === "string") {
+        await tx
+          .update(relation.table)
+          .set({ [relation.foreignKey]: id })
+          .where(eq(relation.table.id, target));
+      }
+    }
+    for (const relation of this.manyToMany) {
+      const ids = values[relation.key];
+      if (!Array.isArray(ids)) {
+        continue;
+      }
+      await tx.delete(relation.table).where(eq(relation.owner, id));
+      if (ids.length > 0) {
+        await tx.insert(relation.table).values(
+          [...new Set(ids.map(String))].map((target) => ({
+            [relation.ownerKey]: id,
+            [relation.targetKey]: target,
+          })),
+        );
+      }
+    }
+  }
+
+  /** Return the records of rows: with ISO 8601 texts for the times, and with the relations. */
+  private async toRecords(db: Database | Transaction, rows: Row[]): Promise<T[]> {
+    const records = rows.map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toRecordValue(value)])),
+    );
+    const ids = records.map((record) => String(record.id));
+    for (const relation of this.inverseOne) {
+      const targets = new Map<string, string>();
+      if (ids.length > 0) {
+        const links = await db
+          .select({ id: relation.table.id, owner: relation.column })
+          .from(relation.table)
+          .where(inArray(relation.column, ids));
+        for (const link of links) {
+          targets.set(String(link.owner), String(link.id));
+        }
+      }
+      for (const record of records) {
+        record[relation.key] = targets.get(String(record.id)) ?? null;
+      }
+    }
+    for (const relation of this.manyToMany) {
+      const lists = new Map<string, string[]>(ids.map((id) => [id, []]));
+      if (ids.length > 0) {
+        const links = await db
+          .select({ owner: relation.owner, target: relation.target })
+          .from(relation.table)
+          .where(inArray(relation.owner, ids))
+          .orderBy(asc(relation.target));
+        for (const link of links) {
+          lists.get(String(link.owner))?.push(String(link.target));
+        }
+      }
+      for (const record of records) {
+        record[relation.key] = lists.get(String(record.id)) ?? [];
+      }
+    }
+    return records as T[];
+  }
+}

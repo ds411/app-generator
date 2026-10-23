@@ -1,0 +1,21 @@
+{{ trace_header("app") }}
+export { createEntityApi, type EntityActions, notifyChange } from "./client";
+export {
+  type ActionError,
+  type ActionResult,
+  type Issue,
+  unwrap,
+  ValidationError,
+} from "./errors";
+export type {
+  EntityApi,
+  EntityRecord,
+  Filter,
+  FilterOp,
+  ListQuery,
+  ListResult,
+  Search,
+  Sort,
+  SortDirection,
+} from "./types";
+export { NotFoundError } from "./types";

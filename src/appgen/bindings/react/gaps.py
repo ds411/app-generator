@@ -25,6 +25,7 @@ The files of each kind of element, without the `.gen` or `.ext` suffix:
 from dataclasses import dataclass, field
 
 from appgen.bindings.react.helpers import members
+from appgen.bindings.shared.typescript import param_type
 from appgen.dsl.model import AppDefinition, Field, Operation
 from appgen.gen.naming import camel, kebab, pascal
 
@@ -100,13 +101,6 @@ def operation_gap(definition: AppDefinition, name: str) -> GapSpec:
         params=params,
         returns=f"Promise<{returns}>",
     )
-
-
-def param_type(param: Field) -> str:
-    """Return the TypeScript type of an operation parameter, without `| null`."""
-    if param.type == "enum":
-        return " | ".join(f'"{value}"' for value in param.values or [])
-    return _TS_TYPES.get(param.type, "string")
 
 
 def component_gap(definition: AppDefinition, element_id: str) -> GapSpec:

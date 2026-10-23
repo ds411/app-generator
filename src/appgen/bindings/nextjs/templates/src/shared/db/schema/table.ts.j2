@@ -1,6 +1,8 @@
 {% set table = nextjs.tables_by_entity[name] %}
 {{ trace_header(element_id) }}
+{% if table.relations or table.join_tables %}
 import { relations } from "drizzle-orm";
+{% endif %}
 import { {{ table.pg_imports | join(", ") }} } from "drizzle-orm/pg-core";
 {% for module, const in table.related_modules %}
 import { {{ const }} } from "./{{ module }}";
@@ -49,6 +51,9 @@ export const {{ join.const }}Relations = relations({{ join.const }}, ({ one }) =
   {{ join.right_relation }}: one({{ join.target_table }}, {
     fields: [{{ join.const }}.{{ join.right_key }}],
     references: [{{ join.target_table }}.id],
+{% if join.inverse_relation_name %}
+    relationName: {{ join.inverse_relation_name | tojson }},
+{% endif %}
   }),
 }));
 {% endfor %}
@@ -57,7 +62,9 @@ export const {{ join.const }}Relations = relations({{ join.const }}, ({ one }) =
 export const {{ table.const }}Relations = relations({{ table.const }}, ({ {{ table.relation_helpers }} }) => ({
 {% for relation in table.relations %}
   {{ trace(relation.element_id) }}
-{% if relation.kind == "one" %}
+{% if relation.kind == "one" and relation.fields is none %}
+  {{ relation.key }}: one({{ relation.target_table }}),
+{% elif relation.kind == "one" %}
   {{ relation.key }}: one({{ relation.target_table }}, {
     fields: [{{ table.const }}.{{ relation.fields }}],
     references: [{{ relation.target_table }}.id],

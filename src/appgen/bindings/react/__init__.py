@@ -8,7 +8,7 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 from pathlib import Path
 
 from appgen.bindings import shared
-from appgen.bindings.react.gaps import gap_spec, param_type
+from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
 from appgen.bindings.shared import shadcn
 from appgen.gen.binding import Binding, Output
@@ -176,5 +176,5 @@ BINDING = Binding(
     ),
     context=context,
     filters={"json": to_json},
-    helpers=HELPERS | {"gap_spec": gap_spec, "param_type": param_type},
+    helpers=HELPERS | {"gap_spec": gap_spec},
 )

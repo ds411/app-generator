@@ -58,7 +58,7 @@ class RelationRef:
     element_id: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class JoinTable:
     """The join table of a `many_to_many` relation."""
 
@@ -74,6 +74,8 @@ class JoinTable:
     target_module: str
     relation_name: str
     element_id: str
+    inverse_relation_name: str | None = None
+    """The `relationName` of the inverse relation on the target, if it has one."""
 
     @property
     def left_relation(self) -> str:
@@ -84,6 +86,33 @@ class JoinTable:
     def right_relation(self) -> str:
         """The key of the relation to the target entity, for example `person`."""
         return self.right_key.removesuffix("Id")
+
+
+@dataclass(frozen=True, slots=True)
+class ListRef:
+    """A `many_to_many` relation as a list of IDs in a record, for the data access."""
+
+    key: str
+    """The key of the list in the record, for example `members`."""
+    join_const: str
+    join_module: str
+    owner_key: str
+    """The key of the join table column with the ID of the record."""
+    target_key: str
+    """The key of the join table column with the ID of the target."""
+    element_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InverseOne:
+    """A `one_to_one` relation whose foreign key is on the target table."""
+
+    key: str
+    """The key of the ID in the record, for example `ownerId`."""
+    target_table: str
+    foreign_key: str
+    """The key of the foreign key column of the target, for example `profileId`."""
+    element_id: str
 
 
 @dataclass(slots=True)
@@ -102,6 +131,10 @@ class Table:
     enums: list[Enum] = field(default_factory=list[Enum])
     relations: list[RelationRef] = field(default_factory=list[RelationRef])
     join_tables: list[JoinTable] = field(default_factory=list[JoinTable])
+    lists: list[ListRef] = field(default_factory=list[ListRef])
+    """The `many_to_many` relations of the record, for the data access."""
+    inverse_ones: list[InverseOne] = field(default_factory=list[InverseOne])
+    """The `one_to_one` relations whose foreign key is on the target, for the data access."""
 
     @property
     def pg_imports(self) -> list[str]:
@@ -112,7 +145,7 @@ class Table:
             names.add("pgEnum")
         if self.join_tables:
             names.add("primaryKey")
-        return sorted(names)
+        return sorted(names, key=lambda name: name.removeprefix("type "))
 
     @property
     def relation_helpers(self) -> str:
@@ -180,7 +213,8 @@ def column_builder(name: str, spec: Field) -> tuple[str, tuple[str, ...], str | 
     if spec.unique:
         code += ".unique()"
     if spec.default is not None:
-        code += f".default({json.dumps(spec.default)})"
+        value = json.dumps(spec.default)
+        code += f".default(new Date({value}))" if spec.type == "datetime" else f".default({value})"
     return code, imports, enum_const
 
 
@@ -210,19 +244,75 @@ def build_tables(definition: AppDefinition) -> list[Table]:
                 code = code.replace("<enum>", const)
             table.columns.append(Column(camel(field_name), code, spec.id, imports))
         for relation_name, relation in entity.relations.items():
-            _add_relation(table, entity_name, relation_name, relation)
+            _add_relation(definition, table, entity_name, relation_name, relation)
         tables.append(table)
     return tables
 
 
-def _add_relation(table: Table, entity_name: str, name: str, relation: Relation) -> None:
+def _inverse(definition: AppDefinition, relation: Relation) -> tuple[str, Relation] | None:
+    """Return the inverse relation of a relation, if it has one of the same kind."""
+    if relation.inverse is None:
+        return None
+    inverse = definition.entities[relation.target].relations.get(relation.inverse)
+    if inverse is None or inverse.kind != relation.kind:
+        return None
+    return relation.inverse, inverse
+
+
+def _stores(definition: AppDefinition, entity_name: str, name: str, relation: Relation) -> bool:
+    """Return True if this side of a `one_to_one` or `many_to_many` relation stores it.
+
+    A relation and its inverse are stored once: as the foreign key of the
+    required side of a `one_to_one` relation, else on the side that comes
+    first in the definition.
+    """
+    found = _inverse(definition, relation)
+    if found is None:
+        return True
+    inverse_name, inverse = found
+    if relation.kind == "one_to_one" and relation.required != inverse.required:
+        return relation.required
+    entities = list(definition.entities)
+
+    def position(entity: str, relation_name: str) -> tuple[int, int]:
+        return entities.index(entity), list(definition.entities[entity].relations).index(
+            relation_name
+        )
+
+    return position(entity_name, name) <= position(relation.target, inverse_name)
+
+
+def _join_table(entity_name: str, name: str, relation: Relation) -> JoinTable:
+    """Return the join table of a `many_to_many` relation, on the side that stores it."""
+    target = relation.target
+    return JoinTable(
+        const=f"{camel(entity_name)}{name[0].upper()}{camel(name)[1:]}Table",
+        name=f"{snake(entity_name)}_{snake(name)}",
+        left_key=f"{camel(entity_name)}Id",
+        left_column=f"{snake(entity_name)}_id",
+        right_key=f"{camel(target)}Id" if target != entity_name else f"related{target}Id",
+        right_column=f"{snake(target)}_id"
+        if target != entity_name
+        else f"related_{snake(target)}_id",
+        target_table=table_const(target),
+        target_module=module_name(target),
+        relation_name=f"{entity_name}.{name}",
+        element_id=relation.id,
+    )
+
+
+def _add_relation(
+    definition: AppDefinition, table: Table, entity_name: str, name: str, relation: Relation
+) -> None:
     """Add the column, the join table, and the relational query entry of a relation.
 
     Both sides of a relation use the same `relationName`: the ID of the
-    side with the foreign key, without `entities.` (`Task.project`).
+    side that stores it, without `entities.` (`Task.project`).
     """
     target = relation.target
-    if relation.kind in ("many_to_one", "one_to_one"):
+    stores = _stores(definition, entity_name, name, relation)
+    found = _inverse(definition, relation)
+    if relation.kind in ("many_to_one", "one_to_one") and stores:
         key = f"{camel(name)}Id"
         code = f'uuid("{snake(name)}_id")'
         if relation.required:
@@ -232,8 +322,12 @@ def _add_relation(table: Table, entity_name: str, name: str, relation: Relation)
         on_delete = _ON_DELETE[
             relation.on_delete or ("cascade" if relation.required else "set_null")
         ]
-        code += f'.references(() => {table_const(target)}.id, {{ onDelete: "{on_delete}" }})'
-        table.columns.append(Column(key, code, relation.id, ()))
+        # The return type stops the TypeScript error of a table that refers to itself.
+        code += (
+            f".references((): AnyPgColumn => {table_const(target)}.id,"
+            f' {{ onDelete: "{on_delete}" }})'
+        )
+        table.columns.append(Column(key, code, relation.id, ("type AnyPgColumn",)))
         table.relations.append(
             RelationRef(
                 camel(name),
@@ -243,6 +337,25 @@ def _add_relation(table: Table, entity_name: str, name: str, relation: Relation)
                 key,
                 f"{entity_name}.{name}",
                 relation.id,
+            )
+        )
+    elif relation.kind == "one_to_one" and found is not None:
+        # The target stores the foreign key of this relation.
+        inverse_name = found[0]
+        table.relations.append(
+            RelationRef(
+                camel(name),
+                "one",
+                table_const(target),
+                module_name(target),
+                None,
+                f"{target}.{inverse_name}",
+                relation.id,
+            )
+        )
+        table.inverse_ones.append(
+            InverseOne(
+                f"{camel(name)}Id", table_const(target), f"{camel(inverse_name)}Id", relation.id
             )
         )
     elif relation.kind == "one_to_many":
@@ -258,21 +371,10 @@ def _add_relation(table: Table, entity_name: str, name: str, relation: Relation)
                 relation.id,
             )
         )
-    else:
-        join = JoinTable(
-            const=f"{camel(entity_name)}{name[0].upper()}{camel(name)[1:]}Table",
-            name=f"{snake(entity_name)}_{snake(name)}",
-            left_key=f"{camel(entity_name)}Id",
-            left_column=f"{snake(entity_name)}_id",
-            right_key=f"{camel(target)}Id" if target != entity_name else f"related{target}Id",
-            right_column=f"{snake(target)}_id"
-            if target != entity_name
-            else f"related_{snake(target)}_id",
-            target_table=table_const(target),
-            target_module=module_name(target),
-            relation_name=f"{entity_name}.{name}",
-            element_id=relation.id,
-        )
+    elif stores:
+        join = _join_table(entity_name, name, relation)
+        if found is not None:
+            join.inverse_relation_name = f"{target}.{found[0]}"
         table.join_tables.append(join)
         table.relations.append(
             RelationRef(
@@ -281,7 +383,37 @@ def _add_relation(table: Table, entity_name: str, name: str, relation: Relation)
                 join.const,
                 table.module,
                 None,
+                join.relation_name,
+                relation.id,
+            )
+        )
+        table.lists.append(
+            ListRef(
+                camel(name), join.const, table.module, join.left_key, join.right_key, relation.id
+            )
+        )
+    else:
+        # The target stores the join table of this relation and its inverse.
+        assert found is not None
+        join = _join_table(target, found[0], found[1])
+        table.relations.append(
+            RelationRef(
+                camel(name),
+                "many",
+                join.const,
+                module_name(target),
+                None,
                 f"{entity_name}.{name}",
+                relation.id,
+            )
+        )
+        table.lists.append(
+            ListRef(
+                camel(name),
+                join.const,
+                module_name(target),
+                join.right_key,
+                join.left_key,
                 relation.id,
             )
         )

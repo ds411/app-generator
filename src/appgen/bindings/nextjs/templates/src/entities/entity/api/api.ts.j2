@@ -1,0 +1,66 @@
+{{ trace_header(element_id) }}
+{% set type = name | pascal %}
+{% set var = name | camel %}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | list %}
+{% set lists = inverse_lists(definition, name) %}
+{% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
+import { createEntityApi, type EntityApi, type ListQuery, type ListResult } from "@/shared/api";
+{% else %}
+import { createEntityApi, type EntityApi } from "@/shared/api";
+{% endif %}
+
+import type { {{ type }}, {{ type }}Input } from "../model/types";
+import {
+  create{{ type }}Action,
+  get{{ type }}Action,
+  list{{ type }}Action,
+  remove{{ type }}Action,
+  update{{ type }}Action,
+} from "./{{ name | kebab }}-actions";
+
+/** The data access of {{ type }}. It calls the server actions, in the browser and on the server. */
+export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = createEntityApi({{ ts_value(name) }}, {
+  list: list{{ type }}Action,
+  get: get{{ type }}Action,
+  create: create{{ type }}Action,
+  update: update{{ type }}Action,
+  remove: remove{{ type }}Action,
+});
+{% for op_name, op in ops %}
+
+{% if op.description %}
+/** {{ op.description }} */
+{% endif %}
+{% if op.kind == "create" %}
+export function {{ op_name | camel }}(input: {{ type }}Input): Promise<{{ type }}> { {{ trace(op.id) }}
+  return {{ var }}Api.create(input);
+}
+{% elif op.kind == "read" %}
+export function {{ op_name | camel }}(id: string): Promise<{{ type }}> { {{ trace(op.id) }}
+  return {{ var }}Api.get(id);
+}
+{% elif op.kind == "update" %}
+export function {{ op_name | camel }}(id: string, patch: Partial<{{ type }}Input>): Promise<{{ type }}> { {{ trace(op.id) }}
+  return {{ var }}Api.update(id, patch);
+}
+{% elif op.kind == "delete" %}
+export function {{ op_name | camel }}(id: string): Promise<void> { {{ trace(op.id) }}
+  return {{ var }}Api.remove(id);
+}
+{% elif op.kind == "list" %}
+export function {{ op_name | camel }}(query?: ListQuery<{{ type }}>): Promise<ListResult<{{ type }}>> { {{ trace(op.id) }}
+  return {{ var }}Api.list(query);
+}
+{% endif %}
+{% endfor %}
+{% for owner, relation_name, relation in lists %}
+
+/** The {{ type }} records of one {{ owner | pascal }}. */
+export function list{{ relation_name | pascal }}Of{{ owner | pascal }}( {{ trace(relation.id) }}
+  {{ owner | camel }}Id: string,
+  query: ListQuery<{{ type }}> = {},
+): Promise<ListResult<{{ type }}>> {
+  const filters = [...(query.filters ?? []), { field: "{{ relation.inverse | camel }}Id" as const, op: "eq" as const, value: {{ owner | camel }}Id }];
+  return {{ var }}Api.list({ ...query, filters });
+}
+{% endfor %}

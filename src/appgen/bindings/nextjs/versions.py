@@ -16,6 +16,7 @@ DEPENDENCIES: dict[str, str] = {
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "0.0.1",
+    "zod": "4.6.7",
 }
 """The runtime packages that each generated app needs."""
 

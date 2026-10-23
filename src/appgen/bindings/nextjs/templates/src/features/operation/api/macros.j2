@@ -1,0 +1,19 @@
+{#- The types of a custom operation: the record, the params, and the result. -#}
+{% macro returns(op) -%}
+{{ "void" if op.returns == "none" else op.returns | pascal }}
+{%- endmacro %}
+{#- The imports from the entity slices. `values` are values of the slice of
+    the operation entity; `record` adds the type of the entity. -#}
+{% macro entity_imports(name, op, values=(), record=False) -%}
+{% set types = [] %}
+{% if record or op.returns == op.entity %}{% set _ = types.append(op.entity | pascal) %}{% endif %}
+{% if op.params %}{% set _ = types.append(name | pascal ~ "Params") %}{% endif %}
+{% if values %}
+import { {{ values | join(", ") }}{% for t in types %}, type {{ t }}{% endfor %} } from "@/entities/{{ op.entity | kebab }}";
+{% elif types %}
+import type { {{ types | join(", ") }} } from "@/entities/{{ op.entity | kebab }}";
+{% endif %}
+{% if op.returns not in ("none", op.entity) %}
+import type { {{ op.returns | pascal }} } from "@/entities/{{ op.returns | kebab }}";
+{% endif %}
+{%- endmacro %}

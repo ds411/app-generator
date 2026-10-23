@@ -1,0 +1,38 @@
+{{ trace_header(element_id) }}
+{% set type = name | pascal %}
+{% set var = name | camel %}
+{% set all = members(name, element) %}
+{% set enums = all | selectattr("field") | selectattr("field.type", "eq", "enum") | list %}
+{% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | list %}
+// The rules of the values of {{ type }}, from the rules of its fields. The
+// server checks each input with them, and the forms use them too.
+import { z } from "zod";
+
+import {
+{% for m in enums %}
+  {{ enum_values_name(name, m.name) }},
+{% endfor %}
+{% for op_name, op in customs %}
+  type {{ op_name | pascal }}Params,
+{% endfor %}
+  type {{ type }}Input,
+} from "./types";
+
+/** The rules of the values that create a {{ type }}. */
+export const {{ var }}InputSchema = z.object({
+{% for m in all %}
+  {{ m.key }}: {{ zod_schema(name, m) }}, {{ trace(m.element_id) }}
+{% endfor %}
+}) satisfies z.ZodType<{{ type }}Input>;
+
+/** The rules of the values that change a {{ type }}: each key is optional. */
+export const {{ var }}PatchSchema = {{ var }}InputSchema.partial();
+{% for op_name, op in customs %}
+
+/** The rules of the parameters of the operation {{ op_name }}. */
+export const {{ op_name | camel }}ParamsSchema = z.object({
+{% for param_name, param in op.params.items() %}
+  {{ param_name | camel }}: {{ param_schema(param) }}, {{ trace(param.id) }}
+{% endfor %}
+}) satisfies z.ZodType<{{ op_name | pascal }}Params>;
+{% endfor %}

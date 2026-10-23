@@ -1,0 +1,41 @@
+{% set table = nextjs.tables_by_entity[name] %}
+{% set type = name | pascal %}
+{% set var = name | camel %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list %}
+{{ trace_header(element_id) }}
+import "server-only";
+
+import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
+import { Repository } from "@/shared/db/repository";
+
+import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
+
+/** The data access of {{ type }} in the database. Use it only on the server. */
+export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
+  entity: {{ ts_value(name) }},
+  table: {{ table.const }},
+  defaults: {{ var }}Defaults,
+{% if table.lists %}
+  manyToMany: [
+{% for item in table.lists %}
+    { {{ trace(item.element_id, scope="begin") }}
+      key: {{ ts_value(item.key) }},
+      table: {{ item.join_const }},
+      ownerKey: {{ ts_value(item.owner_key) }},
+      targetKey: {{ ts_value(item.target_key) }},
+    }, {{ trace(item.element_id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
+{% if table.inverse_ones %}
+  inverseOne: [
+{% for item in table.inverse_ones %}
+    { {{ trace(item.element_id, scope="begin") }}
+      key: {{ ts_value(item.key) }},
+      table: {{ item.target_table }},
+      foreignKey: {{ ts_value(item.foreign_key) }},
+    }, {{ trace(item.element_id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
+});

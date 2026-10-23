@@ -1,0 +1,29 @@
+{% from "src/features/operation/api/macros.j2" import returns, entity_imports %}
+{% set fn = name | camel %}
+{{ trace_header(element_id) }}
+import { notifyChange, unwrap } from "@/shared/api";
+{% set imports = entity_imports(name, element) | trim %}
+{% if imports %}
+
+{{ imports }}
+{% endif %}
+
+import { {{ fn }}Action } from "./{{ name | kebab }}.gen";
+
+{% if element.description %}
+/** {{ element.description }} */
+{% else %}
+/** The operation {{ name }}. */
+{% endif %}
+export async function {{ fn }}(id: string{% if element.params %}, params: {{ name | pascal }}Params{% endif %}): Promise<{{ returns(element) }}> {
+{% if element.returns == "none" %}
+  unwrap(await {{ fn }}Action(id{% if element.params %}, params{% endif %}));
+  // The operation can change records of each entity.
+  notifyChange();
+{% else %}
+  const result = unwrap(await {{ fn }}Action(id{% if element.params %}, params{% endif %}));
+  // The operation can change records of each entity.
+  notifyChange();
+  return result;
+{% endif %}
+}
