@@ -38,6 +38,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Test                 | `uv run pytest`                                     |
 | Run all hook checks  | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null` |
 | Update golden files  | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`              |
+| Update the schema    | `uv run appgen schema --out schema/app.schema.json` |
 
 ## Layout
 
@@ -48,12 +49,27 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
 | `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core.    |
+| `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
 | `docs/adr/`            | The architecture decision records.                          |
 | `.githooks/`           | The git hooks (pre-push checks).                            |
 
 [ADR 0002](docs/adr/0002-app-definition-dsl-v0.md) describes the DSL, and
 [ADR 0003](docs/adr/0003-ui-dsl.md) describes its UI part.
+
+## Editor support
+
+`schema/app.schema.json` is the JSON Schema of the DSL. `appgen schema`
+makes it from the Pydantic models, and a test fails if the committed
+file is out of date. To let a YAML language server (for example the
+YAML extension of VS Code) complete and check a definition, put this
+line at the top of the file:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ds411/app-generator/main/schema/app.schema.json
+```
+
+A relative path to `schema/app.schema.json` also works.
 
 ## Bindings
 

@@ -41,7 +41,12 @@ def is_extension_key(key: str) -> bool:
 class Element(BaseModel):
     """The base class of each element of an app definition."""
 
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        # Extension keys (ADR 0002). The loader keeps them in `extensions`.
+        json_schema_extra={"patternProperties": {"^x-": {}}},
+    )
 
     _location: Location | None = PrivateAttr(default=None)
     _value_locations: dict[str, Location] = PrivateAttr(default_factory=dict[str, Location])
