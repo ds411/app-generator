@@ -1,0 +1,78 @@
+#!/bin/sh
+# Run the checks of each part of the repository that the push changes.
+# A failed check stops the push. This hook replaces CI on pull requests.
+#
+# Enable it once per clone:  git config core.hooksPath .githooks
+# Run all checks:            APPGEN_CHECK_ALL=1 git push
+# Skip the hook:             git push --no-verify
+#
+# To add a part, add a check_<part> function and call it in the
+# "Parts" section with the path patterns of the part.
+
+set -uf
+
+changed=""
+check_all="${APPGEN_CHECK_ALL:-0}"
+failed=0
+
+# Collect the files that the pushed commits change. Git gives one line
+# for each pushed ref on stdin.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # A push that deletes a ref has no commits to check.
+    case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+
+    if [ -n "${remote_sha##*[!0]*}" ] || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+        # A new branch, or a remote commit that is not in this clone:
+        # compare with the default branch of the remote.
+        base=$(git merge-base "$local_sha" refs/remotes/origin/HEAD 2>/dev/null ||
+            git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null) || base=""
+    else
+        base=$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null) || base=""
+    fi
+
+    if [ -z "$base" ]; then
+        echo "pre-push: no base commit for $local_ref, so run all checks."
+        check_all=1
+        continue
+    fi
+    changed="$changed
+$(git diff --name-only "$base" "$local_sha")"
+done
+
+# Return 0 if a changed file matches one of the patterns (shell globs).
+changes() {
+    [ "$check_all" = 1 ] && return 0
+    for pattern in "$@"; do
+        for file in $changed; do
+            # shellcheck disable=SC2254
+            case "$file" in $pattern) return 0 ;; esac
+        done
+    done
+    return 1
+}
+
+# Run one check. Record a failure, but continue, so that the output
+# shows all failed checks.
+run() {
+    echo "pre-push: $*"
+    if ! "$@"; then
+        failed=1
+    fi
+}
+
+check_python() {
+    run uv run --locked ruff check
+    run uv run --locked ruff format --check
+    run uv run --locked pyright
+    run uv run --locked pytest
+}
+
+# Parts
+if changes '*.py' 'src/*' 'tests/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
+    check_python
+fi
+
+if [ "$failed" -ne 0 ]; then
+    echo "pre-push: a check failed. Fix it, or push with --no-verify to skip the hook."
+    exit 1
+fi

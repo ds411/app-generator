@@ -64,7 +64,7 @@ Co-Authored-By: <name> <email>
 
 - [ ] The PR title and the commits follow the [commit format](https://github.com/ds411/app-generator/blob/main/CONTRIBUTING.md#commits).
 - [ ] The PR has tests for the change, or the summary says why it needs none.
-- [ ] Lint, type checks, and tests pass.
+- [ ] The pre-push hook passes (lint, type checks, and tests).
 - [ ] Generated output is deterministic: a second run gives no diff.
 - [ ] The trace check reports no invalid traces.
 - [ ] The docs (README, CONTRIBUTING, ADRs) agree with the change.
