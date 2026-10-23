@@ -1,0 +1,228 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.detail_plan(name) %}
+{% set view = plan.view %}
+{% set code = plan.code() %}
+{% set uses_lookups = "lookups." in code %}
+{% set action_lookups = "lookups." in (plan.actions | map(attribute="href") | select | join(" ")) %}
+{% set gaps = plan.sections | map(attribute="gap") | select | list %}
+{% for tab in plan.tabs %}{% set gaps = gaps + ([tab.gap] if tab.gap else []) + (tab.sections | map(attribute="gap") | select | list) %}{% endfor %}
+{% set cards = (plan.sections + (plan.tabs | map(attribute="sections") | sum(start=[]))) %}
+{% set titled = cards | selectattr("title") | list %}
+{% set described = cards | selectattr("description") | list %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% macro section(s, indent) -%}
+{% filter indent(indent, true) %}
+<Card> {{ trace(s.element_id, jsx=True) }}
+{% if s.title or s.description %}
+  <CardHeader>
+{% if s.title %}
+    <CardTitle>{{ jsx_text(s.title) }}</CardTitle>
+{% endif %}
+{% if s.description %}
+    <CardDescription>{{ jsx_text(s.description) }}</CardDescription>
+{% endif %}
+  </CardHeader>
+{% endif %}
+  <CardContent>
+{% if s.gap %}
+    <{{ s.gap.name }} record={record} />
+{% else %}
+    <dl className={{ js(s.grid) }}>
+{% for field_label, jsx in s.fields %}
+      <div className="min-w-0 space-y-1">
+        <dt className="text-sm text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+        <dd className="break-words">{{ jsx }}</dd>
+      </div>
+{% endfor %}
+    </dl>
+{% endif %}
+  </CardContent>
+</Card>
+{%- endfilter %}
+{%- endmacro %}
+{% set ns = namespace(icons=[]) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+{% if plan.forms %}
+import { useState } from "react";
+{% endif %}
+
+import { NotFoundError } from "@/shared/api";
+{% for entity in ([plan.entity] + plan.lookups) | unique %}
+import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+{% for line in plan.imports %}
+{{ line }}
+{% endfor %}
+{% if "badges." in code %}
+import { badges } from "@/shared/config/badges";
+{% endif %}
+{% if plan.needs("formatValue") %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if plan.needs("pageHref") %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% if plan.lookups %}
+import { byId } from "@/shared/lib/query";
+{% endif %}
+import { useResource } from "@/shared/lib/use-resource";
+{% if plan.actions %}
+import { ActionButton, type ActionSpec, useActionRunner } from "@/shared/ui/actions";
+{% endif %}
+{% if cards %}
+{% set card_names = ["Card", "CardContent"] + (["CardHeader"] if titled or described else []) + (["CardTitle"] if titled else []) + (["CardDescription"] if described else []) %}
+import { {{ card_names | sort | join(", ") }} } from "@/shared/ui/card";
+{% endif %}
+{% if plan.tabs %}
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+{% endif %}
+{% if "avatar" in plan.uses %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "badge" in plan.uses %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "formatted" in plan.uses %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% for f in plan.forms %}
+import { {{ f.component }}Dialog } from "{{ f.module }}";
+{% endfor %}
+{% if plan.forms | selectattr("route_params") | list %}
+import { useParams } from "@/shared/lib/router";
+{% endif %}
+{% set state = ["ViewLoading", "ViewMessage"] %}
+{% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
+import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+
+{% if plan.lookups %}
+type Lookups = {
+{% for entity in plan.lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+
+type ViewData = { record: {{ plan.type }}; lookups: Lookups };
+{% else %}
+type ViewData = { record: {{ plan.type }} };
+{% endif %}
+
+/** Read the record{% if plan.lookups %}, and the related records that its fields show{% endif %}. */
+async function load(id: string): Promise<ViewData> {
+{% if plan.lookups %}
+  const [record, {% for entity in plan.lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+    {{ plan.var }}Api.get(id),
+{% for entity in plan.lookups %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return {
+    record,
+    lookups: { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+  };
+{% else %}
+  return { record: await {{ plan.var }}Api.get(id) };
+{% endif %}
+}
+
+/** Load the data again after a change of the records. */
+function subscribe(listener: () => void): () => void {
+  const stops = [{% for entity in ([plan.entity] + plan.lookups) | unique %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{% if plan.actions %}
+
+{{ m.action_group("viewActions", plan.actions, plan.type) }}
+{% endif %}
+
+export type {{ name | pascal }}ViewProps = {
+  /** The ID of the record. */
+  id: string;
+};
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% endif %}
+export function {{ name | pascal }}View({ id }: {{ name | pascal }}ViewProps) {
+  const resource = useResource(`{{ name }}:${id}`, () => load(id), subscribe);
+{% if plan.actions %}
+{{ m.runner(plan) }}
+{% endif %}
+
+  if (resource.status === "error" && resource.error instanceof NotFoundError) {
+    return (
+{{ m.empty_state(plan) }}
+    );
+  }
+{{ m.states(plan, "detail") }}
+
+  const { record{% if uses_lookups or action_lookups %}, lookups{% endif %} } = resource.data;
+{% if action_lookups %}
+  const viewActions = viewActionsFor(lookups);
+{% endif %}
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">{% if view.header %} {{ trace(view.header.id, jsx=True) }}{% endif %}
+
+        <div className="min-w-0 space-y-2">
+          <h2 className="text-2xl font-semibold tracking-tight">{{ plan.title }}</h2>
+{% if plan.subtitle %}
+          <div className="text-muted-foreground">{{ plan.subtitle }}</div>
+{% endif %}
+{% if plan.badges %}
+          <div className="flex flex-wrap items-center gap-2">
+{% for badge in plan.badges %}
+            {{ badge }}
+{% endfor %}
+          </div>
+{% endif %}
+        </div>
+{% if plan.actions %}
+        <div className="flex flex-wrap items-center gap-2">
+          {Object.values(viewActions).map((action) => (
+            <ActionButton key={action.key} action={action} records={[record]} onRun={run} />
+          ))}
+        </div>
+{% endif %}
+      </div>
+{% for s in plan.sections %}
+{{ section(s, 6) }}
+{% endfor %}
+{% if plan.tabs %}
+      <Tabs defaultValue={{ js(plan.tabs[0].name) }}>
+        <TabsList className="max-w-full justify-start overflow-x-auto">
+{% for tab in plan.tabs %}
+          <TabsTrigger value={{ js(tab.name) }}>
+{% if tab.icon %}
+            <{{ tab.icon | pascal }}Icon />
+{% endif %}
+            {{ jsx_text(tab.label) }}
+          </TabsTrigger>
+{% endfor %}
+        </TabsList>
+{% for tab in plan.tabs %}
+        <TabsContent value={{ js(tab.name) }} className="space-y-4"> {{ trace(tab.element_id, jsx=True) }}
+{% if tab.gap %}
+          <{{ tab.gap.name }} record={record} />
+{% elif tab.view %}
+          <{{ tab.view | pascal }}View where={(row) => {{ tab.where }}} />
+{% endif %}
+{% for s in tab.sections %}
+{{ section(s, 10) }}
+{% endfor %}
+        </TabsContent>
+{% endfor %}
+      </Tabs>
+{% endif %}
+{% if plan.actions %}
+      {dialog}
+{{ m.form_dialogs(plan) }}
+{% endif %}
+    </div>
+  );
+}

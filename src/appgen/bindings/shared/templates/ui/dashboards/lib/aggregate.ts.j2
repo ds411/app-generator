@@ -1,0 +1,118 @@
+{{ trace_header("app") }}
+{% raw %}
+// The filters, the groups, and the aggregates of the dashboards. The
+// dashboards read all records and apply these functions in the browser.
+
+export type FilterOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
+
+export type Aggregate = "count" | "sum" | "avg" | "min" | "max";
+
+/** One group of a chart: its key, its label, its value, and its color. */
+export type ChartDatum = { key: string; label: string; value: number; color?: string };
+
+/** A known group of a chart, in the order of the chart. */
+export type Group = { key: string; label: string; color?: string };
+
+function isEmpty(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+/**
+ * Return true if a value passes a filter operator. A list value (the IDs of
+ * a `many_to_many` relation) passes `eq` if it has the operand. An empty
+ * value passes no comparison (`lt`, `lte`, `gt`, `gte`).
+ */
+export function matchesOp(value: unknown, op: FilterOp, operand: unknown): boolean {
+  const operands = Array.isArray(operand) ? operand : [operand];
+  if (Array.isArray(value)) {
+    switch (op) {
+      case "eq":
+      case "in":
+        return operands.some((item) => value.includes(item));
+      case "ne":
+      case "not_in":
+        return !operands.some((item) => value.includes(item));
+      default:
+        return false;
+    }
+  }
+  const actual = value === undefined ? null : value;
+  switch (op) {
+    case "eq":
+      return actual === operand;
+    case "ne":
+      return actual !== operand;
+    case "in":
+      return operands.includes(actual);
+    case "not_in":
+      return !operands.includes(actual);
+  }
+  if (isEmpty(actual) || isEmpty(operand)) return false;
+  const a = actual as number | string;
+  const b = operand as number | string;
+  switch (op) {
+    case "lt":
+      return a < b;
+    case "lte":
+      return a <= b;
+    case "gt":
+      return a > b;
+    case "gte":
+      return a >= b;
+  }
+}
+
+/** Return an aggregate of numbers. Empty values do not count. Without numbers, return null. */
+export function aggregate(values: unknown[], kind: Exclude<Aggregate, "count">): number | null {
+  const numbers = values.filter((value) => !isEmpty(value)).map(Number);
+  if (numbers.length === 0) return kind === "sum" ? 0 : null;
+  switch (kind) {
+    case "sum":
+      return numbers.reduce((total, value) => total + value, 0);
+    case "avg":
+      return numbers.reduce((total, value) => total + value, 0) / numbers.length;
+    case "min":
+      return Math.min(...numbers);
+    case "max":
+      return Math.max(...numbers);
+  }
+}
+
+const monthFormat = new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" });
+
+function groupLabel(key: string): string {
+  return /^\d{4}-\d{2}$/.test(key) ? monthFormat.format(new Date(`${key}-01T00:00:00`)) : key;
+}
+
+/**
+ * Return the value of each group of records. With known groups, the chart
+ * shows them in their order, also without records, and the records of
+ * other groups count as "Other". Without known groups, the chart shows the
+ * groups of the records, sorted by key (a month `YYYY-MM` shows as a month).
+ */
+export function groupRows<T>(
+  rows: T[],
+  keyOf: (row: T) => string | null,
+  valueOf: (group: T[]) => number,
+  groups?: Group[],
+): ChartDatum[] {
+  const byKey = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = keyOf(row) ?? "";
+    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
+  if (groups) {
+    const known = new Set(groups.map((group) => group.key));
+    const result: ChartDatum[] = groups.map((group) => ({
+      ...group,
+      value: valueOf(byKey.get(group.key) ?? []),
+    }));
+    const other = [...byKey.entries()].filter(([key]) => !known.has(key)).flatMap(([, items]) => items);
+    if (other.length > 0) result.push({ key: "other", label: "Other", value: valueOf(other) });
+    return result;
+  }
+  return [...byKey.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, items]) => ({ key: key || "none", label: key ? groupLabel(key) : "None", value: valueOf(items) }));
+}
+{% endraw %}

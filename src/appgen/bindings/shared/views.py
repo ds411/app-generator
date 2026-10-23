@@ -10,7 +10,7 @@ record (`row`) and the related records (`lookups`), for example
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from appgen.bindings.shared.gaps import gap_spec
 from appgen.bindings.shared.ui import css_class_var, css_var, js
@@ -39,6 +39,10 @@ from appgen.dsl.ui.views import (
 )
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel, pascal, words
+
+if TYPE_CHECKING:
+    from appgen.bindings.shared.dashboards import DashboardPlan
+    from appgen.bindings.shared.details import DetailPlan
 
 type ValueKind = Literal["field", "id", "one", "many"]
 
@@ -258,6 +262,12 @@ class ViewPlan:
         return next((a for a in self.actions if a.name == name), None)
 
 
+class UsesParts(Protocol):
+    """A plan that notes the value components that its JSX uses."""
+
+    uses: set[str]
+
+
 class ViewContext:
     """The values that the view templates read: badges, values, and view plans."""
 
@@ -273,11 +283,38 @@ class ViewContext:
             if isinstance(view, TableView | CardsView | BoardView)
         }
         """The kind of each list view (`table`, `cards`, or `board`), by name."""
+        self.detail_views: list[str] = [
+            name for name, view in (ui.views.items() if ui else ()) if view.kind == "detail"
+        ]
+        self.dashboards: list[str] = list(ui.dashboards) if ui else []
         self._plans: dict[str, ViewPlan] = {}
         # A local import: the forms module imports this module.
         from appgen.bindings.shared.forms import FormContext
 
         self.forms = FormContext(definition)
+        self._details: dict[str, Any] = {}
+        self._dashboards: dict[str, Any] = {}
+
+    @property
+    def runtime(self) -> bool:
+        """Return True if the app has a view or a dashboard, which need the runtime files."""
+        return bool(self.list_views or self.detail_views or self.dashboards)
+
+    def detail_plan(self, name: str) -> DetailPlan:
+        """Return the plan of a detail view (see `appgen.bindings.shared.details`)."""
+        from appgen.bindings.shared.details import build_detail
+
+        if name not in self._details:
+            self._details[name] = build_detail(self, name)
+        return self._details[name]
+
+    def dashboard_plan(self, name: str) -> DashboardPlan:
+        """Return the plan of a dashboard (see `appgen.bindings.shared.dashboards`)."""
+        from appgen.bindings.shared.dashboards import build_dashboard
+
+        if name not in self._dashboards:
+            self._dashboards[name] = build_dashboard(self, name)
+        return self._dashboards[name]
 
     @property
     def badge_icons(self) -> list[str]:
@@ -295,12 +332,26 @@ class ViewContext:
         (`badge`, `avatar`, `formatted`).
         """
         found: set[str] = set()
+        values = {"badge", "avatar", "formatted"}
         for name, kind in self.list_views.items():
             plan = self.view_plan(name)
             found.add(kind)
-            found |= plan.uses & {"badge", "avatar", "formatted"}
+            found |= plan.uses & values
             for f in plan.filters:
                 found.add("multi_select" if f.multiple else f.kind)
+        for name in self.detail_views:
+            found.add("detail")
+            found |= self.detail_plan(name).uses & values
+        for name in self.dashboards:
+            dashboard = self.dashboard_plan(name)
+            found.add("dashboard")
+            found |= dashboard.uses & {"chart"}
+            for widget in dashboard.widgets:
+                found |= {c for col in widget.columns for c in _value_parts(col.cell)}
+                card = widget.card
+                if card is not None:
+                    code = " ".join([card.title, card.subtitle or "", card.badge or ""])
+                    found |= _value_parts(code)
         return found
 
     def badge_for(self, entity: str, path: str) -> str | None:
@@ -438,7 +489,7 @@ class ViewContext:
             paths.append(view.sort.field)
         plan.lookups = sorted(self._lookups(view.entity, paths))
         plan.states = effective_states(definition, view)
-        plan.state_ids = _state_ids(definition, view)
+        plan.state_ids = state_ids(definition, view)
         plan.actions = self._actions(view.entity, view.actions.items(), "view")
         if isinstance(view, TableView | CardsView | BoardView):
             plan.row_actions = self._actions(view.entity, view.row_actions.items(), "row")
@@ -446,17 +497,7 @@ class ViewContext:
             plan.bulk_actions = self._actions(view.entity, view.bulk_actions.items(), "bulk")
         all_actions = [*plan.actions, *plan.row_actions, *plan.bulk_actions]
         plan.imports = sorted({line for action in all_actions for line in action.imports})
-        for form_name in dict.fromkeys(a.form for a in all_actions if a.form):
-            form_plan = self.forms.plan(form_name)
-            plan.forms.append(
-                FormRef(
-                    form_name,
-                    form_plan.component,
-                    form_plan.module,
-                    form_plan.needs_record,
-                    form_plan.route_params,
-                )
-            )
+        plan.forms = self.form_refs(all_actions)
         plan.icons |= {a.action.icon for a in all_actions if a.action.icon}
         states = plan.states
         plan.icons |= {s.icon for s in (states.empty, states.error) if s and s.icon}
@@ -470,7 +511,7 @@ class ViewContext:
             plan.uses.add("filters")
         return plan
 
-    def jsx(self, value: Value, plan: ViewPlan, avatar: bool = False) -> str:
+    def jsx(self, value: Value, plan: UsesParts, avatar: bool = False) -> str:
         """Return the JSX that shows a value of `row`, and note the components it needs."""
         if value.format == "badge":
             plan.uses.add("badge")
@@ -613,6 +654,35 @@ class ViewContext:
         if isinstance(view, BoardView):
             paths.append(view.group_by)
         return paths
+
+    def lookups_of(self, entity: str, paths: Iterable[str]) -> set[str]:
+        """Return the related entities that the field paths of an entity go through."""
+        return self._lookups(entity, paths)
+
+    def action_plans(
+        self, entity: str, actions: Iterable[tuple[str, Action]], scope: str
+    ) -> list[ActionPlan]:
+        """Return the plans of the actions that the templates can render.
+
+        The scope is `view` (no record), `row` (one record), or `bulk`.
+        """
+        return self._actions(entity, actions, scope)
+
+    def form_refs(self, actions: Iterable[ActionPlan]) -> list[FormRef]:
+        """Return the forms that actions open in a dialog or a sheet, in order."""
+        refs: list[FormRef] = []
+        for form_name in dict.fromkeys(a.form for a in actions if a.form):
+            form_plan = self.forms.plan(form_name)
+            refs.append(
+                FormRef(
+                    form_name,
+                    form_plan.component,
+                    form_plan.module,
+                    form_plan.needs_record,
+                    form_plan.route_params,
+                )
+            )
+        return refs
 
     def _lookups(self, entity: str, paths: Iterable[str]) -> set[str]:
         found: set[str] = set()
@@ -808,6 +878,12 @@ class ViewContext:
         return None
 
 
+def _value_parts(code: str) -> set[str]:
+    """Return the value components that JSX code uses."""
+    names = {"badge": "<BadgeValue", "avatar": "<AvatarValue", "formatted": "<FormattedValue"}
+    return {part for part, tag in names.items() if tag in code}
+
+
 def _badge_name(camel_name: str | None, sets: dict[str, BadgeSet]) -> str | None:
     return next((name for name in sets if camel(name) == camel_name), None)
 
@@ -836,10 +912,14 @@ def _kebab(name: str) -> str:
     return "-".join(words(name))
 
 
-def _state_ids(definition: AppDefinition, view: View) -> list[str]:
+def state_ids(definition: AppDefinition, view: View | None) -> list[str]:
+    """Return the element IDs of the states that a view shows, for the traces.
+
+    Without a view, return the IDs of the default states.
+    """
     ids: list[str] = []
     defaults = definition.ui.defaults if definition.ui else None
-    for states in (view.states, defaults.states if defaults else None):
+    for states in (view.states if view else None, defaults.states if defaults else None):
         if states is None:
             continue
         ids.append(states.id)
@@ -887,9 +967,10 @@ _VIEW = "src/widgets/{{ name | kebab }}"
 
 
 def view_rules() -> tuple[Output, ...]:
-    """Return the output rules of the list views: tables, card lists, and boards.
+    """Return the output rules of the views and the dashboards.
 
-    Each view is a widget. The runtime files of the views are in the app
+    Each view (a table, a card list, a board, or a detail view) and each
+    dashboard is a widget. The runtime files of the views are in the app
     only if a view needs them. The bindings that use the views put
     `ViewContext` in their context as `ui_views`, and the view helpers
     (`HELPERS`) in their helpers.
@@ -898,11 +979,11 @@ def view_rules() -> tuple[Output, ...]:
         *(
             Output(template=f"ui/views/{template}", path=path, when=when)
             for template, path, when in (
-                ("lib/format.ts.j2", "src/shared/lib/format.ts", "ui_views.list_views"),
-                ("lib/query.ts.j2", "src/shared/lib/query.ts", "ui_views.list_views"),
-                ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.list_views"),
-                ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.list_views"),
-                ("ui/view-state.tsx.j2", "src/shared/ui/view-state.tsx", "ui_views.list_views"),
+                ("lib/format.ts.j2", "src/shared/lib/format.ts", "ui_views.runtime"),
+                ("lib/query.ts.j2", "src/shared/lib/query.ts", "ui_views.runtime"),
+                ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.runtime"),
+                ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.runtime"),
+                ("ui/view-state.tsx.j2", "src/shared/ui/view-state.tsx", "ui_views.runtime"),
                 (
                     "ui/list-pagination.tsx.j2",
                     "src/shared/ui/list-pagination.tsx",
@@ -940,6 +1021,31 @@ def view_rules() -> tuple[Output, ...]:
             Output(
                 template="ui/views/index.ts.j2", path=_VIEW + "/index.ts", for_each=f"{kind}_view"
             )
-            for kind in ("table", "cards", "board")
+            for kind in ("table", "cards", "board", "detail")
+        ),
+        Output(
+            template="ui/details/detail-view.tsx.j2",
+            path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
+            for_each="detail_view",
+        ),
+        *(
+            Output(template=f"ui/dashboards/{template}", path=path, when=when)
+            for template, path, when in (
+                ("lib/aggregate.ts.j2", "src/shared/lib/aggregate.ts", "ui_views.dashboards"),
+                ("ui/widget-card.tsx.j2", "src/shared/ui/widget-card.tsx", "ui_views.dashboards"),
+                (
+                    "ui/dashboard-chart.tsx.j2",
+                    "src/shared/ui/dashboard-chart.tsx",
+                    "'chart' in ui_views.features",
+                ),
+            )
+        ),
+        Output(
+            template="ui/dashboards/dashboard.tsx.j2",
+            path=_VIEW + "/ui/{{ name | kebab }}-dashboard.tsx",
+            for_each="dashboard",
+        ),
+        Output(
+            template="ui/dashboards/index.ts.j2", path=_VIEW + "/index.ts", for_each="dashboard"
         ),
     )

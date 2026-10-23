@@ -477,3 +477,46 @@ def test_the_app_shell_and_the_views_are_covered(
     for element in iter_elements(definition):
         if element.kind in kinds:
             assert status[element.id] == "covered", element.id
+
+
+def test_each_detail_view_and_dashboard_has_a_widget_and_a_page(result: GenerationResult) -> None:
+    files = _files(result)
+    detail = files["src/widgets/task-detail/ui/task-detail-view.tsx"]
+    assert "export function TaskDetailView({ id }: TaskDetailViewProps) {" in detail
+    assert "resource.error instanceof NotFoundError" in detail
+    assert "<CommentTableView where={(row) => row.taskId === record.id} />" in detail
+    page = files["src/pages/task-detail/ui/task-detail-page.tsx"]
+    assert '<TaskDetailView id={id ?? ""} /> {/* @trace pages.task_detail.content */}' in page
+    dashboard = files["src/widgets/overview/ui/overview-dashboard.tsx"]
+    assert "export function OverviewDashboard() {" in dashboard
+    assert '<DashboardChart kind="donut"' in dashboard
+    page = files["src/pages/dashboard/ui/dashboard-page.tsx"]
+    assert "<OverviewDashboard /> {/* @trace pages.dashboard.content */}" in page
+    assert "useParams" not in page
+    for path in ("src/shared/lib/aggregate.ts", "src/shared/ui/widget-card.tsx"):
+        assert path in files
+    assert "src/shared/ui/dashboard-chart.tsx" in files
+
+
+DETAILS = Path(__file__).parent / "fixtures" / "ui-details.yaml"
+
+
+def test_the_details_and_the_dashboards_are_covered(nextjs: Binding, tmp_path: Path) -> None:
+    definition = load_definition(DETAILS)
+    write_result(generate(definition, nextjs), tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    kinds = {
+        "detail_view",
+        "detail_header",
+        "detail_section",
+        "detail_tab",
+        "dashboard",
+        "stat_widget",
+        "chart_widget",
+        "list_widget",
+    }
+    for element in iter_elements(definition):
+        if element.kind in kinds:
+            assert status[element.id] in ("covered", "gap"), element.id

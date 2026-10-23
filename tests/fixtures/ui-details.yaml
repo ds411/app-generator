@@ -1,0 +1,113 @@
+# The features of the detail views and the dashboards that the main
+# example does not use, for the tests of the front-end bindings: a detail
+# view without a header and without lookups, custom sections, a dashboard without a grid, each
+# aggregate, a line chart by month, a chart by a relation, a chart of
+# an enum without a badge set, and a list widget of a card list.
+version: 0
+app: { name: details, title: Details }
+entities:
+  Team:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+    relations:
+      members: { kind: one_to_many, target: Member, inverse: team }
+  Member:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+      email: { type: email }
+    relations:
+      team: { kind: many_to_one, target: Team, inverse: members }
+  Item:
+    fields:
+      code: { type: string, required: true }
+      stage:
+        type: enum
+        values: [new, open, closed]
+      price: { type: decimal }
+      received: { type: date }
+      updated_at: { type: datetime }
+    relations:
+      owner: { kind: many_to_one, target: Member }
+      tags: { kind: many_to_many, target: Member }
+operations:
+  delete_item: { kind: delete, entity: Item }
+pages:
+  team:
+    path: "/teams/{team_id}"
+    title: Team
+    entity: Team
+    content: { view: team_detail }
+  item:
+    path: "/items/{id}"
+    title: Item
+    entity: Item
+    content: { view: item_detail }
+  members:
+    path: /members
+    title: Members
+    entity: Member
+    content: { view: member_cards }
+  home:
+    path: /
+    title: Home
+    content: { dashboard: stats }
+ui:
+  views:
+    member_cards:
+      kind: cards
+      entity: Member
+      card: { title: name, subtitle: email }
+      row_actions:
+        open: { kind: navigate, page: members }
+    team_detail:
+      kind: detail
+      entity: Team
+      sections:
+        notes: { title: Notes, description: Written by hand., custom: true }
+      tabs:
+        people: { relation: members, view: member_cards }
+    item_detail:
+      kind: detail
+      entity: Item
+      header: { badges: [stage] }
+      sections:
+        main: { fields: [code, price, received, owner, owner.team, tags], columns: 3 }
+      tabs:
+        tagged: { label: Tagged, relation: tags, view: member_cards }
+        extra: { custom: true }
+      actions:
+        delete:
+          kind: operation
+          operation: delete_item
+          variant: destructive
+          on_success: { navigate: members }
+      states:
+        empty: { title: The item does not exist }
+  dashboards:
+    stats:
+      widgets:
+        items: { kind: stat, entity: Item }
+        average:
+          kind: stat
+          entity: Item
+          aggregate: avg
+          field: price
+          format: currency
+          filter: { updated_at: { lte: $now }, stage: [open, closed] }
+        cheapest: { kind: stat, entity: Item, aggregate: min, field: price, span: 2 }
+        tagged:
+          kind: stat
+          entity: Item
+          filter: { tags: { ne: null }, owner.team.name: Core }
+        by_month: { kind: chart, chart: line, entity: Item, group_by: received, span: 2 }
+        by_owner:
+          kind: chart
+          chart: bar
+          entity: Item
+          group_by: owner
+          aggregate: max
+          field: price
+        by_stage: { kind: chart, chart: donut, entity: Item, group_by: stage }
+        people: { kind: list, view: member_cards, limit: 3, link: members, span: 4 }

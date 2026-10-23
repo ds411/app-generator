@@ -1,0 +1,232 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.dashboard_plan(name) %}
+{% set dashboard = plan.dashboard %}
+{% set code = plan.code() %}
+{% set render = plan.render_code() %}
+{% set functions = plan.widgets | selectattr("function") | list %}
+{% set lists = plan.widgets | selectattr("kind", "eq", "list") | list %}
+{% set tables = lists | selectattr("columns") | list %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ns = namespace(icons=[]) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+
+{% for entity in plan.entities %}
+import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+{% for line in plan.imports %}
+{{ line }}
+{% endfor %}
+{% if "badges." in code %}
+import { badges } from "@/shared/config/badges";
+{% endif %}
+{% set agg = [] %}
+{% if "aggregate(" in code %}{% set agg = agg + ["aggregate"] %}{% endif %}
+{% if "groupRows(" in code %}{% set agg = agg + ["groupRows"] %}{% endif %}
+{% if "matchesOp(" in code %}{% set agg = agg + ["matchesOp"] %}{% endif %}
+{% if "ChartDatum" in (functions | map(attribute="returns") | join(" ")) %}{% set agg = agg + ["type ChartDatum"] %}{% endif %}
+{% if agg %}
+import { {{ agg | join(", ") }} } from "@/shared/lib/aggregate";
+{% endif %}
+{% if "stat" in plan.uses or "formatValue(" in code %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if "pageHref(" in code %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% set query = [] %}
+{% if plan.entities %}{% set query = query + ["byId"] %}{% endif %}
+{% if "sortBy(" in code %}{% set query = query + ["sortBy"] %}{% endif %}
+{% if "today()" in code %}{% set query = query + ["today"] %}{% endif %}
+{% if query %}
+import { {{ query | join(", ") }} } from "@/shared/lib/query";
+{% endif %}
+{% if "<Link" in render %}
+import { Link } from "@/shared/lib/router";
+{% endif %}
+import { useResource } from "@/shared/lib/use-resource";
+{% if "chart" in plan.uses %}
+import { DashboardChart } from "@/shared/ui/dashboard-chart";
+{% endif %}
+{% if tables %}
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
+{% endif %}
+{% if "<AvatarValue" in render %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "<BadgeValue" in render %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "<FormattedValue" in render %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% set state = ["ViewLoading", "ViewMessage"] %}
+{% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
+import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+{% set cards = (["StatTile"] if "stat" in plan.uses else []) + (["WidgetCard"] if plan.widgets | rejectattr("kind", "eq", "stat") | list else []) %}
+import { {{ cards | join(", ") }} } from "@/shared/ui/widget-card";
+{% if plan.entities %}
+
+type Lookups = {
+{% for entity in plan.entities %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+
+type DashboardData = {
+  records: {
+{% for entity in plan.entities %}
+    {{ entity | camel }}: {{ entity | pascal }}[];
+{% endfor %}
+  };
+  lookups: Lookups;
+};
+
+/** Read the records of the entities that the widgets show. */
+async function load(): Promise<DashboardData> {
+  const [{% for entity in plan.entities %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for entity in plan.entities %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return {
+    records: { {% for entity in plan.entities %}{{ entity | camel }}: {{ entity | camel }}List.items{{ ", " if not loop.last }}{% endfor %} },
+    lookups: { {% for entity in plan.entities %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+  };
+}
+
+/** Load the data again after a change of the records. */
+function subscribe(listener: () => void): () => void {
+  const stops = [{% for entity in plan.entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{% else %}
+
+type DashboardData = Record<string, never>;
+
+async function load(): Promise<DashboardData> {
+  return {};
+}
+{% endif %}
+{% for w in functions %}
+
+/** {{ w.label }}. */
+function {{ w.function }}(data: DashboardData): {{ w.returns }} { {{ trace(w.element_id) }}
+{% if "lookups." in (w.body | join(" ")) %}
+  const { lookups } = data;
+{% endif %}
+{% for line in w.body %}
+  {{ line }}
+{% endfor %}
+}
+{% endfor %}
+
+{% if dashboard.title %}
+/** {{ dashboard.title }}{% if dashboard.description %}: {{ dashboard.description }}{% endif %} */
+{% endif %}
+export function {{ name | pascal }}Dashboard() {
+  const resource = useResource({{ js(name) }}, load{% if plan.entities %}, subscribe{% endif %});
+
+{{ m.states(plan, "widget") }}
+
+{% if functions %}
+  const data = resource.data;
+{% endif %}
+{% if "lookups." in render %}
+  const { lookups } = data;
+{% endif %}
+{% for w in lists %}
+  const {{ w.function }}Rows = {{ w.function }}(data);
+{% endfor %}
+  return (
+    <div className={{ js(plan.grid) }}>{% if dashboard.grid %} {{ trace(dashboard.grid.id, jsx=True) }}{% endif %}
+
+{% if dashboard.grid %}
+{% for override in dashboard.grid.responsive.values() %}
+      {{ trace(override.id, jsx=True) }}
+{% endfor %}
+{% endif %}
+{% for w in plan.widgets %}
+{% if w.kind == "stat" %}
+      <StatTile
+        label={{ jsx_attr(w.label) }}
+        value={formatValue({{ w.function }}(data), {{ js(w.format) }})}
+{% if w.icon %}
+        icon={ {{- w.icon | pascal }}Icon}
+{% endif %}
+{% if w.color %}
+        color={{ js(w.color) }}
+{% endif %}
+{% if w.href %}
+        href={ {{- w.href }}}
+{% endif %}
+        className={{ js(w.classes) }}
+      />{{ " " }}{{ trace(w.element_id, jsx=True) }}
+{% else %}
+      <WidgetCard title={{ jsx_attr(w.label) }}{% if w.href %} href={ {{- w.href }}}{% endif %} className={{ js(w.classes) }}> {{ trace(w.element_id, jsx=True) }}
+{% if w.kind == "chart" %}
+        <DashboardChart kind={{ js(w.chart) }} data={ {{- w.function }}(data)} valueLabel={{ jsx_attr(w.value_label) }} />
+{% elif w.kind == "list" %}
+{% if w.sort_id %}
+        {{ trace(w.sort_id, jsx=True) }}
+{% endif %}
+        { {{- w.function }}Rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">{{ jsx_text(plan.states.empty.title or "No records yet") }}</p>
+        ) : (
+{% if w.columns %}
+          <Table>
+            <TableHeader>
+              <TableRow>
+{% for column in w.columns %}
+                <TableHead{% if column.classes %} className={{ js(column.classes) }}{% endif %}>{{ jsx_text(column.header) }}</TableHead>
+{% endfor %}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              { {{- w.function }}Rows.map((row) => (
+                <TableRow key={row.id}>
+{% for column in w.columns %}
+                  <TableCell{% if column.classes %} className={{ js(column.classes) }}{% endif %}>{{ column.cell }}</TableCell>
+{% endfor %}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+{% else %}
+{% set card = w.card %}
+          <ul className="divide-y">
+            { {{- w.function }}Rows.map((row) => (
+              <li key={row.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+{% if card.href %}
+                  <Link href={ {{- card.href }}} className="block truncate font-medium underline-offset-4 hover:underline">
+                    {{ card.title }}
+                  </Link>
+{% else %}
+                  <p className="truncate font-medium">{{ card.title }}</p>
+{% endif %}
+{% if card.subtitle %}
+                  <div className="truncate text-sm text-muted-foreground">{{ card.subtitle }}</div>
+{% endif %}
+                </div>
+{% if card.badge %}
+                {{ card.badge }}
+{% endif %}
+              </li>
+            ))}
+          </ul>
+{% endif %}
+        )}
+{% else %}
+        <{{ w.gap.name }} />
+{% endif %}
+      </WidgetCard>
+{% endif %}
+{% endfor %}
+    </div>
+  );
+}
