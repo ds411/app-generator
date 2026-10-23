@@ -53,3 +53,11 @@ class TaskRead(ReadModel):
     done: bool | None
     # @trace entities.Task.relations.project
     project_id: UUID
+
+
+# @trace operations.complete_task
+class CompleteTaskParams(InputModel):
+    """The params of the operation `complete_task`."""
+
+    # @trace operations.complete_task.params.note
+    note: str | None = None

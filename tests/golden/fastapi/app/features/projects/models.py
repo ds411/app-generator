@@ -3,12 +3,11 @@
 """The model of the entity Project: the table `projects`."""
 
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base, enum_type
+from app.core.db import Record, enum_type
 from app.features.projects.enums import ProjectStatus
 
 if TYPE_CHECKING:
@@ -16,12 +15,11 @@ if TYPE_CHECKING:
 
 
 # @trace entities.Project
-class Project(Base):
+class Project(Record):
     """A record of the entity Project."""
 
     __tablename__ = "projects"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     # @trace entities.Project.fields.name
     name: Mapped[str] = mapped_column(String(120))
     # @trace entities.Project.fields.status

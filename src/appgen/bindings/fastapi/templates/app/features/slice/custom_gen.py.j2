@@ -1,0 +1,49 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% set r = py.entity(op.returns) if op.returns else none %}
+"""The operation `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}.
+
+The logic of the operation is in `{{ op.name }}_ext.py`, which appgen creates
+once and never changes.
+"""
+
+{% set lines = [
+    "from uuid import UUID",
+    "from fastapi import APIRouter",
+    "from app.core.db import SessionDep, commit",
+    "from app.core.errors import problem_responses",
+    "from app.features." ~ e.slice ~ " import repository",
+    "from app.features." ~ e.slice ~ "." ~ op.name ~ "_ext import " ~ op.name,
+] %}
+{% if r and r.name != e.name %}
+{% set lines = lines + [
+    "from app.features." ~ r.slice ~ " import repository as " ~ r.snake ~ "_repository",
+    "from app.features." ~ r.slice ~ ".schemas import " ~ op.returns_class,
+] %}
+{% endif %}
+{% set names = ([op.params_class] if op.params else []) + ([op.returns_class] if r and r.name == e.name else []) %}
+{% if names %}
+{% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ (names | sort | join(", "))] %}
+{% endif %}
+{{ py.imports(lines) }}
+
+router = APIRouter(prefix="{{ e.path }}")
+
+
+{{ op.decorator() }}
+async def run_{{ op.name }}(
+    id: UUID,
+{% if op.params %}
+    params: {{ op.params_class }},
+{% endif %}
+    session: SessionDep,
+) -> {{ op.returns_class or "None" }}:
+    """{{ op.description or ("Run the operation " ~ op.name ~ " on a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id)
+    {{ "result = " if r }}await {{ op.name }}(session, record{{ ", params" if op.params }})
+    await commit(session)
+{% if r %}
+    result = await {{ "repository" if r.name == e.name else r.snake ~ "_repository" }}.get(session, result.id)
+    return {{ op.returns_class }}.model_validate(result)
+{% endif %}

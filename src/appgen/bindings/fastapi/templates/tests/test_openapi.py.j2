@@ -1,0 +1,43 @@
+{{ trace_header("app") }}
+"""The OpenAPI document shows each endpoint and each schema, and errors are problem details."""
+
+import pytest
+from httpx import AsyncClient
+
+pytestmark = pytest.mark.anyio
+
+ENDPOINTS = [
+{% for e in py.entity_order() %}
+{% for op in e.operations %}
+    {{ trace(op.id) }}
+    ("{{ op.method }}", "{{ e.path }}{{ op.path }}"),
+{% endfor %}
+{% endfor %}
+]
+SCHEMAS = [
+{% for schema, element_id in py.openapi_schemas %}
+    {{ trace(element_id) }}
+    "{{ schema }}",
+{% endfor %}
+]
+
+
+async def test_the_openapi_document_has_each_endpoint_and_schema(client: AsyncClient) -> None:
+    document = (await client.get("/openapi.json")).json()
+
+    endpoints = [(method, path) for path, item in document["paths"].items() for method in item]
+    assert set(ENDPOINTS) <= set(endpoints)
+    assert set(SCHEMAS) <= set(document["components"]["schemas"])
+
+
+async def test_an_unknown_path_gives_problem_details(client: AsyncClient) -> None:
+    response = await client.get("/no-such-path")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Not Found",
+        "status": 404,
+        "instance": "/no-such-path",
+    }

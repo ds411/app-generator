@@ -140,6 +140,13 @@ class PyField:
             return "sa." + self.sa_type
         return f"sa.{self.sa_type}()"
 
+    def filter_declaration(self) -> str:
+        """Return the declaration of the field in the query of a list endpoint."""
+        type_ = self.read_type + " | None"
+        if self.aliased:
+            return _declare(self.attr, type_, "None", [f'alias="{self.name}"'])
+        return f"{self.attr}: {type_} = None"
+
     def declaration(self, mode: str) -> str:
         """Return the declaration of the field in a schema, for example `title: str`.
 
@@ -235,7 +242,7 @@ class PyRelation:
             )
             args.append(f"foreign_keys=[{self.fk_attr}]")
             if target == entity.name:
-                args.append("remote_side=[id]")
+                args.append(f'remote_side="{target}.id"')
             args.append(f'lazy="{self.lazy}"')
             lines.append(call(f"{self.attr}: Mapped[{target}{nullable}] = ", "relationship", args))
         elif self.side == "back":
@@ -383,6 +390,8 @@ class PyOperation:
     description: str | None
     module: str
     """The module of the operation in its slice, for example `create_task`."""
+    slice: str
+    """The slice of the entity of the operation."""
 
     @property
     def custom(self) -> bool:
@@ -395,6 +404,22 @@ class PyOperation:
     @property
     def has_id(self) -> bool:
         return "{id}" in self.path
+
+    @property
+    def summary(self) -> str:
+        return self.name.replace("_", " ").capitalize()
+
+    @property
+    def returns_class(self) -> str | None:
+        return f"{self.returns}Read" if self.returns else None
+
+    def decorator(self) -> str:
+        """Return the route decorator of the endpoint."""
+        args = [f'"{self.path}"', f"status_code={self.status}"]
+        args.append(f"responses=problem_responses({', '.join(str(e) for e in self.errors)})")
+        args.append(f'summary="{self.summary}"')
+        args.append(f'operation_id="{self.name}"')
+        return call("@router.", self.method, args, 0)
 
 
 @dataclass(slots=True)
@@ -423,8 +448,18 @@ class PyEntity:
         return self.slice
 
     @property
+    def params(self) -> list[PyField]:
+        """The params of the custom operations of the entity."""
+        return [p for op in self.operations if op.custom for p in op.params]
+
+    @property
+    def enum_fields(self) -> list[PyField]:
+        """The fields and the params of type `enum`."""
+        return [f for f in [*self.fields, *self.params] if f.enum is not None]
+
+    @property
     def enums(self) -> list[PyEnum]:
-        return [f.enum for f in self.fields if f.enum is not None]
+        return [f.enum for f in self.enum_fields if f.enum is not None]
 
     @property
     def fk_relations(self) -> list[PyRelation]:
@@ -449,6 +484,81 @@ class PyEntity:
         return [r for r in self.relations if r.side in ("fk", "m2m")]
 
     @property
+    def filters(self) -> list[PyField]:
+        """The fields that a list endpoint can filter by equality."""
+        return [f for f in self.fields if f.filterable]
+
+    @property
+    def sortable(self) -> list[PyField]:
+        return [f for f in self.fields if f.sortable]
+
+    @property
+    def custom_operations(self) -> list[PyOperation]:
+        return [o for o in self.operations if o.custom]
+
+    def target(self, rel: PyRelation) -> PyEntity:
+        return self.app_entities[rel.target]
+
+    def repository_imports(self) -> str:
+        """Return the import block of the repository module of the slice."""
+        lines: set[str] = {
+            "from typing import Any",
+            "from uuid import UUID",
+            "from sqlalchemy.ext.asyncio import AsyncSession",
+            "from app.core.errors import ProblemError",
+            f"from app.features.{self.slice}.models import {self.name}",
+            from_import(
+                f"app.features.{self.slice}.schemas", {f"{self.name}Create", f"{self.name}Update"}
+            ),
+        }
+        core = {"commit"}
+        if self.fk_relations:
+            core.add("ensure_exists")
+        if self.m2m_relations:
+            core.add("load_all")
+        lines.add(from_import("app.core.db", core))
+        for rel in self.input_relations:
+            target = self.target(rel)
+            if target.name != self.name:
+                lines.add(f"from app.features.{target.slice}.models import {target.name}")
+        return import_block(lines)
+
+    def list_imports(self) -> str:
+        """Return the import block of a list operation of the entity."""
+        types = {f.read_type for f in self.filters}
+        lines = {
+            "from typing import Annotated",
+            "from fastapi import APIRouter, Query",
+            "from pydantic import ConfigDict"
+            + (", Field" if any(f.aliased for f in self.filters) else ""),
+            "from sqlalchemy import func, select",
+            "from app.core.db import SessionDep",
+            "from app.core.errors import problem_responses",
+            "from app.core.pagination import Page, PageQuery, sort_order",
+            f"from app.features.{self.slice}.models import {self.name}",
+            f"from app.features.{self.slice}.schemas import {self.name}Read",
+        }
+        if any(t.startswith("dt.") for t in types):
+            lines.add("import datetime as dt")
+        if "Decimal" in types:
+            lines.add("from decimal import Decimal")
+        if self.fk_relations or "UUID" in types:
+            lines.add("from uuid import UUID")
+        enums = {e.name for e in self.enums if e.name in types}
+        if enums:
+            lines.add(from_import(f"app.features.{self.slice}.enums", enums))
+        return import_block(lines)
+
+    def router_imports(self) -> str:
+        """Return the import block of the router module of the slice."""
+        lines = {"from fastapi import APIRouter"}
+        if self.operations:
+            lines.add(
+                from_import(f"app.features.{self.slice}", {o.module for o in self.operations})
+            )
+        return import_block(lines)
+
+    @property
     def not_null(self) -> list[str]:
         """The attributes that an update cannot set to null."""
         names = [f.attr for f in self.fields if f.required]
@@ -469,7 +579,8 @@ class PyEntity:
             typing.add("Any")
         if typing:
             lines.add(from_import("typing", typing))
-        lines.add("from uuid import UUID, uuid4")
+        if self.fk_relations or self.m2m_relations or "UUID" in types:
+            lines.add("from uuid import UUID")
         sqlalchemy = {t for t in sa_types if t != "JSONB"}
         if self.fk_relations:
             sqlalchemy.add("ForeignKey")
@@ -483,10 +594,12 @@ class PyEntity:
         if self.relations:
             orm.add("relationship")
         lines.add(from_import("sqlalchemy.orm", orm))
-        core = {"Base"} | ({"enum_type"} if self.enums else set[str]())
+        core = {"Record"} | ({"Base"} if self.join_tables else set[str]())
+        field_enums = {f.enum.name for f in self.fields if f.enum is not None}
+        core |= {"enum_type"} if field_enums else set[str]()
         lines.add(from_import("app.core.db", core))
-        if self.enums:
-            lines.add(from_import(f"app.features.{self.slice}.enums", {e.name for e in self.enums}))
+        if field_enums:
+            lines.add(from_import(f"app.features.{self.slice}.enums", field_enums))
         block = import_block(lines)
         if targets:
             checks = sorted(
@@ -519,7 +632,8 @@ class PyEntity:
 
     def schema_imports(self) -> str:
         """Return the import block of the schemas module of the slice."""
-        types = {f.schema_type for f in self.fields} | {f.read_type for f in self.fields}
+        types = {f.schema_type for f in [*self.fields, *self.params]}
+        types |= {f.read_type for f in self.fields}
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
@@ -527,6 +641,7 @@ class PyEntity:
             lines.add("from decimal import Decimal")
         lines.add("from uuid import UUID")
         declarations = [f.declaration(m) for f in self.fields for m in ("create", "update", "read")]
+        declarations += [p.declaration("create") for p in self.params]
         declarations += [
             d
             for r in self.relations
@@ -579,6 +694,26 @@ class PyApp:
     @property
     def join_tables(self) -> list[PyJoinTable]:
         return [t for e in self.entities.values() for t in e.join_tables]
+
+    @property
+    def openapi_schemas(self) -> list[tuple[str, str]]:
+        """The schemas that the endpoints use, with the ID of their element, in a fixed order."""
+        found: dict[str, str] = {}
+        for op in self.operations.values():
+            entity = self.entities[op.entity]
+            if op.kind in ("create", "read", "update", "list"):
+                found[f"{entity.name}Read"] = entity.id
+            if op.kind in ("create", "update"):
+                found[f"{entity.name}{op.kind.capitalize()}"] = entity.id
+            if op.custom and op.params:
+                found[op.params_class] = op.id
+            if op.returns:
+                found[f"{op.returns}Read"] = self.entities[op.returns].id
+        return sorted(found.items())
+
+    def imports(self, lines: list[str]) -> str:
+        """Return import lines in the groups and the order of the Ruff import sorter."""
+        return import_block(set(lines))
 
     def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
@@ -1010,6 +1145,7 @@ def _operation(name: str, operation: Operation, entities: dict[str, PyEntity]) -
         returns=returns,
         description=operation.description,
         module=f"{name}_gen" if operation.kind == "custom" else name,
+        slice=entity.slice,
     )
 
 
@@ -1043,6 +1179,13 @@ def _check_names(entity: PyEntity) -> None:
             )
         names[name] = owner
 
+    modules = {"enums", "models", "repository", "router", "schemas", "validation_ext"}
+    for op in entity.operations:
+        if op.module in modules or op.name in modules:
+            raise GenerationError(
+                f"The operation '{op.name}' has the name of a module of the slice "
+                f"'{entity.slice}'. Give it another name."
+            )
     for f in entity.fields:
         claim(f.attr, f"the field '{f.name}'")
     for rel in entity.relations:

@@ -7,7 +7,7 @@ from enum import StrEnum
 
 # @trace entities.Project.fields.status
 class ProjectStatus(StrEnum):
-    """The values of the field `status`."""
+    """The values of `entities.Project.fields.status`."""
 
     PLANNED = "planned"
     ACTIVE = "active"

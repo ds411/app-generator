@@ -2,6 +2,13 @@
 {% set e = py.entity(name) %}
 """The router of the slice `{{ e.slice }}`: the endpoints of the entity {{ e.name }}."""
 
-from fastapi import APIRouter
+{{ e.router_imports() }}
 
-router = APIRouter(prefix={{ e.path | tojson }}, tags=[{{ e.plural_label | tojson }}])
+router = APIRouter(tags=[{{ e.plural_label | tojson }}])
+{% if e.operations %}
+
+{% for op in e.operations %}
+{{ trace(op.id) }}
+router.include_router({{ op.module }}.router)
+{% endfor %}
+{% endif %}

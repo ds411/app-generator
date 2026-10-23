@@ -1,0 +1,104 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+"""The operation `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}."""
+
+{% if op.kind == "list" %}
+{{ e.list_imports() }}
+{% elif op.kind == "create" %}
+from fastapi import APIRouter
+
+from app.core.db import SessionDep
+from app.core.errors import problem_responses
+from app.features.{{ e.slice }} import repository
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Create, {{ e.name }}Read
+{% else %}
+from uuid import UUID
+
+from fastapi import APIRouter
+
+from app.core.db import SessionDep
+from app.core.errors import problem_responses
+from app.features.{{ e.slice }} import repository
+{% if op.kind == "update" %}
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Read, {{ e.name }}Update
+{% elif op.kind == "read" %}
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Read
+{% endif %}
+{% endif %}
+
+router = APIRouter(prefix="{{ e.path }}")
+{% if op.kind == "list" %}
+
+
+class {{ op.name | pascal }}Query(PageQuery):
+    """The query parameters of the operation: the page, the order, and the filters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+{% for f in e.filters %}
+    {{ trace(f.id) }}
+    {{ f.filter_declaration() }}
+{% endfor %}
+{% for r in e.fk_relations %}
+    {{ trace(r.id) }}
+    {{ r.fk_attr }}: UUID | None = None
+{% endfor %}
+
+
+SORTABLE = {
+{% for f in e.sortable %}
+    "{{ f.name }}": {{ e.name }}.{{ f.attr }},
+{% endfor %}
+}
+{% endif %}
+
+
+{{ op.decorator() }}
+{% if op.kind == "create" %}
+async def {{ op.name }}(data: {{ e.name }}Create, session: SessionDep) -> {{ e.name }}Read:
+    """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.create(session, data)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "read" %}
+async def {{ op.name }}(id: UUID, session: SessionDep) -> {{ e.name }}Read:
+    """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "update" %}
+async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep) -> {{ e.name }}Read:
+    """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id)
+    record = await repository.update(session, record, data)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "delete" %}
+async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
+    """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id)
+    await repository.delete(session, record)
+{% elif op.kind == "list" %}
+async def {{ op.name }}(
+    query: Annotated[{{ op.name | pascal }}Query, Query()], session: SessionDep
+) -> Page[{{ e.name }}Read]:
+    """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
+    statement = select({{ e.name }})
+{% for f in e.filters %}
+    if query.{{ f.attr }} is not None:
+        statement = statement.where({{ e.name }}.{{ f.attr }} == query.{{ f.attr }})
+{% endfor %}
+{% for r in e.fk_relations %}
+    if query.{{ r.fk_attr }} is not None:
+        statement = statement.where({{ e.name }}.{{ r.fk_attr }} == query.{{ r.fk_attr }})
+{% endfor %}
+    total = await session.scalar(select(func.count()).select_from(statement.subquery()))
+    order = sort_order(query.sort, SORTABLE, {{ e.name }}.id)
+    records = await session.scalars(
+        statement.order_by(*order).limit(query.limit).offset(query.offset)
+    )
+    return Page[{{ e.name }}Read](
+        items=[{{ e.name }}Read.model_validate(record) for record in records],
+        total=total or 0,
+        limit=query.limit,
+        offset=query.offset,
+    )
+{% endif %}

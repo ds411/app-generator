@@ -3,12 +3,12 @@
 """The enums of the entity {{ e.name }}: the values of its enum fields."""
 
 from enum import StrEnum
-{% for f in e.fields if f.enum %}
+{% for f in e.enum_fields %}
 
 
 {{ trace(f.id) }}
 class {{ f.enum.name }}(StrEnum):
-    """The values of the field `{{ f.name }}`."""
+    """The values of `{{ f.id }}`."""
 
 {% for member, value in f.enum.members %}
     {{ member }} = "{{ value }}"

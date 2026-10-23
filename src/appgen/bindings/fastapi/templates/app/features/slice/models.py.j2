@@ -17,12 +17,11 @@
 
 
 {{ trace(e.id) }}
-class {{ e.name }}(Base):
+class {{ e.name }}(Record):
     """{{ (e.description or ("A record of the entity " ~ e.name ~ ".")) | replace('"', "'") }}"""
 
     __tablename__ = "{{ e.table }}"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
 {% for f in e.fields %}
     {{ trace(f.id) }}
     {{ f.column() }}
