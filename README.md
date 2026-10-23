@@ -100,6 +100,14 @@ Templates can use the naming filters `camel`, `pascal`, `kebab`,
 functions in `helpers`, for example a function that converts a field
 type to a TypeScript type. A helper must be deterministic.
 
+An output rule can have `when`: a Jinja2 expression. If it is false,
+the rule writes no file. For a rule with `for_each`, the expression
+gets the context of each element, so `when="element.kind == 'custom'"`
+writes a file only for the custom operations. A binding can also
+declare a `context` function, which returns more template values for a
+definition (it cannot replace the values of the generator, and it must
+be deterministic), and more Jinja2 `filters`.
+
 Templates get the design tokens as `tokens`: a flat list of
 `ResolvedToken`, sorted by path. Each entry has the final value for the
 light and the dark mode, with all references resolved, and keeps its

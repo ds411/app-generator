@@ -58,6 +58,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     environment = make_environment(binding.template_dir)
     environment.globals.update(binding.helpers)
     environment.globals.update(trace_globals(definition))
+    environment.filters.update(binding.filters)
     base = _base_context(binding, definition)
     elements = list(iter_elements(definition))
     gap_elements = [e for e in elements if e.kind not in binding.covers]
@@ -70,7 +71,8 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
 
     for output in binding.outputs:
         for context in _contexts(base, output, elements):
-            add(_render(environment, output, context))
+            if _applies(environment, output, context):
+                add(_render(environment, output, context))
 
     gaps: list[Gap] = []
     for element in gap_elements:
@@ -119,6 +121,23 @@ def _render(
     )
 
 
+def _applies(environment: jinja2.Environment, output: Output, context: dict[str, Any]) -> bool:
+    """Return True if the `when` expression of an output rule is true in a context."""
+    if output.when is None:
+        return True
+    where = f"'{output.template}'"
+    if "element_id" in context:
+        where += f" for '{context['element_id']}'"
+    try:
+        return bool(environment.compile_expression(output.when, undefined_to_none=False)(**context))
+    except jinja2.UndefinedError as error:
+        raise GenerationError(
+            f"The condition of the rule {where} needs a missing value: {error}"
+        ) from None
+    except jinja2.TemplateSyntaxError as error:
+        raise GenerationError(f"The condition of the rule {where} is not valid: {error}") from None
+
+
 def _contexts(
     base: dict[str, Any], output: Output, elements: list[DefinitionElement]
 ) -> list[dict[str, Any]]:
@@ -133,14 +152,31 @@ def _base_context(binding: Binding, definition: AppDefinition) -> dict[str, Any]
 
     The context holds no clock or random values. A set has no order, so
     the context gives the covered kinds as a sorted list. `tokens` holds
-    the resolved design tokens, sorted by path.
+    the resolved design tokens, sorted by path. The context function of
+    the binding adds its values, but it cannot replace a value of the
+    generator.
     """
-    return {
+    base: dict[str, Any] = {
         "definition": definition,
         "app": definition.app,
         "binding": {"name": binding.name, "covers": sorted(binding.covers)},
         "tokens": resolve_tokens(definition),
     }
+    if binding.context is None:
+        return base
+    extra = dict(binding.context(definition))
+    clash = sorted((set(base) | _ELEMENT_KEYS) & set(extra))
+    if clash:
+        names = ", ".join(clash)
+        raise GenerationError(
+            f"The context of the binding replaces values of the generator: {names}."
+        )
+    return {**base, **extra}
+
+
+_ELEMENT_KEYS = frozenset(
+    {"element", "element_id", "element_kind", "name", "output_path", "output_kind"}
+)
 
 
 def _element_context(base: dict[str, Any], element: DefinitionElement) -> dict[str, Any]:
