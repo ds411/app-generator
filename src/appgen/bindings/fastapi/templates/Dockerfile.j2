@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+{{ trace_header("app") }}
+# Install the dependencies with uv in a build stage. Run the API as a
+# non-root user on port 8000. The build arguments select other images,
+# for example a mirror of the registry.
+
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11
+ARG PYTHON_IMAGE=python:3.14-slim
+
+FROM ${UV_IMAGE} AS uv
+
+FROM ${PYTHON_IMAGE} AS build
+COPY --from=uv /uv /bin/uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --no-dev
+COPY . .
+
+FROM ${PYTHON_IMAGE}
+RUN useradd --system --uid 10001 --no-create-home app
+WORKDIR /app
+COPY --from=build --chown=app:app /app /app
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
+USER app
+EXPOSE 8000
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "8000"]

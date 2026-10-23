@@ -1,0 +1,43 @@
+{{ trace_header("app") }}
+# Start Postgres, run the migrations, and start the API on port 8000:
+#   docker compose up --build
+
+name: {{ app.name | tojson }}
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:18}
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: {{ py.package }}
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d {{ py.package }}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    image: {{ app.name }}-api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: {{ app.name }}-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:

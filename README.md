@@ -316,9 +316,9 @@ custom operation has a generated endpoint and an extension file for its
 logic, and each entity has an extension file for its custom validation.
 Each operation has generated API tests that run against Postgres in a
 container. Errors use the problem details format (RFC 9457). An Alembic
-migration creates the schema in Postgres. Pages and the UI are out of
-the scope of the binding. The binding is in
-`src/appgen/bindings/fastapi/`, and [ADR
+migration creates the schema in Postgres. A Dockerfile and a Compose
+file run the API with Postgres. Pages and the UI are out of the scope of
+the binding. The binding is in `src/appgen/bindings/fastapi/`, and [ADR
 0006](docs/adr/0006-fastapi-binding.md) describes its design. To try the
 output:
 

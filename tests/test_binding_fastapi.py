@@ -358,3 +358,18 @@ def test_the_factories_store_the_records_that_a_record_needs(result: GenerationR
     assert "async def make_task(session: AsyncSession, **values: Any) -> Task:" in factories
     assert '        values["project_id"] = str((await make_project(session)).id)\n' in factories
     assert '"Task": itertools.count(1),' in factories
+
+
+def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -> None:
+    files = _files(result)
+    dockerfile = files["Dockerfile"]
+    assert "# @trace app file" in dockerfile
+    assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11" in dockerfile
+    assert "RUN uv sync --no-dev" in dockerfile
+    assert "USER app" in dockerfile
+    assert dockerfile.count("\nFROM ") == 3
+    compose = files["compose.yaml"]
+    assert "# @trace app file" in compose
+    assert 'command: ["alembic", "upgrade", "head"]' in compose
+    assert "condition: service_completed_successfully" in compose
+    assert ".venv\n" in files[".dockerignore"]
