@@ -213,6 +213,15 @@ components from the shared templates (`src/appgen/bindings/shared/`),
 and writes into `src/shared/ui` only the components that the UI of the
 definition uses, with their npm packages.
 
+The app has a multi-stage `Dockerfile`: pnpm builds the static files,
+and nginx serves them as a non-root user on port 8080. nginx sends
+unknown paths to `index.html`, so that the client routes work after a
+reload:
+
+```sh
+docker build -t tracker /tmp/tracker && docker run --rm -p 8080:8080 tracker
+```
+
 The app has no back end. Each entity gets a slice in `src/entities`
 with its TypeScript type, the labels and rules of its fields, mock
 records, and a data access object. The data access keeps the records in

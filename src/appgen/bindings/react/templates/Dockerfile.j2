@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+{{ trace_header("app") }}
+# Build the static files with pnpm, and serve them with nginx as a
+# non-root user on port 8080.
+
+FROM node:{{ react.node_version }}-alpine AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install
+COPY . .
+RUN pnpm build
+
+FROM nginxinc/nginx-unprivileged:1.29-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+USER nginx
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]
