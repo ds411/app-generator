@@ -83,6 +83,15 @@
       ]
     }
   ],
+  "gaps_to_close": [
+    {
+      "file": "operations.ts",
+      "line": 1,
+      "element_id": "operations.complete_task",
+      "message": "The gap file has no stub markers any more (TODO(appgen), NotImplementedError, Not implemented yet), but its trace is still a gap trace.",
+      "hint": "If the code is done, change '@trace:gap operations.complete_task' to '@trace:manual operations.complete_task'."
+    }
+  ],
   "coverage": {
     "percent": 35.71,
     "total": 14,

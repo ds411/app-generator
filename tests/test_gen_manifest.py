@@ -160,3 +160,12 @@ def test_the_manifest_records_the_elements_and_their_changes(tmp_path: Path) -> 
     back = run({"app": "app", "entities.Comment": "entity"})
     assert back.removed == {"entities.Remark": "entity"}
     assert back.added == ("entities.Comment",)
+
+
+def test_the_manifest_records_the_stub_markers(tmp_path: Path) -> None:
+    write_result(GenerationResult(stub_markers=("TODO(appgen)", "STUB")), tmp_path, "b")
+
+    manifest = read_manifest(tmp_path)
+
+    assert manifest is not None
+    assert manifest.stub_markers == ("TODO(appgen)", "STUB")

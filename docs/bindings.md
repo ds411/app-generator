@@ -99,6 +99,7 @@ The output for the entity `Task`:
 | `covers`               | The element kinds that the binding generates code for.                 |
 | `excludes`             | The element kinds out of the scope of the binding, for example `page` and `ui` for a back end. |
 | `gap_rule`             | An output rule for the extension file of each gap element.             |
+| `stub_markers`         | The text that the stubs of the extension files contain. Default: `TODO(appgen)`. See [traces.md](traces.md#generation-gaps). |
 | `shared_template_dirs` | More template folders, after `template_dir`.                           |
 | `context`              | A function of the definition that returns more template values.        |
 | `filters`              | More Jinja2 filters.                                                   |

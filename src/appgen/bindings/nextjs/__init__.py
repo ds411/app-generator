@@ -251,4 +251,5 @@ BINDING = Binding(
     context=context,
     filters={"json": typescript.to_json},
     helpers=typescript.HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
+    stub_markers=("TODO(appgen)", "Not implemented yet"),
 )

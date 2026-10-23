@@ -102,6 +102,14 @@ class Binding:
     extension file (ADR 0005). `for_each` and `extension` of the rule do
     not apply. Without a gap rule, the gaps are only listed.
     """
+    stub_markers: tuple[str, ...] = ("TODO(appgen)",)
+    """The text that the stubs of the extension files of the binding contain.
+
+    While an extension file with a gap trace contains one of these texts,
+    its stub is not written. When none is left, `appgen check` tells the
+    developer to change the gap trace to a manual trace. The manifest
+    records the markers.
+    """
     helpers: Mapping[str, Callable[..., Any]] = field(
         default_factory=dict[str, Callable[..., Any]], hash=False, compare=False
     )

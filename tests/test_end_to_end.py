@@ -64,6 +64,7 @@ def test_the_check_of_each_app_passes(checked: Any) -> None:
     assert report["passed"] is True
     assert report["invalid"] == []
     assert report["warnings"] == []
+    assert report["gaps_to_close"] == []
 
 
 def test_each_app_covers_all_elements_except_the_kinds_out_of_its_scope(checked: Any) -> None:

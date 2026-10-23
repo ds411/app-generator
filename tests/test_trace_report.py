@@ -91,3 +91,36 @@ def test_text_gives_all_reasons_for_a_failure(report: CheckReport) -> None:
     assert render(report, "text").endswith(
         "Result: failed: 2 invalid traces and the coverage 35.7 % is lower than 50.0 %.\n"
     )
+
+
+def test_a_gap_file_without_stub_markers_is_a_gap_to_close(
+    definition: AppDefinition, tmp_path: Path
+) -> None:
+    (tmp_path / "open_ext.py").write_text(
+        "# @trace:gap operations.list_tasks file\n"
+        "def f():\n"
+        "    # TODO(appgen): write it.\n"
+        "    raise NotImplementedError\n"
+    )
+    (tmp_path / "written_ext.py").write_text(
+        "# @trace:gap operations.complete_task file\ndef f():\n    return 1\n"
+    )
+
+    report = check_traces(definition, tmp_path)
+
+    assert [(p.file, p.line, p.element_id) for p in report.gaps_to_close] == [
+        ("written_ext.py", 1, "operations.complete_task")
+    ]
+    assert report.gaps_to_close[0].hint == (
+        "If the code is done, change '@trace:gap operations.complete_task' to "
+        "'@trace:manual operations.complete_task'."
+    )
+    # Both stay open gaps, and the check passes.
+    assert {e.element_id for e in report.coverage.gaps} == {
+        "operations.list_tasks",
+        "operations.complete_task",
+    }
+    assert report.passed
+    text = render(report, "text")
+    assert "Gaps to close: 1\n  written_ext.py:1: operations.complete_task:" in text
+    assert "open_ext.py" not in text.split("Gaps to close")[1]

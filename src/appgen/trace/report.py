@@ -10,7 +10,12 @@ from appgen.dsl.model import AppDefinition
 from appgen.gen.manifest import Manifest, read_manifest
 from appgen.trace.coverage import CoverageReport, ElementCoverage, KindCoverage, compute_coverage
 from appgen.trace.scanner import DEFAULT_IGNORE, Trace, TraceProblem, scan_folder
-from appgen.trace.validity import find_invalid_traces, valid_traces
+from appgen.trace.validity import (
+    DEFAULT_STUB_MARKERS,
+    find_invalid_traces,
+    valid_traces,
+    written_gaps,
+)
 
 type ReportFormat = Literal["text", "json"]
 
@@ -33,6 +38,11 @@ class CheckReport:
     """The lowest coverage in percent that passes, or None for no limit."""
     warnings: list[TraceProblem] = field(default_factory=list[TraceProblem])
     """The trace text that the scan does not read. Warnings do not change the result."""
+    gaps_to_close: list[TraceProblem] = field(default_factory=list[TraceProblem])
+    """The gap files without stub markers: change their gap trace to a manual trace.
+
+    They do not change the result.
+    """
 
     @property
     def coverage_too_low(self) -> bool:
@@ -80,6 +90,11 @@ def check_traces(
     invalid = find_invalid_traces(definition, scan, generated_files, manifest)
     traces = valid_traces(scan, invalid)
     excluded = sorted(set(exclude_kinds))
+    markers = manifest.stub_markers if manifest and manifest.stub_markers else DEFAULT_STUB_MARKERS
+    root = Path(code_folder)
+    to_close = written_gaps(
+        traces, lambda path: (root / path).read_text(encoding="utf-8", errors="replace"), markers
+    )
     return CheckReport(
         files=scan.files,
         traces=traces,
@@ -88,6 +103,7 @@ def check_traces(
         excluded_kinds=excluded,
         min_coverage=None if min_coverage is None else float(min_coverage),
         warnings=scan.warnings,
+        gaps_to_close=to_close,
     )
 
 
@@ -136,6 +152,14 @@ def render_text(report: CheckReport) -> str:
     lines += ["", f"Open gaps: {len(coverage.gaps)}"]
     lines += [f"  {e.element_id} ({e.kind}): {_locations(e)}" for e in coverage.gaps]
 
+    if report.gaps_to_close:
+        lines += ["", f"Gaps to close: {len(report.gaps_to_close)}"]
+        for problem in report.gaps_to_close:
+            lines.append(
+                f"  {problem.file}:{problem.line}: {problem.element_id}: {problem.message}"
+            )
+            lines.append(f"    hint: {problem.hint}")
+
     lines += ["", "Coverage:"]
     rows = [["kind", "covered", "gaps", "uncovered", "coverage"]]
     rows += [_kind_row(k) for k in (*coverage.by_kind, coverage.total)]
@@ -171,6 +195,16 @@ def render_json(report: CheckReport) -> str:
                 "traces": [{"file": t.file, "line": t.line} for t in e.gap_traces],
             }
             for e in coverage.gaps
+        ],
+        "gaps_to_close": [
+            {
+                "file": p.file,
+                "line": p.line,
+                "element_id": p.element_id,
+                "message": p.message,
+                "hint": p.hint,
+            }
+            for p in report.gaps_to_close
         ],
         "coverage": {
             **_kind_json(coverage.total),

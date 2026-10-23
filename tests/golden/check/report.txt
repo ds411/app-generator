@@ -26,6 +26,10 @@ Uncovered elements: 8
 Open gaps: 1
   operations.complete_task (operation): operations.ts:1
 
+Gaps to close: 1
+  operations.ts:1: operations.complete_task: The gap file has no stub markers any more (TODO(appgen), NotImplementedError, Not implemented yet), but its trace is still a gap trace.
+    hint: If the code is done, change '@trace:gap operations.complete_task' to '@trace:manual operations.complete_task'.
+
 Coverage:
   kind       covered  gaps  uncovered  coverage
   app              1     0          0   100.0 %
