@@ -76,6 +76,7 @@ We plan with GitHub milestones and issues.
 | `binding: fastapi` | The FastAPI binding.                                  |
 | `bug`              | Something that does not work as specified.            |
 | `blocked`          | Work cannot continue until a dependency is done.      |
+| `deferred`         | Planned, but deferred. Do not start this work yet.    |
 
 `.github/planning/labels.yml` defines these labels. The "Planning sync"
 workflow creates or updates them on each push to `main`. To add or
