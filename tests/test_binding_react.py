@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from appgen.bindings.react import versions
 from appgen.bindings.react.helpers import route_params, route_path
+from appgen.bindings.shared import shadcn
 from appgen.dsl import AppDefinition, load_definition
 from appgen.gen import (
     Binding,
@@ -63,6 +65,36 @@ def test_the_app_uses_react_19_vite_react_router_and_pnpm(result: GenerationResu
     for script in ('"lint":', '"typecheck":', '"build":'):
         assert script in package
     assert '"strict": true' in _files(result)["tsconfig.json"]
+
+
+def test_the_app_has_only_the_shadcn_components_that_the_ui_uses(react: Binding) -> None:
+    files = _files(
+        generate(load_definition(EXAMPLE.parent.parent / "edge-cases" / "app.yaml"), react)
+    )
+    components = sorted(p for p in files if p.startswith("src/shared/ui/"))
+    assert components == ["src/shared/ui/button.tsx", "src/shared/ui/sonner.tsx"]
+    assert '"radix-ui": "' in files["package.json"]
+    assert '"recharts"' not in files["package.json"]
+    assert '"@/shared/lib/theme"' in files["src/shared/ui/sonner.tsx"]
+
+
+def test_the_shadcn_setup_follows_the_definition(
+    definition: AppDefinition, result: GenerationResult
+) -> None:
+    files = _files(result)
+    for name in [c.name for c in shadcn.used_components(definition)]:
+        assert f"src/shared/ui/{name}.tsx" in files
+    assert "src/shared/lib/use-mobile.ts" in files
+    assert '"css": "src/app/styles/index.css"' in files["components.json"]
+    assert '"ui": "@/shared/ui"' in files["components.json"]
+    assert "plugins: [react(), tailwindcss()]" in files["vite.config.ts"]
+    assert '@import "tailwindcss";' in files["src/app/styles/index.css"]
+    assert '"recharts": "' in files["package.json"]
+
+
+def test_each_package_of_the_shadcn_components_has_a_version() -> None:
+    names = shadcn.packages(shadcn.registry().values())
+    assert sorted(set(names) - set(versions.COMPONENT_PACKAGES)) == []
 
 
 def test_each_page_has_a_slice_and_a_route(

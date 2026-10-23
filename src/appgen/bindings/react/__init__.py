@@ -7,8 +7,10 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 
 from pathlib import Path
 
+from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec, param_type
-from appgen.bindings.react.helpers import HELPERS, context
+from appgen.bindings.react.helpers import HELPERS, context, to_json
+from appgen.bindings.shared import shadcn
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -26,6 +28,25 @@ _COMPONENT_GAPS = (
     ("form_field", "element.widget == 'custom'"),
 )
 _FUNCTION_GAPS = ("custom_rule", "custom_action")
+
+# One rule for each shadcn/ui component and hook of the shared templates.
+# The app gets only the components that its UI uses (ADR 0003).
+_SHADCN = tuple(
+    Output(
+        template=component.template,
+        path=f"src/shared/ui/{name}.tsx",
+        when=f"{name!r} in react.shadcn",
+    )
+    for name, component in sorted(shadcn.registry().items())
+)
+_HOOKS = tuple(
+    Output(
+        template=f"shadcn/{hook}.ts.j2",
+        path=f"src/shared/lib/{hook}.ts",
+        when=f"{hook!r} in react.hooks",
+    )
+    for hook in sorted({h for c in shadcn.registry().values() for h in c.hooks})
+)
 
 
 def _gap_rules(template: str, suffix: str, kind: str, when: str | None = None) -> list[Output]:
@@ -46,6 +67,7 @@ BINDING = Binding(
     name="react",
     description="A React 19 app with Vite, React Router, FSD, and mock data.",
     template_dir=Path(__file__).parent / "templates",
+    shared_template_dirs=(shared.TEMPLATE_DIR,),
     outputs=(
         Output(template="package.json.j2", path="package.json"),
         Output(template="tsconfig.json.j2", path="tsconfig.json"),
@@ -62,6 +84,12 @@ BINDING = Binding(
         Output(template="src/layer.md.j2", path="src/features/README.md"),
         Output(template="src/layer.md.j2", path="src/entities/README.md"),
         Output(template="src/shared/config/app.ts.j2", path="src/shared/config/app.ts"),
+        Output(template="components.json.j2", path="components.json"),
+        Output(template="src/app/styles/index.css.j2", path="src/app/styles/index.css"),
+        Output(template="shadcn/lib/utils.ts.j2", path="src/shared/lib/utils.ts"),
+        Output(template="src/shared/lib/theme.ts.j2", path="src/shared/lib/theme.ts"),
+        *_SHADCN,
+        *_HOOKS,
         Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
         Output(template="src/shared/api/mock-store.ts.j2", path="src/shared/api/mock-store.ts"),
         Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
@@ -131,5 +159,6 @@ BINDING = Binding(
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,
+    filters={"json": to_json},
     helpers=HELPERS | {"gap_spec": gap_spec, "param_type": param_type},
 )
