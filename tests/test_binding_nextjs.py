@@ -405,7 +405,8 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     files = _files(result)
     dockerfile = files["Dockerfile"]
     assert "# @trace app file" in dockerfile
-    assert f"FROM node:{versions.NODE_VERSION}-alpine AS base" in dockerfile
+    assert f"ARG NODE_IMAGE=node:{versions.NODE_VERSION}-alpine" in dockerfile
+    assert "FROM ${NODE_IMAGE} AS base" in dockerfile
     assert "ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone" in dockerfile
     assert "RUN if [ ! -d drizzle ]; then pnpm db:generate; fi" in dockerfile
     assert "COPY --from=build --chown=node:node /app/drizzle ./drizzle" in dockerfile

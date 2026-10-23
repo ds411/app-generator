@@ -2,9 +2,13 @@
 {{ trace_header("app") }}
 # Build the app with pnpm as a standalone Next.js server, and run it as a
 # non-root user on port 3000. Set DATABASE_URL, and DATABASE_MIGRATE=true
-# to apply the migrations in drizzle/ when the server starts.
+# to apply the migrations in drizzle/ when the server starts. The build
+# argument NODE_IMAGE selects another image, for example a mirror of the
+# registry.
 
-FROM node:{{ nextjs.node_version }}-alpine AS base
+ARG NODE_IMAGE=node:{{ nextjs.node_version }}-alpine
+
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -21,7 +25,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
 RUN if [ ! -d drizzle ]; then pnpm db:generate; fi
 RUN pnpm build
 
-FROM node:{{ nextjs.node_version }}-alpine AS run
+FROM ${NODE_IMAGE} AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=build --chown=node:node /app/.next/standalone ./
