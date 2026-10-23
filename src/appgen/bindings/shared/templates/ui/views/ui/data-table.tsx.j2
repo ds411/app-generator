@@ -1,0 +1,207 @@
+{{ trace_header("app") }}
+"use client";
+
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  type PaginationState,
+  type RowSelectionState,
+  type SortingState,
+  useReactTable,
+} from "@tanstack/react-table";
+import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
+import { type CSSProperties, type ReactNode, useState } from "react";
+
+import { Button } from "@/shared/ui/button";
+import { Checkbox } from "@/shared/ui/checkbox";
+import { ListPagination } from "@/shared/ui/list-pagination";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
+import { cn } from "@/shared/lib/utils";
+
+/** The look of a column (`meta` of a column): its classes and its width. */
+export type DataColumnMeta = {
+  className?: string;
+  width?: string;
+};
+
+function metaOf(meta: unknown): DataColumnMeta | undefined {
+  return meta as DataColumnMeta | undefined;
+}
+
+/**
+ * A table of records with sorting, pages, and selection: the data table of
+ * shadcn/ui on TanStack Table. The view filters the records first.
+ */
+export function DataTable<T extends { id: string }>({
+  columns,
+  data,
+  initialSorting = [],
+  pageSize,
+  pageSizes,
+  resetKey,
+  selection = false,
+  bulkActions,
+  rowActions,
+  onRowClick,
+}: {
+  columns: ColumnDef<T>[];
+  data: T[];
+  initialSorting?: SortingState;
+  pageSize: number;
+  pageSizes: number[];
+  /** A value that changes with the filters. A change shows the first page again. */
+  resetKey?: string;
+  selection?: boolean;
+  /** The actions of the selected records. */
+  bulkActions?: (records: T[], clear: () => void) => ReactNode;
+  /** The menu of one record, in the last column. */
+  rowActions?: (record: T) => ReactNode;
+  onRowClick?: (record: T) => void;
+}) {
+  const [sorting, setSorting] = useState<SortingState>(initialSorting);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize });
+  const [lastKey, setLastKey] = useState(resetKey);
+  if (lastKey !== resetKey) {
+    setLastKey(resetKey);
+    setPagination((value) => ({ ...value, pageIndex: 0 }));
+  }
+
+  const allColumns: ColumnDef<T>[] = [
+    ...(selection
+      ? [
+          {
+            id: "select",
+            header: ({ table }) => (
+              <Checkbox
+                aria-label="Select all"
+                checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
+                onCheckedChange={(value) => table.toggleAllPageRowsSelected(Boolean(value))}
+              />
+            ),
+            cell: ({ row }) => (
+              <Checkbox
+                aria-label="Select the row"
+                checked={row.getIsSelected()}
+                onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+                onClick={(event) => event.stopPropagation()}
+              />
+            ),
+            enableSorting: false,
+            meta: { className: "w-10" },
+          } satisfies ColumnDef<T>,
+        ]
+      : []),
+    ...columns,
+    ...(rowActions
+      ? [
+          {
+            id: "actions",
+            header: () => <span className="sr-only">Actions</span>,
+            cell: ({ row }) => <div className="flex justify-end">{rowActions(row.original)}</div>,
+            enableSorting: false,
+            meta: { className: "w-12" },
+          } satisfies ColumnDef<T>,
+        ]
+      : []),
+  ];
+
+  const table = useReactTable({
+    data,
+    columns: allColumns,
+    state: { sorting, rowSelection, pagination },
+    getRowId: (row) => row.id,
+    onSortingChange: setSorting,
+    onRowSelectionChange: setRowSelection,
+    onPaginationChange: setPagination,
+    enableRowSelection: selection,
+    autoResetPageIndex: false,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+
+  const selected = table.getSelectedRowModel().rows.map((row) => row.original);
+  const rows = table.getRowModel().rows;
+
+  return (
+    <div className="space-y-3">
+      {selection && selected.length > 0 && bulkActions && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
+          <span className="font-medium tabular-nums">{selected.length} selected</span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {bulkActions(selected, () => setRowSelection({}))}
+            <Button variant="ghost" size="sm" onClick={() => setRowSelection({})}>
+              Clear the selection
+            </Button>
+          </div>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-md border">
+        <Table>
+          <TableHeader className="bg-muted/40">
+            {table.getHeaderGroups().map((group) => (
+              <TableRow key={group.id}>
+                {group.headers.map((header) => {
+                  const meta = metaOf(header.column.columnDef.meta);
+                  const sorted = header.column.getIsSorted();
+                  const SortIcon = sorted === "asc" ? ArrowUpIcon : sorted === "desc" ? ArrowDownIcon : ChevronsUpDownIcon;
+                  return (
+                    <TableHead
+                      key={header.id}
+                      className={meta?.className}
+                      style={meta?.width ? ({ width: meta.width } as CSSProperties) : undefined}
+                      aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
+                    >
+                      {header.isPlaceholder ? null : header.column.getCanSort() ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="-mx-2 h-8 data-[state=open]:bg-accent"
+                          onClick={header.column.getToggleSortingHandler()}
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          <SortIcon className={cn("size-3.5", !sorted && "text-muted-foreground/60")} />
+                        </Button>
+                      ) : (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow
+                key={row.id}
+                data-state={row.getIsSelected() ? "selected" : undefined}
+                className={cn(onRowClick && "cursor-pointer")}
+                onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id} className={metaOf(cell.column.columnDef.meta)?.className}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <ListPagination
+        page={pagination.pageIndex + 1}
+        pageCount={Math.max(1, table.getPageCount())}
+        pageSize={pagination.pageSize}
+        pageSizes={pageSizes}
+        total={data.length}
+        onPageChange={(page) => setPagination((value) => ({ ...value, pageIndex: page - 1 }))}
+        onPageSizeChange={(size) => setPagination({ pageIndex: 0, pageSize: size })}
+      />
+    </div>
+  );
+}

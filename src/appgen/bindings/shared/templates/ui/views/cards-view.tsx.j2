@@ -1,0 +1,127 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.view_plan(name) %}
+{% set view = plan.view %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ui_lines = [m.card_imports(plan), 'import { ListPagination } from "@/shared/ui/list-pagination";'] %}
+{{ m.imports(plan, "cards", react=(["type ReactNode"] if plan.row_actions else []), ui=ui_lines) }}
+
+{{ m.data(plan) }}
+
+{{ m.filters(plan) }}
+{{ m.sort_function(plan) }}
+
+{{ m.actions(plan) }}
+{% if view.pagination %}
+const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
+{% else %}
+const PAGE_SIZE = {{ plan.page_size }};
+{% endif %}
+const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+
+{{ m.record_card(plan) }}
+
+export type {{ name | pascal }}ViewProps = {
+  /** Show only the records that pass this test, for example the records of one parent. */
+  where?: (record: {{ plan.type }}) => boolean;
+};
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% endif %}
+export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
+  const resource = useResource({{ js(name) }}, load, subscribe);
+{% if plan.filters %}
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+{% endif %}
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+{% if plan.actions or plan.row_actions %}
+  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{% endif %}
+{% if plan.filters %}
+
+  const updateFilters = (next: Filters) => {
+    setFilters(next);
+    setPage(1);
+  };
+{% endif %}
+
+{{ m.states(plan, "cards") }}
+
+  const { records, lookups } = resource.data;
+  const all = where ? records.filter(where) : records;
+{{ m.action_lookups(plan) -}}
+{% if plan.filters %}
+  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+{% if plan.filters | selectattr("kind", "eq", "select") | list %}
+  const options = filterOptions(lookups);
+{% endif %}
+  const rows = sortRecords(all.filter((row) => matches(row, filters, lookups)), lookups);
+{% else %}
+  const rows = sortRecords(all, lookups);
+{% endif %}
+  const pages = pageCount(rows.length, pageSize);
+  const current = Math.min(page, pages);
+
+  return (
+    <div className="space-y-4">
+{{ m.toolbar(plan) }}
+      {all.length === 0 ? (
+{{ m.empty_state(plan) | indent(2, true) }}
+{% if plan.filters %}
+      ) : rows.length === 0 ? (
+        <ViewMessage
+          title="No matching records"
+          text="Change or reset the filters."
+          action={
+            <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+              Reset the filters
+            </Button>
+          }
+        />
+{% endif %}
+      ) : (
+        <>
+{% if view.grid %}
+          <div className={{ js(grid_classes(view.grid)) }}> {{ trace(view.grid.id, jsx=True) }}
+{% for override in view.grid.responsive.values() %}
+            {{ trace(override.id, jsx=True) }}
+{% endfor %}
+{% else %}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+{% endif %}
+            {pageOf(rows, current, pageSize).map((row) => (
+              <RecordCard
+                key={row.id}
+                row={row}
+{% if m.card_uses_lookups(plan) | trim %}
+                lookups={lookups}
+{% endif %}
+{% if plan.row_actions %}
+                menu={<RowActionsMenu actions={Object.values(rowActions)} record={row} onRun={run} />}
+{% endif %}
+              />
+            ))}
+          </div>
+          <ListPagination
+            page={current}
+            pageCount={pages}
+            pageSize={pageSize}
+            pageSizes={PAGE_SIZES}
+            total={rows.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </>
+      )}
+{% if plan.actions or plan.row_actions %}
+      {dialog}
+{% endif %}
+    </div>
+  );
+}

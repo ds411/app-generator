@@ -10,7 +10,7 @@ from pathlib import Path
 from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
-from appgen.bindings.shared import shadcn, ui
+from appgen.bindings.shared import shadcn, ui, views
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -113,6 +113,59 @@ _APP_SHELL = (
 )
 
 
+# The list views: tables, card lists, and boards, with their runtime files
+# (shared templates, see `appgen.bindings.shared.views`). A runtime file is
+# in the app only if a view needs it.
+_VIEW = "src/widgets/{{ name | kebab }}"
+_VIEWS = (
+    *(
+        Output(template=f"ui/views/{template}", path=path, when=when)
+        for template, path, when in (
+            ("lib/format.ts.j2", "src/shared/lib/format.ts", "ui_views.list_views"),
+            ("lib/query.ts.j2", "src/shared/lib/query.ts", "ui_views.list_views"),
+            ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.list_views"),
+            ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.list_views"),
+            ("ui/view-state.tsx.j2", "src/shared/ui/view-state.tsx", "ui_views.list_views"),
+            (
+                "ui/list-pagination.tsx.j2",
+                "src/shared/ui/list-pagination.tsx",
+                "'table' in ui_views.features or 'cards' in ui_views.features",
+            ),
+            (
+                "ui/data-table.tsx.j2",
+                "src/shared/ui/data-table.tsx",
+                "'table' in ui_views.features",
+            ),
+            *(
+                (f"{folder}/{part}.tsx.j2", f"src/shared/ui/{folder}/{part}.tsx", when)
+                for folder, part, when in (
+                    ("values", "badge-value", "'badge' in ui_views.features"),
+                    ("values", "avatar-value", "'avatar' in ui_views.features"),
+                    ("values", "formatted-value", "'formatted' in ui_views.features"),
+                    ("filters", "search-filter", "'search' in ui_views.features"),
+                    ("filters", "boolean-filter", "'boolean' in ui_views.features"),
+                    ("filters", "date-range-filter", "'date_range' in ui_views.features"),
+                    ("filters", "select-filter", "'select' in ui_views.features"),
+                    ("filters", "multi-select-filter", "'multi_select' in ui_views.features"),
+                )
+            ),
+        )
+    ),
+    *(
+        Output(
+            template=f"ui/views/{kind}-view.tsx.j2",
+            path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
+            for_each=f"{kind}_view",
+        )
+        for kind in ("table", "cards", "board")
+    ),
+    *(
+        Output(template="ui/views/index.ts.j2", path=_VIEW + "/index.ts", for_each=f"{kind}_view")
+        for kind in ("table", "cards", "board")
+    ),
+)
+
+
 def _gap_rules(template: str, suffix: str, kind: str, when: str | None = None) -> list[Output]:
     """Return the rules of the generated file and the extension file of a gap."""
     return [
@@ -147,6 +200,7 @@ BINDING = Binding(
         Output(template="src/app/app.tsx.j2", path="src/app/app.tsx"),
         Output(template="src/app/router.tsx.j2", path="src/app/router.tsx"),
         *_APP_SHELL,
+        *_VIEWS,
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
         Output(template="src/layer.md.j2", path="src/features/README.md"),
@@ -240,9 +294,12 @@ BINDING = Binding(
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
         | {"menu", "menu_group", "menu_item", "menu_sub_item"}
+        | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
+        | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
+        | {"badge_set", "badge_value"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,
     filters={"json": to_json},
-    helpers=HELPERS | ui.HELPERS | {"gap_spec": gap_spec},
+    helpers=HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
 )

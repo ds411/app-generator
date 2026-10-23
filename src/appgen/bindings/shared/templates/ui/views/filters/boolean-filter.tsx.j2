@@ -1,0 +1,27 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useId } from "react";
+
+import { Switch } from "@/shared/ui/switch";
+
+/** A switch that keeps only the records with a true value. */
+export function BooleanFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex h-8 items-center gap-2">
+      <Switch id={id} checked={value} onCheckedChange={onChange} />
+      <label htmlFor={id} className="text-sm">
+        {label}
+      </label>
+    </div>
+  );
+}

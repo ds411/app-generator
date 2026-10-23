@@ -20,6 +20,7 @@ from appgen.bindings.shared.typescript import (
     to_json,
 )
 from appgen.bindings.shared.ui import ui_plan
+from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition
 
 __all__ = ["HELPERS", "Member", "context", "members", "mock_records", "to_json"]
@@ -60,6 +61,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         **versions.DEPENDENCIES,
         **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
     }
+    if "table" in ViewContext(definition).features:
+        dependencies |= versions.TABLE_PACKAGES
     return {
         "name": definition.app.name,
         "private": True,
@@ -88,6 +91,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": ui_plan(definition),
+        "ui_views": ViewContext(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",
             "mode_toggle": shadcn.has_mode_toggle(definition),

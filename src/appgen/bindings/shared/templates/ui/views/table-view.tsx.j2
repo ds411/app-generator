@@ -1,0 +1,138 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.view_plan(name) %}
+{% set view = plan.view %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ui_lines = ['import { DataTable } from "@/shared/ui/data-table";'] %}
+import type { ColumnDef } from "@tanstack/react-table";
+{{ m.imports(plan, "table", ui=ui_lines) }}
+
+{{ m.data(plan) }}
+
+{{ m.filters(plan) }}
+{{ m.sort_function(plan) }}
+
+{% set code = plan.columns | map(attribute="cell") | join(" ") ~ (plan.columns | map(attribute="value") | map(attribute="sort_expr") | join(" ")) %}
+/** The columns of the table. */
+function columnsFor({{ lookups_param(code) }}: Lookups): ColumnDef<{{ plan.type }}>[] {
+  return [
+{% for c in plan.columns %}
+    { {{ trace(c.element_id) }}
+      id: {{ js(c.name | camel) }},
+      header: {{ js(c.header) }},
+      accessorFn: (row) => {{ c.value.sort_expr }},
+      cell: ({ row: { original: row } }) => {{ c.cell }},
+{% if not c.sortable %}
+      enableSorting: false,
+{% else %}
+      sortUndefined: "last",
+{% endif %}
+{% if c.classes or c.width %}
+      meta: { {% if c.classes %}className: {{ js(c.classes) }}{% endif %}{% if c.classes and c.width %}, {% endif %}{% if c.width %}width: {{ js(c.width) }}{% endif %} },
+{% endif %}
+    },
+{% endfor %}
+  ];
+}
+
+{{ m.actions(plan) }}
+{% if view.pagination %}
+const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
+{% else %}
+const PAGE_SIZE = {{ plan.page_size }};
+{% endif %}
+const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+
+export type {{ name | pascal }}ViewProps = {
+  /** Show only the records that pass this test, for example the records of one parent. */
+  where?: (record: {{ plan.type }}) => boolean;
+};
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% endif %}
+export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
+  const resource = useResource({{ js(name) }}, load, subscribe);
+{% if plan.filters %}
+  const [filters, updateFilters] = useState<Filters>(INITIAL_FILTERS);
+{% endif %}
+{% if plan.actions or plan.row_actions or plan.bulk_actions %}
+  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{% endif %}
+
+{{ m.states(plan, "table") }}
+
+  const { records, lookups } = resource.data;
+  const all = where ? records.filter(where) : records;
+{{ m.action_lookups(plan) -}}
+{% if plan.filters %}
+  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+{% set options = plan.filters | selectattr("kind", "eq", "select") | list %}
+{% if options %}
+  const options = filterOptions(lookups);
+{% endif %}
+  const rows = sortRecords(all.filter((row) => matches(row, filters, lookups)), lookups);
+{% else %}
+  const rows = sortRecords(all, lookups);
+{% endif %}
+{% set click = plan.row_action(view.row_click) %}
+
+  return (
+    <div className="space-y-4">
+{{ m.toolbar(plan) }}
+      {all.length === 0 ? (
+{{ m.empty_state(plan) | indent(2, true) }}
+{% if plan.filters %}
+      ) : rows.length === 0 ? (
+        <ViewMessage
+          title="No matching records"
+          text="Change or reset the filters."
+          action={
+            <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+              Reset the filters
+            </Button>
+          }
+        />
+{% endif %}
+      ) : (
+        <DataTable
+          columns={columnsFor(lookups)}
+          data={rows}
+          pageSize={PAGE_SIZE}
+          pageSizes={PAGE_SIZES}
+{% if plan.filters %}
+          resetKey={JSON.stringify(filters)}
+{% endif %}
+{% if view.selection %}
+          selection
+{% endif %}
+{% if plan.bulk_actions %}
+          bulkActions={(selected, clear) =>
+            Object.values(bulkActions).map((action) => (
+              <ActionButton
+                key={action.key}
+                action={action}
+                records={selected}
+                onRun={(next, records) => {
+                  run(next, records);
+                  clear();
+                }}
+              />
+            ))
+          }
+{% endif %}
+{% if plan.row_actions %}
+          rowActions={(record) => <RowActionsMenu actions={Object.values(rowActions)} record={record} onRun={run} />}
+{% endif %}
+{% if click %}
+          onRowClick={(record) => run(rowActions.{{ click.name | camel }}, [record])}
+{% endif %}
+        />
+      )}
+{% if plan.actions or plan.row_actions or plan.bulk_actions %}
+      {dialog}
+{% endif %}
+    </div>
+  );
+}

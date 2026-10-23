@@ -1,0 +1,184 @@
+{{ trace_header("app") }}
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import { MoreHorizontalIcon } from "lucide-react";
+import { Fragment, type ReactNode, useState } from "react";
+import { toast } from "sonner";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/ui/alert-dialog";
+import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
+import { useNavigate } from "@/shared/lib/router";
+
+export type ActionVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
+
+/** An action of a view, a row, or the selected rows. */
+export type ActionSpec<T> = {
+  key: string;
+  label: string;
+  icon?: LucideIcon;
+  variant?: ActionVariant;
+  /** A question that the user must confirm first. */
+  confirm?: { title: string; message?: string; confirmLabel?: string };
+  /** For an action that opens a page: the path of the page, for the first record. */
+  href?: (record: T) => string;
+  /** For an action that runs code: the code. */
+  run?: (records: T[]) => Promise<unknown>;
+  /** The message after a success. */
+  toast?: string;
+  /** The path to open after a success. */
+  navigateTo?: string;
+};
+
+type Pending<T> = { action: ActionSpec<T>; records: T[] };
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "The action did not succeed.";
+}
+
+/**
+ * Run the actions of a view: ask for a confirmation, run the action, and
+ * show the result. Render `dialog` once in the view.
+ */
+export function useActionRunner<T>() {
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<Pending<T> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const execute = async (action: ActionSpec<T>, records: T[]) => {
+    if (action.href) {
+      // A view action has no record: its page has no path parameters.
+      navigate(action.href(records[0] as T));
+      return;
+    }
+    setBusy(true);
+    try {
+      await action.run?.(records);
+      if (action.toast) toast.success(action.toast);
+      if (action.navigateTo) navigate(action.navigateTo);
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = (action: ActionSpec<T>, records: T[]) => {
+    if (action.confirm) setPending({ action, records });
+    else void execute(action, records);
+  };
+
+  const confirm = pending?.action.confirm;
+  const dialog = (
+    <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
+          {confirm?.message && <AlertDialogDescription>{confirm.message}</AlertDialogDescription>}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant={pending?.action.variant === "destructive" ? "destructive" : "default"}
+            onClick={() => {
+              if (pending) void execute(pending.action, pending.records);
+              setPending(null);
+            }}
+          >
+            {confirm?.confirmLabel ?? pending?.action.label ?? "Continue"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  return { run, dialog, busy };
+}
+
+/** A button that runs an action. */
+export function ActionButton<T>({
+  action,
+  records,
+  onRun,
+  size = "sm",
+  disabled,
+}: {
+  action: ActionSpec<T>;
+  records: T[];
+  onRun: (action: ActionSpec<T>, records: T[]) => void;
+  size?: "sm" | "default";
+  disabled?: boolean;
+}) {
+  const Icon = action.icon;
+  return (
+    <Button variant={action.variant ?? "default"} size={size} disabled={disabled} onClick={() => onRun(action, records)}>
+      {Icon && <Icon />}
+      {action.label}
+    </Button>
+  );
+}
+
+/** A menu with the actions of one record. */
+export function RowActionsMenu<T>({
+  actions,
+  record,
+  onRun,
+  children,
+}: {
+  actions: ActionSpec<T>[];
+  record: T;
+  onRun: (action: ActionSpec<T>, records: T[]) => void;
+  /** More menu items, for example the columns of a board. */
+  children?: ReactNode;
+}) {
+  if (actions.length === 0 && !children) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 data-[state=open]:bg-muted"
+          aria-label="Actions"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MoreHorizontalIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44" onClick={(event) => event.stopPropagation()}>
+        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+        {actions.map((action, index) => {
+          const Icon = action.icon;
+          const destructive = action.variant === "destructive";
+          return (
+            <Fragment key={action.key}>
+              {destructive && index > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem variant={destructive ? "destructive" : "default"} onSelect={() => onRun(action, [record])}>
+                {Icon && <Icon />}
+                {action.label}
+              </DropdownMenuItem>
+            </Fragment>
+          );
+        })}
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

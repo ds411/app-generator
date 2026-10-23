@@ -21,9 +21,6 @@ from appgen.dsl.ui.forms import Form
 from appgen.dsl.ui.views import (
     BoardView,
     CardsView,
-    DateRangeFilter,
-    SearchFilter,
-    SelectFilter,
     TableView,
     View,
 )
@@ -136,6 +133,7 @@ def used_components(definition: AppDefinition) -> list[Component]:
             names.add("badge")
         for view in ui.views.values():
             names.update(_view_components(view))
+        names.update(_list_components(definition))
         for form in ui.forms.values():
             names.update(_form_components(definition, form))
         for dashboard in ui.dashboards.values():
@@ -161,45 +159,45 @@ def _action_components(actions: Iterable[Action]) -> set[str]:
 
 
 def _view_components(view: View) -> set[str]:
+    """Return the components of a detail view. The list views come from `_list_components`."""
     names = _action_components(view.actions.values())
-    if isinstance(view, TableView | CardsView):
-        names.update(_action_components(view.row_actions.values()))
-        if view.row_actions:
-            names.add("dropdown-menu")
-        # List views always page on the server (ui.defaults.page_size).
-        names.update(("pagination", "select"))
-        for filter_ in view.filters.values():
-            if isinstance(filter_, SearchFilter):
-                names.add("input")
-            elif isinstance(filter_, SelectFilter):
-                names.update(
-                    ("popover", "command", "checkbox") if filter_.multiple else ("select",)
-                )
-            elif isinstance(filter_, DateRangeFilter):
-                names.update(("popover", "calendar"))
-            else:
-                names.add("switch")
-    if isinstance(view, TableView):
-        names.add("table")
-        if view.selection:
-            names.add("checkbox")
-        names.update(_action_components(view.bulk_actions.values()))
-        for column in view.columns.values():
-            if column.format == "badge" or column.badge:
-                names.add("badge")
-            elif column.format == "avatar":
-                names.add("avatar")
-    elif isinstance(view, CardsView):
-        names.add("card")
-    elif isinstance(view, BoardView):
-        names.update(("card", "badge", "scroll-area"))
-        names.update(_action_components(view.row_actions.values()))
-    else:
-        names.update(("card", "separator"))
-        if view.tabs:
-            names.add("tabs")
-        if view.header is not None and view.header.badges:
-            names.add("badge")
+    if isinstance(view, TableView | CardsView | BoardView):
+        return names
+    names.update(("card", "separator"))
+    if view.tabs:
+        names.add("tabs")
+    if view.header is not None and view.header.badges:
+        names.add("badge")
+    return names
+
+
+# The components of each part of the list views (see `ViewContext.features`).
+_LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "table": ("table", "checkbox", "select"),
+    "cards": ("card", "select"),
+    "board": ("card", "badge"),
+    "search": ("input",),
+    "boolean": ("switch",),
+    "date_range": ("popover", "calendar"),
+    "select": ("select",),
+    "multi_select": ("popover", "command"),
+    "badge": ("badge",),
+    "avatar": ("avatar",),
+}
+
+
+def _list_components(definition: AppDefinition) -> set[str]:
+    """Return the components of the list views and of their shared runtime files."""
+    # A local import: the views module imports this module through `ui`.
+    from appgen.bindings.shared.views import ViewContext
+
+    context = ViewContext(definition)
+    if not context.list_views:
+        return set()
+    # The actions, the states, and the page controls of all list views.
+    names = {"alert-dialog", "dropdown-menu", "empty", "skeleton", "spinner"}
+    for feature in context.features:
+        names.update(_LIST_COMPONENTS.get(feature, ()))
     return names
 
 

@@ -1,0 +1,111 @@
+{{ trace_header("app") }}
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+
+import { Button } from "@/shared/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/shared/ui/empty";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { Spinner } from "@/shared/ui/spinner";
+
+export type ViewShape = "table" | "cards" | "board" | "detail" | "widget";
+
+/** What a view shows while it loads: skeletons in the shape of the view, or a spinner. */
+export function ViewLoading({
+  indicator,
+  shape,
+  text,
+  rows = 5,
+}: {
+  indicator: "skeleton" | "spinner";
+  shape: ViewShape;
+  text?: string;
+  rows?: number;
+}) {
+  if (indicator === "spinner") {
+    return (
+      <div role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Spinner />
+        {text ?? "Loading"}
+      </div>
+    );
+  }
+  const items = Array.from({ length: rows }, (_, index) => index);
+  return (
+    <div role="status" aria-label={text ?? "Loading"} className="space-y-3">
+      {text && <p className="text-sm text-muted-foreground">{text}</p>}
+      {shape === "table" && (
+        <div className="space-y-2 rounded-md border p-3">
+          <Skeleton className="h-8 w-full" />
+          {items.map((item) => (
+            <Skeleton key={item} className="h-10 w-full" />
+          ))}
+        </div>
+      )}
+      {shape === "cards" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item) => (
+            <Skeleton key={item} className="h-36 w-full rounded-xl" />
+          ))}
+        </div>
+      )}
+      {shape === "board" && (
+        <div className="flex gap-4 overflow-hidden">
+          {items.slice(0, 4).map((item) => (
+            <div key={item} className="w-72 shrink-0 space-y-3">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-28 w-full rounded-xl" />
+              <Skeleton className="h-28 w-full rounded-xl" />
+            </div>
+          ))}
+        </div>
+      )}
+      {(shape === "detail" || shape === "widget") && (
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-1/3" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What a view shows without records, or after an error. */
+export function ViewMessage({
+  title,
+  text,
+  icon: Icon,
+  action,
+  tone = "default",
+}: {
+  title: string;
+  text?: string;
+  icon?: LucideIcon;
+  action?: ReactNode;
+  tone?: "default" | "error";
+}) {
+  return (
+    <Empty role={tone === "error" ? "alert" : undefined} className="border border-dashed">
+      <EmptyHeader>
+        {Icon && (
+          <EmptyMedia variant="icon" className={tone === "error" ? "bg-destructive/10 text-destructive" : undefined}>
+            <Icon />
+          </EmptyMedia>
+        )}
+        <EmptyTitle>{title}</EmptyTitle>
+        {text && <EmptyDescription>{text}</EmptyDescription>}
+      </EmptyHeader>
+      {action && <EmptyContent>{action}</EmptyContent>}
+    </Empty>
+  );
+}
+
+/** A button that loads the data of a view again, for the error state. */
+export function RetryButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Button variant="outline" size="sm" onClick={onRetry}>
+      Try again
+    </Button>
+  );
+}

@@ -243,8 +243,12 @@ generated and the extension files of the custom elements. A binding template wit
 path wins over a shared template.
 
 `ui/` holds the shared UI code: the app shell (layouts, menus,
-breadcrumbs, page search, page header, and the 404 page) for now. The
-templates render the values of `appgen.bindings.shared.ui`, and they are
+breadcrumbs, page search, page header, and the 404 page), and the list
+views in `ui/views/` (tables, card lists, and boards, with their filters,
+actions, states, and value formats). The app shell templates render the
+values of `appgen.bindings.shared.ui`, and the view templates render the
+`ViewPlan` of each view from `appgen.bindings.shared.views` (the
+template global `ui_views`). The templates are
 client components that import only `@/shared/*`, `@/widgets/*`,
 `@/features/*`, and `@/entities/<entity>`. Each binding writes
 `@/shared/lib/router` with `Link` (prop `href`), `useNavigate`,
@@ -277,6 +281,22 @@ a record shows the display field of the record. The responsive rules of
 the layout change the sidebar mode (expanded, icons, drawer, or hidden),
 the widths, the top bar parts, and the content padding on screens
 narrower than each breakpoint token.
+
+Each table, card list, and board view is a widget in
+`src/widgets/<view>`, and a page with the view as its content shows it.
+A view reads all records of its entity, and the related records that its
+field paths go through, and filters, sorts, and pages them in the
+browser. A table has sortable columns, a row selection with the bulk
+actions, and a menu of row actions (shadcn/ui data table with TanStack
+Table). A card list shows the card fields in a responsive grid. A board
+has one column for each value of its enum field, with the work in
+progress limits: a drag and drop, or the "Move to" menu, moves a card and
+runs the move operation. The filters are a search box, selects (one or
+many values), a switch, and a date range. The enum values show as
+badges with the label, the color token, and the icon of their badge set.
+The actions open a page, run an operation or a custom action, ask for a
+confirmation, and show a toast. Each view shows its loading, empty, and
+error states. Form actions come with the forms.
 
 The theme comes from the design tokens, with the shared template
 `theme/globals.css.j2`: one CSS variable for each token, with a light and

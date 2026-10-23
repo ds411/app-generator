@@ -1,0 +1,90 @@
+{{ trace_header("app") }}
+"use client";
+
+import { CheckIcon, PlusCircleIcon } from "lucide-react";
+
+import { Button } from "@/shared/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/shared/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import type { Option } from "@/shared/lib/query";
+import { cn } from "@/shared/lib/utils";
+
+/** A choice of many values for a select filter, as in the shadcn/ui data table. */
+export function MultiSelectFilter({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Option[];
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const chosen = new Set(value);
+  const names = options.filter((option) => chosen.has(option.value)).map((option) => option.label);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 border-dashed">
+          <PlusCircleIcon />
+          {label}
+          {names.length > 0 && (
+            <span className="ml-1 rounded-sm bg-secondary px-1.5 text-xs font-normal">
+              {names.length > 2 ? `${names.length} chosen` : names.join(", ")}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        <Command>
+          <CommandInput placeholder={label} />
+          <CommandList>
+            <CommandEmpty>No value has this name.</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => {
+                const selected = chosen.has(option.value);
+                return (
+                  <CommandItem
+                    key={option.value}
+                    onSelect={() =>
+                      onChange(selected ? value.filter((item) => item !== option.value) : [...value, option.value])
+                    }
+                  >
+                    <span
+                      className={cn(
+                        "flex size-4 items-center justify-center rounded-[4px] border",
+                        selected ? "border-primary bg-primary text-primary-foreground" : "opacity-50",
+                      )}
+                    >
+                      {selected && <CheckIcon className="size-3 text-primary-foreground" />}
+                    </span>
+                    {option.label}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+            {value.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup>
+                  <CommandItem onSelect={() => onChange([])} className="justify-center text-center">
+                    Clear the filter
+                  </CommandItem>
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}

@@ -1,0 +1,134 @@
+"""Tests of the list view values of the front-end bindings (`appgen.bindings.shared.views`)."""
+
+from pathlib import Path
+
+import pytest
+
+from appgen.bindings.shared.views import (
+    ViewContext,
+    definition_display,
+    grid_classes,
+    lookups_param,
+)
+from appgen.dsl import load_definition
+from appgen.dsl.ui.common import Grid, GridOverride
+
+EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
+VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"
+
+
+@pytest.fixture(scope="module")
+def example() -> ViewContext:
+    return ViewContext(load_definition(EXAMPLE))
+
+
+@pytest.fixture(scope="module")
+def views() -> ViewContext:
+    return ViewContext(load_definition(VIEWS))
+
+
+def test_a_field_path_reads_the_related_records_from_the_lookups(views: ViewContext) -> None:
+    value = views.value("Item", "owner.team.lead.name")
+    assert value.expr == (
+        'lookups.member.get(lookups.team.get(lookups.member.get(row.ownerId ?? "")'
+        '?.teamId ?? "")?.leadId ?? "")?.name'
+    )
+    assert value.kind == "field"
+    owner = views.value("Item", "owner")
+    assert owner.kind == "one"
+    assert owner.key_expr == "row.ownerId ?? null"
+    assert owner.text_expr == 'String(lookups.member.get(row.ownerId ?? "")?.name ?? "")'
+    tags = views.value("Item", "tags")
+    assert tags.kind == "many"
+    assert tags.key_expr == "(row.tags ?? [])"
+    assert views.view_plan("item_table").lookups == ["Member", "Team"]
+
+
+def test_an_enum_field_takes_the_badge_set_of_the_field(example: ViewContext) -> None:
+    value = example.value("Project", "status")
+    assert value.format == "badge"
+    assert value.badge == "projectStatus"
+    assert example.value("Project", "due_date").format == "date"
+
+
+def test_the_filters_give_their_state_and_their_match(views: ViewContext) -> None:
+    filters = {f.name: f for f in views.view_plan("item_table").filters}
+    assert filters["search"].default == '""'
+    assert filters["search"].match.startswith("matchesSearch(filters.search, [")
+    assert filters["stage"].default == '["new", "open"]'
+    assert filters["stage"].state_type == "string[]"
+    assert filters["stage"].multiple
+    assert filters["kind"].options == (
+        '[{ value: "book", label: "Book" }, { value: "tool", label: "Tool" }, '
+        '{ value: "part", label: "Part" }]'
+    )
+    assert filters["tag"].match == (
+        "filters.tag === null || (row.tags ?? []).includes(filters.tag)"
+    )
+    assert filters["owner"].options is not None
+    assert filters["owner"].options.startswith("[...lookups.member.values()]")
+    assert filters["in_stock"].match == "!filters.inStock || row.inStock === true"
+    assert filters["received"].match == "inDateRange(row.received, filters.received)"
+
+
+def test_the_actions_give_their_paths_and_their_code(views: ViewContext) -> None:
+    plan = views.view_plan("item_table")
+    rows = {a.name: a for a in plan.row_actions}
+    assert rows["open"].href == 'pageHref("item", { id: String(record.id) })'
+    team = rows["team"].href
+    assert team is not None
+    assert 'team: String(lookups.member.get(record.ownerId ?? "")?.teamId ?? null)' in team
+    assert rows["delete"].run == "Promise.all(records.map((record) => deleteItem(record.id)))"
+    assert rows["delete"].navigate_to == 'pageHref("items")'
+    assert rows["restock"].imports == ('import { restock } from "@/features/restock";',)
+    assert rows["flag"].run is not None
+    assert rows["flag"].run.startswith("Promise.all(records.map((record) => ")
+    bulk = {a.name: a for a in plan.bulk_actions}
+    assert bulk["export"].run is not None
+    assert bulk["export"].run.endswith("(records)")
+    assert [a.name for a in plan.actions] == ["cards", "sync"]
+
+
+def test_a_form_action_waits_for_the_forms(example: ViewContext) -> None:
+    plan = example.view_plan("project_table")
+    assert [a.name for a in plan.row_actions] == ["open", "delete"]
+    assert plan.action("new_project") is None
+
+
+def test_a_board_moves_a_card_with_its_operation(example: ViewContext, views: ViewContext) -> None:
+    board = example.view_plan("task_board")
+    assert board.move == 'updateTask(record.id, { status: value as Task["status"] })'
+    assert [c.value for c in board.board_columns] == ["todo", "in_progress", "in_review", "done"]
+    assert board.board_columns[1].limit == 8
+    assert board.board_columns[1].color == "var(--status-progress)"
+    other = views.view_plan("item_board")
+    assert other.move == 'itemApi.update(record.id, { stage: value as Item["stage"] })'
+    assert [c.label for c in other.board_columns] == ["New", "Open", "Closed"]
+
+
+def test_a_card_without_a_title_shows_the_first_string_field(views: ViewContext) -> None:
+    definition = views.definition
+    assert definition_display(definition.entities["Item"]) == "code"
+    assert definition_display(definition.entities["Member"]) == "name"
+    card = views.view_plan("item_cards").card
+    assert card is not None
+    assert card.title == '{String(row.code ?? "")}'
+    assert card.href == 'pageHref("item", { id: String(row.id) })'
+
+
+def test_the_features_list_the_runtime_parts_that_the_views_need(views: ViewContext) -> None:
+    assert views.features >= {"table", "cards", "board", "search", "select", "multi_select"}
+    assert views.features >= {"boolean", "date_range", "badge", "avatar", "formatted"}
+    edge_cases = ViewContext(load_definition(EXAMPLE.parent.parent / "edge-cases" / "app.yaml"))
+    assert edge_cases.features == set()
+
+
+def test_grid_classes_follow_the_breakpoints() -> None:
+    grid = Grid(columns=4, gap="{spacing.4}", responsive={"lg": GridOverride(columns=2)})
+    assert grid_classes(grid) == "grid grid-cols-4 gap-(--spacing-4) max-lg:grid-cols-2"
+    assert grid_classes(None) == "grid grid-cols-1 gap-4"
+
+
+def test_an_unused_lookups_parameter_gets_an_underscore() -> None:
+    assert lookups_param("row.title") == "_lookups"
+    assert lookups_param('lookups.person.get(row.ownerId ?? "")') == "lookups"

@@ -1,0 +1,76 @@
+{{ trace_header("app") }}
+// The search, the filters, the sort, and the pages of the list views. The
+// views read all records and apply these functions in the browser.
+
+import { toDate } from "./format";
+
+export type DateRange = { from?: string; to?: string };
+
+export type Option = { value: string; label: string };
+
+/** Return true if each word of a search text is in one of the texts. */
+export function matchesSearch(search: string, texts: string[]): boolean {
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = texts.join(" ").toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+/** Return true if a date is in a range. An open end of the range matches all dates. */
+export function inDateRange(value: string | null | undefined, range: DateRange): boolean {
+  if (!range.from && !range.to) return true;
+  if (!value) return false;
+  const day = value.slice(0, 10);
+  return (!range.from || day >= range.from) && (!range.to || day <= range.to);
+}
+
+/** Compare two values for a sort. Empty values come last. */
+export function compareValues(a: unknown, b: unknown): number {
+  const emptyA = a === null || a === undefined || a === "";
+  const emptyB = b === null || b === undefined || b === "";
+  if (emptyA || emptyB) return Number(emptyA) - Number(emptyB);
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+/** Return the records sorted by a value. The sort is stable. */
+export function sortBy<T>(rows: T[], value: (row: T) => unknown, desc = false): T[] {
+  const sign = desc ? -1 : 1;
+  return [...rows].sort((a, b) => sign * compareValues(value(a), value(b)));
+}
+
+/** Return the records of one page. Pages count from 1. */
+export function pageOf<T>(rows: T[], page: number, pageSize: number): T[] {
+  return rows.slice((page - 1) * pageSize, page * pageSize);
+}
+
+/** Return the number of pages, at least 1. */
+export function pageCount(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+/** Return today as `YYYY-MM-DD`, in the local time zone. */
+export function today(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/** Return a date as `YYYY-MM-DD`, in the local time zone. */
+export function isoDay(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** Return a `YYYY-MM-DD` day as a Date, or undefined. */
+export function fromIsoDay(value: string | undefined): Date | undefined {
+  return value ? toDate(value) : undefined;
+}
+
+/** Return a map of records by ID. */
+export function byId<T extends { id: string }>(rows: T[]): Map<string, T> {
+  return new Map(rows.map((row) => [row.id, row]));
+}

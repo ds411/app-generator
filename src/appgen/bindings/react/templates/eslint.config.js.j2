@@ -28,10 +28,12 @@ export default tseslint.config(
   {
     // The shadcn/ui sources, as shadcn/ui writes them. They export their
     // variants next to the components, and some of them do not follow the
-    // React Compiler rules of eslint-plugin-react-hooks.
+    // React Compiler rules of eslint-plugin-react-hooks. The data table
+    // uses TanStack Table, which the React Compiler does not memoize.
     files: ["src/shared/ui/**/*.tsx", "src/shared/lib/use-*.ts"],
     rules: {
       "react-refresh/only-export-components": "off",
+      "react-hooks/incompatible-library": "off",
       "react-hooks/purity": "off",
       "react-hooks/set-state-in-effect": "off",
     },

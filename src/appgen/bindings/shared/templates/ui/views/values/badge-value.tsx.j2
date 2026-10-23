@@ -1,0 +1,33 @@
+{{ trace_header("app") }}
+import type { CSSProperties } from "react";
+
+import { Badge } from "@/shared/ui/badge";
+import type { BadgeSet } from "@/shared/config/badges";
+import { cn } from "@/shared/lib/utils";
+
+/**
+ * An enum value as a badge, with the label, the color, and the icon of its
+ * badge set. A value without a style shows as an outline badge.
+ */
+export function BadgeValue({ set, value, className }: { set?: BadgeSet; value: unknown; className?: string }) {
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const style = set?.[String(value)];
+  if (!style) return <Badge variant="outline" className={className}>{String(value)}</Badge>;
+  const Icon = style.icon;
+  return (
+    <Badge
+      variant="outline"
+      style={style.color ? ({ "--badge-color": style.color } as CSSProperties) : undefined}
+      className={cn(
+        style.color &&
+          "border-(color:--badge-color)/30 bg-(color:--badge-color)/10 text-(color:--badge-color) dark:bg-(color:--badge-color)/20",
+        className,
+      )}
+    >
+      {Icon && <Icon />}
+      {style.label}
+    </Badge>
+  );
+}

@@ -1,0 +1,84 @@
+{{ trace_header("app") }}
+// The display formats of the views: numbers, money, dates, and times.
+
+export type Format =
+  | "text"
+  | "number"
+  | "currency"
+  | "percent"
+  | "date"
+  | "datetime"
+  | "relative_time"
+  | "boolean"
+  | "badge"
+  | "email"
+  | "url"
+  | "avatar";
+
+/** The currency of the `currency` format. */
+export const CURRENCY = "USD";
+
+const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const currencyFormat = new Intl.NumberFormat(undefined, { style: "currency", currency: CURRENCY });
+const percentFormat = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 365 * 24 * 3600],
+  ["month", 30 * 24 * 3600],
+  ["week", 7 * 24 * 3600],
+  ["day", 24 * 3600],
+  ["hour", 3600],
+  ["minute", 60],
+  ["second", 1],
+];
+
+/** Return a date (`YYYY-MM-DD`) or a date and time (ISO 8601) as a Date. */
+export function toDate(value: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+}
+
+/** Return a time relative to now, for example "3 days ago". */
+export function formatRelative(date: Date, now: Date = new Date()): string {
+  const seconds = (date.getTime() - now.getTime()) / 1000;
+  for (const [unit, size] of UNITS) {
+    if (Math.abs(seconds) >= size || unit === "second") {
+      return relativeFormat.format(Math.round(seconds / size), unit);
+    }
+  }
+  return "";
+}
+
+/** Return a value as text in a format. An empty value gives an empty text. */
+export function formatValue(value: unknown, format: Format = "text"): string {
+  if (value === null || value === undefined || value === "") return "";
+  switch (format) {
+    case "number":
+      return numberFormat.format(Number(value));
+    case "currency":
+      return currencyFormat.format(Number(value));
+    case "percent":
+      return percentFormat.format(Number(value));
+    case "date":
+      return dateFormat.format(toDate(String(value)));
+    case "datetime":
+      return dateTimeFormat.format(toDate(String(value)));
+    case "relative_time":
+      return formatRelative(toDate(String(value)));
+    case "boolean":
+      return value ? "Yes" : "No";
+    default:
+      return Array.isArray(value) ? value.join(", ") : String(value);
+  }
+}
+
+/** Return the initials of a name, for an avatar: "Ada Lovelace" gives "AL". */
+export function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
