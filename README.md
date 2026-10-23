@@ -84,6 +84,14 @@ run, the files are sorted by path, and each file has LF line endings
 and one final newline. The golden file tests in `tests/golden/` compare
 the output of the `minimal` binding with committed files.
 
+Templates write traces (ADR 0004) with two Jinja2 helpers.
+`trace_header(id, ...)` writes the header of a file: a notice and a file
+trace for each ID. `trace(id, scope=None, kind=None, jsx=False)` writes
+one trace. Both use the comment syntax of the output file, and stop the
+run for an ID that is not an element. Each file that can hold comments
+must have a trace. For a file without comments (for example JSON), the
+manifest records the traces.
+
 `write_result()` writes a generation result into an output folder and
 keeps a manifest in `.appgen/manifest.json`. The manifest lists each
 generated file with its SHA-256 hash, and each extension file apart

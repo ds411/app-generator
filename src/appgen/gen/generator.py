@@ -9,6 +9,7 @@ from appgen.dsl.model import AppDefinition
 from appgen.gen.binding import Binding, Output
 from appgen.gen.elements import DefinitionElement, iter_elements
 from appgen.gen.render import GenerationError, make_environment, normalize_content, normalize_path
+from appgen.gen.traces import comment_style, trace_globals
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,8 @@ class GeneratedFile:
     """A generated file is written on each run. An extension file is created once."""
     element_id: str | None = None
     """The element of the output rule, for a rule with `for_each`."""
+    traces: tuple[str, ...] = ()
+    """For a file type without comments: the element IDs that the manifest records."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,10 +48,12 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
 
     Each element of a kind that the binding does not cover becomes a gap.
     The files are sorted by path, and the gaps are in source order. Raise
-    GenerationError if a template needs a value that does not exist, or if
-    two output rules write the same path.
+    GenerationError if a template needs a value that does not exist, if
+    two output rules write the same path, or if a file that can hold
+    comments has no trace (ADR 0004).
     """
     environment = make_environment(binding.template_dir)
+    environment.globals.update(trace_globals(definition))
     elements = list(iter_elements(definition))
     result = GenerationResult(
         gaps=[Gap(e.id, e.kind) for e in elements if e.kind not in binding.covers]
@@ -70,16 +75,27 @@ def _render(
     where = f"'{output.template}'"
     if "element_id" in context:
         where += f" for '{context['element_id']}'"
+    kind: Literal["generated", "extension"] = "extension" if output.extension else "generated"
     try:
-        path = environment.from_string(output.path).render(context)
+        path = normalize_path(environment.from_string(output.path).render(context))
+        context = {**context, "output_path": path, "output_kind": kind}
         content = environment.get_template(output.template).render(context)
     except jinja2.UndefinedError as error:
         raise GenerationError(f"The template {where} needs a missing value: {error}") from None
+    except GenerationError as error:
+        raise GenerationError(f"The template {where}: {error}") from None
+    element_id: str | None = context.get("element_id")
+    traces: tuple[str, ...] = ()
+    if comment_style(path) is None:
+        traces = (element_id or "app",)
+    elif "@trace" not in content:
+        raise GenerationError(f"The template {where} writes the file '{path}' with no trace.")
     return GeneratedFile(
-        normalize_path(path),
+        path,
         normalize_content(content),
-        kind="extension" if output.extension else "generated",
-        element_id=context.get("element_id"),
+        kind=kind,
+        element_id=element_id,
+        traces=traces,
     )
 
 

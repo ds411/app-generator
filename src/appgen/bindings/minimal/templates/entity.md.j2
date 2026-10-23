@@ -1,0 +1,6 @@
+{{ trace_header(element_id) }}
+# Entity {{ name }} of {{ app.name }}
+
+{% for field_name, field in element.fields.items() %}
+- {{ field_name }}: {{ field.type }}{{ " (required)" if field.required else "" }} {{ trace(field.id) }}
+{% endfor %}

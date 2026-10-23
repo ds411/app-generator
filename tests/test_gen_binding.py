@@ -96,8 +96,8 @@ def test_iter_elements_gives_ids_in_source_order() -> None:
 def test_minimal_binding_writes_one_file_for_each_entity(minimal: Binding) -> None:
     result = generate(DEFINITION, minimal)
     entity_files = [f for f in result.files if f.path.startswith("entities/")]
-    assert [f.path for f in entity_files] == ["entities/Project.txt", "entities/Task.txt"]
-    assert "- name: string (required)\n" in entity_files[0].content
+    assert [f.path for f in entity_files] == ["entities/Project.md", "entities/Task.md"]
+    assert "- name: string (required) <!--" in entity_files[0].content
 
 
 def test_elements_of_uncovered_kinds_are_gaps(minimal: Binding) -> None:
