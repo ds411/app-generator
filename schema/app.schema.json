@@ -1,0 +1,849 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ds411/app-generator/main/schema/app.schema.json",
+  "$defs": {
+    "App": {
+      "additionalProperties": false,
+      "description": "The name and the description of the app.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/AppName"
+        },
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "title"
+      ],
+      "title": "App",
+      "type": "object"
+    },
+    "AppName": {
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "type": "string"
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "description": "A kind of record that the app stores, for example a task.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plural_label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "display_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Field"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "relations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Relation"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Relations",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "Entity",
+      "type": "object"
+    },
+    "EntityName": {
+      "pattern": "^[A-Z][A-Za-z0-9]*$",
+      "type": "string"
+    },
+    "Field": {
+      "additionalProperties": false,
+      "description": "A field of an entity, or a param of a custom operation.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/FieldType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "unique": {
+          "default": false,
+          "title": "Unique",
+          "type": "boolean"
+        },
+        "default": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Length"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Length"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "precision": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Precision"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Field",
+      "type": "object"
+    },
+    "FieldType": {
+      "enum": [
+        "string",
+        "text",
+        "integer",
+        "decimal",
+        "boolean",
+        "date",
+        "datetime",
+        "uuid",
+        "email",
+        "url",
+        "enum",
+        "json"
+      ],
+      "type": "string"
+    },
+    "JsonValue": {},
+    "MemberName": {
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "type": "string"
+    },
+    "Mode": {
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
+    },
+    "OnDelete": {
+      "enum": [
+        "restrict",
+        "cascade",
+        "set_null"
+      ],
+      "type": "string"
+    },
+    "Operation": {
+      "additionalProperties": false,
+      "description": "An action that the app can do on an entity.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/OperationKind"
+        },
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Field"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "returns": {
+          "$ref": "#/$defs/Text",
+          "default": "none"
+        }
+      },
+      "required": [
+        "kind",
+        "entity"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "OperationKind": {
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "list",
+        "custom"
+      ],
+      "type": "string"
+    },
+    "Page": {
+      "additionalProperties": false,
+      "description": "A screen of a front-end app.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "path": {
+          "pattern": "^/",
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Page",
+      "type": "object"
+    },
+    "Relation": {
+      "additionalProperties": false,
+      "description": "A relation from one entity to another entity.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RelationKind"
+        },
+        "target": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "inverse": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "on_delete": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnDelete"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "Relation",
+      "type": "object"
+    },
+    "RelationKind": {
+      "enum": [
+        "many_to_one",
+        "one_to_many",
+        "one_to_one",
+        "many_to_many"
+      ],
+      "type": "string"
+    },
+    "Text": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "Token": {
+      "additionalProperties": false,
+      "description": "A design token: a named value, with an optional value for each mode.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "$value": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "$type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "$description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "$modes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Mode"
+          },
+          "title": "$Modes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "$value"
+      ],
+      "title": "Token",
+      "type": "object"
+    },
+    "TokenGroup": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TokenNode"
+      },
+      "description": "A group of tokens and groups. The keys that do not start with `$` are names.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "$type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "$description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "TokenGroup",
+      "type": "object"
+    },
+    "TokenNode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Token"
+        },
+        {
+          "$ref": "#/$defs/TokenGroup"
+        }
+      ]
+    },
+    "TokenType": {
+      "enum": [
+        "color",
+        "dimension",
+        "fontFamily",
+        "fontWeight",
+        "number",
+        "duration",
+        "typography",
+        "shadow"
+      ],
+      "type": "string"
+    },
+    "Tokens": {
+      "additionalProperties": false,
+      "description": "The design tokens of the app: one group for each kind of token.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "font_family": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "font_size": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "font_weight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "line_height": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "letter_spacing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "typography": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "spacing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "size": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "radius": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "shadow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "breakpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Tokens",
+      "type": "object"
+    },
+    "UI": {
+      "additionalProperties": false,
+      "description": "The `ui` section: the design tokens and the UI elements of the app.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tokens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "UI",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "An app definition for appgen, DSL version 0. See ADR 0002.",
+  "patternProperties": {
+    "^x-": {}
+  },
+  "properties": {
+    "version": {
+      "const": 0,
+      "title": "Version",
+      "type": "integer"
+    },
+    "app": {
+      "$ref": "#/$defs/App"
+    },
+    "entities": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Entity"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/EntityName"
+      },
+      "title": "Entities",
+      "type": "object"
+    },
+    "operations": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Operation"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Operations",
+      "type": "object"
+    },
+    "pages": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Page"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Pages",
+      "type": "object"
+    },
+    "ui": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UI"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "version",
+    "app",
+    "entities"
+  ],
+  "title": "appgen app definition",
+  "type": "object"
+}
