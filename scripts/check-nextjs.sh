@@ -1,6 +1,7 @@
 #!/bin/sh
 # Generate the project tracker with the Next.js binding, and check the
-# output: install, lint, type check, build, Docker image, and traces.
+# output: install, lint, type check, build, Docker image, traces, and
+# the smoke test (scripts/smoke_test.py: start the app and request it).
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -11,6 +12,7 @@
 #
 # Environment variables:
 #   NODE_IMAGE                Build argument of the Docker image.
+#   POSTGRES_IMAGE            The Postgres image of the smoke test.
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
 
 set -eu
@@ -53,5 +55,8 @@ docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-nextjs .
 cd "$root"
 step "appgen check"
 uv run --locked appgen check "$definition" "$out"
+
+step "smoke test"
+uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-nextjs
 
 step "passed"
