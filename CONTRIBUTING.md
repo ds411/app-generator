@@ -28,7 +28,8 @@ the generated code refer back to the app definition.
 4. Make commits that follow the commit format.
 5. Open a pull request that closes the story.
 6. Merge the pull request with "Squash and merge" when the checks pass
-   and the review is complete.
+   and the review is complete. Use the squash commit message from the
+   pull request description.
 
 ## Planning
 
@@ -155,6 +156,8 @@ Refs #14
   applicable".
 - Give the pull request a title in the commit subject format. The title
   becomes the subject of the squash commit.
+- Write the recommended squash commit message in the "Squash commit
+  message" section. Use this message when you merge the pull request.
 - Link each story that the pull request completes with `Closes #<n>`.
 - Keep one story in one pull request where possible.
 - Open the pull request as a draft until it is ready for review.

@@ -42,6 +42,24 @@ or the trace checker. Write "Not applicable" for other changes.
 
 ```
 
+## Squash commit message
+
+<!--
+The recommended message for "Squash and merge". Use the commit format
+(see CONTRIBUTING.md, section "Commits"). The first line is the PR title
+and the PR number. Keep the trailers of all authors. Do not add links to
+claude.ai.
+-->
+
+```text
+<type>(<scope>): <summary> (#<pr>)
+
+<What changes and why. Wrap lines at 72 characters.>
+
+Closes #<issue>
+Co-Authored-By: <name> <email>
+```
+
 ## Checklist
 
 - [ ] The PR title and the commits follow the [commit format](https://github.com/ds411/app-generator/blob/main/CONTRIBUTING.md#commits).
