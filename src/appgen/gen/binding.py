@@ -6,8 +6,10 @@ from pathlib import Path
 type ElementKind = str
 """The kind of a definition element, for example `entity` or `field`.
 
-The kinds of DSL version 0 are `app`, `entity`, `field`, `relation`,
-`operation`, `param`, and `page`. See `appgen.gen.elements`.
+The kind is the class name of the element in snake case. The kinds of
+DSL version 0 are `app`, `entity`, `field`, `relation`, `operation`,
+`param`, and `page`. The UI adds kinds such as `token`, `token_group`,
+`layout`, and `menu_item`. See `appgen.gen.elements`.
 """
 
 

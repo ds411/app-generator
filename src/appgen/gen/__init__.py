@@ -14,6 +14,7 @@ from appgen.gen.manifest import (
 )
 from appgen.gen.registry import UnknownBindingError, available_bindings, find_binding
 from appgen.gen.render import GenerationError
+from appgen.gen.tokens import ResolvedToken, resolve_tokens
 
 __all__ = [
     "MANIFEST_PATH",
@@ -28,6 +29,7 @@ __all__ = [
     "ManifestError",
     "ManualEditsError",
     "Output",
+    "ResolvedToken",
     "UnknownBindingError",
     "WriteReport",
     "available_bindings",
@@ -36,5 +38,6 @@ __all__ = [
     "generate",
     "iter_elements",
     "read_manifest",
+    "resolve_tokens",
     "write_result",
 ]

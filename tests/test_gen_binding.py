@@ -4,6 +4,7 @@ from textwrap import dedent
 import pytest
 
 from appgen.dsl import load_definition_text
+from appgen.dsl.ui import TokenGroup
 from appgen.gen import (
     Binding,
     Gap,
@@ -60,21 +61,21 @@ def test_unknown_binding_lists_the_available_bindings() -> None:
         find_binding("cobol")
 
 
-@pytest.mark.parametrize(
-    ("path", "kind"),
-    [
-        (("app",), "app"),
-        (("entities", "Task"), "entity"),
-        (("entities", "Task", "fields", "title"), "field"),
-        (("entities", "Task", "relations", "project"), "relation"),
-        (("operations", "complete_task"), "operation"),
-        (("operations", "complete_task", "params", "note"), "param"),
-        (("pages", "projects"), "page"),
-        (("ui", "layouts", "main"), "layouts"),
-    ],
-)
-def test_element_kind(path: tuple[str, ...], kind: str) -> None:
-    assert element_kind(path) == kind
+def test_element_kinds_of_dsl_v0() -> None:
+    kinds = {e.id: e.kind for e in iter_elements(DEFINITION)}
+    assert kinds["app"] == "app"
+    assert kinds["entities.Task"] == "entity"
+    assert kinds["entities.Task.fields.title"] == "field"
+    assert kinds["entities.Task.relations.project"] == "relation"
+    assert kinds["operations.complete_task"] == "operation"
+    assert kinds["operations.complete_task.params.note"] == "param"
+    assert kinds["pages.projects"] == "page"
+
+
+def test_element_kind_is_the_class_name_in_snake_case() -> None:
+    group = TokenGroup.model_validate({"blue": {"$value": "#2563eb"}})
+    assert element_kind(("ui", "tokens", "color"), group) == "token_group"
+    assert element_kind(("ui", "tokens", "color", "blue"), group.children["blue"]) == "token"
 
 
 def test_iter_elements_gives_ids_in_source_order() -> None:

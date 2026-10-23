@@ -1,22 +1,15 @@
 """The elements of an app definition, with their IDs and their kinds."""
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from appgen.dsl.ids import walk_elements
-from appgen.dsl.model import AppDefinition, Element
+from appgen.dsl.model import AppDefinition, Element, Field
 from appgen.dsl.source import DataPath
 from appgen.gen.binding import ElementKind
 
-# The element kind of the items of each named collection in the definition.
-_COLLECTION_KINDS: dict[str, ElementKind] = {
-    "entities": "entity",
-    "fields": "field",
-    "relations": "relation",
-    "operations": "operation",
-    "params": "param",
-    "pages": "page",
-}
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,17 +24,17 @@ class DefinitionElement:
     element: Element
 
 
-def element_kind(path: DataPath) -> ElementKind:
-    """Return the kind of the element at a path, for example `field`.
+def element_kind(path: DataPath, element: Element) -> ElementKind:
+    """Return the kind of an element, for example `field` or `token_group`.
 
-    A top-level element (for example `app`) has its key as kind. An item
-    of a named collection has the kind of the collection, or the name of
-    the collection if the generator does not know it.
+    The kind is the class name of the element in snake case, for example
+    `entity` for an Entity and `token` for a design token. The `Field`
+    class serves for entity fields and for operation params, so a Field
+    in a `params` mapping has the kind `param`.
     """
-    if len(path) == 1:
-        return str(path[0])
-    collection = str(path[-2])
-    return _COLLECTION_KINDS.get(collection, collection)
+    if isinstance(element, Field) and len(path) >= 2 and path[-2] == "params":
+        return "param"
+    return _CAMEL_BOUNDARY.sub("_", type(element).__name__).lower()
 
 
 def iter_elements(definition: AppDefinition) -> Iterator[DefinitionElement]:
@@ -50,7 +43,7 @@ def iter_elements(definition: AppDefinition) -> Iterator[DefinitionElement]:
         if path:
             yield DefinitionElement(
                 id=element.id,
-                kind=element_kind(path),
+                kind=element_kind(path, element),
                 name=str(path[-1]),
                 element=element,
             )
