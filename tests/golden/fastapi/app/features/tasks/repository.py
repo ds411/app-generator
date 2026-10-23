@@ -12,6 +12,7 @@ from app.core.errors import ProblemError
 from app.features.projects.models import Project
 from app.features.tasks.models import Task
 from app.features.tasks.schemas import TaskCreate, TaskUpdate
+from app.features.tasks.validation_ext import validate
 
 
 async def get(session: AsyncSession, id: UUID) -> Task:
@@ -23,17 +24,19 @@ async def get(session: AsyncSession, id: UUID) -> Task:
 
 
 async def create(session: AsyncSession, data: TaskCreate) -> Task:
-    """Store a new record, and return it."""
+    """Validate and store a new record, and return it."""
     record = Task()
     await _apply(session, record, data.model_dump(by_alias=False))
+    await validate(session, record, created=True)
     session.add(record)
     await commit(session)
     return await get(session, record.id)
 
 
 async def update(session: AsyncSession, record: Task, data: TaskUpdate) -> Task:
-    """Change the fields of a record that the request gives, and return the record."""
+    """Change the fields that the request gives, validate the record, and return it."""
     await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
+    await validate(session, record, created=False)
     await commit(session)
     return await get(session, record.id)
 

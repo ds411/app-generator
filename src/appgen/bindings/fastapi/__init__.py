@@ -86,6 +86,12 @@ BINDING = Binding(
             extension=True,
         ),
         Output(
+            template="app/features/slice/validation_ext.py.j2",
+            path=_SLICE + "/validation_ext.py",
+            for_each="entity",
+            extension=True,
+        ),
+        Output(
             template="app/features/slice/schemas.py.j2",
             path=_SLICE + "/schemas.py",
             for_each="entity",

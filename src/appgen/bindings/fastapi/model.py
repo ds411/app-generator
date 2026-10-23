@@ -510,6 +510,7 @@ class PyEntity:
             from_import(
                 f"app.features.{self.slice}.schemas", {f"{self.name}Create", f"{self.name}Update"}
             ),
+            f"from app.features.{self.slice}.validation_ext import validate",
         }
         core = {"commit"}
         if self.fk_relations:
