@@ -6,9 +6,58 @@ the code for a binding (a target stack). Traces in the generated code
 refer back to the app definition. See [CONTRIBUTING.md](CONTRIBUTING.md)
 for the plan and the rules.
 
+## Quick start
+
+1. Install [uv](https://docs.astral.sh/uv/), and for the front-end apps
+   [pnpm](https://pnpm.io/) and Node.js 24. Docker runs the apps.
+2. Clone the repository, and install appgen:
+
+   ```sh
+   git clone https://github.com/ds411/app-generator.git
+   cd app-generator
+   uv sync
+   ```
+
+3. Validate the example definition:
+
+   ```sh
+   uv run appgen validate examples/project-tracker/app.yaml
+   ```
+
+4. Generate an app. The bindings are `nextjs` (a full-stack app),
+   `fastapi` (a REST API), and `react` (a front end with mock data):
+
+   ```sh
+   uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker
+   ```
+
+5. Check the traces of the app against the definition:
+
+   ```sh
+   uv run appgen check examples/project-tracker/app.yaml /tmp/tracker
+   ```
+
+6. Run the app:
+
+   ```sh
+   cd /tmp/tracker && pnpm install && pnpm dev
+   ```
+
+   Each generated app has a README with its commands, and a Dockerfile.
+
+To write your own definition, copy `examples/project-tracker/app.yaml`
+and change it. The docs:
+
+| Document                             | Content                                              |
+| ------------------------------------ | ---------------------------------------------------- |
+| [docs/dsl.md](docs/dsl.md)           | The reference of the app definition, with examples.  |
+| [docs/traces.md](docs/traces.md)     | The trace format, generation gaps, and the checker reports. |
+| [docs/bindings.md](docs/bindings.md) | How to write a binding.                              |
+| [docs/adr/](docs/adr/)               | The architecture decision records.                   |
+
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/). Then run this command in the
+This section is for the maintainers of appgen. Install [uv](https://docs.astral.sh/uv/). Then run this command in the
 repository root:
 
 ```sh
@@ -56,6 +105,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
+| `docs/`                | The user docs: the DSL, traces, and bindings.               |
 | `docs/adr/`            | The architecture decision records.                          |
 | `.githooks/`           | The git hooks (pre-push checks).                            |
 
