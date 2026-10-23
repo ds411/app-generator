@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 
 from appgen.bindings.react.helpers import members, mock_records
-from appgen.bindings.react.mock_data import DEFAULT_COUNT, mock_data
+from appgen.bindings.shared.mock_data import DEFAULT_COUNT, mock_data
 from appgen.dsl import AppDefinition, load_definition, load_definition_text
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -81,3 +81,34 @@ def test_the_records_use_the_keys_of_the_typescript_types(definition: AppDefinit
     for name, entity in definition.entities.items():
         keys = {"id"} | {m.key for m in members(name, entity)}
         assert all(set(record) == keys for record in records[name]), name
+
+
+def test_a_key_field_comes_from_the_name_of_the_record() -> None:
+    definition = load_definition(EXAMPLES / "project-tracker" / "app.yaml")
+    for record in mock_data(definition)["Project"]:
+        initials = "".join(word[0] for word in record["name"].split())
+        assert record["key"] == initials, (record["name"], record["key"])
+
+
+def test_a_derived_value_keeps_the_pattern_and_the_unique_rule() -> None:
+    definition = load_definition_text(
+        "version: 0\napp: { name: a, title: A }\n"
+        "entities:\n  Team:\n    x-mock-count: 16\n    fields:\n"
+        "      name: { type: string, required: true }\n"
+        "      code: { type: string, required: true, unique: true, pattern: '^[A-Z]{3,4}$' }\n"
+        "      slug: { type: string, required: true, pattern: '^[a-z-]+$' }\n"
+    )
+    records = mock_data(definition)["Team"]
+    codes = [record["code"] for record in records]
+    assert len(set(codes)) == len(codes)
+    for record in records:
+        assert re.fullmatch("[A-Z]{3,4}", record["code"])
+        words = record["name"].split()
+        assert record["code"].startswith(words[0][:2].upper())
+        assert record["slug"] == "-".join(words).lower()
+
+
+def test_a_derived_field_without_a_source_field_gets_a_random_value() -> None:
+    definition = load_definition(EXAMPLES / "edge-cases" / "app.yaml")
+    codes = [record["code"] for record in mock_data(definition)["Sample"]]
+    assert all(re.fullmatch("[A-Z0-9-]+", code) for code in codes)

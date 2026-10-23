@@ -7,6 +7,12 @@ always gives the same records. The values suit the field types and
 options (enum values, `min`, `max`, `max_length`, simple patterns, and
 `unique`), and each relation refers to a record that exists.
 
+Some values come from other values of the record, so that the record
+looks real: a key or a code field (`DERIVED_FIELDS`) comes from the name
+of the record (`SOURCE_FIELDS`), for example the key `MP` for the
+project "Meridian Portal". The rules are in this shared module, so that
+each binding gets the same records.
+
 An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
 """
@@ -20,6 +26,10 @@ from typing import Any
 from appgen.dsl.model import AppDefinition, Entity, Field
 
 DEFAULT_COUNT = 12
+DERIVED_FIELDS = ("key", "code", "slug", "abbreviation", "short_name")
+"""The string fields whose value comes from the source field of the record."""
+SOURCE_FIELDS = ("name", "title", "label")
+"""The fields that a derived field reads, in order of preference."""
 BASE_DATE = date(2026, 1, 5)
 """The center of the mock dates. A fixed date keeps the output deterministic."""
 
@@ -84,15 +94,31 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
         rng = random.Random(f"{definition.app.name}:{name}")
         records: list[Record] = []
         seen: dict[str, set[Any]] = {f: set() for f, field in entity.fields.items() if field.unique}
+        source = next((f for f in SOURCE_FIELDS if f in entity.fields), None)
+        derived = [
+            f
+            for f, field in entity.fields.items()
+            if source is not None and f in DERIVED_FIELDS and field.type == "string"
+        ]
         for index, record_id in enumerate(ids[name]):
             record: Record = {"id": record_id}
             for field_name, field in entity.fields.items():
-                value = _field_value(rng, entity, field_name, field, index, record)
-                if field_name in seen:
-                    for _ in range(100):
-                        if value is None or value not in seen[field_name]:
-                            break
-                        value = _field_value(rng, entity, field_name, field, index, record)
+                if field_name in derived:
+                    record[field_name] = None  # Set after the source, in the same key order.
+                    continue
+                record[field_name] = _unique_value(
+                    rng, entity, field_name, field, index, record, seen.get(field_name)
+                )
+            for field_name in derived:
+                field = entity.fields[field_name]
+                value = _derived_value(
+                    record.get(source or ""), field_name, field, seen.get(field_name)
+                )
+                if value is None:
+                    value = _unique_value(
+                        rng, entity, field_name, field, index, record, seen.get(field_name)
+                    )
+                elif field_name in seen:
                     seen[field_name].add(value)
                 record[field_name] = value
             for relation_name, relation in entity.relations.items():
@@ -119,6 +145,60 @@ def _count(entity: Entity) -> int:
 
 def _uuid(rng: random.Random) -> str:
     return str(uuid.UUID(int=rng.getrandbits(128), version=4))
+
+
+def _unique_value(
+    rng: random.Random,
+    entity: Entity,
+    name: str,
+    field: Field,
+    index: int,
+    record: Record,
+    seen: set[Any] | None,
+) -> Any:
+    """Return a field value. For a unique field (`seen` is not None), try again on a repeat."""
+    value = _field_value(rng, entity, name, field, index, record)
+    if seen is not None:
+        for _ in range(100):
+            if value is None or value not in seen:
+                break
+            value = _field_value(rng, entity, name, field, index, record)
+        seen.add(value)
+    return value
+
+
+def _derived_value(source: Any, name: str, field: Field, seen: set[Any] | None) -> str | None:
+    """Return a value that comes from the source value, or None if no candidate fits the field.
+
+    The candidates are the initials of the words, then longer prefixes of
+    the words (`MP`, `MEP`, `MERP`, ...), in capitals, in small letters,
+    and as a slug (`meridian-portal`). A `slug` field tries the slug
+    first. The first candidate that fits the pattern, the length limits,
+    and the unique rule wins.
+    """
+    if not isinstance(source, str):
+        return None
+    words = re.findall(r"[A-Za-z0-9]+", source)
+    if not words:
+        return None
+    slugs = ["-".join(words).lower(), "_".join(words).lower()]
+    candidates = slugs if name == "slug" else []
+    rest = "".join(word[:1] for word in words[1:])
+    for size in range(1, len(words[0]) + 1):
+        compact = words[0][:size] + rest
+        candidates.extend([compact.upper(), compact.lower()])
+    candidates.extend(slugs)
+    for candidate in candidates:
+        if field.pattern is not None and not re.fullmatch(field.pattern, candidate):
+            continue
+        if field.min_length is not None and len(candidate) < field.min_length:
+            continue
+        if field.max_length is not None and len(candidate) > field.max_length:
+            continue
+        if seen is not None and candidate in seen:
+            continue
+        return candidate
+    return None
 
 
 def _field_value(
