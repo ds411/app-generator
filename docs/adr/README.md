@@ -20,3 +20,4 @@ gives the rules.
 | 0001   | [Record architecture decisions](0001-record-architecture-decisions.md) | Accepted |
 | 0002   | [App definition DSL v0](0002-app-definition-dsl-v0.md)                 | Accepted |
 | 0003   | [UI DSL](0003-ui-dsl.md)                                               | Accepted |
+| 0004   | [Trace format](0004-trace-format.md)                                   | Accepted |
