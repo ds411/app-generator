@@ -45,13 +45,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | ---------------------- | ----------------------------------------------------------- |
 | `src/appgen/`          | The generator and the CLI.                                  |
 | `src/appgen/dsl/`      | The app definition DSL: the model, the loader, and checks.  |
+| `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
 | `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core.    |
 | `tests/`               | The tests.                                                  |
 | `docs/adr/`            | The architecture decision records.                          |
 | `.githooks/`           | The git hooks (pre-push checks).                            |
 
-[ADR 0002](docs/adr/0002-app-definition-dsl-v0.md) describes the DSL.
+[ADR 0002](docs/adr/0002-app-definition-dsl-v0.md) describes the DSL, and
+[ADR 0003](docs/adr/0003-ui-dsl.md) describes its UI part.
 
 ## Bindings
 

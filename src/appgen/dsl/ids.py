@@ -8,7 +8,7 @@ to the element, with a dot between the keys, for example
 from collections.abc import Iterator
 
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic
-from appgen.dsl.model import Element
+from appgen.dsl.element import Element
 from appgen.dsl.source import DataPath
 
 
@@ -28,6 +28,11 @@ def walk_elements(element: Element, path: DataPath = ()) -> Iterator[tuple[DataP
             for key, item in value.items():  # pyright: ignore[reportUnknownVariableType]
                 if isinstance(item, Element):
                     yield from walk_elements(item, (*path, name, str(key)))  # pyright: ignore[reportUnknownArgumentType]
+    # Some elements, for example token groups, keep named children as
+    # extra keys of their own mapping.
+    for key, item in (element.model_extra or {}).items():
+        if isinstance(item, Element):
+            yield from walk_elements(item, (*path, key))
 
 
 def index_elements(root: Element) -> dict[str, Element]:

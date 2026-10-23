@@ -102,8 +102,8 @@ UI elements follow the ID rule of ADR 0002:
 UI element names follow the rule for fields: `^[a-z][a-z0-9_]*$`.
 Token names have one more rule, `^[a-z0-9][a-z0-9_]*$`, so that a
 scale step can be a number, for example `blue.600` or `spacing.4`.
-YAML reads an unquoted `600` as an integer. The loader reads an integer
-token name as its decimal text. Thus `05` must have quotes.
+The loader reads each mapping key as its text, so `600` and `"600"` are
+the same name.
 
 Icon names are the kebab-case names of [Lucide](https://lucide.dev),
 the icon set of shadcn/ui, for example `folder-kanban`. The rule is

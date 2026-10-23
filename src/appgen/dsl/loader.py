@@ -160,15 +160,16 @@ def _data_path(loc: tuple[int | str, ...]) -> tuple[DataPath, bool]:
     """Convert a Pydantic error location to a data path.
 
     Pydantic adds "[key]" for an error in a dict key, and a tag for each
-    member of a union or a function validator. Return the path without
-    them, and true if the error is in a dict key.
+    member of a union or a function validator. The tags of the unions in
+    the model start with "tag-". Return the path without them, and true
+    if the error is in a dict key.
     """
     path: list[str | int] = []
     is_key = False
     for part in loc:
         if part == "[key]":
             is_key = True
-        elif isinstance(part, int) or not part.startswith(("function-", "constrained-")):
+        elif isinstance(part, int) or not part.startswith(("function-", "constrained-", "tag-")):
             path.append(part)
     return tuple(path), is_key
 
