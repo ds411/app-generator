@@ -2,19 +2,23 @@
 # @trace app file
 """The database: the model base class, the engine, and one session for each request."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from enum import StrEnum
 from typing import Annotated
+from uuid import UUID, uuid4
 
 from fastapi import Depends, Request
-from sqlalchemy import Enum, MetaData
+from sqlalchemy import Enum, MetaData, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.core.errors import ProblemError
 
 # Fixed names for the constraints, so that the migrations and the models agree.
 NAMING_CONVENTION = {
@@ -29,6 +33,14 @@ class Base(DeclarativeBase):
     """The base class of the models of all slices."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class Record(Base):
+    """The base class of the models of the entities: each has a UUID as primary key."""
+
+    __abstract__ = True
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
 
 
 def _enum_values(enum: type[StrEnum]) -> list[str]:
@@ -67,3 +79,41 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 """The type of an endpoint parameter that gets the session of the request."""
+
+
+async def commit(session: AsyncSession) -> None:
+    """Commit the session. A broken constraint gives a 409 Conflict error."""
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        raise ProblemError(
+            409,
+            "The change breaks a rule of the data: a value must be unique, "
+            "or other records refer to this record.",
+        ) from error
+
+
+async def ensure_exists[M: Record](
+    session: AsyncSession, model: type[M], id: UUID, field: str
+) -> None:
+    """Check that the record of a foreign key exists. Else give a 422 error."""
+    if await session.get(model, id) is None:
+        raise ProblemError(
+            422, f"The field '{field}' refers to {model.__name__} {id}, which does not exist."
+        )
+
+
+async def load_all[M: Record](
+    session: AsyncSession, model: type[M], ids: Sequence[UUID], field: str
+) -> list[M]:
+    """Return the records of a list of IDs. Give a 422 error if one does not exist."""
+    records = list(await session.scalars(select(model).where(model.id.in_(ids))))
+    missing = set(ids) - {record.id for record in records}
+    if missing:
+        names = ", ".join(sorted(str(id) for id in missing))
+        raise ProblemError(
+            422,
+            f"The field '{field}' refers to {model.__name__} records that do not exist: {names}.",
+        )
+    return records

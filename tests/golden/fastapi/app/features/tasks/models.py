@@ -4,24 +4,23 @@
 
 import datetime as dt
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import Boolean, Date, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.db import Base
+from app.core.db import Record
 
 if TYPE_CHECKING:
     from app.features.projects.models import Project
 
 
 # @trace entities.Task
-class Task(Base):
+class Task(Record):
     """A record of the entity Task."""
 
     __tablename__ = "tasks"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     # @trace entities.Task.fields.title
     title: Mapped[str] = mapped_column(String)
     # @trace entities.Task.fields.due_date

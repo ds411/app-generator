@@ -55,3 +55,15 @@ class {{ e.name }}Read(ReadModel):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% for op in e.custom_operations if op.params %}
+
+
+{{ trace(op.id) }}
+class {{ op.params_class }}(InputModel):
+    """The params of the operation `{{ op.name }}`."""
+
+{% for p in op.params %}
+    {{ trace(p.id) }}
+    {{ p.declaration("create") }}
+{% endfor %}
+{% endfor %}

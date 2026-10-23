@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import Settings
 from app.core.db import make_engine, make_sessions
+from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
 
 # @trace entities.Project
@@ -45,6 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    add_problem_handlers(app)
     app.include_router(health_router)
     # @trace entities.Project
     app.include_router(projects_router)

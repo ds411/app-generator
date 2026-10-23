@@ -13,6 +13,7 @@ from appgen.gen.binding import Binding, Output
 
 _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
+_OPERATION = "app/features/{{ py.operations[name].slice }}/{{ name }}"
 
 BINDING = Binding(
     name="fastapi",
@@ -37,6 +38,8 @@ BINDING = Binding(
         Output(template="app/models.py.j2", path="app/models.py"),
         Output(template="app/core/config.py.j2", path="app/core/config.py"),
         Output(template="app/core/db.py.j2", path="app/core/db.py"),
+        Output(template="app/core/errors.py.j2", path="app/core/errors.py"),
+        Output(template="app/core/pagination.py.j2", path="app/core/pagination.py"),
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
@@ -59,6 +62,30 @@ BINDING = Binding(
             for_each="entity",
         ),
         Output(
+            template="app/features/slice/repository.py.j2",
+            path=_SLICE + "/repository.py",
+            for_each="entity",
+        ),
+        Output(
+            template="app/features/slice/operation.py.j2",
+            path=_OPERATION + ".py",
+            for_each="operation",
+            when="element.kind != 'custom'",
+        ),
+        Output(
+            template="app/features/slice/custom_gen.py.j2",
+            path=_OPERATION + "_gen.py",
+            for_each="operation",
+            when="element.kind == 'custom'",
+        ),
+        Output(
+            template="app/features/slice/custom_ext.py.j2",
+            path=_OPERATION + "_ext.py",
+            for_each="operation",
+            when="element.kind == 'custom'",
+            extension=True,
+        ),
+        Output(
             template="app/features/slice/schemas.py.j2",
             path=_SLICE + "/schemas.py",
             for_each="entity",
@@ -66,6 +93,7 @@ BINDING = Binding(
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
         Output(template="tests/test_migrations.py.j2", path="tests/test_migrations.py"),
+        Output(template="tests/test_openapi.py.j2", path="tests/test_openapi.py"),
         Output(template="package.py.j2", path="tests/features/__init__.py"),
         Output(template="package.py.j2", path=_TESTS + "/__init__.py", for_each="entity"),
         Output(
@@ -76,7 +104,7 @@ BINDING = Binding(
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
     ),
-    covers=frozenset({"app", "entity", "field", "relation"}),
+    covers=frozenset({"app", "entity", "field", "relation", "operation", "param"}),
     excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,

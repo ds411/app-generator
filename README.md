@@ -261,10 +261,12 @@ cd /tmp/tracker && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
 `appgen generate <definition> -b fastapi -o <dir>` writes a standalone
 REST API: FastAPI 0.161 on Python 3.14, with uv. Each entity is a
-vertical slice in `app/features/<slice>/`, with a SQLAlchemy model
-and Pydantic schemas for the input and the output of the API. An
-Alembic migration creates the schema in Postgres. Pages and the UI are out of the
-scope of the binding. The binding is in
+vertical slice in `app/features/<slice>/`, with a SQLAlchemy model,
+Pydantic schemas, a repository, and one module for each operation. A
+custom operation has a generated endpoint and an extension file for its
+logic. Errors use the problem details format (RFC 9457). An Alembic
+migration creates the schema in Postgres. Pages and the UI are out of
+the scope of the binding. The binding is in
 `src/appgen/bindings/fastapi/`, and
 [ADR 0006](docs/adr/0006-fastapi-binding.md) describes its design. To
 try the output:

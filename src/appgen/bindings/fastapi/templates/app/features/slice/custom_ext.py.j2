@@ -1,0 +1,42 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% set r = py.entity(op.returns) if op.returns else none %}
+{% if op.description %}
+"""The logic of the operation `{{ op.name }}`.
+
+{{ op.description }}
+"""
+{% else %}
+"""The logic of the operation `{{ op.name }}`."""
+{% endif %}
+
+{% set lines = [
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from app.features." ~ e.slice ~ ".models import " ~ e.name,
+] %}
+{% if r and r.name != e.name %}
+{% set lines = lines + ["from app.features." ~ r.slice ~ ".models import " ~ r.name] %}
+{% endif %}
+{% if op.params %}
+{% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ op.params_class] %}
+{% endif %}
+{{ py.imports(lines) }}
+
+
+async def {{ op.name }}(
+    session: AsyncSession,
+    record: {{ e.name }},
+{% if op.params %}
+    params: {{ op.params_class }},
+{% endif %}
+) -> {{ r.name if r else "None" }}:
+    """Run the operation on a record{{ ", with the params of the request" if op.params }}.
+
+    The generated endpoint commits the session after this function.
+{% if r %}
+    Return the {{ r.name }} record that the endpoint returns.
+{% endif %}
+    """
+    # TODO(appgen): write the logic of the operation {{ op.name }}.
+    raise NotImplementedError("operations.{{ op.name }}")

@@ -4,4 +4,13 @@
 
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+from app.features.tasks import complete_task_gen, create_task, list_tasks
+
+router = APIRouter(tags=["Tasks"])
+
+# @trace operations.create_task
+router.include_router(create_task.router)
+# @trace operations.list_tasks
+router.include_router(list_tasks.router)
+# @trace operations.complete_task
+router.include_router(complete_task_gen.router)
