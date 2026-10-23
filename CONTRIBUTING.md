@@ -225,6 +225,13 @@ git config core.hooksPath .githooks
   the checks are `ruff check`, `ruff format --check`, `pyright`,
   `pytest`, and `appgen check` on the golden output of the bindings
   (`tests/golden/`). The trace check fails on an invalid trace.
+- When a push changes the generator core or the FastAPI binding, the
+  hook also runs `scripts/check-fastapi.sh`. The script generates the
+  project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
+  pyright, the generated tests, `docker build`, and `appgen check` on
+  the output. It needs Docker. Run it by hand with
+  `scripts/check-fastapi.sh [output folder]`. The script header lists
+  the environment variables for other images (for example a mirror).
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.

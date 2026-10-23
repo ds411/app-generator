@@ -331,6 +331,9 @@ uv run appgen generate examples/project-tracker/app.yaml -b fastapi -o /tmp/trac
 cd /tmp/tracker-api && uv sync && uv run ruff check && uv run pyright && uv run pytest
 ```
 
+`scripts/check-fastapi.sh` runs these steps, `docker build`, and
+`appgen check` on the output. The pre-push hook runs it.
+
 ## Traces
 
 [ADR 0004](docs/adr/0004-trace-format.md) defines the trace format. The
