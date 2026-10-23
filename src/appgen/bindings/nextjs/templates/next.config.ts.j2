@@ -1,0 +1,9 @@
+{{ trace_header("app") }}
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  // The Docker image runs the standalone server (see the Dockerfile).
+  output: "standalone",
+};
+
+export default nextConfig;

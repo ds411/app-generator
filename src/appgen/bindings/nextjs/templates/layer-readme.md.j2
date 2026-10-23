@@ -1,0 +1,8 @@
+{% set layer = output_path.split("/")[1] %}
+{{ trace_header("app") }}
+
+# src/{{ layer }}
+
+{% for name, text in nextjs.layers if name == layer %}
+{{ text }}
+{% endfor %}

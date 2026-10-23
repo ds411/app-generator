@@ -1,0 +1,22 @@
+{% set info = nextjs.pages[name] %}
+{{ trace_header(element_id) }}
+import type { Metadata } from "next";
+
+import { {{ info.component }} } from "@/pages/{{ info.slice }}";
+
+export const metadata: Metadata = { title: {{ element.title | tojson }} };
+{% if info.params %}
+
+type RouteProps = {
+  params: Promise<{ {% for param in info.params %}{{ param }}: string{{ "; " if not loop.last }}{% endfor %} }>;
+};
+
+export default async function Route({ params }: RouteProps) {
+  return <{{ info.component }} params={await params} />;
+}
+{% else %}
+
+export default function Route() {
+  return <{{ info.component }} />;
+}
+{% endif %}

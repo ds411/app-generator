@@ -1,0 +1,3 @@
+{% set info = nextjs.pages[name] %}
+{{ trace_header(element_id) }}
+export { {{ info.component }} } from "./ui/{{ info.slice }}-page";
