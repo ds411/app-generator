@@ -264,7 +264,11 @@ git config core.hooksPath .githooks
 - When you add a part (for example a binding), add its checks and its
   path patterns to the hook.
 - Claude Code sessions enable the hook with a SessionStart hook in
-  `.claude/settings.json`.
+  `.claude/settings.json`. In cloud sessions, the SessionStart hook
+  `.claude/hooks/session-start.sh` also starts the Docker daemon,
+  pulls `POSTGRES_IMAGE`, and builds the Node image
+  `localhost/appgen-node:24-alpine` (the default of `NODE_IMAGE`) that
+  trusts the CA of the session proxy.
 
 ## AI-assisted work
 
