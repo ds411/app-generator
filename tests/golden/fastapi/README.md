@@ -34,6 +34,7 @@ When you write the code of an extension file, change `@trace:gap` to
 | Check the format   | `uv run ruff format --check`              |
 | Type check         | `uv run pyright`                          |
 | Test               | `uv run pytest`                           |
+| Run with Docker    | `docker compose up --build`               |
 
 The API documentation is at `/docs` when the API runs. The API reads
 its settings from environment variables or from a `.env` file (see
@@ -49,6 +50,15 @@ the success case and the main error cases. The factories in
 records that they need. The generated tests of a custom operation check
 only its errors (404 and 422). Write the tests of its logic in your own
 test modules, which appgen does not change.
+
+## Docker
+
+`docker compose up --build` builds the image, starts Postgres, runs the
+migrations, and starts the API on port 8000. The Dockerfile installs
+the dependencies with uv in a build stage, and runs the API as a
+non-root user. To use other images, for example from a mirror, set the
+build arguments `UV_IMAGE` and `PYTHON_IMAGE`, and the environment
+variable `POSTGRES_IMAGE` for Compose.
 
 ## Layout
 

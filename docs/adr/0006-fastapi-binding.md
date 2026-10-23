@@ -61,6 +61,7 @@ The slice name is also the table name and the URL prefix
 | `app/features/<slice>/<operation>_gen.py` | The endpoint of a custom operation.      |
 | `app/features/<slice>/<operation>_ext.py` | The logic of a custom operation (extension file). |
 | `migrations/`                      | The Alembic migrations.                         |
+| `Dockerfile`, `compose.yaml`       | The image of the API, and a stack with Postgres and the migrations. |
 | `tests/`                           | The tests, with one module for each operation.  |
 
 A slice imports from `app/core/`. Relations between entities are the
