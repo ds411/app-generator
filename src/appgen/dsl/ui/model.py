@@ -5,6 +5,7 @@ from typing import Annotated
 import pydantic
 
 from appgen.dsl.element import Element, MemberName
+from appgen.dsl.ui.common import States
 from appgen.dsl.ui.dashboards import Dashboard
 from appgen.dsl.ui.forms import Form
 from appgen.dsl.ui.layout import Layout, Menu, Theme
@@ -19,6 +20,8 @@ class Defaults(Element):
     """The layout of the pages that do not set one."""
     page_size: Annotated[int, pydantic.Field(ge=1)] | None = None
     """The page size of the lists that do not set one."""
+    states: States | None = None
+    """The states of the views that do not set them."""
 
 
 class UI(Element):

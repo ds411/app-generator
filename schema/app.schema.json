@@ -251,6 +251,17 @@
           "title": "Actions",
           "type": "object"
         },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "board",
           "title": "Kind",
@@ -370,6 +381,10 @@
       "title": "BooleanFilter",
       "type": "object"
     },
+    "BreakpointName": {
+      "pattern": "^[a-z0-9][a-z0-9_]*$",
+      "type": "string"
+    },
     "Card": {
       "additionalProperties": false,
       "description": "The content of a card in a card list or a board.",
@@ -469,6 +484,17 @@
           },
           "title": "Actions",
           "type": "object"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "sort": {
           "anyOf": [
@@ -726,6 +752,17 @@
             }
           ],
           "default": null
+        },
+        "hide_below": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakpointName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "Column",
@@ -847,6 +884,39 @@
         }
       },
       "title": "Content",
+      "type": "object"
+    },
+    "ContentOverride": {
+      "additionalProperties": false,
+      "description": "Content keys that change on narrow screens.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "max_width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "padding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ContentOverride",
       "type": "object"
     },
     "CustomAction": {
@@ -1116,6 +1186,17 @@
           ],
           "default": null,
           "title": "Page Size"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "Defaults",
@@ -1324,6 +1405,17 @@
           },
           "title": "Actions",
           "type": "object"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "kind": {
           "const": "detail",
@@ -2197,9 +2289,55 @@
             }
           ],
           "default": null
+        },
+        "responsive": {
+          "additionalProperties": {
+            "$ref": "#/$defs/GridOverride"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/BreakpointName"
+          },
+          "title": "Responsive",
+          "type": "object"
         }
       },
       "title": "Grid",
+      "type": "object"
+    },
+    "GridOverride": {
+      "additionalProperties": false,
+      "description": "The columns and the gap of a grid on screens narrower than a breakpoint.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "columns": {
+          "anyOf": [
+            {
+              "maximum": 12,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Columns"
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "GridOverride",
       "type": "object"
     },
     "IconName": {
@@ -2276,9 +2414,63 @@
             }
           ],
           "default": null
+        },
+        "responsive": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LayoutOverride"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/BreakpointName"
+          },
+          "title": "Responsive",
+          "type": "object"
         }
       },
       "title": "Layout",
+      "type": "object"
+    },
+    "LayoutOverride": {
+      "additionalProperties": false,
+      "description": "The region keys of a layout on screens narrower than a breakpoint.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "sidebar": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SidebarOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "topbar": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TopbarOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "LayoutOverride",
       "type": "object"
     },
     "LengthRule": {
@@ -2381,6 +2573,70 @@
         "view"
       ],
       "title": "ListWidget",
+      "type": "object"
+    },
+    "LoadingState": {
+      "additionalProperties": false,
+      "description": "What a view shows while it loads its data.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "indicator": {
+          "default": "skeleton",
+          "enum": [
+            "skeleton",
+            "spinner"
+          ],
+          "title": "Indicator",
+          "type": "string"
+        }
+      },
+      "title": "LoadingState",
       "type": "object"
     },
     "MemberName": {
@@ -3328,6 +3584,39 @@
       ],
       "type": "string"
     },
+    "SidebarOverride": {
+      "additionalProperties": false,
+      "description": "Sidebar keys that change on narrow screens.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SidebarMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SidebarOverride",
+      "type": "object"
+    },
     "Sort": {
       "additionalProperties": false,
       "description": "A sort order.",
@@ -3451,6 +3740,105 @@
       "title": "StatWidget",
       "type": "object"
     },
+    "State": {
+      "additionalProperties": false,
+      "description": "What a view shows in a state: a title, a text, an icon, and an action.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "States": {
+      "additionalProperties": false,
+      "description": "The loading, empty, and error states of a view.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "loading": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoadingState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "empty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/State"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/State"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "States",
+      "type": "object"
+    },
     "TableView": {
       "additionalProperties": false,
       "description": "A table of records.",
@@ -3492,6 +3880,17 @@
           },
           "title": "Actions",
           "type": "object"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "sort": {
           "anyOf": [
@@ -3909,6 +4308,53 @@
         }
       },
       "title": "Topbar",
+      "type": "object"
+    },
+    "TopbarOverride": {
+      "additionalProperties": false,
+      "description": "Top bar keys that change on narrow screens.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "breadcrumbs": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Breadcrumbs"
+        },
+        "mode_toggle": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode Toggle"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search"
+        }
+      },
+      "title": "TopbarOverride",
       "type": "object"
     },
     "UI": {

@@ -32,12 +32,47 @@ def kind_tag(value: object) -> str | None:
     return None
 
 
+class GridOverride(Element):
+    """The columns and the gap of a grid on screens narrower than a breakpoint."""
+
+    columns: Annotated[int, pydantic.Field(ge=1, le=12)] | None = None
+    gap: TokenRef | None = None
+
+
 class Grid(Element):
     """A column grid. Forms, card lists, and dashboards use grids."""
 
     columns: Annotated[int, pydantic.Field(ge=1, le=12)] = 1
     gap: TokenRef | None = None
     """A spacing token."""
+    responsive: dict[BreakpointName, GridOverride] = pydantic.Field(
+        default_factory=dict[str, GridOverride]
+    )
+    """Overrides for screens narrower than a breakpoint. The smallest breakpoint wins."""
+
+
+class State(Element):
+    """What a view shows in a state: a title, a text, an icon, and an action."""
+
+    title: Text | None = None
+    text: Text | None = None
+    icon: IconName | None = None
+    action: MemberName | None = None
+    """An action of the view. In the error state, `retry` loads the data again."""
+
+
+class LoadingState(State):
+    """What a view shows while it loads its data."""
+
+    indicator: Literal["skeleton", "spinner"] = "skeleton"
+
+
+class States(Element):
+    """The loading, empty, and error states of a view."""
+
+    loading: LoadingState | None = None
+    empty: State | None = None
+    error: State | None = None
 
 
 class Confirm(Element):

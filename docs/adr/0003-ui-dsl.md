@@ -553,7 +553,8 @@ of the view). `loading` also has `indicator` (`skeleton` or
 data again.
 
 `ui.defaults.states` gives the states for views that do not define
-them. The bindings have built-in states for what both leave out.
+them. Its only action is `retry`, in the error state, because the views
+have different actions. The bindings have built-in states for what both leave out.
 
 ### Defaults
 

@@ -11,6 +11,7 @@ from typing import cast
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field
+from appgen.dsl.ui.common import State, States
 from appgen.dsl.ui.dashboards import (
     FILTER_OPS,
     RELATIVE_DATES,
@@ -228,6 +229,8 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
         yield _missing(view, "entity", "entity", view.entity, definition.entities)
         return
     entity = view.entity
+    if view.states is not None:
+        yield from _check_states(view.states, view.actions)
     if not isinstance(view, DetailView) and view.sort is not None:
         yield from _check_paths(definition, view.sort, "field", entity, [view.sort.field])
     match view:
@@ -425,6 +428,26 @@ def _check_filter_value(
             )
     elif target.enum_values and value not in target.enum_values:
         yield _missing(element, "filter", "enum value", str(value), target.enum_values)
+
+
+def check_ui_states(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The default states can only use the action `retry`, in the error state."""
+    if definition.ui is not None and definition.ui.defaults is not None:
+        states = definition.ui.defaults.states
+        if states is not None:
+            yield from _check_states(states, {})
+
+
+def _check_states(states: States, actions: Mapping[str, object]) -> Iterator[Diagnostic]:
+    """The action of a state must be an action of the view, or `retry` for an error."""
+    for key in ("loading", "empty", "error"):
+        state: State | None = getattr(states, key)
+        if state is None or state.action is None or state.action in actions:
+            continue
+        if key == "error" and state.action == "retry":
+            continue
+        choices = [*actions, "retry"] if key == "error" else list(actions)
+        yield _missing(state, "action", "action", state.action, choices)
 
 
 def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Iterator[Diagnostic]:
