@@ -11,7 +11,14 @@ export type ExpectedPage = {
   title: string;
   /** The path parameters, for example ["id"]. */
   params: string[];
+  /** True if the page shows the detail view of a record. */
+  detail: boolean;
+  /** The labels of the page actions that run an operation on the record, for example "Delete". */
+  recordActions: string[];
 };
+
+/** An ID that no record has. */
+export const UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
 
 export type ExpectedToken = {
   path: string;

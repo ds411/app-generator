@@ -9,6 +9,7 @@ data, as the pages of the React app with its mock data do. Then it
 checks the app:
 
 - Next.js and React: open one page for each entity that has a page.
+  Next.js: a detail page with an unknown ID gives the status 404.
 - FastAPI: call the health check, and the list endpoint of each entity.
 
 With `--local`, the script runs the Next.js app or the FastAPI app on the
@@ -50,6 +51,7 @@ Environment variables:
 import argparse
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -76,6 +78,7 @@ BUILD_ARGS = {
     "react": ("NODE_IMAGE", "NGINX_IMAGE"),
     "fastapi": ("UV_IMAGE", "PYTHON_IMAGE"),
 }
+UNKNOWN_ID = "00000000-0000-4000-8000-000000000000"
 PORTS = {"nextjs": 3000, "fastapi": 8000, "react": 8080}
 # The Compose services that run the image of the app.
 SERVICES = {"nextjs": ("app",), "fastapi": ("migrate", "api")}
@@ -231,6 +234,21 @@ def entity_pages(definition: AppDefinition) -> dict[str, tuple[str, str]]:
     return pages
 
 
+def detail_pages(definition: AppDefinition) -> list[str]:
+    """Return the names of the pages that show a detail view of a record."""
+    ui = definition.ui
+    views = ui.views if ui is not None else {}
+    return [
+        name
+        for name, page in definition.pages.items()
+        if page.entity
+        and "{" in page.path
+        and page.content is not None
+        and page.content.view in views
+        and views[page.content.view].kind == "detail"
+    ]
+
+
 def check_front_end(binding: str, definition: AppDefinition) -> None:
     base = f"http://localhost:{PORTS[binding]}"
     wait_for(binding, base + "/")
@@ -249,6 +267,16 @@ def check_front_end(binding: str, definition: AppDefinition) -> None:
         if expected not in response.body:
             raise SmokeError(f"{binding}: GET {path} does not contain {expected!r}.")
         log(binding, f"entity {entity}: GET {path} is OK")
+    if binding != "nextjs":
+        # The React app is a single-page app: nginx gives status 200 for each path.
+        return
+    for name in detail_pages(definition):
+        path = definition.pages[name].path
+        path = re.sub(r"\{[^}]+\}", UNKNOWN_ID, path)
+        response = get(base + path)
+        if response.status != 404:
+            raise SmokeError(f"{binding}: GET {path} gave the status {response.status}, not 404.")
+        log(binding, f"page {name}: GET {path} with an unknown ID gives 404")
 
 
 def check_api(binding: str, definition: AppDefinition) -> None:
@@ -304,6 +332,10 @@ def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
                 "path": page.path,
                 "title": page.title,
                 "params": [part[1:-1] for part in page.path.split("/") if part.startswith("{")],
+                "detail": name in detail_pages(definition),
+                "recordActions": [
+                    str(a.label) for a in page.actions.values() if a.label and a.kind == "operation"
+                ],
             }
             for name, page in definition.pages.items()
         ],

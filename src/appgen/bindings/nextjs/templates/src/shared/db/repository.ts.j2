@@ -95,6 +95,9 @@ function toRecordValue(value: unknown): unknown {
  * The data access of one entity in the Postgres database, with the same
  * interface as the data access in the browser. Use it only on the server.
  */
+/** The form of a record ID: the primary keys are UUIDs. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class Repository<T extends EntityRecord, TInput extends object>
   implements Omit<EntityApi<T, TInput>, "subscribe">
 {
@@ -141,6 +144,14 @@ export class Repository<T extends EntityRecord, TInput extends object>
     }
     const rows: Row[] = await select;
     return { items: await this.toRecords(db, rows), total, page, pageSize };
+  }
+
+  /** Return true if a record with the ID exists. An ID that is not a UUID does not exist. */
+  async exists(id: string): Promise<boolean> {
+    if (!UUID.test(id)) {
+      return false;
+    }
+    return (await getDb().$count(this.table, eq(this.table.id, id))) > 0;
   }
 
   async get(id: string): Promise<T> {

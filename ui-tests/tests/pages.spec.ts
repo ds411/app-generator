@@ -4,10 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { expect, type Page, test } from "@playwright/test";
 
-import { type ExpectedPage, expected, modeOf, pathPattern } from "./expected";
+import { type ExpectedPage, expected, modeOf, pathPattern, UNKNOWN_ID } from "./expected";
 
 const SCREENSHOTS = fileURLToPath(new URL(`../screenshots/${expected.binding}/`, import.meta.url));
-const UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
 
 /**
  * Return a path of a page with path parameters: the first link to the
