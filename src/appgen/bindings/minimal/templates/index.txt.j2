@@ -1,0 +1,8 @@
+{{ app.title }} ({{ app.name }})
+Binding: {{ binding.name }}
+Covers: {{ binding.covers | join(", ") }}
+
+Entities:
+{% for entity_name in definition.entities %}
+- {{ entity_name }}
+{% endfor %}

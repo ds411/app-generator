@@ -1,0 +1,2 @@
+# Generated output must keep LF line endings on each platform.
+tests/golden/** text eol=lf

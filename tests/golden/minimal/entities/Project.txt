@@ -1,0 +1,3 @@
+Entity Project of project-tracker
+- name: string (required)
+- status: enum

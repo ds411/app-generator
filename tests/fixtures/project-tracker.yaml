@@ -1,0 +1,46 @@
+# The app definition of the golden file tests. Change the golden files
+# with: APPGEN_UPDATE_GOLDEN=1 uv run pytest tests/test_gen_render.py
+version: 0
+
+app:
+  name: project-tracker
+  title: Project Tracker
+
+entities:
+  Project:
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      status:
+        type: enum
+        values: [planned, active, done]
+        default: planned
+    relations:
+      tasks: { kind: one_to_many, target: Task, inverse: project }
+
+  Task:
+    display_field: title
+    fields:
+      title: { type: string, required: true }
+      due_date: { type: date }
+      done: { type: boolean, default: false }
+    relations:
+      project:
+        kind: many_to_one
+        target: Project
+        required: true
+        on_delete: cascade
+        inverse: tasks
+
+operations:
+  create_task: { kind: create, entity: Task }
+  list_tasks: { kind: list, entity: Task }
+  complete_task:
+    kind: custom
+    entity: Task
+    params:
+      note: { type: text }
+    returns: Task
+
+pages:
+  projects: { path: /projects, title: Projects, entity: Project }

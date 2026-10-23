@@ -4,6 +4,7 @@ from appgen.gen.binding import Binding, ElementKind, Output
 from appgen.gen.elements import DefinitionElement, element_kind, iter_elements
 from appgen.gen.generator import Gap, GeneratedFile, GenerationResult, generate
 from appgen.gen.registry import UnknownBindingError, available_bindings, find_binding
+from appgen.gen.render import GenerationError
 
 __all__ = [
     "Binding",
@@ -11,6 +12,7 @@ __all__ = [
     "ElementKind",
     "Gap",
     "GeneratedFile",
+    "GenerationError",
     "GenerationResult",
     "Output",
     "UnknownBindingError",
