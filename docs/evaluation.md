@@ -86,7 +86,7 @@ The drift report is in [traces.md](traces.md#after-a-change-to-the-definition).
 
 ### Tests
 
-- 457 Python tests (generator, DSL, checker, bindings, end to end, docs).
+- 656 Python tests (generator, DSL, checker, bindings, end to end, docs).
 - The tests of each generated app (pytest for FastAPI, Vitest for the
   front ends).
 - The smoke test: one page of each entity on each front end, and
