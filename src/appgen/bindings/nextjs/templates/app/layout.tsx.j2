@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import "@/app/styles/globals.css";
+import { Providers } from "@/app/providers";
 import { appConfig } from "@/shared/config";
 
 export const metadata: Metadata = {
@@ -12,8 +13,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
-      <body className="min-h-svh antialiased">{children}</body>
+    // next-themes sets the class of the color mode before React hydrates.
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-svh antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

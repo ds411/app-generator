@@ -140,3 +140,25 @@ def test_the_app_has_only_the_shadcn_components_that_the_ui_uses(
 def test_each_component_package_has_a_version() -> None:
     needed = shadcn.packages(shadcn.registry().values())
     assert sorted(set(needed) - set(versions.COMPONENT_PACKAGES)) == []
+
+
+def test_the_theme_comes_from_the_tokens(result: GenerationResult) -> None:
+    files = _files(result)
+    css = files["src/app/styles/globals.css"]
+    assert "--primary: oklch(0.511 0.262 276.966); /* @trace ui.tokens.color.primary */" in css
+    assert ".dark {" in css
+    assert "--spacing-4: 1rem; /* @trace ui.tokens.spacing.4 */" in css
+    assert "@utility typography-heading {" in css
+    providers = files["src/app/providers/index.tsx"]
+    assert 'defaultTheme="system"' in providers
+    assert "@trace ui.theme file" in providers
+    assert "export function ModeToggle()" in files["src/features/toggle-theme/ui/mode-toggle.tsx"]
+
+
+def test_the_check_covers_all_tokens(tmp_path: Path, result: GenerationResult) -> None:
+    definition = load_definition(EXAMPLE)
+    write_result(result, tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    tokens = [e for e in report.coverage.elements if e.element_id.startswith("ui.tokens")]
+    assert tokens
+    assert {e.status for e in tokens} == {"covered"}

@@ -162,7 +162,9 @@ routes. Each route renders a page slice of Feature-Sliced Design in
 `src/pages`, and the other FSD layers are in `src/` too. Each element
 of a kind that the binding does not cover yet gets an extension file in
 `src/gaps/`. The app gets the shadcn/ui components that its UI uses, in
-`src/shared/ui/`, and their npm packages. The exact package versions are in
+`src/shared/ui/`, and their npm packages. The theme in
+`src/app/styles/globals.css` comes from the design tokens, and
+next-themes switches the color mode (`ui.theme`). The exact package versions are in
 `src/appgen/bindings/nextjs/versions.py`. To try the output:
 
 ```sh
@@ -182,6 +184,18 @@ components, and the hooks that each component imports.
 that the UI of a definition needs. To update the components, change the
 commit or the list in `scripts/vendor_shadcn.py`, and run
 `uv run scripts/vendor_shadcn.py`.
+
+`theme/globals.css.j2` writes the theme of Tailwind CSS 4 and shadcn/ui
+from the resolved design tokens (`appgen.bindings.shared.theme`). Each
+color token, and each token with another value in the dark mode, is a
+CSS variable in `:root` and `.dark` (`color.primary_foreground` gives
+`--primary-foreground` and `bg-primary-foreground`). The other tokens
+are theme variables of Tailwind CSS (`spacing.4` gives `--spacing-4`,
+`font_size.sm` gives `--text-sm`), and each typography token gives a
+utility (`typography-heading`). `radius.lg` gives `--radius`. A shadcn/ui
+variable without a token keeps the shadcn/ui default. Each variable has
+a trace to its token. `theme/mode-toggle.tsx.j2` is the switch for the
+color mode.
 
 ### React binding
 

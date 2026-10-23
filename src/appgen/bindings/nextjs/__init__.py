@@ -69,7 +69,18 @@ BINDING = Binding(
             path="{{ nextjs.pages[name].route_file }}",
             for_each="page",
         ),
-        Output(template="src/app/styles/globals.css.j2", path="src/app/styles/globals.css"),
+        Output(template="theme/globals.css.j2", path="src/app/styles/globals.css"),
+        Output(template="src/app/providers/index.tsx.j2", path="src/app/providers/index.tsx"),
+        Output(
+            template="src/features/toggle-theme/index.ts.j2",
+            path="src/features/toggle-theme/index.ts",
+            when="nextjs.mode_toggle",
+        ),
+        Output(
+            template="theme/mode-toggle.tsx.j2",
+            path="src/features/toggle-theme/ui/mode-toggle.tsx",
+            when="nextjs.mode_toggle",
+        ),
         Output(template="src/pages/slice/index.ts.j2", path=_PAGE + "/index.ts", for_each="page"),
         Output(
             template="src/pages/slice/ui/page.tsx.j2",
@@ -84,7 +95,7 @@ BINDING = Binding(
         *_SHADCN,
         *_HOOKS,
     ),
-    covers=frozenset({"app", "page"}),
+    covers=frozenset({"app", "page", "theme", "tokens", "token_group", "token"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": to_json},

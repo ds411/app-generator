@@ -103,12 +103,21 @@ def hooks(components: Iterable[Component]) -> list[str]:
     return sorted({hook for component in components for hook in component.hooks})
 
 
+def has_mode_toggle(definition: AppDefinition) -> bool:
+    """Return True if the app shows a switch for the color mode (ADR 0003, "Theme")."""
+    ui = definition.ui
+    if ui is None or (ui.theme is not None and not ui.theme.mode_toggle):
+        return False
+    topbars = [layout.topbar for layout in ui.layouts.values() if layout.topbar is not None]
+    return not topbars or any(topbar.mode_toggle for topbar in topbars)
+
+
 def used_components(definition: AppDefinition) -> list[Component]:
     """Return the components that the UI of a definition needs, with their dependencies."""
     names: set[str] = set(BASE_COMPONENTS)
     ui = definition.ui
     if ui is not None:
-        if ui.theme is None or ui.theme.mode_toggle:
+        if has_mode_toggle(definition):
             names.add("dropdown-menu")
         for layout in ui.layouts.values():
             if layout.sidebar is not None:
@@ -117,8 +126,6 @@ def used_components(definition: AppDefinition) -> list[Component]:
                 names.add("separator")
                 if layout.topbar.breadcrumbs:
                     names.add("breadcrumb")
-                if layout.topbar.mode_toggle:
-                    names.add("dropdown-menu")
                 names.update(_action_components(layout.topbar.actions.values()))
         if any(g.collapsible for menu in ui.navigation.values() for g in menu.groups.values()):
             names.add("collapsible")
