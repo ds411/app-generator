@@ -16,7 +16,7 @@ from pathlib import Path
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Field
-from appgen.dsl.ui.checks import check_ui_tokens, check_ui_views
+from appgen.dsl.ui.checks import check_ui_forms, check_ui_tokens, check_ui_views
 
 type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 
@@ -205,6 +205,7 @@ CHECKS: list[Check] = [
     check_fields,
     check_ui_tokens,
     check_ui_views,
+    check_ui_forms,
 ]
 """The checks that `validate_definition` runs, in order."""
 

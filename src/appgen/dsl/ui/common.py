@@ -32,6 +32,14 @@ def kind_tag(value: object) -> str | None:
     return None
 
 
+class Grid(Element):
+    """A column grid. Forms, card lists, and dashboards use grids."""
+
+    columns: Annotated[int, pydantic.Field(ge=1, le=12)] = 1
+    gap: TokenRef | None = None
+    """A spacing token."""
+
+
 class Confirm(Element):
     """A question that the user must confirm before an action runs."""
 

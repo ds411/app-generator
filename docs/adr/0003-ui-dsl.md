@@ -504,7 +504,9 @@ rules:
     message: The due date must be on or after the start date.
 ```
 
-The client and the server use the same rules.
+A `custom` rule is a generation gap. It has `message` and `fields` (the
+form fields that show the message). The client and the server use the
+same rules.
 
 ### Dashboards
 

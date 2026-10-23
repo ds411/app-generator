@@ -13,7 +13,7 @@ from appgen.dsl.element import (
     MemberName,
     Text,
 )
-from appgen.dsl.ui.common import Action, FieldPath, IconName, TokenRef, kind_tag
+from appgen.dsl.ui.common import Action, FieldPath, Grid, IconName, TokenRef, kind_tag
 
 type FieldRef = Annotated[
     str,
@@ -78,14 +78,6 @@ class Pagination(Element):
     page_sizes: list[Annotated[int, pydantic.Field(ge=1)]] = pydantic.Field(
         default_factory=list[int]
     )
-
-
-class Grid(Element):
-    """A column grid."""
-
-    columns: Annotated[int, pydantic.Field(ge=1, le=12)] = 1
-    gap: TokenRef | None = None
-    """A spacing token."""
 
 
 class Column(Element):
