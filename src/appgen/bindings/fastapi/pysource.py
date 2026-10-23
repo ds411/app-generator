@@ -41,15 +41,15 @@ def import_block(lines: set[str]) -> str:
     """Return import lines in the groups and the order of the Ruff import sorter.
 
     The groups are the standard library, the third-party packages, and the
-    app (`app.`). Straight imports (`import x`) come before `from` imports
+    app (`app.` and `tests.`). Straight imports (`import x`) come before `from` imports
     in each group.
     """
-    stdlib = {"datetime", "decimal", "enum", "typing", "uuid", "collections", "os"}
+    stdlib = {"collections", "datetime", "decimal", "enum", "itertools", "os", "typing", "uuid"}
     groups: list[list[str]] = [[], [], []]
     for line in lines:
         module = line.split()[1]
         root = module.split(".")[0]
-        index = 0 if root in stdlib else 2 if root == "app" else 1
+        index = 0 if root in stdlib else 2 if root in ("app", "tests") else 1
         groups[index].append(line)
 
     def key(line: str) -> tuple[int, str]:

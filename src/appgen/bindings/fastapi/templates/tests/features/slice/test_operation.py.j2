@@ -1,0 +1,262 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% macro sig(fn, args) %}
+{% set line = "async def " ~ fn ~ "(" ~ args ~ ") -> None:" %}
+{% if line | length <= 100 %}
+{{ line }}
+{% else %}
+async def {{ fn }}(
+    {{ args }}
+) -> None:
+{% endif %}
+{% endmacro %}
+{% set url = e.path ~ op.path %}
+{% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
+{% set missing_url = 'f"' ~ (url | replace("{id}", "{uuid4()}")) ~ '"' %}
+{% set required = e.fields | selectattr("required") | rejectattr("has_default") | list %}
+{% set exact = e.exact_fields %}
+{% set exact_filters = e.filters | selectattr("exact") | list %}
+{% set filter = exact_filters[0] if exact_filters else none %}
+"""The tests of the operation `{{ op.name }}`: {{ op.method | upper }} {{ url }}."""
+
+{% set ns = namespace(lines=[
+    "import pytest",
+    "from httpx import AsyncClient",
+    "from tests.problems import assert_problem",
+]) %}
+{% if op.kind in ("create", "read", "update", "delete", "list") %}
+{% set ns.lines = ns.lines + ["from sqlalchemy.ext.asyncio import AsyncSession"] %}
+{% endif %}
+{% if op.kind == "create" %}
+{% set ns.lines = ns.lines + [
+    "from uuid import UUID" ~ (", uuid4" if e.fk_relations else ""),
+    "from app.features." ~ e.slice ~ " import repository",
+    "from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read",
+    "from tests.factories import " ~ e.snake ~ "_input",
+] %}
+{% elif op.kind == "read" %}
+{% set ns.lines = ns.lines + [
+    "from uuid import uuid4",
+    "from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read",
+    "from tests.factories import make_" ~ e.snake,
+] %}
+{% elif op.kind == "update" %}
+{% set ns.lines = ns.lines + [
+    "from uuid import uuid4",
+    "from app.features." ~ e.slice ~ " import repository",
+    "from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read",
+    py.from_import("tests.factories", ["make_" ~ e.snake] + ([e.snake ~ "_input"] if exact else [])),
+] %}
+{% if not exact %}
+{% set ns.lines = ns.lines + ["from typing import Any"] %}
+{% endif %}
+{% elif op.kind == "delete" %}
+{% set ns.lines = ns.lines + [
+    "from uuid import uuid4",
+    "from sqlalchemy import select",
+    "from app.features." ~ e.slice ~ ".models import " ~ e.name,
+    "from tests.factories import make_" ~ e.snake,
+] %}
+{% elif op.kind == "list" %}
+{% set ns.lines = ns.lines + ["from tests.factories import make_" ~ e.snake] %}
+{% if filter %}
+{% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read"] %}
+{% endif %}
+{% else %}
+{% set ns.lines = ns.lines + ["from uuid import uuid4"] %}
+{% endif %}
+{{ py.imports(ns.lines) }}
+
+pytestmark = pytest.mark.anyio
+{% if op.kind == "create" %}
+
+
+{{ sig("test_" ~ op.name ~ "_stores_a_record", "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session)
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert response.status_code == 201, response.text
+    record = await repository.get(session, UUID(response.json()["id"]))
+    assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
+{% for f in exact %}
+    assert response.json()["{{ f.name }}"] == payload["{{ f.name }}"]
+{% endfor %}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_input_that_is_not_valid", "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session)
+{% if required %}
+    del payload["{{ required[0].name }}"]
+{% else %}
+    payload["unknown_field"] = 1
+{% endif %}
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 422)
+{% for r in e.fk_relations %}
+
+
+{{ trace(r.id) }}
+{{ sig("test_" ~ op.name ~ "_rejects_a_missing_" ~ (r.attr | trim("_")), "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session, {{ r.fk_attr }}=str(uuid4()))
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 422)
+{% endfor %}
+{% if e.has_unique_input %}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_a_duplicate_value", "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session)
+    assert (await client.post("{{ url }}", json=payload)).status_code == 201
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 409)
+{% endif %}
+{% elif op.kind == "read" %}
+
+
+{{ sig("test_" ~ op.name ~ "_returns_the_record", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
+
+    response = await client.get({{ id_url }})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
+
+
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.get({{ missing_url }})
+
+    assert_problem(response, 404)
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_an_id_that_is_not_valid", "client: AsyncClient") }}    response = await client.get("{{ url | replace('{id}', 'not-an-id') }}")
+
+    assert_problem(response, 422)
+{% elif op.kind == "update" %}
+
+
+{{ sig("test_" ~ op.name ~ "_changes_the_given_fields", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
+{% if exact %}
+    changes = {"{{ exact[0].name }}": (await {{ e.snake }}_input(session))["{{ exact[0].name }}"]}
+{% else %}
+    changes: dict[str, Any] = {}
+{% endif %}
+
+    response = await client.patch({{ id_url }}, json=changes)
+
+    assert response.status_code == 200, response.text
+{% if exact %}
+    assert response.json()["{{ exact[0].name }}"] == changes["{{ exact[0].name }}"]
+{% endif %}
+    record = await repository.get(session, record.id)
+    assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
+
+
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.patch({{ missing_url }}, json={})
+
+    assert_problem(response, 404)
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_input_that_is_not_valid", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
+
+{% if e.not_null %}
+    response = await client.patch({{ id_url }}, json={"{{ e.not_null[0] }}": None})
+{% else %}
+    response = await client.patch({{ id_url }}, json={"unknown_field": 1})
+{% endif %}
+
+    assert_problem(response, 422)
+{% elif op.kind == "delete" %}
+
+
+{{ sig("test_" ~ op.name ~ "_deletes_the_record", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
+
+    response = await client.delete({{ id_url }})
+
+    assert response.status_code == 204, response.text
+    assert await session.scalar(select({{ e.name }}.id).where({{ e.name }}.id == record.id)) is None
+
+
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.delete({{ missing_url }})
+
+    assert_problem(response, 404)
+{% elif op.kind == "list" %}
+
+
+{{ sig("test_" ~ op.name ~ "_returns_a_page_of_records", "client: AsyncClient, session: AsyncSession") }}    records = [await make_{{ e.snake }}(session), await make_{{ e.snake }}(session)]
+
+    response = await client.get("{{ url }}", params={"limit": 1})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 2
+    assert len(response.json()["items"]) == 1
+    response = await client.get("{{ url }}", params={"offset": 1})
+    assert len(response.json()["items"]) == 1
+    response = await client.get("{{ url }}")
+    assert {item["id"] for item in response.json()["items"]} == {str(r.id) for r in records}
+{% if e.sortable %}
+
+
+{{ sig("test_" ~ op.name ~ "_sorts_the_records", "client: AsyncClient, session: AsyncSession") }}    records = [await make_{{ e.snake }}(session), await make_{{ e.snake }}(session)]
+
+    response = await client.get("{{ url }}", params={"sort": "-{{ e.sortable[0].name }}"})
+
+    assert response.status_code == 200, response.text
+    assert {item["id"] for item in response.json()["items"]} == {str(r.id) for r in records}
+{% endif %}
+{% if filter %}
+
+
+{{ trace(filter.id) }}
+{{ sig("test_" ~ op.name ~ "_filters_the_records", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
+    await make_{{ e.snake }}(session)
+    value = {{ e.name }}Read.model_validate(record).model_dump(mode="json")["{{ filter.name }}"]
+
+    response = await client.get("{{ url }}", params={"{{ filter.name }}": value})
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert str(record.id) in {item["id"] for item in items}
+    assert all(item["{{ filter.name }}"] == value for item in items)
+{% endif %}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_sort_field", "client: AsyncClient") }}    response = await client.get("{{ url }}", params={"sort": "unknown_field"})
+
+    assert_problem(response, 422)
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_parameter", "client: AsyncClient") }}    response = await client.get("{{ url }}", params={"unknown_field": 1})
+
+    assert_problem(response, 422)
+{% else %}
+{% set required_params = op.params | selectattr("required") | rejectattr("has_default") | list %}
+
+
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}{% if op.params %}
+    n = 0
+    params = {
+{% for p in op.params %}
+        "{{ p.name }}": {{ p.sample }},
+{% endfor %}
+    }
+
+    response = await client.post({{ missing_url }}, json=params)
+{% else %}
+    response = await client.post({{ missing_url }})
+{% endif %}
+
+    assert_problem(response, 404)
+{% if op.params %}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_params_that_are_not_valid", "client: AsyncClient") }}{% if required_params %}
+    response = await client.post({{ missing_url }}, json={})
+{% else %}
+    response = await client.post({{ missing_url }}, json={"unknown_field": 1})
+{% endif %}
+
+    assert_problem(response, 422)
+{% endif %}
+{% endif %}
