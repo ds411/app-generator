@@ -12,7 +12,7 @@ from pathlib import Path
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
-from appgen.bindings.shared import shadcn, typescript
+from appgen.bindings.shared import shadcn, typescript, ui
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.gen.binding import Binding, Output
 
@@ -20,6 +20,82 @@ _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+
+# The app shell: the layouts, the menus, the breadcrumbs, and the search
+# (shared templates, see `appgen.bindings.shared.ui`). Each layout with
+# pages is a route group in `app/`.
+_APP_SHELL = (
+    Output(template="ui/config/pages.ts.j2", path="src/shared/config/pages.ts"),
+    Output(template="ui/lib/pages.ts.j2", path="src/shared/lib/pages.ts"),
+    Output(template="ui/lib/use-media-query.ts.j2", path="src/shared/lib/use-media-query.ts"),
+    Output(template="ui/lib/use-resource.ts.j2", path="src/shared/lib/use-resource.ts"),
+    Output(template="src/shared/lib/router.tsx.j2", path="src/shared/lib/router.tsx"),
+    Output(
+        template="ui/widgets/layout/layout.tsx.j2",
+        path="src/widgets/layouts/ui/{{ name | kebab }}-layout.tsx",
+        for_each="layout",
+    ),
+    Output(
+        template="ui/widgets/layout/index.ts.j2",
+        path="src/widgets/layouts/index.ts",
+        when="ui_plan.layouts",
+    ),
+    Output(
+        template="app/group/layout.tsx.j2",
+        path="app/({{ name | kebab }})/layout.tsx",
+        for_each="layout",
+        when="ui_plan.pages_of(name)",
+    ),
+    Output(
+        template="app/group/bare-layout.tsx.j2",
+        path="app/(bare)/layout.tsx",
+        when="ui_plan.pages_of(none)",
+    ),
+    Output(template="app/not-found.tsx.j2", path="app/not-found.tsx"),
+    Output(
+        template="ui/widgets/navigation/menu.tsx.j2",
+        path="src/widgets/navigation/ui/{{ name | kebab }}-menu.tsx",
+        for_each="menu",
+        when="name in ui_plan.menus",
+    ),
+    Output(
+        template="ui/widgets/navigation/index.ts.j2",
+        path="src/widgets/navigation/index.ts",
+        when="ui_plan.menus",
+    ),
+    *(
+        Output(
+            template=f"ui/widgets/breadcrumbs/{template}.j2",
+            path=f"src/widgets/page-breadcrumbs/{path}",
+            when="ui_plan.breadcrumbs",
+        )
+        for template, path in (
+            ("index.ts", "index.ts"),
+            ("page-breadcrumbs.tsx", "ui/page-breadcrumbs.tsx"),
+            ("record-labels.ts", "model/record-labels.ts"),
+        )
+    ),
+    Output(
+        template="ui/features/search-pages/index.ts.j2",
+        path="src/features/search-pages/index.ts",
+        when="ui_plan.search",
+    ),
+    Output(
+        template="ui/features/search-pages/page-search.tsx.j2",
+        path="src/features/search-pages/ui/page-search.tsx",
+        when="ui_plan.search",
+    ),
+    Output(template="ui/widgets/page-header/index.ts.j2", path="src/widgets/page-header/index.ts"),
+    Output(
+        template="ui/widgets/page-header/page-header.tsx.j2",
+        path="src/widgets/page-header/ui/page-header.tsx",
+    ),
+    Output(template="src/pages/not-found/index.ts.j2", path="src/pages/not-found/index.ts"),
+    Output(
+        template="ui/pages/not-found.tsx.j2",
+        path="src/pages/not-found/ui/not-found-page.tsx",
+    ),
+)
 
 # One rule for each shadcn/ui component and hook. The app gets only the
 # components that its UI uses (ADR 0003, "Binding map").
@@ -63,6 +139,7 @@ BINDING = Binding(
             for layer, _ in FSD_LAYERS
         ),
         Output(template="app/layout.tsx.j2", path="app/layout.tsx"),
+        *_APP_SHELL,
         Output(
             template="app/page.tsx.j2",
             path="{{ nextjs.pages[name].route_file }}",
@@ -153,5 +230,5 @@ BINDING = Binding(
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": typescript.to_json},
-    helpers=typescript.HELPERS | {"gap_spec": gap_spec},
+    helpers=typescript.HELPERS | ui.HELPERS | {"gap_spec": gap_spec},
 )

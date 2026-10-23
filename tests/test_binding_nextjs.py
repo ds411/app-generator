@@ -66,23 +66,50 @@ def test_the_fsd_layers_are_in_src_and_the_routes_in_app(result: GenerationResul
     assert "pages/README.md" in files
     routes = sorted(path for path in files if path.startswith("app/"))
     assert routes == [
+        "app/(app-shell)/layout.tsx",
+        "app/(app-shell)/page.tsx",
+        "app/(app-shell)/people/page.tsx",
+        "app/(app-shell)/projects/[id]/page.tsx",
+        "app/(app-shell)/projects/page.tsx",
+        "app/(app-shell)/tasks/[id]/page.tsx",
+        "app/(app-shell)/tasks/page.tsx",
         "app/layout.tsx",
-        "app/page.tsx",
-        "app/people/page.tsx",
-        "app/projects/[id]/page.tsx",
-        "app/projects/page.tsx",
-        "app/tasks/[id]/page.tsx",
-        "app/tasks/page.tsx",
+        "app/not-found.tsx",
     ]
 
 
 def test_each_route_renders_the_page_of_its_slice(result: GenerationResult) -> None:
     files = _files(result)
-    route = files["app/projects/[id]/page.tsx"]
+    route = files["app/(app-shell)/projects/[id]/page.tsx"]
     assert "// @trace pages.project_detail file" in route
     assert 'import { ProjectDetailPage } from "@/pages/project-detail";' in route
-    assert "return <ProjectDetailPage params={await params} />;" in route
+    assert "return <ProjectDetailPage />;" in route
     assert "export { DashboardPage }" in files["src/pages/dashboard/index.ts"]
+    page = files["src/pages/project-detail/ui/project-detail-page.tsx"]
+    assert '"use client";' in page
+    assert "const { id } = useParams();" in page
+    assert "<PageHeader" in page
+
+
+def test_each_layout_is_a_route_group_with_the_shared_shell(result: GenerationResult) -> None:
+    files = _files(result)
+    group = files["app/(app-shell)/layout.tsx"]
+    assert "// @trace ui.layouts.app_shell file" in group
+    assert "return <AppShellLayout>{children}</AppShellLayout>;" in group
+    assert "export function AppShellLayout(" in files["src/widgets/layouts/ui/app-shell-layout.tsx"]
+    assert "<AppShellLayout>\n      <NotFoundPage />" in files["app/not-found.tsx"]
+    router = files["src/shared/lib/router.tsx"]
+    assert 'import NextLink from "next/link";' in router
+    for name in ("Link", "useNavigate", "usePathname", "useParams"):
+        assert f"export function {name}(" in router
+    assert "src/widgets/navigation/ui/main-menu.tsx" in files
+    assert "src/widgets/page-breadcrumbs/ui/page-breadcrumbs.tsx" in files
+
+
+def test_pages_without_a_layout_are_in_the_bare_group(edge_files: dict[str, str]) -> None:
+    assert "app/(bare)/samples/page.tsx" in edge_files
+    bare = edge_files["app/(bare)/layout.tsx"]
+    assert '<span className="font-semibold">{appConfig.title}</span>' in bare
 
 
 def test_uncovered_elements_get_gap_files(result: GenerationResult) -> None:
