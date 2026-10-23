@@ -254,6 +254,8 @@ BINDING = Binding(
         | {"form", "form_section", "form_field", "form_on_success"}
         | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
         | {"compare_rule"}
+        | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
+        | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,
