@@ -2,6 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/ds411/app-generator/main/schema/app.schema.json",
   "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NavigateAction"
+        },
+        {
+          "$ref": "#/$defs/FormAction"
+        },
+        {
+          "$ref": "#/$defs/OperationAction"
+        },
+        {
+          "$ref": "#/$defs/CustomAction"
+        }
+      ]
+    },
     "App": {
       "additionalProperties": false,
       "description": "The name and the description of the app.",
@@ -37,6 +53,164 @@
     "AppName": {
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
+    },
+    "ColorMode": {
+      "enum": [
+        "light",
+        "dark",
+        "system"
+      ],
+      "type": "string"
+    },
+    "Confirm": {
+      "additionalProperties": false,
+      "description": "A question that the user must confirm before an action runs.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "confirm_label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "Confirm",
+      "type": "object"
+    },
+    "Content": {
+      "additionalProperties": false,
+      "description": "The content region of a layout, where the page shows.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "max_width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "padding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Content",
+      "type": "object"
+    },
+    "CustomAction": {
+      "additionalProperties": false,
+      "description": "An action that hand-written code gives (a generation gap).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": "default"
+        },
+        "confirm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confirm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "custom",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CustomAction",
+      "type": "object"
+    },
+    "Defaults": {
+      "additionalProperties": false,
+      "description": "Values that apply when a UI element does not set them.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Defaults",
+      "type": "object"
     },
     "Entity": {
       "additionalProperties": false,
@@ -276,6 +450,10 @@
       "title": "Field",
       "type": "object"
     },
+    "FieldPath": {
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$",
+      "type": "string"
+    },
     "FieldType": {
       "enum": [
         "string",
@@ -293,10 +471,324 @@
       ],
       "type": "string"
     },
+    "Footer": {
+      "additionalProperties": false,
+      "description": "The optional footer region of a layout.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Footer",
+      "type": "object"
+    },
+    "FormAction": {
+      "additionalProperties": false,
+      "description": "Open a form.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": "default"
+        },
+        "confirm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confirm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "form",
+          "title": "Kind",
+          "type": "string"
+        },
+        "form": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "on_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnSuccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "form"
+      ],
+      "title": "FormAction",
+      "type": "object"
+    },
+    "IconName": {
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "type": "string"
+    },
     "JsonValue": {},
+    "Layout": {
+      "additionalProperties": false,
+      "description": "An app shell: a sidebar, a top bar, the content, and an optional footer.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "sidebar": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sidebar"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "topbar": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Topbar"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Content"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "footer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Footer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Layout",
+      "type": "object"
+    },
     "MemberName": {
       "pattern": "^[a-z][a-z0-9_]*$",
       "type": "string"
+    },
+    "Menu": {
+      "additionalProperties": false,
+      "description": "A navigation menu. The items without a group show before the groups.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "items": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MenuItem"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Items",
+          "type": "object"
+        },
+        "groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MenuGroup"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Groups",
+          "type": "object"
+        }
+      },
+      "title": "Menu",
+      "type": "object"
+    },
+    "MenuGroup": {
+      "additionalProperties": false,
+      "description": "A group of menu items with a label.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "collapsible": {
+          "default": false,
+          "title": "Collapsible",
+          "type": "boolean"
+        },
+        "items": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MenuItem"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Items",
+          "type": "object"
+        }
+      },
+      "title": "MenuGroup",
+      "type": "object"
+    },
+    "MenuItem": {
+      "additionalProperties": false,
+      "description": "An item of a menu. It opens a page, and it can have one level of sub-items.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "page": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "items": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MenuSubItem"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Items",
+          "type": "object"
+        }
+      },
+      "required": [
+        "page"
+      ],
+      "title": "MenuItem",
+      "type": "object"
+    },
+    "MenuSubItem": {
+      "additionalProperties": false,
+      "description": "An item below a menu item.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "page": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "page"
+      ],
+      "title": "MenuSubItem",
+      "type": "object"
     },
     "Mode": {
       "enum": [
@@ -305,6 +797,76 @@
       ],
       "type": "string"
     },
+    "NavigateAction": {
+      "additionalProperties": false,
+      "description": "Open a page.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": "default"
+        },
+        "confirm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confirm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "navigate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "page": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "page"
+      ],
+      "title": "NavigateAction",
+      "type": "object"
+    },
     "OnDelete": {
       "enum": [
         "restrict",
@@ -312,6 +874,39 @@
         "set_null"
       ],
       "type": "string"
+    },
+    "OnSuccess": {
+      "additionalProperties": false,
+      "description": "What the app does after an action or a form succeeds.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "toast": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "navigate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "OnSuccess",
+      "type": "object"
     },
     "Operation": {
       "additionalProperties": false,
@@ -357,6 +952,77 @@
         "entity"
       ],
       "title": "Operation",
+      "type": "object"
+    },
+    "OperationAction": {
+      "additionalProperties": false,
+      "description": "Run an operation, for example a delete.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "variant": {
+          "$ref": "#/$defs/Variant",
+          "default": "default"
+        },
+        "confirm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confirm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "operation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "on_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnSuccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "operation"
+      ],
+      "title": "OperationAction",
       "type": "object"
     },
     "OperationKind": {
@@ -406,6 +1072,49 @@
             }
           ],
           "default": null
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "content": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PageContent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "breadcrumb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -413,6 +1122,55 @@
         "title"
       ],
       "title": "Page",
+      "type": "object"
+    },
+    "PageContent": {
+      "additionalProperties": false,
+      "description": "What a page shows in its layout: one view, form, or dashboard, or a gap.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "form": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dashboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom": {
+          "default": false,
+          "title": "Custom",
+          "type": "boolean"
+        }
+      },
+      "title": "PageContent",
       "type": "object"
     },
     "Relation": {
@@ -494,9 +1252,106 @@
       ],
       "type": "string"
     },
+    "Sidebar": {
+      "additionalProperties": false,
+      "description": "The sidebar region of a layout.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "navigation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "$ref": "#/$defs/SidebarMode",
+          "default": "expanded"
+        },
+        "side": {
+          "default": "left",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Side",
+          "type": "string"
+        }
+      },
+      "title": "Sidebar",
+      "type": "object"
+    },
+    "SidebarMode": {
+      "enum": [
+        "expanded",
+        "icons",
+        "drawer",
+        "hidden"
+      ],
+      "type": "string"
+    },
     "Text": {
       "minLength": 1,
       "type": "string"
+    },
+    "Theme": {
+      "additionalProperties": false,
+      "description": "The theme settings of the app.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "default_mode": {
+          "$ref": "#/$defs/ColorMode",
+          "default": "system"
+        },
+        "mode_toggle": {
+          "default": true,
+          "title": "Mode Toggle",
+          "type": "boolean"
+        }
+      },
+      "title": "Theme",
+      "type": "object"
     },
     "Token": {
       "additionalProperties": false,
@@ -591,6 +1446,10 @@
           "$ref": "#/$defs/TokenGroup"
         }
       ]
+    },
+    "TokenRef": {
+      "pattern": "^\\{([a-z0-9][a-z0-9_]*(?:\\.[a-z0-9][a-z0-9_]*)*)\\}$",
+      "type": "string"
     },
     "TokenType": {
       "enum": [
@@ -759,6 +1618,42 @@
       "title": "Tokens",
       "type": "object"
     },
+    "Topbar": {
+      "additionalProperties": false,
+      "description": "The top bar region of a layout.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "breadcrumbs": {
+          "default": true,
+          "title": "Breadcrumbs",
+          "type": "boolean"
+        },
+        "mode_toggle": {
+          "default": true,
+          "title": "Mode Toggle",
+          "type": "boolean"
+        },
+        "search": {
+          "default": false,
+          "title": "Search",
+          "type": "boolean"
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        }
+      },
+      "title": "Topbar",
+      "type": "object"
+    },
     "UI": {
       "additionalProperties": false,
       "description": "The `ui` section: the design tokens and the UI elements of the app.",
@@ -766,6 +1661,17 @@
         "^x-": {}
       },
       "properties": {
+        "theme": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Theme"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "tokens": {
           "anyOf": [
             {
@@ -776,10 +1682,51 @@
             }
           ],
           "default": null
+        },
+        "layouts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Layout"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Layouts",
+          "type": "object"
+        },
+        "navigation": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Menu"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Navigation",
+          "type": "object"
+        },
+        "defaults": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Defaults"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "UI",
       "type": "object"
+    },
+    "Variant": {
+      "enum": [
+        "default",
+        "secondary",
+        "outline",
+        "ghost",
+        "destructive"
+      ],
+      "type": "string"
     }
   },
   "additionalProperties": false,

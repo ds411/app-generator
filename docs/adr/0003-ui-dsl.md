@@ -295,7 +295,7 @@ A menu has `items`, or `groups` with `items`, or both. An item has
 `page` (required), `label` (default: the page title), `icon`, and
 `items` (one level of sub-items). A group has `label`, `icon`,
 `collapsible`, and `items`. The order in the file is the order on the
-screen. The binding marks the item of the current route.
+screen. The items without a group show before the groups. The binding marks the item of the current route.
 
 ```yaml
 ui:

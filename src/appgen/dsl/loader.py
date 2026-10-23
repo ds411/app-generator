@@ -119,6 +119,35 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
             hint=_did_you_mean(str(value), _literal_choices(expected)),
             element_id=element,
         )
+    if kind == "union_tag_invalid":
+        # A union that the `kind` key selects (see `appgen.dsl.ui.common.kind_tag`).
+        ctx = detail.get("ctx", {})
+        tag = str(ctx.get("tag", "")).removeprefix("tag-")
+        choices = [
+            choice.removeprefix("tag-") for choice in _literal_choices(ctx.get("expected_tags", ""))
+        ]
+        expected = ", ".join(f"'{choice}'" for choice in choices)
+        return Diagnostic(
+            code="invalid-value",
+            message=f"The kind '{tag}' is not valid. Expected {expected}.",
+            location=source_map.value((*path, "kind")),
+            hint=_did_you_mean(tag, choices),
+            element_id=element,
+        )
+    if kind == "union_tag_not_found":
+        if isinstance(value, dict):
+            return Diagnostic(
+                code="missing-key",
+                message="The key 'kind' is missing.",
+                location=source_map.element(path),
+                element_id=element,
+            )
+        return Diagnostic(
+            code="invalid-value",
+            message="Expected a mapping.",
+            location=location,
+            element_id=element,
+        )
     if kind == "string_pattern_mismatch":
         pattern = detail.get("ctx", {}).get("pattern", "")
         what = "name" if is_key else "value"
@@ -226,14 +255,12 @@ def _is_mapping(annotation: object) -> bool:
 
 
 def _child_model(annotation: object) -> type[BaseModel] | None:
+    """Return the model in an annotation, or None if it has no model or more than one."""
     annotation = _unwrap(annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation
-    for arg in get_args(annotation):
-        found = _child_model(arg)
-        if found is not None:
-            return found
-    return None
+    found = {model for arg in get_args(annotation) if (model := _child_model(arg)) is not None}
+    return found.pop() if len(found) == 1 else None
 
 
 def _literal_choices(expected: str) -> list[str]:
