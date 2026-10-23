@@ -204,9 +204,13 @@ ID. Later sections follow the same rule, for example
 
 ### Extensions
 
-A key that starts with `x-` is an extension key, as in OpenAPI. Each
-mapping in the definition can have extension keys. The loader keeps
-them and does not check them. Any other unknown key is an error.
+A key that starts with `x-` is an extension key, as in OpenAPI. The
+root of the definition and each element (a mapping with fixed keys, for
+example the app, an entity, or a field) can have extension keys. A
+mapping of named elements, for example `entities` or `fields`, cannot
+have them, because each of its keys is a name. The loader keeps the
+extension keys and does not check them. Any other unknown key is an
+error.
 
 ### Example
 

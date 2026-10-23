@@ -3,14 +3,14 @@
 import difflib
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, TypeAliasType, get_args, get_origin
+from typing import Annotated, TypeAliasType, cast, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.ids import element_id, index_elements, walk_elements
-from appgen.dsl.model import AppDefinition
+from appgen.dsl.model import DSL_VERSION, RESERVED_SECTIONS, AppDefinition, is_extension_key
 from appgen.dsl.source import DataPath, SourceMap, YamlDocument, read_yaml, read_yaml_file
 
 _TYPE_MESSAGES = {
@@ -48,11 +48,23 @@ def _load(document: YamlDocument) -> AppDefinition:
                 )
             ]
         )
+    data = document.data
+    diagnostics: list[Diagnostic] = []
+    if isinstance(data, dict):
+        sections = cast(dict[str, object], data)
+        diagnostics = [
+            _not_supported(section, source_map)
+            for section in sections
+            if section in RESERVED_SECTIONS
+        ]
+        data = {k: v for k, v in sections.items() if k not in RESERVED_SECTIONS}
+    definition: AppDefinition | None = None
     try:
-        definition = AppDefinition.model_validate(document.data)
+        definition = AppDefinition.model_validate(data)
     except ValidationError as error:
-        diagnostics = [_diagnostic(detail, source_map) for detail in error.errors()]
-        raise DefinitionError(_unique(diagnostics)) from None
+        diagnostics += [_diagnostic(detail, source_map) for detail in error.errors()]
+    if definition is None or diagnostics:
+        raise DefinitionError(_unique(diagnostics))
     value_locations: dict[DataPath, dict[str, Location]] = defaultdict(dict[str, Location])
     for key, location in source_map.values.items():
         if key:
@@ -64,10 +76,22 @@ def _load(document: YamlDocument) -> AppDefinition:
     return definition
 
 
+def _not_supported(section: str, source_map: SourceMap) -> Diagnostic:
+    return Diagnostic(
+        code="not-supported",
+        message=f"The section '{section}' is not supported in this version of the DSL.",
+        location=source_map.element((section,)),
+        hint="A later version of the DSL adds this section. Remove it, or keep "
+        f"its data in an extension key, for example 'x-{section}'.",
+    )
+
+
 def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
     kind = detail["type"]
     path, is_key = _data_path(detail["loc"])
     element = _element_id(path)
+    if path == ("version",):
+        return _version_diagnostic(detail, source_map)
     if kind == "missing":
         parent = path[:-1]
         return Diagnostic(
@@ -98,17 +122,37 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
     if kind == "string_pattern_mismatch":
         pattern = detail.get("ctx", {}).get("pattern", "")
         what = "name" if is_key else "value"
+        extension = is_key and isinstance(value, str) and is_extension_key(value)
         return Diagnostic(
             code="invalid-name" if is_key else "invalid-value",
             message=f"The {what} {value!r} does not match the pattern {pattern}.",
             location=location,
             element_id=element,
+            hint="Put extension keys in an element, not in a mapping of names."
+            if extension
+            else None,
         )
     return Diagnostic(
         code="invalid-value",
         message=_TYPE_MESSAGES.get(kind, detail["msg"] + "."),
         location=location,
         element_id=element,
+    )
+
+
+def _version_diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
+    if detail["type"] == "missing":
+        return Diagnostic(
+            code="missing-version",
+            message="The key 'version' is missing. It gives the version of the DSL.",
+            location=source_map.root,
+            hint=f"Add 'version: {DSL_VERSION}' at the top of the file.",
+        )
+    return Diagnostic(
+        code="unsupported-version",
+        message=f"The DSL version {detail['input']!r} is not supported.",
+        location=source_map.value(("version",)),
+        hint=f"This version of appgen reads DSL version {DSL_VERSION}.",
     )
 
 
