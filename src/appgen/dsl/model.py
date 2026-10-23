@@ -2,16 +2,30 @@
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, Self, cast
 
 import pydantic
-from pydantic import BaseModel, ConfigDict, JsonValue, PrivateAttr, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    StringConstraints,
+    model_validator,
+)
 
 from appgen.dsl.diagnostics import Location
 
 APP_NAME_PATTERN = r"^[a-z][a-z0-9-]*$"
 ENTITY_NAME_PATTERN = r"^[A-Z][A-Za-z0-9]*$"
 MEMBER_NAME_PATTERN = r"^[a-z][a-z0-9_]*$"
+
+DSL_VERSION = 0
+"""The DSL version that this loader reads."""
+EXTENSION_PREFIX = "x-"
+RESERVED_SECTIONS: tuple[str, ...] = ("ui", "auth", "access", "workflows", "translations")
+"""Top-level sections that a later DSL version adds (ADR 0002)."""
 
 type AppName = Annotated[str, StringConstraints(pattern=APP_NAME_PATTERN)]
 """The name of the app, in kebab case, for example `project-tracker`."""
@@ -44,6 +58,11 @@ RELATION_KINDS: tuple[str, ...] = RelationKind.__value__.__args__
 OPERATION_KINDS: tuple[str, ...] = OperationKind.__value__.__args__
 
 
+def is_extension_key(key: str) -> bool:
+    """Return true for an extension key: a key that starts with `x-` (ADR 0002)."""
+    return key.startswith(EXTENSION_PREFIX)
+
+
 class Element(BaseModel):
     """The base class of each element of an app definition."""
 
@@ -52,6 +71,25 @@ class Element(BaseModel):
     _location: Location | None = PrivateAttr(default=None)
     _value_locations: dict[str, Location] = PrivateAttr(default_factory=dict[str, Location])
     _id: str = PrivateAttr(default="")
+    _extensions: dict[str, Any] = PrivateAttr(default_factory=dict[str, Any])
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _keep_extensions(cls, data: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        """Take the extension keys (`x-...`) out of the input, and keep them."""
+        extensions: dict[str, Any] = {}
+        if isinstance(data, dict):
+            items = cast(dict[Any, Any], data).items()
+            extensions = {k: v for k, v in items if isinstance(k, str) and is_extension_key(k)}
+            data = {k: v for k, v in items if k not in extensions}
+        element = handler(data)
+        element._extensions = extensions
+        return element
+
+    @property
+    def extensions(self) -> Mapping[str, Any]:
+        """The extension keys of the element and their values. The DSL does not check them."""
+        return MappingProxyType(self._extensions)
 
     @property
     def location(self) -> Location | None:
