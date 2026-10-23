@@ -1,29 +1,45 @@
 {{ trace_header("app") }}
 """The entry point of the API: `create_app` makes the FastAPI app."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import Settings
+from app.core.db import make_engine, make_sessions
 from app.core.health import router as health_router
 {% for e in py.entity_order() | sort(attribute="slice") %}
 
 {{ trace(e.id) }}
 from app.features.{{ e.slice }}.router import router as {{ e.slice }}_router
 {% endfor %}
+from app.models import configure_models
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    """Close the connections of the database when the app stops."""
+    yield
+    await app.state.engine.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Return the FastAPI app with the routers of all slices."""
     settings = settings or Settings()
+    configure_models()
     app = FastAPI(
         title={{ app.title | tojson }},
         version="0.1.0",
 {% if app.description %}
         description={{ app.description | tojson }},
 {% endif %}
+        lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.engine = make_engine(settings.database_url)
+    app.state.sessions = make_sessions(app.state.engine)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

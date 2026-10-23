@@ -1,0 +1,42 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+"""The model of the entity {{ e.name }}: the table `{{ e.table }}`."""
+
+{{ e.model_imports() }}
+{% for t in e.join_tables %}
+
+{{ trace(t.relation_id) }}
+{{ t.name }} = Table(
+    "{{ t.name }}",
+    Base.metadata,
+{% for line in t.model_columns() %}
+    {{ line }}
+{% endfor %}
+)
+{% endfor %}
+
+
+{{ trace(e.id) }}
+class {{ e.name }}(Base):
+    """{{ (e.description or ("A record of the entity " ~ e.name ~ ".")) | replace('"', "'") }}"""
+
+    __tablename__ = "{{ e.table }}"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+{% for f in e.fields %}
+    {{ trace(f.id) }}
+    {{ f.column() }}
+{% endfor %}
+{% for r in e.relations %}
+    {{ trace(r.id) }}
+{% for line in r.model_lines(e) %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% for r in e.m2m_relations %}
+
+    @property
+    def {{ r.ids_field }}(self) -> list[UUID]:
+        """The IDs of the records of the relation `{{ r.name }}`."""
+        return [item.id for item in self.{{ r.attr }}]
+{% endfor %}

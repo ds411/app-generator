@@ -1,0 +1,82 @@
+{{ trace_header("app") }}
+"""Create the schema of the app definition `{{ app.name }}`.
+
+appgen generates this migration from the current definition. To change
+the schema of a database that has data, write a new migration by hand,
+for example with `alembic revision --autogenerate`.
+
+Revision ID: 0001
+Revises:
+"""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+{% if py.entity_order() | map(attribute="fields") | sum(start=[]) | selectattr("sa_type", "equalto", "JSONB") | list %}
+from sqlalchemy.dialects import postgresql
+{% endif %}
+
+revision: str = "0001"
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    """Create the tables, then the foreign keys, so that the order of the tables is free."""
+{% for e in py.entity_order() %}
+    {{ trace(e.id) }}
+    op.create_table(
+        "{{ e.table }}",
+        sa.Column("id", sa.Uuid(), nullable=False),
+{% for f in e.fields %}
+        {{ trace(f.id) }}
+        {{ f.migration_column() }}
+{% endfor %}
+{% for r, column in e.fk_columns %}
+        {{ trace(r.id) }}
+        {{ column }}
+{% endfor %}
+        sa.PrimaryKeyConstraint("id", name="pk_{{ e.table }}"),
+{% for f in e.fields if f.unique %}
+        sa.UniqueConstraint("{{ f.name }}", name="uq_{{ e.table }}_{{ f.name }}"),
+{% endfor %}
+{% for r in e.fk_relations if r.unique %}
+        sa.UniqueConstraint("{{ r.fk }}", name="uq_{{ e.table }}_{{ r.fk }}"),
+{% endfor %}
+    )
+{% endfor %}
+{% for e in py.entity_order() %}
+{% for r in e.fk_relations %}
+    {{ trace(r.id) }}
+    {{ py.foreign_key_call(e, r) }}
+{% if not r.unique %}
+    op.create_index("ix_{{ e.table }}_{{ r.fk }}", "{{ e.table }}", ["{{ r.fk }}"])
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% for t in py.join_tables %}
+    {{ trace(t.relation_id) }}
+    op.create_table(
+        "{{ t.name }}",
+{% for line in t.migration_lines() %}
+        {{ line }}
+{% endfor %}
+    )
+{% endfor %}
+
+
+def downgrade() -> None:
+    """Drop the join tables and the foreign keys, then the tables."""
+{% for t in py.join_tables | reverse %}
+    op.drop_table("{{ t.name }}")
+{% endfor %}
+{% for e in py.entity_order() | reverse %}
+{% for r in e.fk_relations | reverse %}
+    {{ py.drop_foreign_key_call(e, r) }}
+{% endfor %}
+{% endfor %}
+{% for e in py.entity_order() | reverse %}
+    op.drop_table("{{ e.table }}")
+{% endfor %}

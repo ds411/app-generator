@@ -3,11 +3,15 @@
 """The health check of the API, for Docker and load balancers."""
 
 from fastapi import APIRouter
+from sqlalchemy import text
+
+from app.core.db import SessionDep
 
 router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    """Return `ok` while the API runs."""
+async def health(session: SessionDep) -> dict[str, str]:
+    """Return `ok` while the API runs and the database answers."""
+    await session.execute(text("SELECT 1"))
     return {"status": "ok"}

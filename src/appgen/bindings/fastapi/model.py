@@ -101,6 +101,45 @@ class PyField:
     def mutable_default(self) -> bool:
         return self.type == "json" and self.default[:1] in ("[", "{")
 
+    def column(self) -> str:
+        """Return the declaration of the model attribute, for example `title: Mapped[str] = ...`."""
+        type_ = self.model_type + (" | None" if self.nullable else "")
+        args = [f'"{self.name}"'] if self.aliased else []
+        args.append(self.sa_type)
+        if self.unique:
+            args.append("unique=True")
+        return call(f"{self.attr}: Mapped[{type_}] = ", "mapped_column", args)
+
+    def migration_column(self) -> str:
+        """Return the `sa.Column` of the field in the migration."""
+        args = [f'"{self.name}"', self.migration_type(), f"nullable={not self.required}"]
+        one_line = call("", "sa.Column", args, 8, ",")
+        if "\n" in one_line:
+            args[1] = self.migration_type(12)
+        return call("", "sa.Column", args, 8, ",")
+
+    def migration_type(self, indent: int | None = None) -> str:
+        """Return the SQLAlchemy type of the column in the migration, without the app classes.
+
+        With an indent, a long enum type has one argument on each line.
+        """
+        if self.enum is not None:
+            args = [f'"{v}"' for _, v in self.enum.members]
+            args += [
+                f'name="{self.enum.constraint}"',
+                "native_enum=False",
+                "create_constraint=True",
+                f"length={self.enum.length}",
+            ]
+            if indent is None:
+                return f"sa.Enum({', '.join(args)})"
+            return call("", "sa.Enum", args, indent)
+        if self.sa_type == "JSONB":
+            return "postgresql.JSONB()"
+        if "(" in self.sa_type:
+            return "sa." + self.sa_type
+        return f"sa.{self.sa_type}()"
+
     def declaration(self, mode: str) -> str:
         """Return the declaration of the field in a schema, for example `title: str`.
 
@@ -170,6 +209,59 @@ class PyRelation:
     def nullable(self) -> bool:
         return not (self.side == "fk" and self.required)
 
+    @property
+    def lazy(self) -> str:
+        """The loading strategy: the read schema needs the many-to-many and embedded targets."""
+        return "selectin" if self.side == "m2m" or self.embed else "raise"
+
+    def model_lines(self, entity: PyEntity) -> list[str]:
+        """Return the declarations of the relation in the model of its entity."""
+        target = self.target
+        lines: list[str] = []
+        args: list[str] = []
+        if self.back_populates:
+            args.append(f'back_populates="{self.back_populates}"')
+        if self.side == "fk":
+            assert self.fk and self.fk_attr
+            nullable = " | None" if not self.required else ""
+            key = [f'ForeignKey("{entity.app_entities[target].table}.id"']
+            if self.on_delete:
+                key[0] += f', ondelete="{self.on_delete}"'
+            key[0] += ")"
+            key.append("unique=True" if self.unique else "index=True")
+            column = [f'"{self.fk}"', *key] if self.fk_attr != self.fk else key
+            lines.append(
+                call(f"{self.fk_attr}: Mapped[UUID{nullable}] = ", "mapped_column", column)
+            )
+            args.append(f"foreign_keys=[{self.fk_attr}]")
+            if target == entity.name:
+                args.append("remote_side=[id]")
+            args.append(f'lazy="{self.lazy}"')
+            lines.append(call(f"{self.attr}: Mapped[{target}{nullable}] = ", "relationship", args))
+        elif self.side == "back":
+            other = entity.app_entities[target]
+            remote = next(r for r in other.relations if r.name == self.back_populates)
+            args.append(f'foreign_keys="{target}.{remote.fk_attr}"')
+            args += [f'lazy="{self.lazy}"', "passive_deletes=True"]
+            if self.many:
+                type_ = f"list[{target}]"
+            else:
+                type_ = f"{target} | None"
+                args.append("uselist=False")
+            lines.append(call(f"{self.attr}: Mapped[{type_}] = ", "relationship", args))
+        else:
+            other = entity.app_entities[target]
+            args = [
+                f'secondary="{self.secondary}"',
+                f'primaryjoin="{entity.name}.id == {self.secondary}.c.{self.local_column}"',
+                f'secondaryjoin="{other.name}.id == {self.secondary}.c.{self.remote_column}"',
+                *args,
+                f'lazy="{self.lazy}"',
+                "passive_deletes=True",
+            ]
+            lines.append(call(f"{self.attr}: Mapped[list[{target}]] = ", "relationship", args))
+        return lines
+
     def declarations(self, mode: str) -> list[str]:
         """Return the declarations of the relation in a schema.
 
@@ -213,6 +305,62 @@ class PyJoinTable:
     left_column: str
     right_table: str
     right_column: str
+
+    def model_columns(self) -> list[str]:
+        """Return the `Column` lines of the join table in the model module."""
+        return [
+            call(
+                "",
+                "Column",
+                [
+                    f'"{column}"',
+                    "Uuid()",
+                    f'ForeignKey("{table}.id", ondelete="CASCADE")',
+                    "primary_key=True",
+                ],
+                4,
+                ",",
+            )
+            for column, table in (
+                (self.left_column, self.left_table),
+                (self.right_column, self.right_table),
+            )
+        ]
+
+    def migration_lines(self) -> list[str]:
+        """Return the arguments of `op.create_table` for the join table, after its name."""
+        lines = [
+            call("", "sa.Column", [f'"{c}"', "sa.Uuid()", "nullable=False"], 8, ",")
+            for c in (self.left_column, self.right_column)
+        ]
+        for column, table in (
+            (self.left_column, self.left_table),
+            (self.right_column, self.right_table),
+        ):
+            lines.append(
+                call(
+                    "",
+                    "sa.ForeignKeyConstraint",
+                    [
+                        f'["{column}"]',
+                        f'["{table}.id"]',
+                        f'name="fk_{self.name}_{column}_{table}"',
+                        'ondelete="CASCADE"',
+                    ],
+                    8,
+                    ",",
+                )
+            )
+        lines.append(
+            call(
+                "",
+                "sa.PrimaryKeyConstraint",
+                [f'"{self.left_column}"', f'"{self.right_column}"', f'name="pk_{self.name}"'],
+                8,
+                ",",
+            )
+        )
+        return lines
 
 
 @dataclass(slots=True)
@@ -306,6 +454,65 @@ class PyEntity:
         names = [f.attr for f in self.fields if f.required]
         return names + [r.fk_attr for r in self.fk_relations if r.required and r.fk_attr]
 
+    def model_imports(self) -> str:
+        """Return the import block of the models module of the slice."""
+        types = {f.model_type for f in self.fields}
+        sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
+        lines: set[str] = set()
+        if any(t.startswith("dt.") for t in types):
+            lines.add("import datetime as dt")
+        if "Decimal" in types:
+            lines.add("from decimal import Decimal")
+        targets = {r.target for r in self.relations if r.target != self.name}
+        typing = {"TYPE_CHECKING"} if targets else set[str]()
+        if "Any" in types:
+            typing.add("Any")
+        if typing:
+            lines.add(from_import("typing", typing))
+        lines.add("from uuid import UUID, uuid4")
+        sqlalchemy = {t for t in sa_types if t != "JSONB"}
+        if self.fk_relations:
+            sqlalchemy.add("ForeignKey")
+        if self.join_tables:
+            sqlalchemy |= {"Column", "ForeignKey", "Table", "Uuid"}
+        if sqlalchemy:
+            lines.add(from_import("sqlalchemy", sqlalchemy))
+        if "JSONB" in sa_types:
+            lines.add("from sqlalchemy.dialects.postgresql import JSONB")
+        orm = {"Mapped", "mapped_column"}
+        if self.relations:
+            orm.add("relationship")
+        lines.add(from_import("sqlalchemy.orm", orm))
+        core = {"Base"} | ({"enum_type"} if self.enums else set[str]())
+        lines.add(from_import("app.core.db", core))
+        if self.enums:
+            lines.add(from_import(f"app.features.{self.slice}.enums", {e.name for e in self.enums}))
+        block = import_block(lines)
+        if targets:
+            checks = sorted(
+                f"    from app.features.{self.app_entities[t].slice}.models import {t}"
+                for t in targets
+            )
+            block += "\n\nif TYPE_CHECKING:\n" + "\n".join(checks)
+        return block
+
+    @property
+    def fk_columns(self) -> list[tuple[PyRelation, str]]:
+        """The foreign key columns of the table, with their `sa.Column` in the migration."""
+        return [
+            (
+                r,
+                call(
+                    "",
+                    "sa.Column",
+                    [f'"{r.fk}"', "sa.Uuid()", f"nullable={not r.required}"],
+                    8,
+                    ",",
+                ),
+            )
+            for r in self.fk_relations
+        ]
+
     def reject_null_call(self) -> str:
         """Return the statement of the update schema that rejects null for required fields."""
         return call("return ", "reject_null", ["self", *(f'"{n}"' for n in self.not_null)], 8)
@@ -372,6 +579,28 @@ class PyApp:
     @property
     def join_tables(self) -> list[PyJoinTable]:
         return [t for e in self.entities.values() for t in e.join_tables]
+
+    def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
+        return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
+
+    def foreign_key_call(self, entity: PyEntity, rel: PyRelation) -> str:
+        """Return the `op.create_foreign_key` statement of a foreign key in the migration."""
+        args = [
+            f'"{self.foreign_key_name(entity, rel)}"',
+            f'"{entity.table}"',
+            f'"{self.entities[rel.target].table}"',
+            f'["{rel.fk}"]',
+            '["id"]',
+        ]
+        if rel.on_delete:
+            args.append(f'ondelete="{rel.on_delete}"')
+        return call("", "op.create_foreign_key", args)
+
+    def drop_foreign_key_call(self, entity: PyEntity, rel: PyRelation) -> str:
+        """Return the `op.drop_constraint` statement of a foreign key in the migration."""
+        name = self.foreign_key_name(entity, rel)
+        args = [f'"{name}"', f'"{entity.table}"', 'type_="foreignkey"']
+        return call("", "op.drop_constraint", args)
 
     @property
     def custom_operations(self) -> list[PyOperation]:
@@ -485,7 +714,7 @@ def _types(f: Field, enum: PyEnum | None) -> tuple[str, str, str]:
             return "UUID", "UUID", "Uuid"
         case "enum":
             assert enum is not None
-            return enum.name, enum.name, f"enum_type({enum.name}, {enum.constraint!r})"
+            return enum.name, enum.name, f'enum_type({enum.name}, "{enum.constraint}")'
         case _:
             return "Any", "JsonValue", "JSONB"
 

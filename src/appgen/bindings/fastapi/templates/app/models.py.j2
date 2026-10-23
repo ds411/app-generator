@@ -1,0 +1,20 @@
+{{ trace_header("app") }}
+"""All models of the app. Alembic and the relations between slices need them all."""
+
+from sqlalchemy.orm import configure_mappers
+{% for e in py.entity_order() | sort(attribute="slice") %}
+
+{{ trace(e.id) }}
+from app.features.{{ e.slice }}.models import {{ e.name }}
+{% endfor %}
+
+__all__ = [
+{% for e in py.entity_order() | sort(attribute="name") %}
+    "{{ e.name }}",
+{% endfor %}
+]
+
+
+def configure_models() -> None:
+    """Check the relations of all models, and prepare them for use."""
+    configure_mappers()

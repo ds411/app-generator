@@ -1,11 +1,20 @@
 {{ trace_header("app") }}
-"""The fixtures of the tests."""
+"""The fixtures of the tests: a migrated Postgres database and an HTTP client."""
 
-from collections.abc import AsyncIterator
+import asyncio
+import os
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from testcontainers.community.postgres import PostgresContainer
 
+from app.core.config import Settings
+from app.core.db import Base
 from app.main import create_app
 
 
@@ -14,9 +23,62 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(scope="session")
+def database_url() -> Iterator[str]:
+    """The URL of the test database.
+
+    The tests use the database in TEST_DATABASE_URL, or else Postgres in a
+    container. The tests delete all data in this database.
+    """
+    url = os.environ.get("TEST_DATABASE_URL")
+    if url:
+        yield url
+        return
+    image = os.environ.get("POSTGRES_IMAGE", "postgres:18")
+    with PostgresContainer(image, driver="asyncpg") as postgres:
+        yield postgres.get_connection_url()
+
+
+def alembic_config(database_url: str) -> Config:
+    """Return the Alembic configuration for a database."""
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    config.attributes["configure_logger"] = False
+    return config
+
+
+async def _reset_schema(database_url: str) -> None:
+    engine = create_async_engine(database_url)
+    async with engine.begin() as connection:
+        await connection.execute(text("DROP SCHEMA public CASCADE"))
+        await connection.execute(text("CREATE SCHEMA public"))
+    await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def migrated_url(database_url: str) -> str:
+    """The URL of the test database, with an empty schema at the latest migration."""
+    asyncio.run(_reset_schema(database_url))
+    command.upgrade(alembic_config(database_url), "head")
+    return database_url
+
+
 @pytest.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    """An HTTP client that calls the app in the same process."""
-    app = create_app()
+async def session(migrated_url: str) -> AsyncIterator[AsyncSession]:
+    """A session for the test code. The tables are empty after each test."""
+    engine = create_async_engine(migrated_url)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield session
+    tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+    async with engine.begin() as connection:
+        await connection.execute(text(f"TRUNCATE {tables} CASCADE"))
+    await engine.dispose()
+
+
+@pytest.fixture
+async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """An HTTP client that calls the app in the same process, with the test database."""
+    app = create_app(Settings(database_url=migrated_url))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
+    await app.state.engine.dispose()
