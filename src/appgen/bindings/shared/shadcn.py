@@ -124,8 +124,11 @@ def used_components(definition: AppDefinition) -> list[Component]:
                 names.update(("sidebar", "separator"))
             if layout.topbar is not None:
                 names.add("separator")
-                if layout.topbar.breadcrumbs:
-                    names.add("breadcrumb")
+                overrides = [o.topbar for o in layout.responsive.values() if o.topbar is not None]
+                if layout.topbar.breadcrumbs or any(o.breadcrumbs for o in overrides):
+                    names.update(("breadcrumb", "skeleton"))
+                if layout.topbar.search or any(o.search for o in overrides):
+                    names.update(("command", "dialog"))
                 names.update(_action_components(layout.topbar.actions.values()))
         if any(g.collapsible for menu in ui.navigation.values() for g in menu.groups.values()):
             names.add("collapsible")

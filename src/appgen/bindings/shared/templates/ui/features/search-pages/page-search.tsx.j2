@@ -1,0 +1,73 @@
+{{ trace_header("app") }}
+"use client";
+
+import { SearchIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { Button } from "@/shared/ui/button";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/shared/ui/command";
+import { type PageName, pages } from "@/shared/config/pages";
+import { pageHref } from "@/shared/lib/pages";
+import { useNavigate } from "@/shared/lib/router";
+import { cn } from "@/shared/lib/utils";
+
+/** The pages that the search finds: the pages without path parameters. */
+const searchPages = (Object.keys(pages) as PageName[]).filter((name) => !pages[name].path.includes("{"));
+
+/** A search button that opens a list of the pages. Ctrl+K or Cmd+K opens it too. */
+export function PageSearch({ className }: { className?: string }) {
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "k" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setOpen((value) => !value);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        className={cn("h-9 w-56 justify-start gap-2 text-muted-foreground xl:w-64", className)}
+        onClick={() => setOpen(true)}
+      >
+        <SearchIcon />
+        <span className="flex-1 text-left">Search pages</span>
+        <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px]">Ctrl K</kbd>
+      </Button>
+      <CommandDialog open={open} onOpenChange={setOpen} title="Search pages" description="Find a page by its title.">
+        <CommandInput placeholder="Type a page title" />
+        <CommandList>
+          <CommandEmpty>No page has this title.</CommandEmpty>
+          <CommandGroup heading="Pages">
+            {searchPages.map((name) => (
+              <CommandItem
+                key={name}
+                value={pages[name].title}
+                onSelect={() => {
+                  setOpen(false);
+                  navigate(pageHref(name));
+                }}
+              >
+                {pages[name].title}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+    </>
+  );
+}

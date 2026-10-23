@@ -1,0 +1,14 @@
+{{ trace_header("app") }}
+{% for entity in ui_plan.record_entities %}
+import { {{ entity | camel }}Api, {{ entity | camel }}Meta } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+
+/** Load the label of a record for the breadcrumbs: the value of its display field. */
+export const recordLabels: Record<string, (id: string) => Promise<string>> = {
+{% for entity in ui_plan.record_entities %}
+  {{ js(entity) }}: async (id) => {
+    const record = await {{ entity | camel }}Api.get(id);
+    return String(record[{{ entity | camel }}Meta.displayField] ?? id);
+  },
+{% endfor %}
+};

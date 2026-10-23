@@ -145,6 +145,14 @@ def css_name(path: str) -> str:
     return path.replace("_", "-").replace(".", "-")
 
 
+def css_var(path: str) -> str:
+    """Return the CSS variable of a token path: `size.sidebar` gives `var(--size-sidebar)`."""
+    group, _, rest = path.partition(".")
+    if group == "color":
+        return f"var(--{css_name(rest)})"
+    return f"var(--{_NAMESPACES[group]}-{css_name(rest)})"
+
+
 def css_value(token: ResolvedToken, value: JsonValue) -> str:
     """Return a token value as CSS text."""
     if token.type == "fontFamily":

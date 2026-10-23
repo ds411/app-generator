@@ -1,0 +1,4 @@
+{{ trace_header("app") }}
+{% for layout_name in ui_plan.layouts %}
+export { {{ layout_name | pascal }}Layout } from "./ui/{{ layout_name | kebab }}-layout";
+{% endfor %}

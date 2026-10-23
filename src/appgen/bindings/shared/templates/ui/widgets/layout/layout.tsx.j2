@@ -1,0 +1,194 @@
+{{ trace_header(element_id) }}
+{% set plan = ui_plan.layouts[name] %}
+{% set sidebar = element.sidebar %}
+{% set topbar = element.topbar %}
+{% set breadcrumbs = topbar is not none and plan.breadcrumbs.shown %}
+{% set search = topbar is not none and plan.search.shown %}
+{% set mode_toggle = topbar is not none and plan.mode_toggle.shown and ui_plan.mode_toggle %}
+{% set modes = plan.sidebar_modes %}
+{% set can_hide = "hidden" in modes %}
+"use client";
+
+{% if sidebar is not none and sidebar.icon %}
+import { {{ sidebar.icon | pascal }}Icon } from "lucide-react";
+{% endif %}
+import { {% if sidebar is not none %}type CSSProperties, {% endif %}type ReactNode{% if sidebar is not none %}, useState{% endif %} } from "react";
+
+{% if breadcrumbs %}
+import { PageBreadcrumbs } from "@/widgets/page-breadcrumbs";
+{% endif %}
+{% if sidebar is not none and sidebar.navigation %}
+import { {{ sidebar.navigation | pascal }}Menu } from "@/widgets/navigation";
+{% endif %}
+{% if search %}
+import { PageSearch } from "@/features/search-pages";
+{% endif %}
+{% if mode_toggle %}
+import { ModeToggle } from "@/features/toggle-theme";
+{% endif %}
+{% if sidebar is not none %}
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from "@/shared/ui/sidebar";
+{% endif %}
+{% if sidebar is not none and topbar is not none %}
+import { Separator } from "@/shared/ui/separator";
+{% endif %}
+{% if sidebar is not none %}
+import { Link } from "@/shared/lib/router";
+{% endif %}
+{% if plan.sidebar_steps %}
+import { useMediaQuery } from "@/shared/lib/use-media-query";
+{% endif %}
+{% if sidebar is not none %}
+
+type SidebarMode = {{ plan.sidebar_modes | map("tojson") | join(" | ") }};
+{% endif %}
+
+/**
+ * The layout {{ js(name) }}: {% if sidebar is not none %}a sidebar, {% endif %}{% if topbar is not none %}a top bar, {% endif %}the page{% if element.footer %}, and a footer{% endif %}.
+{% if plan.steps %}
+ * The rules change on screens narrower than the breakpoints {{ plan.steps | map(attribute="breakpoint") | join(", ") }}.
+{% endif %}
+ */
+export function {{ name | pascal }}Layout({ children }: { children: ReactNode }) {
+{% for step in plan.steps %}
+{% for id in step.element_ids %}
+  {{ trace(id) }}
+{% endfor %}
+{% endfor %}
+{% if sidebar is not none %}
+{% for step in plan.sidebar_steps %}
+  const below{{ step.breakpoint | pascal }} = useMediaQuery({{ js(step.query) }});
+{% endfor %}
+  const mode: SidebarMode ={% for step in plan.sidebar_steps %} below{{ step.breakpoint | pascal }} ? {{ js(step.sidebar_mode) }} :{% endfor %} {{ js(plan.sidebar_mode) }};
+  // The user can open and close the sidebar. The choice applies to one mode.
+  const [openByMode, setOpenByMode] = useState<Partial<Record<SidebarMode, boolean>>>({});
+  const open = openByMode[mode] ?? {{ 'mode === "expanded"' if "expanded" in modes else "false" }};
+{% endif %}
+
+  const topbar = (
+{% if topbar is not none %}
+    <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur"> {{ trace(topbar.id, jsx=True) }}
+{% if sidebar is not none and can_hide %}
+      {mode !== "hidden" && (
+        <>
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+        </>
+      )}
+{% elif sidebar is not none %}
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+{% endif %}
+{% if breadcrumbs %}
+      <PageBreadcrumbs className="{{ plan.breadcrumbs.classes('block') }} min-w-0 overflow-hidden" />
+{% endif %}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+{% if search %}
+        <div className="{{ plan.search.classes('block') }}">
+          <PageSearch />
+        </div>
+{% endif %}
+{% if mode_toggle %}
+        <div className="{{ plan.mode_toggle.classes('block') }}">
+          <ModeToggle />
+        </div>
+{% endif %}
+      </div>
+    </header>
+{% else %}
+    null
+{% endif %}
+  );
+
+  const page = (
+    <>
+      <div className="{{ plan.content_classes }}">{% if element.content %} {{ trace(element.content.id, jsx=True) }}{% endif %}
+        {children}
+      </div>
+{% if element.footer %}
+      <footer className="mt-auto border-t px-6 py-4 text-sm text-muted-foreground"> {{ trace(element.footer.id, jsx=True) }}
+        {{ jsx_text(element.footer.text) }}
+      </footer>
+{% endif %}
+    </>
+  );
+
+{% if sidebar is not none %}
+  const nav = {{ 'mode === "hidden" ? null : (' if can_hide else "(" }}
+    <Sidebar collapsible={{ '{mode === "icons" ? "icon" : "offcanvas"}' if "icons" in modes else '"offcanvas"' }} side={{ js(sidebar.side) }}> {{ trace(sidebar.id, jsx=True) }}
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" asChild tooltip={{ jsx_attr(sidebar.title or definition.app.title) }}>
+              <Link href="/">
+                <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+{% if sidebar.icon %}
+                  <{{ sidebar.icon | pascal }}Icon className="size-4" />
+{% else %}
+                  <span className="text-sm font-semibold">{{ jsx_text((sidebar.title or definition.app.title)[:1] | upper) }}</span>
+{% endif %}
+                </div>
+                <span className="truncate font-semibold">{{ jsx_text(sidebar.title or definition.app.title) }}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+      <SidebarContent>
+{% if sidebar.navigation %}
+        <{{ sidebar.navigation | pascal }}Menu />
+{% endif %}
+      </SidebarContent>
+      <SidebarRail />
+    </Sidebar>
+  );
+
+  return (
+    <SidebarProvider
+      open={open}
+      onOpenChange={(value) => setOpenByMode((modes) => ({ ...modes, [mode]: value }))}
+{% if plan.sidebar_classes %}
+      className="{{ plan.sidebar_classes }}"
+{% endif %}
+      style={
+        {
+          "--sidebar-width": "var(--shell-sidebar-width, 16rem)",
+          "--sidebar-width-icon": "var(--shell-sidebar-width-icon, 3rem)",
+        } as CSSProperties
+      }
+    >
+{% if sidebar.side == "right" %}
+      <SidebarInset>
+        {topbar}
+        {page}
+      </SidebarInset>
+      {nav}
+{% else %}
+      {nav}
+      <SidebarInset>
+        {topbar}
+        {page}
+      </SidebarInset>
+{% endif %}
+    </SidebarProvider>
+  );
+{% else %}
+  return (
+    <div className="flex min-h-svh flex-col bg-background">
+      {topbar}
+      <main className="flex flex-1 flex-col">{page}</main>
+    </div>
+  );
+{% endif %}
+}

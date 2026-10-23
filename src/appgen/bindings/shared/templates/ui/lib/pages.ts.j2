@@ -1,0 +1,94 @@
+{{ trace_header("app") }}
+import { type PageName, pages } from "@/shared/config/pages";
+
+export type PageParams = Record<string, string>;
+
+export type PageMatch = {
+  name: PageName;
+  params: PageParams;
+  /** The values of the parameters, in path order. */
+  values: string[];
+};
+
+const PARAM = /^\{([a-z][a-z0-9_]*)\}$/;
+
+/** Return the name of a path parameter segment, for example `id` for `{id}`. */
+function paramName(segment: string): string | undefined {
+  return PARAM.exec(segment)?.[1];
+}
+
+function segments(path: string): string[] {
+  return path.split("/").filter(Boolean);
+}
+
+/** Return the names of the parameters of a page, in path order. */
+export function pageParamNames(name: PageName): string[] {
+  return segments(pages[name].path).flatMap((part) => paramName(part) ?? []);
+}
+
+/**
+ * Return the parameters of a page from parameter values in path order. A
+ * parent page gets the first values of its child page, so that the page
+ * `/books/{id}` gets the book ID of `/books/{book_id}/chapters/{id}`.
+ */
+export function pageParams(name: PageName, values: string[]): PageParams {
+  const params: PageParams = {};
+  pageParamNames(name).forEach((param, index) => {
+    const value = values[index];
+    if (value !== undefined) params[param] = value;
+  });
+  return params;
+}
+
+/** Return the path of a page, with the values of its parameters. */
+export function pageHref(name: PageName, params: PageParams = {}): string {
+  const parts = segments(pages[name].path).map((part) => {
+    const param = paramName(part);
+    return param === undefined ? part : encodeURIComponent(params[param] ?? "");
+  });
+  return "/" + parts.join("/");
+}
+
+/**
+ * Return the page that a path shows, and the values of its parameters.
+ * A page with fewer parameters wins, so `/projects/new` finds a page with
+ * that fixed path before the page `/projects/{id}`.
+ */
+export function matchPage(pathname: string): PageMatch | null {
+  const actual = segments(pathname);
+  let best: (PageMatch & { score: number }) | null = null;
+  for (const name of Object.keys(pages) as PageName[]) {
+    const expected = segments(pages[name].path);
+    if (expected.length !== actual.length) continue;
+    const params: PageParams = {};
+    const values: string[] = [];
+    let score = 0;
+    const found = expected.every((part, index) => {
+      const value = actual[index] ?? "";
+      const param = paramName(part);
+      if (param === undefined) return part === value;
+      const decoded = decodeURIComponent(value);
+      params[param] = decoded;
+      values.push(decoded);
+      score += 1;
+      return true;
+    });
+    if (found && (best === null || score < best.score)) best = { name, params, values, score };
+  }
+  return best && { name: best.name, params: best.params, values: best.values };
+}
+
+/** Return the pages from the root page to a page, for the breadcrumbs. */
+export function pageChain(name: PageName): PageName[] {
+  const chain: PageName[] = [];
+  for (let current: PageName | null = name; current !== null; current = pages[current].parent) {
+    chain.unshift(current);
+  }
+  return chain;
+}
+
+/** Return true if a menu link to a page path is the active link for a path. */
+export function isActivePath(href: string, pathname: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(href + "/");
+}
