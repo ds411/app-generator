@@ -55,7 +55,7 @@ def test_the_app_uses_next_16_typescript_strict_and_pnpm(result: GenerationResul
     assert package["packageManager"].startswith("pnpm@")
     assert {"lint", "typecheck", "build"} <= set(package["scripts"])
     assert json.loads(files["tsconfig.json"])["compilerOptions"]["strict"] is True
-    assert 'output: "standalone"' in files["next.config.ts"]
+    assert '"standalone"' in files["next.config.ts"]
 
 
 def test_the_fsd_layers_are_in_src_and_the_routes_in_app(result: GenerationResult) -> None:
@@ -88,7 +88,7 @@ def test_uncovered_elements_get_gap_files(result: GenerationResult) -> None:
     gap = _files(result)["src/gaps/operations.complete_task.ext.ts"]
     assert "// @trace:gap operations.complete_task file" in gap
     assert "TODO(appgen)" in gap
-    assert {g.kind for g in result.gaps} >= {"entity", "field", "operation"}
+    assert {g.kind for g in result.gaps} >= {"operation", "param"}
 
 
 def test_two_runs_give_the_same_output(definition: AppDefinition, nextjs: Binding) -> None:
@@ -162,3 +162,53 @@ def test_the_check_covers_all_tokens(tmp_path: Path, result: GenerationResult) -
     tokens = [e for e in report.coverage.elements if e.element_id.startswith("ui.tokens")]
     assert tokens
     assert {e.status for e in tokens} == {"covered"}
+
+
+def test_each_entity_is_a_drizzle_table_with_traces(result: GenerationResult) -> None:
+    files = _files(result)
+    task = files["src/shared/db/schema/task.ts"]
+    assert "// @trace entities.Task file" in task
+    assert 'export const taskTable = pgTable("task", {' in task
+    assert "  // @trace entities.Task.fields.title\n" in task
+    assert 'title: varchar("title", { length: 200 }).notNull(),' in task
+    assert 'status: taskStatusEnum("status").default("todo"),' in task
+    assert (
+        'estimateHours: numeric("estimate_hours", { precision: 6, scale: 1, mode: "number" }),'
+        in task
+    )
+    assert 'completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),' in task
+    assert (
+        'projectId: uuid("project_id").notNull()'
+        '.references(() => projectTable.id, { onDelete: "cascade" }),'
+    ) in task
+    assert 'assigneeId: uuid("assignee_id").references(() => personTable.id, {' in task
+    assert 'onDelete: "set null" }),' in task
+    assert 'comments: many(commentTable, { relationName: "Comment.task" }),' in task
+    index = files["src/shared/db/schema/index.ts"]
+    assert 'export * from "./task"; // @trace entities.Task' in index
+
+
+def test_a_many_to_many_relation_gets_a_join_table(result: GenerationResult) -> None:
+    project = _files(result)["src/shared/db/schema/project.ts"]
+    assert 'export const projectMembersTable = pgTable(\n  "project_members",' in project
+    assert "(t) => [primaryKey({ columns: [t.projectId, t.personId] })]," in project
+    assert 'members: many(projectMembersTable, { relationName: "Project.members" }),' in project
+
+
+def test_the_app_has_drizzle_kit_and_migrates_on_start(result: GenerationResult) -> None:
+    files = _files(result)
+    package = json.loads(files["package.json"])
+    assert {"drizzle-orm", "postgres", "server-only"} <= set(package["dependencies"])
+    assert package["scripts"]["db:generate"] == "drizzle-kit generate"
+    assert 'schema: "./src/shared/db/schema/index.ts"' in files["drizzle.config.ts"]
+    assert 'process.env.DATABASE_MIGRATE === "true"' in files["instrumentation.ts"]
+    assert "DATABASE_URL=postgres://" in files[".env.example"]
+
+
+def test_the_check_covers_all_entities_fields_and_relations(
+    tmp_path: Path, definition: AppDefinition, result: GenerationResult
+) -> None:
+    write_result(result, tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    data = [e for e in report.coverage.elements if e.element_id.startswith("entities.")]
+    assert {e.status for e in data} == {"covered"}

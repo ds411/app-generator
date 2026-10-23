@@ -2,8 +2,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // The Docker image runs the standalone server (see the Dockerfile).
-  output: "standalone",
+  // The Docker image builds the standalone server (see the Dockerfile).
+  // `pnpm start` needs the default output.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
 };
 
 export default nextConfig;

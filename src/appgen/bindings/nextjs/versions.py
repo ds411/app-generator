@@ -10,9 +10,12 @@ NODE_VERSION = "24"
 PNPM_VERSION = "10.28.0"
 
 DEPENDENCIES: dict[str, str] = {
+    "drizzle-orm": "0.45.4",
     "next": "16.4.3",
+    "postgres": "3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "server-only": "0.0.1",
 }
 """The runtime packages that each generated app needs."""
 
@@ -21,6 +24,7 @@ DEV_DEPENDENCIES: dict[str, str] = {
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "drizzle-kit": "0.31.11",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "4.3.3",

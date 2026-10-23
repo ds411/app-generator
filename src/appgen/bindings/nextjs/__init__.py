@@ -1,11 +1,11 @@
 """The Next.js 16 binding: a full-stack TypeScript app.
 
 The app uses the App Router, TypeScript in strict mode, Tailwind CSS,
-shadcn/ui, and pnpm. Its code follows Feature-Sliced Design (FSD): the Next.js
-`app/` folder in the root holds only the routes, and the FSD layers
-`app`, `pages`, `widgets`, `features`, `entities`, and `shared` are
-folders in `src/`. Each route renders the page of its slice in
-`src/pages`.
+shadcn/ui, Drizzle ORM with Postgres, and pnpm. Its code follows
+Feature-Sliced Design (FSD): the Next.js `app/` folder in the root
+holds only the routes, and the FSD layers `app`, `pages`, `widgets`,
+`features`, `entities`, and `shared` are folders in `src/`. Each
+route renders the page of its slice in `src/pages`.
 """
 
 import json
@@ -92,10 +92,24 @@ BINDING = Binding(
         Output(template="components.json.j2", path="components.json"),
         Output(template="shadcn/lib/utils.ts.j2", path="src/shared/lib/utils.ts"),
         Output(template="src/shared/lib/theme.ts.j2", path="src/shared/lib/theme.ts"),
+        Output(template="drizzle.config.ts.j2", path="drizzle.config.ts"),
+        Output(template="instrumentation.ts.j2", path="instrumentation.ts"),
+        Output(template="env.example.j2", path=".env.example"),
+        Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
+        Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
+        Output(template="src/shared/db/migrate.ts.j2", path="src/shared/db/migrate.ts"),
+        Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
+        Output(
+            template="src/shared/db/schema/table.ts.j2",
+            path="src/shared/db/schema/{{ nextjs.tables_by_entity[name].module }}.ts",
+            for_each="entity",
+        ),
         *_SHADCN,
         *_HOOKS,
     ),
-    covers=frozenset({"app", "page", "theme", "tokens", "token_group", "token"}),
+    covers=frozenset(
+        {"app", "page", "entity", "field", "relation", "theme", "tokens", "token_group", "token"}
+    ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": to_json},

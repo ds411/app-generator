@@ -1,0 +1,5 @@
+{{ trace_header("app") }}
+// The Drizzle schema: one module for each entity of the app definition.
+{% for table in nextjs.tables %}
+export * from "./{{ table.module }}"; {{ trace(table.element_id) }}
+{% endfor %}

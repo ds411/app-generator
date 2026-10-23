@@ -1,0 +1,27 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+
+import * as schema from "./schema";
+
+export type Database = PostgresJsDatabase<typeof schema>;
+
+const globalForDb = globalThis as unknown as { appgenDb?: Database };
+
+/**
+ * Return the database client. It connects on the first call, so that
+ * `next build` needs no database. In development, the client survives
+ * hot reloads.
+ */
+export function getDb(): Database {
+  if (!globalForDb.appgenDb) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error("Set DATABASE_URL to the connection URL of the Postgres database.");
+    }
+    globalForDb.appgenDb = drizzle(postgres(url), { schema });
+  }
+  return globalForDb.appgenDb;
+}

@@ -1,0 +1,71 @@
+{% set table = nextjs.tables_by_entity[name] %}
+{{ trace_header(element_id) }}
+import { relations } from "drizzle-orm";
+import { {{ table.pg_imports | join(", ") }} } from "drizzle-orm/pg-core";
+{% for module, const in table.related_modules %}
+import { {{ const }} } from "./{{ module }}";
+{% endfor %}
+{% for enum in table.enums %}
+
+{{ trace(enum.element_id) }}
+export const {{ enum.const }} = pgEnum({{ enum.name | tojson }}, [
+{% for value in enum.values %}
+  {{ value | tojson }},
+{% endfor %}
+]);
+{% endfor %}
+
+{{ trace(element_id) }}
+export const {{ table.const }} = pgTable({{ table.name | tojson }}, {
+  id: uuid("id").primaryKey().defaultRandom(),
+{% for column in table.columns %}
+  {{ trace(column.element_id) }}
+  {{ column.key }}: {{ column.builder }},
+{% endfor %}
+});
+{% for join in table.join_tables %}
+
+{{ trace(join.element_id) }}
+export const {{ join.const }} = pgTable(
+  {{ join.name | tojson }},
+  {
+    {{ join.left_key }}: uuid({{ join.left_column | tojson }})
+      .notNull()
+      .references(() => {{ table.const }}.id, { onDelete: "cascade" }),
+    {{ join.right_key }}: uuid({{ join.right_column | tojson }})
+      .notNull()
+      .references(() => {{ join.target_table }}.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.{{ join.left_key }}, t.{{ join.right_key }}] })],
+);
+
+{{ trace(join.element_id) }}
+export const {{ join.const }}Relations = relations({{ join.const }}, ({ one }) => ({
+  {{ join.left_relation }}: one({{ table.const }}, {
+    fields: [{{ join.const }}.{{ join.left_key }}],
+    references: [{{ table.const }}.id],
+    relationName: {{ join.relation_name | tojson }},
+  }),
+  {{ join.right_relation }}: one({{ join.target_table }}, {
+    fields: [{{ join.const }}.{{ join.right_key }}],
+    references: [{{ join.target_table }}.id],
+  }),
+}));
+{% endfor %}
+{% if table.relations %}
+
+export const {{ table.const }}Relations = relations({{ table.const }}, ({ {{ table.relation_helpers }} }) => ({
+{% for relation in table.relations %}
+  {{ trace(relation.element_id) }}
+{% if relation.kind == "one" %}
+  {{ relation.key }}: one({{ relation.target_table }}, {
+    fields: [{{ table.const }}.{{ relation.fields }}],
+    references: [{{ relation.target_table }}.id],
+    relationName: {{ relation.relation_name | tojson }},
+  }),
+{% else %}
+  {{ relation.key }}: many({{ relation.target_table }}, { relationName: {{ relation.relation_name | tojson }} }),
+{% endif %}
+{% endfor %}
+}));
+{% endif %}
