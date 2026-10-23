@@ -1,7 +1,8 @@
 #!/bin/sh
 # Generate the project tracker with the FastAPI binding, and check the
-# output: install, lint, format, type check, tests, Docker image, and
-# traces. The pre-push hook runs this script when a push changes the
+# output: install, lint, format, type check, tests, Docker image,
+# traces, and the smoke test (scripts/smoke_test.py: start the app and
+# request it). The pre-push hook runs this script when a push changes the
 # generator or the FastAPI binding. Run it by hand from the repository
 # root:
 #
@@ -12,7 +13,7 @@
 # in TEST_DATABASE_URL.
 #
 # Environment variables:
-#   POSTGRES_IMAGE            The Postgres image of the tests (default postgres:18).
+#   POSTGRES_IMAGE            The Postgres image of the tests and the smoke test.
 #   UV_IMAGE, PYTHON_IMAGE    Build arguments of the Docker image.
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
 
@@ -61,5 +62,8 @@ docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-fastapi 
 cd "$root"
 step "appgen check"
 uv run --locked appgen check "$definition" "$out"
+
+step "smoke test"
+uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-fastapi
 
 step "passed"

@@ -244,6 +244,11 @@ git config core.hooksPath .githooks
   `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. It needs pnpm and Docker. Run it by hand
   with `scripts/check-react.sh [output folder]`.
+- Each check script ends with the smoke test of its app
+  (`scripts/smoke_test.py`): it starts the Docker image that the script
+  built, and requests one page for each entity (Next.js and React) or
+  the list endpoint of each entity (FastAPI). Run it for all apps with
+  `uv run scripts/smoke_test.py`.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.

@@ -42,6 +42,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Run all hook checks   | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null`        |
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
+| Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 
 ## Layout
 
@@ -93,6 +94,16 @@ Each check reports no invalid traces and 100 % coverage. The FastAPI
 app leaves out the pages and the UI by design, so its report lists the
 kinds `page` and `ui` as excluded. `tests/test_end_to_end.py` runs these
 steps with the CLI.
+
+`scripts/smoke_test.py` starts the apps in Docker, one at a time: the
+Next.js app and the FastAPI app with Postgres (Docker Compose), and the
+React app with nginx. It opens one page for each entity in the
+Next.js and React apps, and calls the health check and the list endpoint
+of each entity in the FastAPI app. The check scripts of the bindings
+(`scripts/check-<binding>.sh`) run it on the image that they build, so
+the pre-push hook runs it. The script header lists the environment
+variables, for example `POSTGRES_IMAGE` for a mirror of the Postgres
+image.
 
 ## Bindings
 

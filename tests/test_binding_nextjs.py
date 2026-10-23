@@ -436,7 +436,7 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     assert "node_modules\n.next\n" in files[".dockerignore"]
     compose = files["compose.yaml"]
     assert "# @trace app file" in compose
-    assert "image: postgres:18-alpine" in compose
+    assert "image: ${POSTGRES_IMAGE:-postgres:18-alpine}" in compose
     assert "DATABASE_URL: postgres://postgres:postgres@db:5432/project_tracker" in compose
     assert 'DATABASE_MIGRATE: "true"' in compose
     assert "condition: service_healthy" in compose
