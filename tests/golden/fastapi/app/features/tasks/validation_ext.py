@@ -1,5 +1,5 @@
 # Created by appgen once. appgen never changes or deletes this file.
-# @trace:gap entities.Task file
+# @trace:manual entities.Task file
 """The custom validation of the entity Task.
 
 The create and update operations call `validate` before they store a
@@ -19,4 +19,4 @@ async def validate(session: AsyncSession, record: Task, *, created: bool) -> Non
     new record. To reject the record, raise
     `app.core.errors.ProblemError(422, "<the reason>")`.
     """
-    # TODO(appgen): add the validation rules of the entity Task, if it has some.
+    # Add the validation rules of the entity Task here, if it has some.

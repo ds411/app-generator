@@ -37,17 +37,34 @@ def test_generated_and_manual_traces_cover_an_element(definition: AppDefinition)
 
 
 def test_an_element_with_only_gap_traces_is_an_open_gap(definition: AppDefinition) -> None:
-    traces = _traces(
-        "# @trace:gap operations.complete_task file\n"
-        "# @trace:gap operations.list_tasks\n"
-        "x = 1  # @trace:manual operations.list_tasks\n"
-    )
+    traces = _traces("# @trace:gap operations.complete_task file\n")
 
     report = compute_coverage(definition, traces)
 
     assert [e.element_id for e in report.gaps] == ["operations.complete_task"]
+
+
+def test_a_gap_trace_keeps_an_element_open_next_to_other_traces(
+    definition: AppDefinition,
+) -> None:
+    # The generated code that calls a stub has a generated trace to the
+    # element of the stub. The stub still has no logic (ADR 0005).
+    traces = _traces(
+        "# @trace:gap operations.complete_task\n"
+        "x = 1  # @trace operations.complete_task\n"
+        "# @trace:gap operations.list_tasks\n"
+        "y = 1  # @trace:manual operations.list_tasks\n"
+        "z = 1  # @trace:manual operations.create_task\n"
+    )
+
+    report = compute_coverage(definition, traces)
+
     status = {e.element_id: e.status for e in report.elements}
-    assert status["operations.list_tasks"] == "covered"
+    assert status["operations.complete_task"] == "gap"
+    assert status["operations.list_tasks"] == "gap"
+    assert status["operations.create_task"] == "covered"
+    gap = next(e for e in report.gaps if e.element_id == "operations.complete_task")
+    assert [t.line for t in gap.gap_traces] == [1]
 
 
 def test_a_trace_covers_only_its_own_element(definition: AppDefinition) -> None:

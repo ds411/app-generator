@@ -166,7 +166,11 @@ A gap trace marks an element that needs hand-written code
   file that it creates, with a `TODO(appgen):` comment.
 - When the developer writes the code, the developer changes
   `@trace:gap` to `@trace:manual`. The checker reports each element
-  that has only gap traces as an open gap.
+  that has a gap trace as an open gap, also when the generated code
+  that calls the extension has a `generated` trace to it (#151).
+- An optional hook that works as it is (for example a validation
+  function that accepts all records) is not a gap. Its extension file
+  has a `@trace:manual` trace in the header.
 - The generated file that calls the extension has a `generated` trace
   to the same element. Thus the checker sees both the generated part
   and the hand-written part.

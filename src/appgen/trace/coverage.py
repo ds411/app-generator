@@ -1,7 +1,10 @@
 """The coverage of an app definition by the traces in code (ADR 0004).
 
-- An element with a `generated` or a `manual` trace is covered.
-- An element with only `gap` traces is an open gap.
+- An element with a `gap` trace is an open gap, also when other traces
+  refer to it: the generated code that calls a stub has a `generated`
+  trace, but the stub still needs hand-written code (ADR 0005).
+- An element with a `generated` or a `manual` trace, and no `gap`
+  trace, is covered.
 - An element with no trace is uncovered.
 
 A trace covers only its own element.
@@ -27,6 +30,11 @@ class ElementCoverage:
     status: CoverageStatus
     traces: tuple[Trace, ...] = ()
     """The traces to the element, sorted by position."""
+
+    @property
+    def gap_traces(self) -> tuple[Trace, ...]:
+        """The gap traces to the element: where the open work is."""
+        return tuple(t for t in self.traces if t.kind == "gap")
 
 
 @dataclass(slots=True)
@@ -75,7 +83,7 @@ class CoverageReport:
 
     @property
     def gaps(self) -> list[ElementCoverage]:
-        """The elements with only gap traces: the open gaps."""
+        """The elements with a gap trace: the open gaps."""
         return [e for e in self.elements if e.status == "gap"]
 
     @property
@@ -117,8 +125,8 @@ def compute_coverage(
 
 
 def _status(traces: tuple[Trace, ...]) -> CoverageStatus:
-    if any(t.kind in ("generated", "manual") for t in traces):
-        return "covered"
-    if traces:
+    if any(t.kind == "gap" for t in traces):
         return "gap"
+    if traces:
+        return "covered"
     return "uncovered"
