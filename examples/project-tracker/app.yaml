@@ -46,7 +46,7 @@ entities:
         default: planned
       start_date: { type: date }
       due_date: { type: date }
-      budget: { type: decimal, min: 0, precision: 12, scale: 2 }
+      budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
     relations:
       owner:
         kind: many_to_one
@@ -492,7 +492,7 @@ ui:
         owner: { label: Owner, format: avatar }
         start_date: { label: Start, format: date, hide_below: lg }
         due_date: { label: Due, format: date, align: end }
-        budget: { label: Budget, format: currency, align: end, hide_below: md }
+        budget: { label: Budget, align: end, hide_below: md }
       sort: { field: due_date, direction: asc }
       filters:
         search: { kind: search, label: Search projects, fields: [name, key, owner.name] }
@@ -876,7 +876,6 @@ ui:
           entity: Project
           aggregate: sum
           field: budget
-          format: currency
           filter: { status: { in: [planned, active] } }
           icon: wallet
           color: "{color.status.success}"

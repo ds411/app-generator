@@ -48,6 +48,8 @@ _EMPTY: dict[ValueKind, str] = {
     "boolean": "false",
 }
 _INPUT_TYPES = {"email": "email", "url": "url"}
+NUMBER_FORMATS = frozenset({"number", "currency", "percent"})
+"""The field formats that a number widget shows next to its value."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,8 @@ class FieldPlan:
     span: int = 1
     rows: int | None = None
     step: float | None = None
+    format: str | None = None
+    """For a number: the display format of the field (`number`, `currency`, or `percent`)."""
     input_type: str = "text"
     required: bool = False
     required_message: str = "Enter a value."
@@ -324,7 +328,8 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
         navigate=_navigate(definition, form, entity, operation),
         rule_values=form_values(definition, name)[0],
         route_params=route_params,
-        widgets={f.widget for f in fields},
+        widgets={f.widget for f in fields}
+        | ({"number_format"} if any(f.format for f in fields) else set()),
     )
 
 
@@ -416,6 +421,8 @@ def _value_field(
         )
     if value.type == "integer":
         plan.step = 1
+    if widget == "number" and value.format in NUMBER_FORMATS:
+        plan.format = value.format
     return plan
 
 
@@ -628,6 +635,7 @@ def form_rules() -> tuple[Output, ...]:
                 ("option-radio", "'radio' in ui_forms.widgets"),
                 ("date-input", "'date' in ui_forms.widgets or 'datetime' in ui_forms.widgets"),
                 ("date-time-input", "'datetime' in ui_forms.widgets"),
+                ("number-input", "'number_format' in ui_forms.widgets"),
                 ("relation-select", "ui_forms.relations"),
             )
         ),

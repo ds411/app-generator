@@ -215,7 +215,23 @@ def _form_components(definition: AppDefinition, form: Form) -> set[str]:
         if widget is None:
             widget = _default_widget(definition, form.entity, name, params)
         names.update(_WIDGET_COMPONENTS.get(widget or "custom", ()))
+        if widget == "number" and _has_format(definition, form.entity, name, params):
+            names.add("input-group")
     return names
+
+
+def _has_format(
+    definition: AppDefinition, entity: str, name: str, params: dict[str, Field] | None
+) -> bool:
+    """Return True if a number field of a form has a number format (see `NumberInput`)."""
+    if params is not None and name in params:
+        member: object = params[name]
+    else:
+        try:
+            member = resolve_path(definition, entity, name).member
+        except FieldPathError:
+            return False
+    return isinstance(member, Field) and member.format in ("number", "currency", "percent")
 
 
 def _default_widget(

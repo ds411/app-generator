@@ -389,7 +389,8 @@ the column hides on narrower screens).
 | `url`           | `url`                             |
 | `avatar`        | A relation (initials of the display field) |
 
-The default format comes from the field type.
+The default format is the `format` of the field (an entity field key,
+added in M12), else a format for the field type.
 
 A filter has `kind` and these keys:
 
@@ -516,7 +517,7 @@ these keys:
 
 | Kind    | Keys                                                                                     |
 | ------- | ---------------------------------------------------------------------------------------- |
-| `stat`  | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, or `max`), `field` (a number field, not for `count`), `filter`, `format` (`number`, `currency`, or `percent`), `icon`, `color` (a color token), `link` (a page). |
+| `stat`  | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, or `max`), `field` (a number field, not for `count`), `filter`, `format` (`number`, `currency`, or `percent`; the default is the `format` of the field, else `number`), `icon`, `color` (a color token), `link` (a page). |
 | `chart` | `chart` (`bar`, `line`, or `donut`), `entity`, `group_by` (an `enum`, `date`, or relation field), `aggregate`, `field`, `filter`, `badge` (colors for the groups). |
 | `list`  | `view` (a table or a card list), `filter`, `sort`, `limit`, `link` (a page for "View all"). |
 | `custom`| A generation gap.                                                                        |

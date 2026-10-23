@@ -503,7 +503,10 @@ class ViewContext:
         if isinstance(member, Field):
             member_label = member.label or member_label
             raw = f"{expr}{dot}{camel(last)}"
-            badge = badge or (self.badge_for(entity, path) if member.type == "enum" else None)
+            if fmt is None and badge is None:
+                fmt = member.format
+            if fmt is None or fmt == "badge":
+                badge = badge or (self.badge_for(entity, path) if member.type == "enum" else None)
             enum_values = tuple(member.values or ()) if member.type == "enum" else ()
             fmt = fmt or ("badge" if badge else _DEFAULT_FORMATS[member.type])
             text = (

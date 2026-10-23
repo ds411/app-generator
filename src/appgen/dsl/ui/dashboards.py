@@ -39,7 +39,8 @@ class StatWidget(WidgetBase):
     field: FieldPath | None = None
     """A number field. Not for `count`."""
     filter: RecordFilter = pydantic.Field(default_factory=dict[str, JsonValue])
-    format: Literal["number", "currency", "percent"] = "number"
+    format: Literal["number", "currency", "percent"] | None = None
+    """The default is the format of the field (for an aggregate of a field), else `number`."""
     icon: IconName | None = None
     color: TokenRef | None = None
     """A color token."""
