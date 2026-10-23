@@ -8,6 +8,13 @@ and starts the app: the Next.js app and the FastAPI app with Postgres
 - Next.js and React: open one page for each entity that has a page.
 - FastAPI: call the health check, and the list endpoint of each entity.
 
+With `--ui`, the script also runs the Playwright UI tests in `ui-tests/`
+on a front-end app, while the app runs: each page in the light and the
+dark mode, and the design tokens. The screenshots go to
+`ui-tests/screenshots/` (git ignores it). Install the browser once with
+`pnpm --dir ui-tests install && pnpm --dir ui-tests exec playwright
+install chromium`.
+
 Run it from the repository root:
 
     uv run scripts/smoke_test.py [binding ...]
@@ -15,7 +22,7 @@ Run it from the repository root:
 Without a binding, the script tests all three apps. To test an app that
 a check script generated and built, give its folder and its image:
 
-    uv run scripts/smoke_test.py nextjs --app <folder> --image <tag>
+    uv run scripts/smoke_test.py nextjs --app <folder> --image <tag> [--ui]
 
 The script needs Docker. It uses the ports 3000 (Next.js), 8000
 (FastAPI), and 8080 (React) of the host, one app at a time.
@@ -26,6 +33,8 @@ Environment variables:
     UV_IMAGE, PYTHON_IMAGE        Build arguments of the FastAPI image.
     APPGEN_DOCKER_BUILD_ARGS      More arguments for `docker build`.
     APPGEN_SMOKE_TIMEOUT          Seconds to wait for an app to start (default 180).
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the UI tests, instead of the one
+                                  that Playwright installs.
 """
 
 import argparse
@@ -44,9 +53,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from appgen.bindings.shared.theme import css_value, css_var
 from appgen.dsl import AppDefinition, load_definition
+from appgen.gen.tokens import resolve_tokens
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+UI_TESTS = Path("ui-tests")
 BINDINGS = ("nextjs", "fastapi", "react")
 BUILD_ARGS = {
     "nextjs": ("NODE_IMAGE",),
@@ -221,7 +233,54 @@ def check_api(binding: str, definition: AppDefinition) -> None:
         )
 
 
-def smoke_test(binding: str, app: Path | None, image: str | None) -> None:
+def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
+    """Return the values that the UI tests expect: the pages and the design tokens."""
+    tokens = resolve_tokens(definition)
+    body = next((t for t in tokens if t.path == "typography.body"), None)
+    font_sizes = {
+        mode: str(cast(dict[str, object], value).get("font_size", "1rem"))
+        for mode, value in (
+            ("light", body.light if body else {}),
+            ("dark", body.dark if body else {}),
+        )
+    }
+    return {
+        "binding": binding,
+        "pages": [
+            {
+                "name": name,
+                "path": page.path,
+                "title": page.title,
+                "params": [part[1:-1] for part in page.path.split("/") if part.startswith("{")],
+            }
+            for name, page in definition.pages.items()
+        ],
+        "colors": [
+            {
+                "path": t.path,
+                "variable": css_var(t.path).removeprefix("var(").removesuffix(")"),
+                "light": css_value(t, t.light),
+                "dark": css_value(t, t.dark),
+            }
+            for t in tokens
+            if t.group == "color"
+        ],
+        "bodyFontSize": font_sizes,
+    }
+
+
+def check_ui(binding: str, definition: AppDefinition) -> None:
+    """Run the Playwright UI tests on the app that runs."""
+    log(binding, "UI tests (Playwright)")
+    expected = json.dumps(expected_ui(binding, definition), indent=2)
+    (UI_TESTS / "expected.json").write_text(expected + "\n")
+    subprocess.run(["pnpm", "install", "--silent", "--frozen-lockfile"], cwd=UI_TESTS, check=True)
+    subprocess.run(["pnpm", "--silent", "typecheck"], cwd=UI_TESTS, check=True)
+    env = {**os.environ, "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}"}
+    subprocess.run(["pnpm", "exec", "playwright", "test"], cwd=UI_TESTS, env=env, check=True)
+
+
+def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = False) -> None:
     definition = load_definition(DEFINITION)
     with tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp:
         if app is None:
@@ -235,6 +294,8 @@ def smoke_test(binding: str, app: Path | None, image: str | None) -> None:
                 check_api(binding, definition)
             else:
                 check_front_end(binding, definition)
+                if ui:
+                    check_ui(binding, definition)
     log(binding, "passed")
 
 
@@ -243,6 +304,9 @@ def main() -> int:
     parser.add_argument("bindings", nargs="*", metavar="binding", help=", ".join(BINDINGS))
     parser.add_argument("--app", type=Path, help="A generated app; the default is a new one.")
     parser.add_argument("--image", help="The Docker image of the app; the default is a new one.")
+    parser.add_argument(
+        "--ui", action="store_true", help="Also run the UI tests on the front ends."
+    )
     args = parser.parse_args()
     bindings: list[str] = args.bindings or list(BINDINGS)
     unknown = [b for b in bindings if b not in BINDINGS]
@@ -252,7 +316,7 @@ def main() -> int:
         parser.error("--app and --image need one binding.")
     try:
         for binding in bindings:
-            smoke_test(binding, args.app, args.image)
+            smoke_test(binding, args.app, args.image, args.ui)
     except (SmokeError, subprocess.CalledProcessError) as error:
         print(f"smoke-test: failed: {error}", file=sys.stderr)
         return 1
