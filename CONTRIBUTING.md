@@ -232,6 +232,12 @@ git config core.hooksPath .githooks
   the output. It needs Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
+- When a push changes the generator core, the Next.js binding, or the
+  shared binding code, the hook also runs `scripts/check-nextjs.sh`.
+  The script generates the project tracker with the Next.js binding,
+  and runs `pnpm install`, lint, type check, build, `docker build`, and
+  `appgen check` on the output. It needs pnpm and Docker. Run it by
+  hand with `scripts/check-nextjs.sh [output folder]`.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.

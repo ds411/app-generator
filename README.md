@@ -208,6 +208,9 @@ uv run appgen generate examples/project-tracker/app.yaml -b nextjs -o /tmp/track
 cd /tmp/tracker-next && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 ```
 
+`scripts/check-nextjs.sh` runs these steps, `docker build`, and
+`appgen check` on the output. The pre-push hook runs it.
+
 ### Shared shadcn/ui templates
 
 The Next.js and the React bindings write the same shadcn/ui components.
