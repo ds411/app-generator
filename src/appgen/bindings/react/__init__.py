@@ -7,10 +7,11 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 
 from pathlib import Path
 
-from appgen.bindings.react.helpers import HELPERS
+from appgen.bindings.react.helpers import HELPERS, context
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
+_ENTITY = "src/entities/{{ name | kebab }}"
 
 BINDING = Binding(
     name="react",
@@ -32,6 +33,34 @@ BINDING = Binding(
         Output(template="src/layer.md.j2", path="src/features/README.md"),
         Output(template="src/layer.md.j2", path="src/entities/README.md"),
         Output(template="src/shared/config/app.ts.j2", path="src/shared/config/app.ts"),
+        Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
+        Output(template="src/shared/api/mock-store.ts.j2", path="src/shared/api/mock-store.ts"),
+        Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
+        Output(
+            template="src/entities/entity/index.ts.j2",
+            path=_ENTITY + "/index.ts",
+            for_each="entity",
+        ),
+        Output(
+            template="src/entities/entity/model/types.ts.j2",
+            path=_ENTITY + "/model/types.ts",
+            for_each="entity",
+        ),
+        Output(
+            template="src/entities/entity/model/meta.ts.j2",
+            path=_ENTITY + "/model/meta.ts",
+            for_each="entity",
+        ),
+        Output(
+            template="src/entities/entity/api/api.ts.j2",
+            path=_ENTITY + "/api/{{ name | kebab }}-api.ts",
+            for_each="entity",
+        ),
+        Output(
+            template="src/entities/entity/api/mock-data.ts.j2",
+            path=_ENTITY + "/api/{{ name | kebab }}-mock-data.ts",
+            for_each="entity",
+        ),
         Output(
             template="src/pages/page/index.ts.j2",
             path=_PAGE + "/index.ts",
@@ -43,6 +72,7 @@ BINDING = Binding(
             for_each="page",
         ),
     ),
-    covers=frozenset({"app", "page"}),
+    covers=frozenset({"app", "page", "entity", "field", "relation", "operation"}),
+    context=context,
     helpers=HELPERS,
 )

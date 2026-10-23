@@ -1,0 +1,34 @@
+{{ trace_header(element_id) }}
+{% set type = name | pascal %}
+{% set all = members(name, element) %}
+{% for m in all if m.field and m.field.type == "enum" %}
+{% if loop.first %}
+
+{% endif %}
+export const {{ enum_values_name(name, m.name) }} = {{ ts_value(m.field.values) }} as const; {{ trace(m.element_id) }}
+export type {{ m.ts_type }} = (typeof {{ enum_values_name(name, m.name) }})[number];
+{% endfor %}
+
+{% if element.description %}
+/** {{ element.description }} */
+{% endif %}
+export type {{ type }} = {
+  id: string;
+{% for m in all %}
+  {{ m.key }}: {{ m.ts_type }}{{ " | null" if m.nullable }}; {{ trace(m.element_id) }}
+{% endfor %}
+};
+
+/** The values that create a {{ type }}. The keys without a value get their defaults. */
+export type {{ type }}Input = {
+{% for m in all %}
+  {{ m.key }}{{ "" if m.input_required else "?" }}: {{ m.ts_type }}{{ " | null" if m.nullable }};
+{% endfor %}
+};
+
+/** The value of each optional key that the create input does not have. */
+export const {{ name | camel }}Defaults: Partial<Omit<{{ type }}, "id">> = {
+{% for m in all if not m.input_required %}
+  {{ m.key }}: {{ ts_value(m.default) }},
+{% endfor %}
+};

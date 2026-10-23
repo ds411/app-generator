@@ -1,0 +1,39 @@
+{{ trace_header(element_id) }}
+{% set type = name | pascal %}
+// The labels and the rules of the fields and the relations of {{ type }}.
+// The UI uses them for column headers, form labels, and checks.
+
+export const {{ name | camel }}Meta = {
+  name: {{ ts_value(name) }},
+  label: {{ ts_value(element.label or label(name)) }},
+  pluralLabel: {{ ts_value(element.plural_label or (element.label or label(name)) ~ "s") }},
+  displayField: {{ ts_value((element.display_field or "id") | camel) }},
+  fields: {
+{% for field_name, field in element.fields.items() %}
+    {{ field_name | camel }}: { {{ trace(field.id, scope="begin") }}
+      label: {{ ts_value(field.label or label(field_name)) }},
+      type: {{ ts_value(field.type) }},
+      required: {{ ts_value(field.required) }},
+{% if field.description %}
+      description: {{ ts_value(field.description) }},
+{% endif %}
+{% for option in ("min_length", "max_length", "pattern", "min", "max", "precision", "scale", "values") if field[option] is not none %}
+      {{ option | camel }}: {{ ts_value(field[option]) }},
+{% endfor %}
+    }, {{ trace(field.id, scope="end") }}
+{% endfor %}
+  },
+  relations: {
+{% for relation_name, relation in element.relations.items() %}
+    {{ relation_name | camel }}: { {{ trace(relation.id, scope="begin") }}
+      label: {{ ts_value(relation.label or label(relation_name)) }},
+      kind: {{ ts_value(relation.kind) }},
+      target: {{ ts_value(relation.target) }},
+      required: {{ ts_value(relation.required) }},
+{% if relation.inverse %}
+      inverse: {{ ts_value(relation.inverse | camel) }},
+{% endif %}
+    }, {{ trace(relation.id, scope="end") }}
+{% endfor %}
+  },
+} as const;
