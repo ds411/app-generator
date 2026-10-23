@@ -1,0 +1,24 @@
+{{ trace_header("app") }}
+import { Outlet } from "react-router";
+
+{% if react.mode_toggle %}
+import { ModeToggle } from "@/features/toggle-theme";
+{% endif %}
+import { appConfig } from "@/shared/config/app";
+
+/** The frame of all pages: a header with the app title, and the page. */
+export function RootLayout() {
+  return (
+    <div className="min-h-svh bg-background text-foreground">
+      <header className="flex items-center justify-between border-b px-6 py-3">
+        <span className="font-semibold">{appConfig.title}</span>
+{% if react.mode_toggle %}
+        <ModeToggle />
+{% endif %}
+      </header>
+      <div className="p-6">
+        <Outlet />
+      </div>
+    </div>
+  );
+}

@@ -14,6 +14,7 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.react.mock_data import mock_data
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.theme import build_theme
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.gen.naming import camel, pascal, words
 
@@ -211,9 +212,14 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
     components = shadcn.used_components(definition)
+    theme = definition.ui.theme if definition.ui is not None else None
     return {
         "mock": mock_records(definition),
+        "theme": build_theme(definition),
+        "theme_element": theme.id if theme is not None else "app",
         "react": {
+            "default_mode": theme.default_mode if theme is not None else "system",
+            "mode_toggle": shadcn.has_mode_toggle(definition),
             "shadcn": [component.name for component in components],
             "hooks": shadcn.hooks(components),
             "package_json": package_json(definition),

@@ -218,6 +218,12 @@ components from the shared templates (`src/appgen/bindings/shared/`),
 and writes into `src/shared/ui` only the components that the UI of the
 definition uses, with their npm packages.
 
+The theme comes from the design tokens, with the shared template
+`theme/globals.css.j2`: one CSS variable for each token, with a light and
+a dark value, as shadcn/ui and Tailwind CSS name them. The app switches
+between the light, the dark, and the system mode (next-themes, with the
+class `dark` on `<html>`), if the definition shows the mode toggle.
+
 The app has a multi-stage `Dockerfile`: pnpm builds the static files,
 and nginx serves them as a non-root user on port 8080. nginx sends
 unknown paths to `index.html`, so that the client routes work after a

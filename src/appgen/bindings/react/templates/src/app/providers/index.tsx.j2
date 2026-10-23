@@ -1,0 +1,20 @@
+{{ trace_header(theme_element) }}
+import type { ReactNode } from "react";
+
+import { ThemeProvider } from "@/shared/lib/theme";
+import { Toaster } from "@/shared/ui/sonner";
+
+/** The providers of the app: the color mode and the toasts. */
+export function Providers({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <ThemeProvider
+      attribute="class"
+      defaultTheme={{ react.default_mode | tojson }}
+      enableSystem
+      disableTransitionOnChange
+    >
+      {children}
+      <Toaster richColors closeButton />
+    </ThemeProvider>
+  );
+}

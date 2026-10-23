@@ -5,8 +5,15 @@ import { createBrowserRouter } from "react-router";
 import { {{ page_name | pascal }}Page } from "@/pages/{{ page_name | kebab }}";
 {% endfor %}
 
+import { RootLayout } from "./layout/root-layout";
+
 export const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
 {% for page_name, page in definition.pages.items() %}
-  { path: {{ route_path(page.path) | tojson }}, element: <{{ page_name | pascal }}Page /> }, {{ trace(page.id) }}
+      { path: {{ route_path(page.path) | tojson }}, element: <{{ page_name | pascal }}Page /> }, {{ trace(page.id) }}
 {% endfor %}
+    ],
+  },
 ]);

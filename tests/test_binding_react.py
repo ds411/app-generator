@@ -92,6 +92,29 @@ def test_the_shadcn_setup_follows_the_definition(
     assert '"recharts": "' in files["package.json"]
 
 
+def test_the_theme_comes_from_the_design_tokens(result: GenerationResult) -> None:
+    files = _files(result)
+    css = files["src/app/styles/index.css"]
+    assert "--primary: oklch(0.511 0.262 276.966); /* @trace ui.tokens.color.primary */" in css
+    dark = css.split(".dark {", 1)[1].split("}", 1)[0]
+    assert "--primary: oklch(0.673 0.182 276.935); /* @trace ui.tokens.color.primary */" in dark
+    assert "--spacing-4: 1rem; /* @trace ui.tokens.spacing.4 */" in css
+    assert "--breakpoint-md: 768px; /* @trace ui.tokens.breakpoint.md */" in css
+    providers = files["src/app/providers/index.tsx"]
+    assert 'attribute="class"' in providers
+    assert 'defaultTheme="system"' in providers
+    assert "<ModeToggle />" in files["src/app/layout/root-layout.tsx"]
+    assert 'setTheme("dark")' in files["src/features/toggle-theme/ui/mode-toggle.tsx"]
+
+
+def test_an_app_without_a_mode_toggle_has_no_toggle(react: Binding) -> None:
+    files = _files(
+        generate(load_definition(EXAMPLE.parent.parent / "edge-cases" / "app.yaml"), react)
+    )
+    assert "src/features/toggle-theme/ui/mode-toggle.tsx" not in files
+    assert "ModeToggle" not in files["src/app/layout/root-layout.tsx"]
+
+
 def test_each_package_of_the_shadcn_components_has_a_version() -> None:
     names = shadcn.packages(shadcn.registry().values())
     assert sorted(set(names) - set(versions.COMPONENT_PACKAGES)) == []
@@ -164,7 +187,7 @@ def test_each_file_has_a_file_trace_and_the_check_finds_no_invalid_traces(
     covered = {e.element_id for e in report.coverage.elements if e.status == "covered"}
     assert {"app", "pages.dashboard", "pages.project_detail"} <= covered
     for element in iter_elements(definition):
-        if element.kind in ("entity", "field", "relation", "page"):
+        if element.kind in ("entity", "field", "relation", "page", "token", "token_group"):
             assert element.id in covered, element.id
     for name, operation in definition.operations.items():
         if operation.kind != "custom":
