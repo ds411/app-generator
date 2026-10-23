@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any
 
 from appgen.bindings.fastapi.names import attribute, plural, singular
+from appgen.bindings.fastapi.pysource import call, from_import, import_block
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.gen.naming import constant, kebab, pascal, snake
@@ -89,6 +90,47 @@ class PyField:
     def nullable(self) -> bool:
         return not self.required
 
+    @property
+    def read_type(self) -> str:
+        """The type of the field in the read schema, without None."""
+        return {"EmailStr": "str", "UrlStr": "str", "AwareDatetime": "dt.datetime"}.get(
+            self.schema_type, self.schema_type
+        )
+
+    @property
+    def mutable_default(self) -> bool:
+        return self.type == "json" and self.default[:1] in ("[", "{")
+
+    def declaration(self, mode: str) -> str:
+        """Return the declaration of the field in a schema, for example `title: str`.
+
+        The mode is `create` (also for params), `update`, or `read`.
+        """
+        alias = [f'alias="{self.name}"'] if self.aliased else []
+        docs = [(k, v) for k, v in self.constraints if k in ("title", "description")]
+        rules = [f"{k}={v}" for k, v in self.constraints if mode != "read" or (k, v) in docs]
+        if mode == "read":
+            type_ = self.read_type + (" | None" if self.nullable else "")
+            return _declare(self.attr, type_, None, [*alias, *rules])
+        if mode == "update":
+            return _declare(self.attr, f"{self.schema_type} | None", "None", [*alias, *rules])
+        if self.required and not self.has_default:
+            return _declare(self.attr, self.schema_type, None, [*alias, *rules])
+        type_ = self.schema_type if self.required else f"{self.schema_type} | None"
+        if self.mutable_default:
+            factory = f"lambda: {self.default}"
+            return _declare(self.attr, type_, None, [f"default_factory={factory}", *alias, *rules])
+        return _declare(self.attr, type_, self.default, [*alias, *rules])
+
+
+def _declare(attr: str, type_: str, default: str | None, args: list[str]) -> str:
+    """Return a field declaration of a Pydantic model, with `Field()` for its rules."""
+    if not args:
+        return f"{attr}: {type_}" + (f" = {default}" if default is not None else "")
+    if default is not None:
+        args = [f"default={default}", *args]
+    return call(f"{attr}: {type_} = ", "Field", args)
+
 
 @dataclass(slots=True)
 class PyRelation:
@@ -123,6 +165,42 @@ class PyRelation:
     @property
     def many(self) -> bool:
         return self.side == "m2m" or self.kind == "one_to_many"
+
+    @property
+    def nullable(self) -> bool:
+        return not (self.side == "fk" and self.required)
+
+    def declarations(self, mode: str) -> list[str]:
+        """Return the declarations of the relation in a schema.
+
+        The mode is `create`, `update`, or `read`. The input schemas have
+        the ID of the target, or the IDs of the targets. The read schema
+        also has the target object, if the relation is embedded.
+        """
+        lines: list[str] = []
+        if self.side == "fk":
+            assert self.fk_attr is not None
+            if mode == "update":
+                lines.append(f"{self.fk_attr}: UUID | None = None")
+            elif self.required:
+                lines.append(f"{self.fk_attr}: UUID")
+            else:
+                lines.append(f"{self.fk_attr}: UUID | None" + (" = None" if mode != "read" else ""))
+        elif self.side == "m2m":
+            lines.append(
+                {
+                    "create": f"{self.ids_field}: list[UUID] = Field(default_factory=list[UUID])",
+                    "update": f"{self.ids_field}: list[UUID] | None = None",
+                    "read": f"{self.ids_field}: list[UUID]",
+                }[mode]
+            )
+        if mode == "read" and self.embed:
+            target = f"{self.target}Read"
+            if self.many:
+                lines.append(f"{self.attr}: list[{target}]")
+            else:
+                lines.append(f"{self.attr}: {target}" + (" | None" if self.nullable else ""))
+        return lines
 
 
 @dataclass(slots=True)
@@ -189,6 +267,8 @@ class PyEntity:
     relations: list[PyRelation] = field(default_factory=list[PyRelation])
     operations: list[PyOperation] = field(default_factory=list[PyOperation])
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
+    app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
+    """All entities of the app, to find the targets of the relations."""
 
     @property
     def table(self) -> str:
@@ -214,6 +294,60 @@ class PyEntity:
     def read_relations(self) -> list[PyRelation]:
         """The relations that the read schema shows: the foreign keys, the IDs, or the objects."""
         return [r for r in self.relations if r.side in ("fk", "m2m") or r.embed]
+
+    @property
+    def input_relations(self) -> list[PyRelation]:
+        """The relations that the input schemas set: the foreign keys and the IDs."""
+        return [r for r in self.relations if r.side in ("fk", "m2m")]
+
+    @property
+    def not_null(self) -> list[str]:
+        """The attributes that an update cannot set to null."""
+        names = [f.attr for f in self.fields if f.required]
+        return names + [r.fk_attr for r in self.fk_relations if r.required and r.fk_attr]
+
+    def reject_null_call(self) -> str:
+        """Return the statement of the update schema that rejects null for required fields."""
+        return call("return ", "reject_null", ["self", *(f'"{n}"' for n in self.not_null)], 8)
+
+    def schema_imports(self) -> str:
+        """Return the import block of the schemas module of the slice."""
+        types = {f.schema_type for f in self.fields} | {f.read_type for f in self.fields}
+        lines: set[str] = set()
+        if any(t.startswith("dt.") for t in types):
+            lines.add("import datetime as dt")
+        if "Decimal" in types:
+            lines.add("from decimal import Decimal")
+        lines.add("from uuid import UUID")
+        declarations = [f.declaration(m) for f in self.fields for m in ("create", "update", "read")]
+        declarations += [
+            d
+            for r in self.relations
+            for m in ("create", "update", "read")
+            for d in r.declarations(m)
+        ]
+        pydantic = {"Field"} if any("Field(" in d for d in declarations) else set[str]()
+        for name in ("AwareDatetime", "EmailStr", "JsonValue"):
+            if name in types:
+                pydantic.add(name)
+        if self.not_null:
+            pydantic.add("model_validator")
+            lines.add("from typing import Self")
+        if pydantic:
+            lines.add(from_import("pydantic", pydantic))
+        core = {"InputModel", "ReadModel"}
+        if self.not_null:
+            core.add("reject_null")
+        lines.add(from_import("app.core.schemas", core))
+        if "UrlStr" in types:
+            lines.add("from app.core.types import UrlStr")
+        if self.enums:
+            lines.add(from_import(f"app.features.{self.slice}.enums", {e.name for e in self.enums}))
+        for rel in self.embedded:
+            target = self.app_entities[rel.target]
+            if target.name != self.name:
+                lines.add(f"from app.features.{target.slice}.schemas import {target.name}Read")
+        return import_block(lines)
 
 
 @dataclass(slots=True)
@@ -251,6 +385,8 @@ def python_app(definition: AppDefinition) -> PyApp:
     name, or if embedded relations form a cycle.
     """
     entities = {name: _entity(name, entity) for name, entity in definition.entities.items()}
+    for py_entity in entities.values():
+        py_entity.app_entities = entities
     for name, entity in definition.entities.items():
         _relations(definition, entities, name, entity)
     _check_embed_cycles(entities)

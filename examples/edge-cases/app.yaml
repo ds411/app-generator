@@ -54,7 +54,7 @@ entities:
     fields:
       label: { type: string }
     relations:
-      owner: { kind: many_to_one, target: Owner, on_delete: set_null, inverse: items }
+      owner: { kind: many_to_one, target: Owner, on_delete: set_null, inverse: items, x-fastapi-embed: true }
       parent: { kind: many_to_one, target: Item, on_delete: restrict }
   Tag:
     fields:

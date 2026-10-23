@@ -1,0 +1,16 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+"""The enums of the entity {{ e.name }}: the values of its enum fields."""
+
+from enum import StrEnum
+{% for f in e.fields if f.enum %}
+
+
+{{ trace(f.id) }}
+class {{ f.enum.name }}(StrEnum):
+    """The values of the field `{{ f.name }}`."""
+
+{% for member, value in f.enum.members %}
+    {{ member }} = "{{ value }}"
+{% endfor %}
+{% endfor %}

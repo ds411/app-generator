@@ -1,0 +1,57 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+"""The schemas of the entity {{ e.name }}: the input and the output of the API."""
+
+{{ e.schema_imports() }}
+
+
+class {{ e.name }}Create(InputModel):
+    """The input to create a record of the entity {{ e.name }}."""
+
+{% for f in e.fields %}
+    {{ trace(f.id) }}
+    {{ f.declaration("create") }}
+{% endfor %}
+{% for r in e.input_relations %}
+    {{ trace(r.id) }}
+{% for line in r.declarations("create") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+
+
+class {{ e.name }}Update(InputModel):
+    """The input to change a record of the entity {{ e.name }}. Only the given fields change."""
+
+{% for f in e.fields %}
+    {{ trace(f.id) }}
+    {{ f.declaration("update") }}
+{% endfor %}
+{% for r in e.input_relations %}
+    {{ trace(r.id) }}
+{% for line in r.declarations("update") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% if e.not_null %}
+
+    @model_validator(mode="after")
+    def _reject_null(self) -> Self:
+        {{ e.reject_null_call() }}
+{% endif %}
+
+
+class {{ e.name }}Read(ReadModel):
+    """A record of the entity {{ e.name }}, as the API returns it."""
+
+    id: UUID
+{% for f in e.fields %}
+    {{ trace(f.id) }}
+    {{ f.declaration("read") }}
+{% endfor %}
+{% for r in e.read_relations %}
+    {{ trace(r.id) }}
+{% for line in r.declarations("read") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}

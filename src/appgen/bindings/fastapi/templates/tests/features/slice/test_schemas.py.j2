@@ -1,0 +1,72 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set required = e.fields | selectattr("required") | rejectattr("has_default") | list %}
+{% set required_fks = e.fk_relations | selectattr("required") | list %}
+{% if required or required_fks or e.not_null %}
+import pytest
+from pydantic import ValidationError
+
+{% endif %}
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Create, {{ e.name }}Read, {{ e.name }}Update
+from tests.payloads import {{ e.snake }}_payload
+
+
+def test_the_create_schema_accepts_valid_input() -> None:
+    {{ e.name }}Create.model_validate({{ e.snake }}_payload())
+{% if required or required_fks %}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+{% for f in required %}
+        "{{ f.name }}",
+{% endfor %}
+{% for r in required_fks %}
+        "{{ r.fk_attr }}",
+{% endfor %}
+    ],
+)
+def test_the_create_schema_needs_the_required_fields(name: str) -> None:
+    payload = {{ e.snake }}_payload()
+    del payload[name]
+
+    with pytest.raises(ValidationError):
+        {{ e.name }}Create.model_validate(payload)
+{% endif %}
+
+
+def test_the_update_schema_accepts_a_partial_change() -> None:
+    assert {{ e.name }}Update.model_validate({}).model_fields_set == set()
+{% if e.not_null %}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+{% for n in e.not_null %}
+        "{{ n }}",
+{% endfor %}
+    ],
+)
+def test_the_update_schema_rejects_null_for_a_required_field(name: str) -> None:
+    with pytest.raises(ValidationError):
+        {{ e.name }}Update.model_validate({name: None})
+{% endif %}
+
+
+def test_the_read_schema_documents_each_field() -> None:
+    properties = {{ e.name }}Read.model_json_schema(by_alias=True)["properties"]
+
+    assert set(properties) >= {
+        "id",
+{% for f in e.fields %}
+        "{{ f.name }}",
+{% endfor %}
+{% for r in e.fk_relations %}
+        "{{ r.fk_attr }}",
+{% endfor %}
+{% for r in e.m2m_relations %}
+        "{{ r.ids_field }}",
+{% endfor %}
+    }

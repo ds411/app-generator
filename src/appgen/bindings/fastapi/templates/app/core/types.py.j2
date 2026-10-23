@@ -1,0 +1,15 @@
+{{ trace_header("app") }}
+"""Field types that the schemas of all slices share."""
+
+from typing import Annotated
+
+from pydantic import AfterValidator, AnyUrl
+
+
+def _check_url(value: str) -> str:
+    AnyUrl(value)
+    return value
+
+
+UrlStr = Annotated[str, AfterValidator(_check_url)]
+"""A URL. The API checks it, and stores it as text without changes."""
