@@ -6,3 +6,5 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+# The SQLite database of local runs
+*.db

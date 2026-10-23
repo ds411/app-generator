@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   // The Docker image builds the standalone server (see the Dockerfile).
   // `pnpm start` needs the default output.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
+  // PGlite (the local database) loads its WebAssembly files from node_modules.
+  serverExternalPackages: ["@electric-sql/pglite"],
 };
 
 export default nextConfig;

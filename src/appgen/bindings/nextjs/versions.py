@@ -10,6 +10,7 @@ NODE_VERSION = "24"
 PNPM_VERSION = "10.28.0"
 
 DEPENDENCIES: dict[str, str] = {
+    "@electric-sql/pglite": "0.5.8",
     "drizzle-orm": "0.45.4",
     "next": "16.4.3",
     "postgres": "3.4.9",

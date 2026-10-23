@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-{% if py.entity_order() | map(attribute="fields") | sum(start=[]) | selectattr("sa_type", "equalto", "JSONB") | list %}
+{% if py.entity_order() | map(attribute="fields") | sum(start=[]) | selectattr("sa_type", "equalto", "JSON_TYPE") | list %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 

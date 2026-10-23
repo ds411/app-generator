@@ -134,8 +134,8 @@ class PyField:
             if indent is None:
                 return f"sa.Enum({', '.join(args)})"
             return call("", "sa.Enum", args, indent)
-        if self.sa_type == "JSONB":
-            return "postgresql.JSONB()"
+        if self.sa_type in _MIGRATION_TYPES:
+            return _MIGRATION_TYPES[self.sa_type]
         if "(" in self.sa_type:
             return "sa." + self.sa_type
         return f"sa.{self.sa_type}()"
@@ -602,20 +602,19 @@ class PyEntity:
             lines.add(from_import("typing", typing))
         if self.fk_relations or self.m2m_relations or "UUID" in types:
             lines.add("from uuid import UUID")
-        sqlalchemy = {t for t in sa_types if t != "JSONB"}
+        sqlalchemy = sa_types - set(_MIGRATION_TYPES)
         if self.fk_relations:
             sqlalchemy.add("ForeignKey")
         if self.join_tables:
             sqlalchemy |= {"Column", "ForeignKey", "Table", "Uuid"}
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
-        if "JSONB" in sa_types:
-            lines.add("from sqlalchemy.dialects.postgresql import JSONB")
         orm = {"Mapped", "mapped_column"}
         if self.relations:
             orm.add("relationship")
         lines.add(from_import("sqlalchemy.orm", orm))
         core = {"Record"} | ({"Base"} if self.join_tables else set[str]())
+        core |= sa_types & set(_MIGRATION_TYPES)
         field_enums = {f.enum.name for f in self.fields if f.enum is not None}
         core |= {"enum_type"} if field_enums else set[str]()
         lines.add(from_import("app.core.db", core))
@@ -744,23 +743,27 @@ class PyApp:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
 
     def foreign_key_call(self, entity: PyEntity, rel: PyRelation) -> str:
-        """Return the `op.create_foreign_key` statement of a foreign key in the migration."""
+        """Return the statement that adds a foreign key in the migration.
+
+        The statement uses the batch mode of Alembic, because SQLite cannot
+        add a constraint to a table. SQLite copies the table instead.
+        """
         args = [
             f'"{self.foreign_key_name(entity, rel)}"',
-            f'"{entity.table}"',
             f'"{self.entities[rel.target].table}"',
             f'["{rel.fk}"]',
             '["id"]',
         ]
         if rel.on_delete:
             args.append(f'ondelete="{rel.on_delete}"')
-        return call("", "op.create_foreign_key", args)
+        create = call("", "batch.create_foreign_key", args, 8)
+        return f'with op.batch_alter_table("{entity.table}") as batch:\n        {create}'
 
     def drop_foreign_key_call(self, entity: PyEntity, rel: PyRelation) -> str:
-        """Return the `op.drop_constraint` statement of a foreign key in the migration."""
+        """Return the statement that drops a foreign key in the migration, in batch mode."""
         name = self.foreign_key_name(entity, rel)
-        args = [f'"{name}"', f'"{entity.table}"', 'type_="foreignkey"']
-        return call("", "op.drop_constraint", args)
+        drop = call("", "batch.drop_constraint", [f'"{name}"', 'type_="foreignkey"'], 8)
+        return f'with op.batch_alter_table("{entity.table}") as batch:\n        {drop}'
 
     @property
     def custom_operations(self) -> list[PyOperation]:
@@ -849,6 +852,16 @@ def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
     )
 
 
+_MIGRATION_TYPES = {
+    "JSON_TYPE": 'sa.JSON().with_variant(postgresql.JSONB(), "postgresql")',
+    "Timestamp": "sa.DateTime(timezone=True)",
+}
+"""The column types of `app.core.db`, and their SQLAlchemy types in the migration.
+
+The app types work on Postgres and on SQLite (the local database).
+"""
+
+
 def _types(f: Field, enum: PyEnum | None) -> tuple[str, str, str]:
     """Return the model type, the schema type, and the SQLAlchemy type of a field."""
     match f.type:
@@ -869,14 +882,14 @@ def _types(f: Field, enum: PyEnum | None) -> tuple[str, str, str]:
         case "date":
             return "dt.date", "dt.date", "Date"
         case "datetime":
-            return "dt.datetime", "AwareDatetime", "DateTime(timezone=True)"
+            return "dt.datetime", "AwareDatetime", "Timestamp"
         case "uuid":
             return "UUID", "UUID", "Uuid"
         case "enum":
             assert enum is not None
             return enum.name, enum.name, f'enum_type({enum.name}, "{enum.constraint}")'
         case _:
-            return "Any", "JsonValue", "JSONB"
+            return "Any", "JsonValue", "JSON_TYPE"
 
 
 def _default(f: Field, enum: PyEnum | None) -> str:

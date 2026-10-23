@@ -60,19 +60,20 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_tasks"),
     )
     # @trace entities.Task.relations.project
-    op.create_foreign_key(
-        "fk_tasks_project_id_projects",
-        "tasks",
-        "projects",
-        ["project_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
+    with op.batch_alter_table("tasks") as batch:
+        batch.create_foreign_key(
+            "fk_tasks_project_id_projects",
+            "projects",
+            ["project_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
     op.create_index("ix_tasks_project_id", "tasks", ["project_id"])
 
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
-    op.drop_constraint("fk_tasks_project_id_projects", "tasks", type_="foreignkey")
+    with op.batch_alter_table("tasks") as batch:
+        batch.drop_constraint("fk_tasks_project_id_projects", type_="foreignkey")
     op.drop_table("tasks")
     op.drop_table("projects")

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://app:app@localhost:5432/{{ py.package }}"
-    """The URL of the Postgres database, with the asyncpg driver."""
+    """The URL of the database: Postgres with the asyncpg driver, or SQLite with the
+    aiosqlite driver for local runs, for example `sqlite+aiosqlite:///./local.db`."""
     cors_origins: list[str] = []
     """The origins of the browser apps that can call the API."""

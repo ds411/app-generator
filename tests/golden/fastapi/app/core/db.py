@@ -2,13 +2,15 @@
 # @trace app file
 """The database: the model base class, the engine, and one session for each request."""
 
+import datetime as dt
 from collections.abc import AsyncIterator, Sequence
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends, Request
-from sqlalchemy import Enum, MetaData, select
+from sqlalchemy import JSON, DateTime, Dialect, Enum, MetaData, TypeDecorator, event, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -60,9 +62,50 @@ def enum_type(enum: type[StrEnum], name: str) -> Enum:
     )
 
 
+JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
+"""The column type of JSON values: JSONB on Postgres, and JSON text on SQLite."""
+
+
+class Timestamp(TypeDecorator[dt.datetime]):
+    """A date and time with a time zone.
+
+    Postgres keeps the time zone. SQLite does not, so on SQLite the type
+    stores the time in UTC and reads it back as UTC.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: dt.datetime | None, dialect: Dialect) -> dt.datetime | None:
+        if value is not None and dialect.name == "sqlite" and value.tzinfo is not None:
+            return value.astimezone(dt.UTC).replace(tzinfo=None)
+        return value
+
+    def process_result_value(
+        self, value: dt.datetime | None, dialect: Dialect
+    ) -> dt.datetime | None:
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=dt.UTC)
+        return value
+
+
+def _enable_foreign_keys(connection: Any, _record: Any) -> None:
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def make_engine(database_url: str) -> AsyncEngine:
-    """Return the engine of the app. It connects only when a session needs it."""
-    return create_async_engine(database_url, pool_pre_ping=True)
+    """Return the engine of the app. It connects only when a session needs it.
+
+    The URL selects the database: Postgres (`postgresql+asyncpg://`), or
+    SQLite (`sqlite+aiosqlite://`) for local runs. SQLite checks the
+    foreign keys only when each connection turns the check on.
+    """
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    if engine.dialect.name == "sqlite":
+        event.listen(engine.sync_engine, "connect", _enable_foreign_keys)
+    return engine
 
 
 def make_sessions(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

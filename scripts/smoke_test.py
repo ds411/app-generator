@@ -8,6 +8,12 @@ and starts the app: the Next.js app and the FastAPI app with Postgres
 - Next.js and React: open one page for each entity that has a page.
 - FastAPI: call the health check, and the list endpoint of each entity.
 
+With `--local`, the script runs the Next.js app or the FastAPI app on the
+machine, without Docker and without a Postgres server: the Next.js app
+with PGlite (`pnpm start`), and the FastAPI app with SQLite (`uv run
+fastapi run`). The app must be installed, and the Next.js app must be
+built (`pnpm build`). Then the script does the same checks.
+
 With `--ui`, the script also runs the Playwright UI tests in `ui-tests/`
 on a front-end app, while the app runs: each page in the light and the
 dark mode, and the design tokens. The screenshots go to
@@ -23,8 +29,9 @@ Without a binding, the script tests all three apps. To test an app that
 a check script generated and built, give its folder and its image:
 
     uv run scripts/smoke_test.py nextjs --app <folder> --image <tag> [--ui]
+    uv run scripts/smoke_test.py nextjs --app <folder> --local
 
-The script needs Docker. It uses the ports 3000 (Next.js), 8000
+The script needs Docker, except with `--local`. It uses the ports 3000 (Next.js), 8000
 (FastAPI), and 8080 (React) of the host, one app at a time.
 
 Environment variables:
@@ -41,6 +48,7 @@ import argparse
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -170,6 +178,43 @@ def started(binding: str, app: Path, image: str, temp: Path) -> Generator[None]:
         subprocess.run(stop, cwd=app, check=False, stdout=subprocess.DEVNULL)
 
 
+@contextmanager
+def started_local(binding: str, app: Path, temp: Path) -> Generator[None]:
+    """Start the app on the machine with its local database, and stop it at the end."""
+    env = {**os.environ, "PORT": str(PORTS[binding])}
+    if binding == "nextjs":
+        if not (app / "drizzle").is_dir():
+            log(binding, "pnpm db:generate")
+            subprocess.run(
+                ["pnpm", "--silent", "db:generate"], cwd=app, check=True, stdout=subprocess.DEVNULL
+            )
+        env |= {"DATABASE_URL": f"pglite:{temp / 'pglite'}", "DATABASE_MIGRATE": "true"}
+        command = ["pnpm", "--silent", "start"]
+    else:
+        # The generated app has its own virtual environment.
+        env.pop("VIRTUAL_ENV", None)
+        env["DATABASE_URL"] = f"sqlite+aiosqlite:///{temp / 'local.db'}"
+        log(binding, "alembic upgrade head")
+        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
+        command = ["uv", "run", "fastapi", "run", "app/main.py", "--port", env["PORT"]]
+    log(binding, f"{' '.join(command)} with {env['DATABASE_URL']}")
+    output = temp / "local.log"
+    with output.open("w") as out:
+        # A new session, so that the stop also ends the child processes of pnpm and uv.
+        process = subprocess.Popen(
+            command, cwd=app, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
+        )
+    try:
+        yield
+    except SmokeError:
+        print(output.read_text(), flush=True)
+        raise
+    finally:
+        log(binding, "stop")
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=30)
+
+
 def entity_pages(definition: AppDefinition) -> dict[str, tuple[str, str]]:
     """Return the path and the title of one page for each entity, without path parameters."""
     pages: dict[str, tuple[str, str]] = {}
@@ -280,6 +325,15 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
     subprocess.run(["pnpm", "exec", "playwright", "test"], cwd=UI_TESTS, env=env, check=True)
 
 
+def check(binding: str, definition: AppDefinition, ui: bool) -> None:
+    if binding == "fastapi":
+        check_api(binding, definition)
+    else:
+        check_front_end(binding, definition)
+        if ui:
+            check_ui(binding, definition)
+
+
 def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = False) -> None:
     definition = load_definition(DEFINITION)
     with tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp:
@@ -290,13 +344,18 @@ def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = Fal
             image = f"appgen-smoke-{binding}"
             build(binding, app, image)
         with started(binding, app, image, Path(temp)):
-            if binding == "fastapi":
-                check_api(binding, definition)
-            else:
-                check_front_end(binding, definition)
-                if ui:
-                    check_ui(binding, definition)
+            check(binding, definition, ui)
     log(binding, "passed")
+
+
+def smoke_test_local(binding: str, app: Path, ui: bool = False) -> None:
+    definition = load_definition(DEFINITION)
+    with (
+        tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp,
+        started_local(binding, app, Path(temp)),
+    ):
+        check(binding, definition, ui)
+    log(binding, "passed with the local database")
 
 
 def main() -> int:
@@ -307,6 +366,11 @@ def main() -> int:
     parser.add_argument(
         "--ui", action="store_true", help="Also run the UI tests on the front ends."
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Run the app of --app on the machine with its local database, not in Docker.",
+    )
     args = parser.parse_args()
     bindings: list[str] = args.bindings or list(BINDINGS)
     unknown = [b for b in bindings if b not in BINDINGS]
@@ -314,9 +378,14 @@ def main() -> int:
         parser.error(f"unknown binding: {', '.join(unknown)}")
     if (args.app or args.image) and len(bindings) != 1:
         parser.error("--app and --image need one binding.")
+    if args.local and (args.app is None or args.image or bindings[0] not in SERVICES):
+        parser.error("--local needs --app, and the binding nextjs or fastapi.")
     try:
         for binding in bindings:
-            smoke_test(binding, args.app, args.image, args.ui)
+            if args.local:
+                smoke_test_local(binding, args.app, args.ui)
+            else:
+                smoke_test(binding, args.app, args.image, args.ui)
     except (SmokeError, subprocess.CalledProcessError) as error:
         print(f"smoke-test: failed: {error}", file=sys.stderr)
         return 1

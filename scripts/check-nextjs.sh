@@ -2,7 +2,8 @@
 # Generate the project tracker with the Next.js binding, and check the
 # output: install, lint, type check, build, Docker image, traces, and
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
-# app, request it, and run the Playwright tests in ui-tests/).
+# app, request it, and run the Playwright tests in ui-tests/). Last, the
+# smoke test runs the built app with PGlite (--local), without Docker.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -61,5 +62,8 @@ uv run --locked appgen check "$definition" "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-nextjs --ui
+
+step "smoke test with the local database"
+uv run --locked scripts/smoke_test.py nextjs --app "$out" --local
 
 step "passed"
