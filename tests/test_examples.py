@@ -3,11 +3,14 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-import yaml
 
 from appgen.dsl import check_file
 from appgen.dsl.model import FIELD_TYPES, OPERATION_KINDS, RELATION_KINDS
 from appgen.dsl.schema import json_schema
+from appgen.dsl.source import read_yaml
+from appgen.dsl.ui.dashboards import StatWidget
+from appgen.dsl.ui.tokens import TokenTable
+from appgen.dsl.ui.views import BoardView, DetailView, TableView
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 VALID = sorted(EXAMPLES.glob("*/app.yaml"))
@@ -64,7 +67,9 @@ def test_valid_examples_load_without_diagnostics(path: Path) -> None:
 
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.parent.name)
 def test_valid_examples_match_the_json_schema(path: Path) -> None:
-    instance = yaml.safe_load(path.read_text(encoding="utf-8"))
+    # The loader reads each mapping key as text (ADR 0003), so token
+    # names such as `600` are strings, as in the YAML editor support.
+    instance = read_yaml(path.read_text(encoding="utf-8")).data
 
     jsonschema.validate(instance, json_schema(), cls=jsonschema.Draft202012Validator)
 
@@ -79,6 +84,31 @@ def test_project_tracker_has_the_planned_content() -> None:
         assert {"create", "read", "update", "delete", "list"} <= kinds, entity
     assert any(op.kind == "custom" for op in definition.operations.values())
     assert definition.entities["Task"].relations["project"].target == "Project"
+
+
+def test_project_tracker_has_the_planned_ui() -> None:
+    definition, _ = check_file(EXAMPLES / "project-tracker" / "app.yaml")
+
+    assert definition is not None
+    ui = definition.ui
+    assert ui is not None
+    tokens = TokenTable.build(ui.tokens)
+    assert tokens.resolve("color.primary", "light") != tokens.resolve("color.primary", "dark")
+    shell = ui.layouts["app_shell"]
+    assert shell.sidebar is not None
+    assert shell.topbar is not None
+    assert shell.topbar.breadcrumbs
+    assert any(isinstance(w, StatWidget) for w in ui.dashboards["overview"].widgets.values())
+    projects = ui.views["project_table"]
+    assert isinstance(projects, TableView)
+    assert projects.filters
+    board = ui.views["task_board"]
+    assert isinstance(board, BoardView)
+    assert board.group_by == "status"
+    task = ui.views["task_detail"]
+    assert isinstance(task, DetailView)
+    assert task.tabs
+    assert any(form.mode == "dialog" for form in ui.forms.values())
 
 
 def test_edge_cases_use_each_field_type_relation_kind_and_operation_kind() -> None:

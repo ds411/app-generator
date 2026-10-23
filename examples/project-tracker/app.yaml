@@ -1,7 +1,8 @@
 # yaml-language-server: $schema=../../schema/app.schema.json
 #
 # A project tracker: projects, their tasks, and the people who work on
-# them. This is the main example of appgen. M2 adds its UI.
+# them. This is the main example of appgen. The ui section describes the
+# screens: design tokens, the app shell, views, forms, and a dashboard.
 version: 0
 
 app:
@@ -143,9 +144,778 @@ operations:
   delete_comment: { kind: delete, entity: Comment }
 
 pages:
-  dashboard: { path: /, title: Dashboard }
-  projects: { path: /projects, title: Projects, entity: Project }
-  project_detail: { path: "/projects/{id}", title: Project, entity: Project }
-  task_board: { path: /tasks, title: Tasks, entity: Task }
-  task_detail: { path: "/tasks/{id}", title: Task, entity: Task }
-  people: { path: /people, title: People, entity: Person }
+  dashboard:
+    path: /
+    title: Dashboard
+    content: { dashboard: overview }
+  projects:
+    path: /projects
+    title: Projects
+    entity: Project
+    content: { view: project_table }
+  project_detail:
+    path: "/projects/{id}"
+    title: Project
+    entity: Project
+    content: { view: project_detail }
+    actions:
+      new_task: { kind: form, form: new_task, label: New task, icon: plus }
+  task_board:
+    path: /tasks
+    title: Tasks
+    entity: Task
+    content: { view: task_board }
+  task_detail:
+    path: "/tasks/{id}"
+    title: Task
+    entity: Task
+    content: { view: task_detail }
+    actions:
+      delete:
+        kind: operation
+        operation: delete_task
+        label: Delete
+        icon: trash-2
+        variant: destructive
+        confirm: { title: "Delete the task?", message: This also deletes its comments., confirm_label: Delete }
+        on_success: { toast: The task is deleted., navigate: task_board }
+  people:
+    path: /people
+    title: People
+    entity: Person
+    content: { view: person_cards }
+
+ui:
+  theme:
+    default_mode: system
+    mode_toggle: true
+
+  # Design tokens (ADR 0003). Base tokens hold the palette and the scales.
+  # Semantic tokens refer to them, with a value for each color mode. The
+  # semantic color names are the names of the shadcn/ui theme variables.
+  tokens:
+    color:
+      $description: The palette and the semantic colors of the theme.
+      white: { $value: "#ffffff" }
+      black: { $value: "#000000" }
+      slate:
+        50: { $value: "oklch(0.984 0.003 247.858)" }
+        100: { $value: "oklch(0.968 0.007 247.896)" }
+        200: { $value: "oklch(0.929 0.013 255.508)" }
+        300: { $value: "oklch(0.869 0.022 252.894)" }
+        400: { $value: "oklch(0.704 0.04 256.788)" }
+        500: { $value: "oklch(0.554 0.046 257.417)" }
+        600: { $value: "oklch(0.446 0.043 257.281)" }
+        700: { $value: "oklch(0.372 0.044 257.287)" }
+        800: { $value: "oklch(0.279 0.041 260.031)" }
+        900: { $value: "oklch(0.208 0.042 265.755)" }
+        950: { $value: "oklch(0.129 0.042 264.695)" }
+      indigo:
+        400: { $value: "oklch(0.673 0.182 276.935)" }
+        500: { $value: "oklch(0.585 0.233 277.117)" }
+        600: { $value: "oklch(0.511 0.262 276.966)" }
+      sky:
+        500: { $value: "oklch(0.685 0.169 237.323)" }
+      emerald:
+        500: { $value: "oklch(0.696 0.17 162.48)" }
+        600: { $value: "oklch(0.596 0.145 163.225)" }
+      amber:
+        500: { $value: "oklch(0.769 0.188 70.08)" }
+      orange:
+        500: { $value: "oklch(0.705 0.213 47.604)" }
+      red:
+        500: { $value: "oklch(0.637 0.237 25.331)" }
+        600: { $value: "oklch(0.577 0.245 27.325)" }
+      violet:
+        500: { $value: "oklch(0.606 0.25 292.717)" }
+
+      background:
+        $value: "{color.white}"
+        $modes: { dark: "{color.slate.950}" }
+      foreground:
+        $value: "{color.slate.950}"
+        $modes: { dark: "{color.slate.50}" }
+      card:
+        $value: "{color.white}"
+        $modes: { dark: "{color.slate.900}" }
+      card_foreground:
+        $value: "{color.slate.950}"
+        $modes: { dark: "{color.slate.50}" }
+      popover:
+        $value: "{color.white}"
+        $modes: { dark: "{color.slate.900}" }
+      popover_foreground:
+        $value: "{color.slate.950}"
+        $modes: { dark: "{color.slate.50}" }
+      primary:
+        $value: "{color.indigo.600}"
+        $modes: { dark: "{color.indigo.400}" }
+      primary_foreground:
+        $value: "{color.white}"
+        $modes: { dark: "{color.slate.950}" }
+      secondary:
+        $value: "{color.slate.100}"
+        $modes: { dark: "{color.slate.800}" }
+      secondary_foreground:
+        $value: "{color.slate.900}"
+        $modes: { dark: "{color.slate.50}" }
+      muted:
+        $value: "{color.slate.100}"
+        $modes: { dark: "{color.slate.800}" }
+      muted_foreground:
+        $value: "{color.slate.500}"
+        $modes: { dark: "{color.slate.400}" }
+      accent:
+        $value: "{color.slate.100}"
+        $modes: { dark: "{color.slate.800}" }
+      accent_foreground:
+        $value: "{color.slate.900}"
+        $modes: { dark: "{color.slate.50}" }
+      destructive:
+        $value: "{color.red.600}"
+        $modes: { dark: "{color.red.500}" }
+      border:
+        $value: "{color.slate.200}"
+        $modes: { dark: "{color.slate.800}" }
+      input:
+        $value: "{color.slate.200}"
+        $modes: { dark: "{color.slate.800}" }
+      ring:
+        $value: "{color.indigo.500}"
+        $modes: { dark: "{color.indigo.400}" }
+      chart_1: { $value: "{color.indigo.500}" }
+      chart_2: { $value: "{color.sky.500}" }
+      chart_3: { $value: "{color.emerald.500}" }
+      chart_4: { $value: "{color.amber.500}" }
+      chart_5: { $value: "{color.violet.500}" }
+      sidebar:
+        $value: "{color.slate.50}"
+        $modes: { dark: "{color.slate.900}" }
+      sidebar_foreground:
+        $value: "{color.slate.700}"
+        $modes: { dark: "{color.slate.200}" }
+      sidebar_primary:
+        $value: "{color.indigo.600}"
+        $modes: { dark: "{color.indigo.400}" }
+      sidebar_accent:
+        $value: "{color.slate.200}"
+        $modes: { dark: "{color.slate.800}" }
+      sidebar_border:
+        $value: "{color.slate.200}"
+        $modes: { dark: "{color.slate.800}" }
+      status:
+        $description: The colors of the status and priority badges.
+        neutral: { $value: "{color.slate.500}" }
+        info: { $value: "{color.sky.500}" }
+        progress: { $value: "{color.indigo.500}" }
+        review: { $value: "{color.violet.500}" }
+        success: { $value: "{color.emerald.600}" }
+        warning: { $value: "{color.amber.500}" }
+        alert: { $value: "{color.orange.500}" }
+        danger: { $value: "{color.red.600}" }
+
+    font_family:
+      sans: { $value: [Inter, ui-sans-serif, system-ui, sans-serif] }
+      mono: { $value: [JetBrains Mono, ui-monospace, monospace] }
+    font_size:
+      xs: { $value: 0.75rem }
+      sm: { $value: 0.875rem }
+      base: { $value: 1rem }
+      lg: { $value: 1.125rem }
+      xl: { $value: 1.25rem }
+      2xl: { $value: 1.5rem }
+      3xl: { $value: 1.875rem }
+    font_weight:
+      regular: { $value: 400 }
+      medium: { $value: 500 }
+      semibold: { $value: 600 }
+      bold: { $value: 700 }
+    line_height:
+      tight: { $value: 1.25 }
+      snug: { $value: 1.375 }
+      normal: { $value: 1.5 }
+    letter_spacing:
+      tight: { $value: -0.025em }
+      normal: { $value: 0em }
+      wide: { $value: 0.05em }
+    typography:
+      body:
+        $value:
+          font_family: "{font_family.sans}"
+          font_size: "{font_size.sm}"
+          font_weight: "{font_weight.regular}"
+          line_height: "{line_height.normal}"
+      label:
+        $value:
+          font_family: "{font_family.sans}"
+          font_size: "{font_size.xs}"
+          font_weight: "{font_weight.medium}"
+          line_height: "{line_height.normal}"
+          letter_spacing: "{letter_spacing.wide}"
+      heading:
+        $value:
+          font_family: "{font_family.sans}"
+          font_size: "{font_size.2xl}"
+          font_weight: "{font_weight.semibold}"
+          line_height: "{line_height.tight}"
+          letter_spacing: "{letter_spacing.tight}"
+      stat:
+        $value:
+          font_family: "{font_family.sans}"
+          font_size: "{font_size.3xl}"
+          font_weight: "{font_weight.bold}"
+          line_height: "{line_height.tight}"
+      code:
+        $value:
+          font_family: "{font_family.mono}"
+          font_size: "{font_size.xs}"
+          font_weight: "{font_weight.regular}"
+          line_height: "{line_height.normal}"
+    spacing:
+      0: { $value: 0 }
+      1: { $value: 0.25rem }
+      2: { $value: 0.5rem }
+      3: { $value: 0.75rem }
+      4: { $value: 1rem }
+      6: { $value: 1.5rem }
+      8: { $value: 2rem }
+      12: { $value: 3rem }
+    size:
+      sidebar: { $value: 16rem }
+      sidebar_icons: { $value: 3rem }
+      content: { $value: 80rem }
+      column_sm: { $value: 6rem }
+      column_md: { $value: 10rem }
+      column_lg: { $value: 18rem }
+    radius:
+      sm: { $value: 0.375rem }
+      md: { $value: 0.5rem }
+      lg: { $value: 0.625rem }
+      xl: { $value: 0.875rem }
+    shadow:
+      sm:
+        $value: { color: "#0000000d", offset_x: 0, offset_y: 1px, blur: 2px, spread: 0 }
+      md:
+        $value:
+          - { color: "#0000001a", offset_x: 0, offset_y: 4px, blur: 6px, spread: -1px }
+          - { color: "#0000001a", offset_x: 0, offset_y: 2px, blur: 4px, spread: -2px }
+        $modes:
+          dark: { color: "#00000066", offset_x: 0, offset_y: 4px, blur: 8px, spread: 0 }
+    breakpoint:
+      sm: { $value: 640px }
+      md: { $value: 768px }
+      lg: { $value: 1024px }
+      xl: { $value: 1280px }
+    duration:
+      fast: { $value: 150ms }
+      normal: { $value: 250ms }
+
+  badges:
+    project_status:
+      field: Project.status
+      values:
+        planned: { label: Planned, color: "{color.status.neutral}", icon: circle-dashed }
+        active: { label: Active, color: "{color.status.progress}", icon: circle-play }
+        on_hold: { label: On hold, color: "{color.status.warning}", icon: circle-pause }
+        done: { label: Done, color: "{color.status.success}", icon: circle-check }
+    task_status:
+      field: Task.status
+      values:
+        todo: { label: To do, color: "{color.status.neutral}", icon: circle }
+        in_progress: { label: In progress, color: "{color.status.progress}", icon: loader }
+        in_review: { label: In review, color: "{color.status.review}", icon: eye }
+        done: { label: Done, color: "{color.status.success}", icon: circle-check }
+    task_priority:
+      field: Task.priority
+      values:
+        low: { label: Low, color: "{color.status.neutral}", icon: arrow-down }
+        medium: { label: Medium, color: "{color.status.info}", icon: arrow-right }
+        high: { label: High, color: "{color.status.alert}", icon: arrow-up }
+        urgent: { label: Urgent, color: "{color.status.danger}", icon: siren }
+    person_role:
+      field: Person.role
+      values:
+        member: { label: Member, color: "{color.status.neutral}" }
+        lead: { label: Lead, color: "{color.status.info}", icon: star }
+        admin: { label: Admin, color: "{color.status.review}", icon: shield }
+
+  layouts:
+    app_shell:
+      sidebar:
+        navigation: main
+        title: Project Tracker
+        icon: folder-kanban
+        width: "{size.sidebar}"
+      topbar:
+        breadcrumbs: true
+        search: true
+        mode_toggle: true
+        actions:
+          new_task: { kind: form, form: new_task, label: New task, icon: plus }
+      content: { max_width: "{size.content}", padding: "{spacing.8}" }
+      footer: { text: "Project Tracker, generated by appgen." }
+      responsive:
+        lg:
+          sidebar: { mode: icons, width: "{size.sidebar_icons}" }
+          content: { padding: "{spacing.6}" }
+        md:
+          sidebar: { mode: drawer }
+          topbar: { search: false }
+          content: { padding: "{spacing.4}" }
+
+  navigation:
+    main:
+      items:
+        dashboard: { page: dashboard, label: Dashboard, icon: layout-dashboard }
+      groups:
+        work:
+          label: Work
+          items:
+            projects: { page: projects, icon: folder-kanban }
+            tasks: { page: task_board, label: Task board, icon: square-kanban }
+        team:
+          label: Team
+          collapsible: true
+          items:
+            people: { page: people, icon: users }
+
+  views:
+    project_table:
+      kind: table
+      entity: Project
+      title: Projects
+      description: All projects, with their owner, status, and dates.
+      columns:
+        key: { label: Key, width: "{size.column_sm}" }
+        name: { label: Project, link: project_detail, width: "{size.column_lg}" }
+        status: { label: Status, badge: project_status }
+        owner: { label: Owner, format: avatar }
+        start_date: { label: Start, format: date, hide_below: lg }
+        due_date: { label: Due, format: date, align: end }
+        budget: { label: Budget, format: currency, align: end, hide_below: md }
+      sort: { field: due_date, direction: asc }
+      filters:
+        search: { kind: search, label: Search projects, fields: [name, key, owner.name] }
+        status: { kind: select, label: Status, field: status, multiple: true }
+        owner: { kind: select, label: Owner, field: owner }
+        due: { kind: date_range, label: Due date, field: due_date }
+      pagination: { page_size: 20, page_sizes: [10, 20, 50] }
+      row_actions:
+        open: { kind: navigate, page: project_detail, label: Open, icon: arrow-right }
+        edit: { kind: form, form: edit_project, label: Edit, icon: pencil }
+        delete:
+          kind: operation
+          operation: delete_project
+          label: Delete
+          icon: trash-2
+          variant: destructive
+          confirm:
+            title: Delete the project?
+            message: This deletes the project and all its tasks.
+            confirm_label: Delete
+          on_success: { toast: The project is deleted. }
+      row_click: open
+      selection: true
+      bulk_actions:
+        archive: { kind: operation, operation: archive_project, label: Archive, icon: archive }
+      states:
+        empty:
+          title: No projects yet
+          text: Create a project to plan your work.
+          icon: folder-plus
+          action: new_project
+      actions:
+        new_project: { kind: form, form: new_project, label: New project, icon: plus }
+
+    task_board:
+      kind: board
+      entity: Task
+      title: Task board
+      group_by: status
+      columns:
+        todo: { label: To do, color: "{color.status.neutral}" }
+        in_progress: { label: In progress, color: "{color.status.progress}", limit: 8 }
+        in_review: { label: In review, color: "{color.status.review}", limit: 5 }
+        done: { label: Done, color: "{color.status.success}" }
+      card:
+        title: title
+        subtitle: project
+        badge: { field: priority, badge: task_priority }
+        fields: [due_date, estimate_hours]
+        footer: [assignee]
+      sort: { field: due_date }
+      move: update_task
+      row_actions:
+        open: { kind: navigate, page: task_detail, label: Open }
+        edit: { kind: form, form: edit_task, label: Edit, icon: pencil }
+      actions:
+        new_task: { kind: form, form: new_task, label: New task, icon: plus }
+      states:
+        loading: { indicator: skeleton, text: Loading the board }
+
+    task_table:
+      kind: table
+      entity: Task
+      columns:
+        title: { label: Task, link: task_detail, width: "{size.column_lg}" }
+        status: { badge: task_status }
+        priority: { badge: task_priority, hide_below: md }
+        assignee: { format: avatar }
+        due_date: { format: date, align: end }
+      sort: { field: due_date }
+      filters:
+        status: { kind: select, field: status, multiple: true }
+        assignee: { kind: select, field: assignee }
+      pagination: { page_size: 10 }
+      row_click: open
+      row_actions:
+        open: { kind: navigate, page: task_detail }
+        complete:
+          kind: operation
+          operation: complete_task
+          label: Complete
+          icon: circle-check
+          on_success: { toast: The task is done. }
+
+    task_detail:
+      kind: detail
+      entity: Task
+      header: { title: title, subtitle: project, badges: [status, priority] }
+      sections:
+        summary:
+          title: Summary
+          fields: [assignee, due_date, estimate_hours, completed_at]
+          columns: 4
+      tabs:
+        details:
+          label: Details
+          icon: file-text
+          sections:
+            description: { title: Description, fields: [description] }
+            project: { title: Project, fields: [project, project.owner, project.due_date], columns: 3 }
+        comments: { label: Comments, icon: message-square, relation: comments, view: comment_table }
+        activity: { label: Activity, icon: history, custom: true }
+      actions:
+        edit: { kind: form, form: edit_task, label: Edit, icon: pencil }
+        assign: { kind: form, form: assign_task, label: Assign, icon: user-plus, variant: outline }
+        complete:
+          kind: operation
+          operation: complete_task
+          label: Complete
+          icon: circle-check
+          variant: secondary
+          on_success: { toast: The task is done. }
+
+    project_detail:
+      kind: detail
+      entity: Project
+      header: { title: name, subtitle: key, badges: [status] }
+      sections:
+        overview:
+          title: Overview
+          fields: [owner, start_date, due_date, budget]
+          columns: 4
+      tabs:
+        about:
+          label: About
+          icon: info
+          sections:
+            description: { title: Description, fields: [description] }
+        tasks: { label: Tasks, icon: list-checks, relation: tasks, view: task_table }
+        members: { label: Members, icon: users, relation: members, view: person_cards }
+        timeline: { label: Timeline, icon: chart-gantt, custom: true }
+      actions:
+        edit: { kind: form, form: edit_project, label: Edit, icon: pencil }
+        archive:
+          kind: operation
+          operation: archive_project
+          label: Archive
+          icon: archive
+          variant: outline
+          confirm: { title: "Archive the project?", message: All open tasks close., confirm_label: Archive }
+
+    person_cards:
+      kind: cards
+      entity: Person
+      card:
+        title: name
+        subtitle: email
+        badge: { field: role, badge: person_role }
+        fields: [active]
+      grid:
+        columns: 4
+        gap: "{spacing.4}"
+        responsive:
+          xl: { columns: 3 }
+          lg: { columns: 2 }
+          sm: { columns: 1 }
+      sort: { field: name }
+      filters:
+        search: { kind: search, label: Search people, fields: [name, email] }
+        role: { kind: select, field: role }
+        active: { kind: boolean, field: active, label: Active only, default: true }
+      row_actions:
+        edit: { kind: form, form: edit_person, label: Edit, icon: pencil }
+      actions:
+        new_person: { kind: form, form: new_person, label: Add person, icon: user-plus }
+
+    comment_table:
+      kind: table
+      entity: Comment
+      columns:
+        author: { format: avatar, width: "{size.column_md}" }
+        body: { label: Comment }
+        posted_at: { label: Posted, format: relative_time, align: end }
+      sort: { field: posted_at, direction: desc }
+      pagination: { page_size: 10 }
+      actions:
+        new_comment: { kind: form, form: new_comment, label: Add comment, icon: message-square-plus }
+      row_actions:
+        delete:
+          kind: operation
+          operation: delete_comment
+          label: Delete
+          variant: destructive
+          confirm: { title: "Delete the comment?" }
+      states:
+        empty: { title: No comments yet, icon: message-square, action: new_comment }
+
+  forms:
+    new_project:
+      entity: Project
+      operation: create_project
+      title: New project
+      description: Plan a new body of work.
+      submit_label: Create project
+      grid:
+        columns: 2
+        gap: "{spacing.4}"
+        responsive:
+          sm: { columns: 1 }
+      sections:
+        basics: { title: Basics, fields: [name, key, owner, status] }
+        planning: { title: Planning, fields: [start_date, due_date, budget, description] }
+      fields:
+        name:
+          placeholder: Website relaunch
+          rules:
+            required: { message: Enter a name. }
+            min_length: { value: 3, message: Use 3 or more characters. }
+        key:
+          help: 2 to 6 capital letters. Task numbers start with it.
+          placeholder: WEB
+          rules:
+            pattern: { value: "^[A-Z]{2,6}$", message: Use 2 to 6 capital letters. }
+        owner: { widget: relation, label: Owner }
+        status: { widget: select }
+        start_date: {}
+        due_date: {}
+        budget: { step: 100, rules: { min: { value: 0, message: The budget cannot be negative. } } }
+        description: { widget: textarea, rows: 4, span: 2 }
+      rules:
+        due_after_start:
+          kind: compare
+          field: due_date
+          op: gte
+          other: start_date
+          message: The due date must be on or after the start date.
+      on_success: { toast: The project is created., navigate: project_detail }
+
+    edit_project:
+      entity: Project
+      operation: update_project
+      mode: sheet
+      title: Edit project
+      submit_label: Save
+      fields:
+        name: {}
+        status: { widget: radio }
+        owner: { widget: relation }
+        members: { widget: relation, help: The people who work on the project. }
+        start_date: {}
+        due_date: {}
+        budget: {}
+        description: { widget: textarea, rows: 6 }
+      rules:
+        due_after_start:
+          kind: compare
+          field: due_date
+          op: gte
+          other: start_date
+          message: The due date must be on or after the start date.
+      on_success: { toast: The project is saved. }
+
+    new_task:
+      entity: Task
+      operation: create_task
+      title: New task
+      submit_label: Create task
+      grid: { columns: 2, gap: "{spacing.4}", responsive: { sm: { columns: 1 } } }
+      sections:
+        task: { fields: [title, description] }
+        planning: { title: Planning, fields: [project, assignee, status, priority, due_date, estimate_hours] }
+      fields:
+        title:
+          span: 2
+          placeholder: What needs to be done?
+          rules: { required: { message: Enter a title. } }
+        description: { widget: textarea, rows: 3, span: 2 }
+        project: { widget: relation }
+        assignee: { widget: relation, placeholder: Nobody }
+        status: {}
+        priority: { widget: radio }
+        due_date: {}
+        estimate_hours: { label: Estimate (hours), step: 0.5 }
+      defaults: { project: $route.id, status: todo, priority: medium }
+      on_success: { toast: The task is created. }
+
+    edit_task:
+      entity: Task
+      operation: update_task
+      mode: sheet
+      title: Edit task
+      submit_label: Save
+      fields:
+        title: {}
+        description: { widget: textarea, rows: 6 }
+        status: {}
+        priority: { widget: radio }
+        assignee: { widget: relation }
+        due_date: {}
+        estimate_hours: { step: 0.5 }
+      on_success: { toast: The task is saved. }
+
+    assign_task:
+      entity: Task
+      operation: assign_task
+      title: Assign the task
+      submit_label: Assign
+      fields:
+        assignee_id:
+          widget: custom
+          label: Person
+          help: A person picker. The widget is a generation gap.
+        note: { widget: textarea, rows: 3, placeholder: A note for the person }
+      rules:
+        active_person:
+          kind: custom
+          fields: [assignee_id]
+          message: The person must be active.
+      on_success: { toast: The task is assigned. }
+
+    new_person:
+      entity: Person
+      operation: create_person
+      title: Add a person
+      grid: { columns: 2, gap: "{spacing.4}" }
+      fields:
+        name: { span: 2 }
+        email: { placeholder: name@example.com }
+        role: { widget: select }
+        active: { widget: switch }
+      on_success: { toast: The person is added. }
+
+    edit_person:
+      entity: Person
+      operation: update_person
+      mode: sheet
+      fields:
+        name: {}
+        email: {}
+        role: { widget: radio }
+        active: { widget: switch }
+
+    new_comment:
+      entity: Comment
+      operation: create_comment
+      title: Add a comment
+      fields:
+        body: { widget: textarea, rows: 4, label: Comment, rules: { required: { message: Write a comment. } } }
+        task: { widget: relation }
+        author: { widget: relation }
+      defaults: { task: $route.id }
+
+  dashboards:
+    overview:
+      title: Overview
+      description: The state of the projects and the tasks.
+      grid:
+        columns: 4
+        gap: "{spacing.6}"
+        responsive:
+          lg: { columns: 2 }
+          sm: { columns: 1, gap: "{spacing.4}" }
+      widgets:
+        active_projects:
+          kind: stat
+          label: Active projects
+          entity: Project
+          filter: { status: active }
+          icon: folder-kanban
+          color: "{color.status.progress}"
+          link: projects
+        open_tasks:
+          kind: stat
+          label: Open tasks
+          entity: Task
+          filter: { status: { ne: done } }
+          icon: list-todo
+          color: "{color.status.info}"
+          link: task_board
+        overdue_tasks:
+          kind: stat
+          label: Overdue tasks
+          entity: Task
+          filter: { due_date: { lt: $today }, status: { ne: done } }
+          icon: alarm-clock
+          color: "{color.destructive}"
+          link: task_board
+        total_budget:
+          kind: stat
+          label: Budget of active projects
+          entity: Project
+          aggregate: sum
+          field: budget
+          format: currency
+          filter: { status: { in: [planned, active] } }
+          icon: wallet
+          color: "{color.status.success}"
+        tasks_by_status:
+          kind: chart
+          label: Tasks by status
+          chart: donut
+          entity: Task
+          group_by: status
+          badge: task_status
+          span: 2
+        hours_by_person:
+          kind: chart
+          label: Open hours by person
+          chart: bar
+          entity: Task
+          group_by: assignee
+          aggregate: sum
+          field: estimate_hours
+          filter: { status: { not_in: [done] } }
+          span: 2
+        due_soon:
+          kind: list
+          label: Due soon
+          view: task_table
+          filter: { status: { ne: done }, due_date: { gte: $today } }
+          sort: { field: due_date }
+          limit: 6
+          link: task_board
+          span: 3
+        workload:
+          kind: custom
+          label: Team workload
+          span: 1
+
+  defaults:
+    layout: app_shell
+    page_size: 20
+    states:
+      loading: { indicator: skeleton }
+      empty: { title: Nothing here yet, icon: inbox }
+      error: { title: Something went wrong, text: Try again in a moment., icon: triangle-alert, action: retry }
