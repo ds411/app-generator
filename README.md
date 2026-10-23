@@ -184,7 +184,12 @@ slice (`server.ts`, only on the server). A server action returns its
 errors as data, and `<entity>Api` throws them again as `NotFoundError`
 or `ValidationError`. Each custom operation is a features slice with a
 server action (`.gen.ts`) that calls the extension file (`.ext.ts`),
-where the developer writes the logic. The exact package versions are in
+where the developer writes the logic. Custom UI parts (page content,
+detail tabs and sections, dashboard widgets, form widgets, form rules,
+and actions) get the same generated and extension files as in the React
+app, from the shared templates in `gap/` and `appgen.bindings.shared.gaps`.
+appgen writes an extension file only once, so a later run keeps its
+code. The exact package versions are in
 `src/appgen/bindings/nextjs/versions.py`. To try the output:
 
 ```sh
@@ -221,7 +226,9 @@ The entity templates are shared too: `src/shared/api/types.ts.j2` (the
 `EntityApi` interface and `NotFoundError`), and `model/types.ts.j2`,
 `model/meta.ts.j2`, and `model/schema.ts.j2` in `src/entities/entity/`.
 They use the template globals of `appgen.bindings.shared.typescript`
-(`HELPERS`), which both bindings add. A binding template with the same
+(`HELPERS`), which both bindings add. The gap templates in `gap/` and
+`appgen.bindings.shared.gaps` (`gap_spec`, `gap_rules()`) give the
+generated and the extension files of the custom elements. A binding template with the same
 path wins over a shared template.
 
 `ui/` holds the shared UI code: the app shell (layouts, menus,

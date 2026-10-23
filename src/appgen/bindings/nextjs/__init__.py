@@ -13,6 +13,7 @@ from pathlib import Path
 from appgen.bindings import shared
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
 from appgen.bindings.shared import shadcn, typescript
+from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
@@ -137,15 +138,17 @@ BINDING = Binding(
                 ("api/operation.ext.ts", "api/{{ name | kebab }}.ext.ts"),
             )
         ),
+        *gap_rules(),
         *_SHADCN,
         *_HOOKS,
     ),
     covers=frozenset(
         {"app", "page", "entity", "field", "relation", "operation", "param"}
         | {"theme", "tokens", "token_group", "token"}
+        | {"custom_widget", "custom_rule", "custom_action"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": typescript.to_json},
-    helpers=typescript.HELPERS,
+    helpers=typescript.HELPERS | {"gap_spec": gap_spec},
 )

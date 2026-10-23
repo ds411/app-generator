@@ -339,3 +339,36 @@ def test_the_edge_cases_cover_all_elements_with_data(tmp_path: Path, nextjs: Bin
         e for e in report.coverage.elements if e.element_id.startswith(("entities.", "operations."))
     ]
     assert {e.status for e in data} == {"covered"}
+
+
+def test_custom_ui_elements_get_the_shared_gap_files(result: GenerationResult) -> None:
+    files = _files(result)
+    kinds = {f.path: f.kind for f in result.files}
+    for base in (
+        "src/widgets/task-detail/ui/activity-tab",
+        "src/widgets/overview/ui/workload-widget",
+        "src/features/assign-task-form/ui/assignee-id-widget",
+    ):
+        assert kinds[base + ".gen.tsx"] == "generated"
+        assert kinds[base + ".ext.tsx"] == "extension"
+        name = base.rsplit("/", 1)[1]
+        assert f'from "./{name}.ext";' in files[base + ".gen.tsx"]
+        assert "TODO(appgen)" in files[base + ".ext.tsx"]
+    rule = "src/features/assign-task-form/model/active-person-rule"
+    assert kinds[rule + ".ext.ts"] == "extension"
+    assert "return true;" in files[rule + ".ext.ts"]
+
+
+def test_regeneration_keeps_the_extension_files(
+    tmp_path: Path, definition: AppDefinition, result: GenerationResult
+) -> None:
+    write_result(result, tmp_path, "nextjs")
+    paths = [
+        tmp_path / "src/features/assign-task/api/assign-task.ext.ts",
+        tmp_path / "src/widgets/task-detail/ui/activity-tab.ext.tsx",
+    ]
+    for path in paths:
+        path.write_text(path.read_text().replace("TODO(appgen)", "Done by hand"))
+    write_result(generate(definition, find_binding("nextjs")), tmp_path, "nextjs")
+    for path in paths:
+        assert "Done by hand" in path.read_text()
