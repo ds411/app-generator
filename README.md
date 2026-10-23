@@ -50,6 +50,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
 | `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core.    |
+| `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
 | `docs/adr/`            | The architecture decision records.                          |
@@ -98,3 +99,12 @@ A binding registers itself with an entry point in the group
 [project.entry-points."appgen.bindings"]
 minimal = "appgen.bindings.minimal:BINDING"
 ```
+
+## Traces
+
+[ADR 0004](docs/adr/0004-trace-format.md) defines the trace format. The
+scanner (`appgen.trace.scan_folder`) finds the traces in a code folder
+with a text scan. It skips the paths in `.gitignore` files and in an
+ignore list (by default `node_modules/`, `.venv/`, `.git/`, and other
+tool folders). It reports each malformed trace with its file, line, and
+column.
