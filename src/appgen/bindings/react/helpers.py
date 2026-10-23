@@ -11,7 +11,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from appgen.bindings.react import versions
 from appgen.bindings.react.mock_data import mock_data
+from appgen.bindings.shared import shadcn
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.gen.naming import camel, pascal, words
 
@@ -46,6 +48,11 @@ def label(name: str) -> str:
     """Return a display label for a name: `due_date` gives `Due date`."""
     text = " ".join(words(name))
     return text[:1].upper() + text[1:]
+
+
+def to_json(value: Any) -> str:
+    """Return a value as JSON with an indent of two spaces, as the Node.js tools write it."""
+    return json.dumps(value, indent=2, ensure_ascii=False)
 
 
 def ts_value(value: Any, indent: int | None = None) -> str:
@@ -172,9 +179,47 @@ def mock_records(definition: AppDefinition) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
+def package_json(definition: AppDefinition) -> dict[str, Any]:
+    """Return the content of `package.json`, with the packages sorted by name.
+
+    The app gets the npm packages of the shadcn/ui components that it uses.
+    """
+    components = shadcn.used_components(definition)
+    dependencies = {
+        **versions.DEPENDENCIES,
+        **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
+    }
+    return {
+        "name": definition.app.name,
+        "private": True,
+        "version": "0.1.0",
+        "type": "module",
+        "packageManager": f"pnpm@{versions.PNPM_VERSION}",
+        "engines": {"node": ">=22.22.0"},
+        "scripts": {
+            "dev": "vite",
+            "build": "vite build",
+            "preview": "vite preview",
+            "lint": "eslint --max-warnings 0 .",
+            "typecheck": "tsc --noEmit",
+        },
+        "dependencies": dict(sorted(dependencies.items())),
+        "devDependencies": dict(sorted(versions.DEV_DEPENDENCIES.items())),
+    }
+
+
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
-    return {"mock": mock_records(definition)}
+    components = shadcn.used_components(definition)
+    return {
+        "mock": mock_records(definition),
+        "react": {
+            "shadcn": [component.name for component in components],
+            "hooks": shadcn.hooks(components),
+            "package_json": package_json(definition),
+            "node_version": versions.NODE_VERSION,
+        },
+    }
 
 
 HELPERS: dict[str, Callable[..., Any]] = {

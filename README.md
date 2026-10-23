@@ -191,7 +191,13 @@ Router, and pnpm, with the code in the layers of Feature-Sliced Design
 (`src/app`, `src/pages`, `src/widgets`, `src/features`,
 `src/entities`, and `src/shared`). Each page of the definition gets a
 route and a slice in `src/pages`. The binding is in
-`src/appgen/bindings/react/`.
+`src/appgen/bindings/react/`, and `versions.py` there pins the version
+of each package.
+
+The UI uses Tailwind CSS and shadcn/ui. The binding takes the shadcn/ui
+components from the shared templates (`src/appgen/bindings/shared/`),
+and writes into `src/shared/ui` only the components that the UI of the
+definition uses, with their npm packages.
 
 The app has no back end. Each entity gets a slice in `src/entities`
 with its TypeScript type, the labels and rules of its fields, mock
