@@ -1,0 +1,10 @@
+# expect: missing-inverse
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Project:
+    fields: { name: { type: string } }
+    relations:
+      tasks: { kind: one_to_many, target: Task }
+  Task:
+    fields: { title: { type: string } }

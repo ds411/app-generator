@@ -1,0 +1,9 @@
+# expect: duplicate-path
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }
+pages:
+  tasks: { path: /tasks, title: Tasks }
+  all_tasks: { path: /tasks, title: All tasks }

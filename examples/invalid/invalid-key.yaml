@@ -1,0 +1,6 @@
+# expect: invalid-key
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  ? [Task, Project]
+  : fields: { title: { type: string } }

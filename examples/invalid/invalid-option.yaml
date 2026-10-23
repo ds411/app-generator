@@ -1,0 +1,6 @@
+# expect: invalid-option
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { done: { type: boolean, max_length: 5 } }

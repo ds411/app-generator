@@ -1,0 +1,5 @@
+# expect: missing-version
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }

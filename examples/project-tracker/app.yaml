@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+#
+# A project tracker: projects, their tasks, and the people who work on
+# them. This is the main example of appgen. M2 adds its UI.
+version: 0
+
+app:
+  name: project-tracker
+  title: Project Tracker
+  description: Plan projects, split them into tasks, and assign the tasks to people.
+
+entities:
+  Person:
+    description: A member of the team.
+    label: Person
+    plural_label: People
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true, max_length: 254 }
+      role:
+        type: enum
+        values: [member, lead, admin]
+        default: member
+      active: { type: boolean, required: true, default: true }
+    relations:
+      owned_projects: { kind: one_to_many, target: Project, inverse: owner }
+      assigned_tasks: { kind: one_to_many, target: Task, inverse: assignee }
+
+  Project:
+    description: A body of work with a goal and a due date.
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      key:
+        type: string
+        description: A short code for the project. Task numbers start with it.
+        required: true
+        unique: true
+        pattern: "^[A-Z]{2,6}$"
+      description: { type: text, max_length: 5000 }
+      status:
+        type: enum
+        values: [planned, active, on_hold, done]
+        default: planned
+      start_date: { type: date }
+      due_date: { type: date }
+      budget: { type: decimal, min: 0, precision: 12, scale: 2 }
+    relations:
+      owner:
+        kind: many_to_one
+        target: Person
+        required: true
+        on_delete: restrict
+        inverse: owned_projects
+      tasks: { kind: one_to_many, target: Task, inverse: project }
+      members: { kind: many_to_many, target: Person }
+
+  Task:
+    description: A piece of work in a project.
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 200 }
+      description: { type: text }
+      status:
+        type: enum
+        values: [todo, in_progress, in_review, done]
+        default: todo
+      priority:
+        type: enum
+        values: [low, medium, high, urgent]
+        default: medium
+      estimate_hours: { type: decimal, min: 0, max: 1000, precision: 6, scale: 1 }
+      due_date: { type: date }
+      completed_at: { type: datetime }
+    relations:
+      project:
+        kind: many_to_one
+        target: Project
+        required: true
+        on_delete: cascade
+        inverse: tasks
+      assignee:
+        kind: many_to_one
+        target: Person
+        on_delete: set_null
+        inverse: assigned_tasks
+      comments: { kind: one_to_many, target: Comment, inverse: task }
+
+  Comment:
+    description: A note on a task.
+    fields:
+      body: { type: text, required: true, max_length: 10000 }
+      posted_at: { type: datetime, required: true }
+    relations:
+      task:
+        kind: many_to_one
+        target: Task
+        required: true
+        on_delete: cascade
+        inverse: comments
+      author: { kind: many_to_one, target: Person, required: true, on_delete: restrict }
+
+operations:
+  create_person: { kind: create, entity: Person }
+  read_person: { kind: read, entity: Person }
+  update_person: { kind: update, entity: Person }
+  delete_person: { kind: delete, entity: Person }
+  list_people: { kind: list, entity: Person }
+
+  create_project: { kind: create, entity: Project }
+  read_project: { kind: read, entity: Project }
+  update_project: { kind: update, entity: Project }
+  delete_project: { kind: delete, entity: Project }
+  list_projects: { kind: list, entity: Project }
+  archive_project:
+    kind: custom
+    entity: Project
+    description: Set the project to done and close all its open tasks.
+    returns: Project
+
+  create_task: { kind: create, entity: Task }
+  read_task: { kind: read, entity: Task }
+  update_task: { kind: update, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+  list_tasks: { kind: list, entity: Task }
+  assign_task:
+    kind: custom
+    entity: Task
+    description: Assign a task to a person, and tell the person.
+    params:
+      assignee_id: { type: uuid, required: true }
+      note: { type: text, max_length: 500 }
+    returns: Task
+  complete_task:
+    kind: custom
+    entity: Task
+    description: Set the task to done and record the time.
+    returns: Task
+
+  create_comment: { kind: create, entity: Comment }
+  list_comments: { kind: list, entity: Comment }
+  delete_comment: { kind: delete, entity: Comment }
+
+pages:
+  dashboard: { path: /, title: Dashboard }
+  projects: { path: /projects, title: Projects, entity: Project }
+  project_detail: { path: "/projects/{id}", title: Project, entity: Project }
+  task_board: { path: /tasks, title: Tasks, entity: Task }
+  task_detail: { path: "/tasks/{id}", title: Task, entity: Task }
+  people: { path: /people, title: People, entity: Person }

@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+#
+# An edge-case definition. It uses each field type, each field option,
+# each relation kind, each operation kind, and extension keys. Tests and
+# bindings use it to check the cases that the project tracker does not
+# have.
+version: 0
+x-purpose: edge cases
+
+app:
+  name: edge-cases
+  title: Edge Cases
+  x-icon: flask
+
+entities:
+  Sample:
+    description: One field of each type.
+    label: Sample
+    plural_label: Samples
+    display_field: code
+    x-table: samples
+    fields:
+      code: { type: string, required: true, unique: true, min_length: 3, max_length: 12, pattern: "^[A-Z0-9-]+$", label: Code }
+      notes: { type: text, min_length: 0, max_length: 20000, description: Long text with line breaks. }
+      count: { type: integer, min: -10, max: 10, default: 0 }
+      ratio: { type: decimal, min: 0, max: 1, precision: 5, scale: 4, default: 0.5 }
+      enabled: { type: boolean, default: false }
+      day: { type: date, default: "2026-01-31" }
+      moment: { type: datetime, default: "2026-01-31T12:00:00+00:00" }
+      token: { type: uuid, default: 00000000-0000-0000-0000-000000000000 }
+      contact: { type: email, max_length: 254 }
+      homepage: { type: url, max_length: 2048 }
+      level:
+        type: enum
+        # "on" and "off" are names here, not booleans.
+        values: ["on", "off", standby]
+        default: standby
+      payload: { type: json, default: { tags: [a, b], nested: { ok: true } }, x-widget: code }
+
+  # Each relation kind, with and without an inverse.
+  Owner:
+    fields:
+      name: { type: string, required: true }
+    relations:
+      profile: { kind: one_to_one, target: Profile, required: true, on_delete: cascade, inverse: owner }
+      items: { kind: one_to_many, target: Item, inverse: owner }
+      tags: { kind: many_to_many, target: Tag, inverse: owners }
+  Profile:
+    fields:
+      bio: { type: text }
+    relations:
+      owner: { kind: one_to_one, target: Owner, inverse: profile }
+  Item:
+    fields:
+      label: { type: string }
+    relations:
+      owner: { kind: many_to_one, target: Owner, on_delete: set_null, inverse: items }
+      parent: { kind: many_to_one, target: Item, on_delete: restrict }
+  Tag:
+    fields:
+      name: { type: string, required: true, unique: true }
+    relations:
+      owners: { kind: many_to_many, target: Owner, inverse: tags }
+
+operations:
+  create_sample: { kind: create, entity: Sample, description: Make a sample. }
+  read_sample: { kind: read, entity: Sample }
+  update_sample: { kind: update, entity: Sample }
+  delete_sample: { kind: delete, entity: Sample }
+  list_samples: { kind: list, entity: Sample }
+  reset_sample:
+    kind: custom
+    entity: Sample
+    params:
+      keep_code: { type: boolean, default: true }
+      reason: { type: enum, values: [error, test] }
+    returns: Sample
+  purge_items:
+    kind: custom
+    entity: Item
+    returns: none
+
+pages:
+  home: { path: /, title: Home }
+  samples: { path: /samples, title: Samples, entity: Sample, description: All samples. }
