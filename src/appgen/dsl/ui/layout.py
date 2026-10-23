@@ -5,7 +5,7 @@ from typing import Literal
 import pydantic
 
 from appgen.dsl.element import Element, MemberName, Text
-from appgen.dsl.ui.common import Action, IconName, TokenRef
+from appgen.dsl.ui.common import Action, BreakpointName, IconName, TokenRef
 
 type ColorMode = Literal["light", "dark", "system"]
 type SidebarMode = Literal["expanded", "icons", "drawer", "hidden"]
@@ -57,6 +57,36 @@ class Footer(Element):
     text: Text
 
 
+class SidebarOverride(Element):
+    """Sidebar keys that change on narrow screens."""
+
+    mode: SidebarMode | None = None
+    width: TokenRef | None = None
+
+
+class TopbarOverride(Element):
+    """Top bar keys that change on narrow screens."""
+
+    breadcrumbs: bool | None = None
+    mode_toggle: bool | None = None
+    search: bool | None = None
+
+
+class ContentOverride(Element):
+    """Content keys that change on narrow screens."""
+
+    max_width: TokenRef | None = None
+    padding: TokenRef | None = None
+
+
+class LayoutOverride(Element):
+    """The region keys of a layout on screens narrower than a breakpoint."""
+
+    sidebar: SidebarOverride | None = None
+    topbar: TopbarOverride | None = None
+    content: ContentOverride | None = None
+
+
 class Layout(Element):
     """An app shell: a sidebar, a top bar, the content, and an optional footer."""
 
@@ -64,6 +94,10 @@ class Layout(Element):
     topbar: Topbar | None = None
     content: Content | None = None
     footer: Footer | None = None
+    responsive: dict[BreakpointName, LayoutOverride] = pydantic.Field(
+        default_factory=dict[str, LayoutOverride]
+    )
+    """Overrides for screens narrower than a breakpoint. The smallest breakpoint wins."""
 
 
 class MenuSubItem(Element):

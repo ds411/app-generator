@@ -19,6 +19,7 @@ from appgen.dsl.model import AppDefinition, Element, Field
 from appgen.dsl.ui.checks import (
     check_ui_dashboards,
     check_ui_forms,
+    check_ui_states,
     check_ui_tokens,
     check_ui_views,
 )
@@ -212,6 +213,7 @@ CHECKS: list[Check] = [
     check_ui_views,
     check_ui_forms,
     check_ui_dashboards,
+    check_ui_states,
 ]
 """The checks that `validate_definition` runs, in order."""
 

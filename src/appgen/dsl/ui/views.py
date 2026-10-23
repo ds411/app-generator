@@ -14,7 +14,16 @@ from appgen.dsl.element import (
     MemberName,
     Text,
 )
-from appgen.dsl.ui.common import Action, FieldPath, Grid, IconName, TokenRef, kind_tag
+from appgen.dsl.ui.common import (
+    Action,
+    BreakpointName,
+    FieldPath,
+    Grid,
+    IconName,
+    States,
+    TokenRef,
+    kind_tag,
+)
 
 type FieldRef = Annotated[
     str,
@@ -96,6 +105,8 @@ class Column(Element):
     sortable: bool = True
     link: MemberName | None = None
     """A page that the cell opens, with the ID of the record."""
+    hide_below: BreakpointName | None = None
+    """The column hides on screens narrower than this breakpoint."""
 
 
 class FilterBase(Element):
@@ -168,6 +179,8 @@ class ViewBase(Element):
     title: Text | None = None
     description: Text | None = None
     actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
+    states: States | None = None
+    """The default comes from `ui.defaults.states`, and then from the binding."""
 
 
 class ListViewBase(ViewBase):
