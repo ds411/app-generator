@@ -1,0 +1,7 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+"""The router of the slice `{{ e.slice }}`: the endpoints of the entity {{ e.name }}."""
+
+from fastapi import APIRouter
+
+router = APIRouter(prefix={{ e.path | tojson }}, tags=[{{ e.plural_label | tojson }}])

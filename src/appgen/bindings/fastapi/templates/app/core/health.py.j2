@@ -1,0 +1,12 @@
+{{ trace_header("app") }}
+"""The health check of the API, for Docker and load balancers."""
+
+from fastapi import APIRouter
+
+router = APIRouter(tags=["Health"])
+
+
+@router.get("/health")
+async def health() -> dict[str, str]:
+    """Return `ok` while the API runs."""
+    return {"status": "ok"}

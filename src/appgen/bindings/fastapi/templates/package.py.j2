@@ -1,0 +1,5 @@
+{% if element_id is defined %}
+{{ trace_header(element_id) }}
+{% else %}
+{{ trace_header("app") }}
+{% endif %}

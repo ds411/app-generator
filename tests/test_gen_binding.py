@@ -221,3 +221,13 @@ def test_the_binding_context_cannot_replace_a_generator_value(tmp_path: Path) ->
     )
     with pytest.raises(GenerationError, match="replaces values of the generator: name, tokens"):
         generate(DEFINITION, binding)
+
+
+def test_elements_of_excluded_kinds_and_under_them_are_not_gaps(minimal: Binding) -> None:
+    result = generate(DEFINITION, replace(minimal, excludes=frozenset({"operation", "page"})))
+
+    assert [g.element_id for g in result.gaps] == [
+        "entities.Project.relations.tasks",
+        "entities.Task.relations.project",
+    ]
+    assert result.excluded_kinds == ("operation", "page")

@@ -43,6 +43,8 @@ class Manifest:
     extensions: dict[str, ExtensionEntry] = field(default_factory=dict[str, ExtensionEntry])
     traces: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     """The element IDs of each generated file that cannot hold comments (ADR 0004)."""
+    excluded_kinds: tuple[str, ...] = ()
+    """The element kinds that are out of the scope of the binding. The check does not count them."""
 
     def to_json(self) -> str:
         """Return the manifest as JSON text, with sorted keys and a final newline."""
@@ -56,6 +58,8 @@ class Manifest:
             },
             "traces": {path: list(ids) for path, ids in sorted(self.traces.items())},
         }
+        if self.excluded_kinds:
+            data["excluded_kinds"] = sorted(self.excluded_kinds)
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
     @classmethod
@@ -73,6 +77,7 @@ class Manifest:
                     for k, v in data["extensions"].items()
                 },
                 traces={str(k): tuple(str(i) for i in v) for k, v in data["traces"].items()},
+                excluded_kinds=tuple(str(k) for k in data.get("excluded_kinds", [])),
             )
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise ManifestError(f"The manifest is not valid: {error}") from None
@@ -149,7 +154,7 @@ def write_result(
         raise ManualEditsError(edited, unknown)
 
     report = WriteReport()
-    new = Manifest(binding=binding)
+    new = Manifest(binding=binding, excluded_kinds=result.excluded_kinds)
     for path, file in sorted(generated.items()):
         data = file.content.encode("utf-8")
         target = out_dir / path

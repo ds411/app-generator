@@ -44,13 +44,16 @@ class GenerationResult:
 
     files: list[GeneratedFile] = field(default_factory=list[GeneratedFile])
     gaps: list[Gap] = field(default_factory=list[Gap])
+    excluded_kinds: tuple[str, ...] = ()
+    """The element kinds that are out of the scope of the binding, sorted."""
 
 
 def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     """Render the templates of a binding for a definition.
 
-    Each element of a kind that the binding does not cover becomes a gap.
-    The files are sorted by path, and the gaps are in source order. Raise
+    Each element of a kind that the binding does not cover becomes a gap,
+    unless its kind, or the kind of an element above it, is excluded. The
+    files are sorted by path, and the gaps are in source order. Raise
     GenerationError if a template needs a value that does not exist, if
     two output rules write the same path, or if a file that can hold
     comments has no trace (ADR 0004).
@@ -61,7 +64,8 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     environment.filters.update(binding.filters)
     base = _base_context(binding, definition)
     elements = list(iter_elements(definition))
-    gap_elements = [e for e in elements if e.kind not in binding.covers]
+    in_scope = _in_scope(elements, binding.excludes)
+    gap_elements = [e for e in in_scope if e.kind not in binding.covers]
     files: dict[str, GeneratedFile] = {}
 
     def add(generated: GeneratedFile) -> None:
@@ -88,7 +92,25 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
             )
         add(generated)
         gaps.append(Gap(element.id, element.kind, generated.path))
-    return GenerationResult(files=[files[path] for path in sorted(files)], gaps=gaps)
+    return GenerationResult(
+        files=[files[path] for path in sorted(files)],
+        gaps=gaps,
+        excluded_kinds=tuple(sorted(binding.excludes)),
+    )
+
+
+def _in_scope(
+    elements: list[DefinitionElement], excludes: frozenset[str]
+) -> list[DefinitionElement]:
+    """Return the elements that are not of an excluded kind, and not under such an element."""
+    roots: list[str] = []
+    kept: list[DefinitionElement] = []
+    for element in elements:
+        if element.kind in excludes:
+            roots.append(element.id)
+        elif not any(element.id.startswith(f"{root}.") for root in roots):
+            kept.append(element)
+    return kept
 
 
 def _render(

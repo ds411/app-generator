@@ -80,6 +80,14 @@ class Binding:
     All bindings have the naming filters of `appgen.gen.naming`, for example
     `camel` and `kebab`.
     """
+    excludes: frozenset[ElementKind] = frozenset()
+    """The element kinds that are out of the scope of the binding.
+
+    The generator makes no gap for an element of an excluded kind, or for
+    the elements under it. For example, a back-end binding excludes
+    `page` and `ui`. The manifest records the kinds, and `appgen check`
+    does not count these elements in the coverage.
+    """
     gap_rule: Output | None = None
     """The extension file for each element of a kind that the binding does not cover.
 
