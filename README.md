@@ -164,7 +164,12 @@ of a kind that the binding does not cover yet gets an extension file in
 `src/gaps/`. The app gets the shadcn/ui components that its UI uses, in
 `src/shared/ui/`, and their npm packages. The theme in
 `src/app/styles/globals.css` comes from the design tokens, and
-next-themes switches the color mode (`ui.theme`). The exact package versions are in
+next-themes switches the color mode (`ui.theme`). Each entity is a Drizzle
+table in `src/shared/db/schema/` (a foreign key column for each
+`many_to_one` and `one_to_one` relation, and a join table for each
+`many_to_many` relation), with a trace on each table, column, and
+relation. `pnpm db:generate` writes the SQL migrations with drizzle-kit,
+and the server applies them at start when `DATABASE_MIGRATE=true`. The exact package versions are in
 `src/appgen/bindings/nextjs/versions.py`. To try the output:
 
 ```sh

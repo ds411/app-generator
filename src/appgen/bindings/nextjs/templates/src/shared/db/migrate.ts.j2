@@ -1,0 +1,9 @@
+{{ trace_header("app") }}
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+
+import { getDb } from "./client";
+
+/** Apply the migrations in `drizzle/` (from `pnpm db:generate`) to the database. */
+export async function migrateDatabase(): Promise<void> {
+  await migrate(getDb(), { migrationsFolder: "drizzle" });
+}

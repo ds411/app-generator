@@ -1,0 +1,12 @@
+{{ trace_header("app") }}
+/**
+ * Next.js calls `register()` once when the server starts. With
+ * `DATABASE_MIGRATE=true` (as in `compose.yaml`), the server applies the
+ * database migrations before it serves requests.
+ */
+export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.DATABASE_MIGRATE === "true") {
+    const { migrateDatabase } = await import("@/shared/db/migrate");
+    await migrateDatabase();
+  }
+}

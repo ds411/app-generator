@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from appgen.bindings.nextjs import versions
+from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.theme import build_theme
 from appgen.dsl.model import AppDefinition, Page
@@ -105,6 +106,10 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
             "start": "next start",
             "lint": "eslint --max-warnings 0",
             "typecheck": "next typegen && tsc --noEmit",
+            "db:generate": "drizzle-kit generate",
+            "db:migrate": "drizzle-kit migrate",
+            "db:push": "drizzle-kit push",
+            "db:studio": "drizzle-kit studio",
         },
         "dependencies": dict(sorted(dependencies.items())),
         "devDependencies": dict(sorted(dev_dependencies.items())),
@@ -117,6 +122,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     components = shadcn.used_components(definition)
     ui = definition.ui
     theme = ui.theme if ui is not None else None
+    tables = build_tables(definition)
     return {
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -126,6 +132,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "shadcn": [component.name for component in components],
             "hooks": shadcn.hooks(components),
             "layers": FSD_LAYERS,
+            "tables": tables,
+            "tables_by_entity": {table.entity: table for table in tables},
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,

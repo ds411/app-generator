@@ -1,0 +1,13 @@
+{{ trace_header("app") }}
+import { defineConfig } from "drizzle-kit";
+
+// pnpm db:generate writes the SQL migrations of the schema into drizzle/.
+// The migrations belong to the app: appgen does not write them.
+export default defineConfig({
+  dialect: "postgresql",
+  schema: "./src/shared/db/schema/index.ts",
+  out: "./drizzle",
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/{{ app.name | snake }}",
+  },
+});
