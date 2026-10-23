@@ -16,6 +16,7 @@ from appgen.bindings.shared.ui import (
     ui_plan,
 )
 from appgen.dsl import load_definition
+from appgen.gen import find_binding, generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
 LAYOUTS = Path(__file__).parent / "fixtures" / "react-layouts.yaml"
@@ -110,3 +111,27 @@ def test_the_regions_of_a_page_fill_the_grid_in_their_order() -> None:
         "flex flex-wrap items-start gap-2"
     )
     assert page_regions(definition.pages["projects"], has_actions=True) == []
+
+
+@pytest.mark.parametrize(
+    ("binding_name", "development"),
+    [("nextjs", 'process.env.NODE_ENV === "development"'), ("react", "import.meta.env.DEV")],
+)
+def test_a_stub_widget_shows_its_element_id_only_in_development(
+    binding_name: str, development: str
+) -> None:
+    result = generate(load_definition(EXAMPLE), find_binding(binding_name))
+    stubs = {f.path: f.content for f in result.files if f.path.endswith(".ext.tsx")}
+
+    # The custom widget, the custom form widget, and the custom detail tabs.
+    assert {
+        "src/widgets/overview/ui/workload-widget.ext.tsx",
+        "src/features/assign-task-form/ui/assignee-id-widget.ext.tsx",
+        "src/widgets/task-detail/ui/activity-tab.ext.tsx",
+    } <= set(stubs)
+    for path, content in stubs.items():
+        line = next(line for line in content.splitlines() if "Not implemented yet" in line)
+        element_id = content.splitlines()[1].split()[2]
+        assert line.strip() == (
+            f'{{{development} ? "Not implemented yet: {element_id}" : "Not available yet."}}'
+        ), path
