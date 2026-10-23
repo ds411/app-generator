@@ -28,7 +28,7 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
 import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
 {% endif %}
-{% set form_lib = ["type FormErrors", "schemaErrors"] %}
+{% set form_lib = ["type FormErrors", "schemaErrors", "submitErrors"] %}
 {% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
 import { {{ form_lib | join(", ") }} } from "@/shared/lib/form";
 {% if plan.navigate and "pageHref" in plan.navigate %}
@@ -251,9 +251,9 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       navigate({{ plan.navigate }});
 {% endif %}
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The form did not save.";
-      setErrors({ _form: message });
-      toast.error(message);
+      const found = submitErrors(error);
+      setErrors(found);
+      toast.error(found._form);
     } finally {
       setBusy(false);
     }

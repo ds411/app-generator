@@ -3,11 +3,15 @@
 {% set view = element.content.view if element.content is not none and element.content.view in ui_views.list_views else none %}
 {% set detail = element.content.view if info.params and element.content is not none and element.content.view in ui_views.detail_views else none %}
 {% set dashboard = element.content.dashboard if element.content is not none and element.content.dashboard else none %}
+{% set form = element.content.form if element.content is not none else none %}
 {% set id_param = info.params[-1] if detail else none %}
 {{ trace_header(element_id) }}
 "use client";
 
-{% if info.params and not view and not dashboard %}
+{% if form %}
+import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
+{% endif %}
+{% if (info.params and not view and not dashboard) or form %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
 {% if dashboard %}
@@ -23,7 +27,7 @@ import { {{ name | pascal }}Content } from "./{{ info.slice }}-content.gen";
 {% endif %}
 
 export function {{ info.component }}() {
-{% if custom and element.entity %}
+{% if (custom and element.entity) or form %}
   const params = useParams();
 {% elif detail %}
   const { {{ id_param }} } = useParams();
@@ -44,6 +48,8 @@ export function {{ info.component }}() {
       <{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
 {% elif detail %}
       <{{ detail | pascal }}View id={ {{- id_param }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
+{% elif form %}
+      <{{ form | pascal }}FormPage routeParams={params} /> {{ trace(element.content.id, jsx=True) }}
 {% elif dashboard %}
       <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
 {% else %}

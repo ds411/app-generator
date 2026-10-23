@@ -11,6 +11,7 @@ from typing import Any
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
@@ -149,7 +150,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
-        "ui_views": ViewContext(definition),
+        "ui_views": ViewContext(definition, forms=True),
+        "ui_forms": FormContext(definition),
         "nextjs": {
             "default_layout": default_layout,
             "groups": [(layout, route_group(layout)) for layout in sorted(groups, key=str)],

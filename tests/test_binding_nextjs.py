@@ -520,3 +520,43 @@ def test_the_details_and_the_dashboards_are_covered(nextjs: Binding, tmp_path: P
     for element in iter_elements(definition):
         if element.kind in kinds:
             assert status[element.id] in ("covered", "gap"), element.id
+
+
+def test_each_form_is_a_feature_that_calls_the_server_actions(result: GenerationResult) -> None:
+    files = _files(result)
+    form = files["src/features/new-project-form/ui/new-project-form.tsx"]
+    assert "projectInputSchema.pick(" in form
+    assert '"Enter a name."' in form
+    assert "const found = submitErrors(error);" in form
+    assert (
+        "export function submitErrors(error: unknown): FormErrors {"
+        in files["src/shared/lib/form.ts"]
+    )
+    assert "src/shared/ui/form-widgets/relation-select.tsx" in files
+    detail = files["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert 'import { EditProjectFormDialog } from "@/features/edit-project-form";' in detail
+    table = files["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert 'import { NewProjectFormDialog } from "@/features/new-project-form";' in table
+
+
+FORMS = Path(__file__).parent / "fixtures" / "react-forms.yaml"
+
+
+def test_a_page_form_and_the_form_elements_are_covered(nextjs: Binding, tmp_path: Path) -> None:
+    definition = load_definition(FORMS)
+    result = generate(definition, nextjs)
+    write_result(result, tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    kinds = {"form", "form_section", "form_field", "form_on_success", "field_rules"}
+    for element in iter_elements(definition):
+        if element.kind in kinds or element.kind.endswith("_rule"):
+            assert status[element.id] in ("covered", "gap"), element.id
+    pages = [
+        content
+        for path, content in _files(result).items()
+        if path.startswith("src/pages/") and "FormPage routeParams={params}" in content
+    ]
+    assert pages
+    assert all("const params = useParams();" in page for page in pages)

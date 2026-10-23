@@ -12,7 +12,7 @@ from pathlib import Path
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
-from appgen.bindings.shared import shadcn, typescript, ui, views
+from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.gen.binding import Binding, Output
 
@@ -141,6 +141,7 @@ BINDING = Binding(
         Output(template="app/layout.tsx.j2", path="app/layout.tsx"),
         *_APP_SHELL,
         *views.view_rules(),
+        *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
             path="{{ nextjs.pages[name].route_file }}",
@@ -234,6 +235,9 @@ BINDING = Binding(
         | {"badge_set", "badge_value"}
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
         | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
+        | {"form", "form_section", "form_field", "form_on_success"}
+        | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
+        | {"compare_rule"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
