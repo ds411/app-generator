@@ -34,6 +34,14 @@ step() {
     echo "check-fastapi: $*"
 }
 
+# In a cloud session, use the mirror images, and start Docker and pull
+# the Postgres image. Outside cloud sessions, this does nothing.
+if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+    # shellcheck source=scripts/sandbox.env
+    . scripts/sandbox.env
+    scripts/sandbox-setup.sh
+fi
+
 step "generate $definition in $out"
 uv run --locked appgen generate "$definition" -b fastapi -o "$out" >/dev/null
 
