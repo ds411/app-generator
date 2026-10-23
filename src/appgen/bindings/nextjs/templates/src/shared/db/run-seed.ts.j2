@@ -1,0 +1,14 @@
+{{ trace_header("app") }}
+// pnpm db:seed: fill the tables of the database of DATABASE_URL with the
+// seed records, if the tables are empty. Apply the migrations first.
+import { connect } from "./connect";
+import { seedDatabase } from "./seed";
+
+const url = process.env.DATABASE_URL;
+if (!url) {
+  console.error("Set DATABASE_URL to the connection URL of the database, or to pglite:<folder>.");
+  process.exit(1);
+}
+const added = await seedDatabase(connect(url));
+console.log(added ? "The seed records are added." : "The tables have records, so the seed adds none.");
+process.exit(0);

@@ -175,7 +175,11 @@ BINDING = Binding(
         Output(template="env.example.j2", path=".env.example"),
         Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
         Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
+        Output(template="src/shared/db/connect.ts.j2", path="src/shared/db/connect.ts"),
         Output(template="src/shared/db/migrate.ts.j2", path="src/shared/db/migrate.ts"),
+        Output(template="src/shared/db/seed.ts.j2", path="src/shared/db/seed.ts"),
+        Output(template="src/shared/db/seed-data.ts.j2", path="src/shared/db/seed-data.ts"),
+        Output(template="src/shared/db/run-seed.ts.j2", path="src/shared/db/run-seed.ts"),
         Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
         Output(
             template="src/shared/db/schema/table.ts.j2",

@@ -37,3 +37,12 @@ export const expected: Expected = JSON.parse(readFileSync(file, "utf8")) as Expe
 export function modeOf(projectName: string): Mode {
   return projectName === "dark" ? "dark" : "light";
 }
+
+/** A regular expression for the paths of a page, for example `^/projects/[^/]+$`. */
+export function pathPattern(path: string): RegExp {
+  const source = path
+    .split("/")
+    .map((part) => (part.startsWith("{") ? "[^/?#]+" : part.replace(/[.*+?^$()|[\]\\]/g, "\\$&")))
+    .join("/");
+  return new RegExp(`^${source}$`);
+}

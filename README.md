@@ -301,7 +301,9 @@ at start when `DATABASE_MIGRATE=true`. The app has a multi-stage
 `Dockerfile` (a standalone Next.js server as a non-root user, with the
 migrations in `drizzle/`) and a `compose.yaml` with Postgres:
 `docker compose up --build` starts both, and the app migrates the
-database when it starts. For a local run without a Postgres server, set
+database when it starts. The app has seed records: `pnpm db:seed` (or
+`DATABASE_SEED=true` at start) fills the empty tables with the mock
+records of the shared generator, the same records as in the React app. For a local run without a Postgres server, set
 `DATABASE_URL=pglite:./.pglite` to use PGlite, an embedded Postgres
 ([ADR 0007](docs/adr/0007-local-database.md)).
 

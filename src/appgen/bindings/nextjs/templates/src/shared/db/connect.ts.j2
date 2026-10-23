@@ -1,0 +1,31 @@
+{{ trace_header("app") }}
+import { PGlite } from "@electric-sql/pglite";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
+import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+
+import * as schema from "./schema";
+
+export type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
+
+/** The scheme of a `DATABASE_URL` that selects PGlite, for example `pglite:./.pglite`. */
+const PGLITE_SCHEME = "pglite:";
+
+/** Return true if `DATABASE_URL` selects PGlite (an embedded Postgres) instead of a server. */
+export function usesPglite(): boolean {
+  return process.env.DATABASE_URL?.startsWith(PGLITE_SCHEME) ?? false;
+}
+
+/**
+ * Connect to the database of a URL. The server calls it through
+ * `getDb()`; the scripts (`pnpm db:seed`) call it directly.
+ */
+export function connect(url: string): Database {
+  if (url.startsWith(PGLITE_SCHEME)) {
+    // The data folder after the scheme. Without a folder, the data stays in memory.
+    const dataDir = url.slice(PGLITE_SCHEME.length) || undefined;
+    return drizzlePglite(new PGlite(dataDir), { schema });
+  }
+  return drizzlePostgres(postgres(url), { schema });
+}

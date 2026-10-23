@@ -3,12 +3,15 @@
 Each entity is a Postgres table with a UUID primary key `id`. Each field
 is a column, and each `many_to_one` or `one_to_one` relation is a foreign
 key column `<relation>_id`. A `many_to_many` relation gets a join table.
-The templates of `src/shared/db/schema/` render these values.
+The templates of `src/shared/db/schema/` render these values. The seed
+of `src/shared/db/seed.ts` fills the tables with the shared mock records.
 """
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
+from appgen.bindings.shared.mock_data import mock_data
 from appgen.dsl.model import AppDefinition, Field, Relation
 from appgen.gen.naming import camel, snake
 
@@ -417,3 +420,118 @@ def _add_relation(
                 relation.id,
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class SeedJoin:
+    """The seed rows of a join table."""
+
+    join: JoinTable
+    rows: list[str]
+    """The rows as TypeScript object literals."""
+
+
+@dataclass(frozen=True, slots=True)
+class SeedTable:
+    """The seed records of a table, as TypeScript object literals."""
+
+    table: Table
+    rows: list[str]
+    """The rows to insert. An optional foreign key is null here."""
+    links: list[str]
+    """The optional foreign keys of the rows (`id` and the keys), to set after all inserts."""
+    joins: list[SeedJoin]
+
+    @property
+    def const(self) -> str:
+        """The TypeScript name of the rows, for example `projectSeed`."""
+        return self.table.const.removesuffix("Table") + "Seed"
+
+    @property
+    def links_const(self) -> str:
+        return self.const + "Links"
+
+
+def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTable]:
+    """Return the seed records of each table, in an order that the required foreign keys permit.
+
+    The records are the mock records of the shared generator
+    (`appgen.bindings.shared.mock_data`), so the Next.js seed and the
+    React mock data agree. A table comes after the tables that its
+    required foreign keys refer to. The optional foreign keys are links:
+    the seed sets them after it inserts all rows, so a cycle or a
+    reference to the same table is no problem.
+    """
+    data = mock_data(definition)
+    by_entity = {table.entity: table for table in tables}
+    result: dict[str, SeedTable] = {}
+    for table in tables:
+        entity = definition.entities[table.entity]
+        rows: list[str] = []
+        links: list[str] = []
+        joins = [SeedJoin(join, []) for join in table.join_tables]
+        for record in data[table.entity]:
+            row = [("id", json.dumps(record["id"]))]
+            link: list[tuple[str, str]] = []
+            for field_name, spec in entity.fields.items():
+                row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
+            for name, relation in entity.relations.items():
+                if relation.kind not in ("many_to_one", "one_to_one"):
+                    continue
+                if not _stores(definition, table.entity, name, relation):
+                    continue
+                key, value = f"{camel(name)}Id", record.get(name)
+                if relation.required:
+                    row.append((key, json.dumps(value)))
+                else:
+                    row.append((key, "null"))
+                    if value is not None:
+                        link.append((key, json.dumps(value)))
+            rows.append(_ts_object(row))
+            if link:
+                links.append(_ts_object([("id", json.dumps(record["id"])), *link]))
+            for seed_join in joins:
+                name = seed_join.join.relation_name.split(".", 1)[1]
+                targets: list[str] = record.get(name) or []
+                for target in targets:
+                    seed_join.rows.append(
+                        _ts_object(
+                            [
+                                (seed_join.join.left_key, json.dumps(record["id"])),
+                                (seed_join.join.right_key, json.dumps(target)),
+                            ]
+                        )
+                    )
+        result[table.entity] = SeedTable(table, rows, links, joins)
+    return [result[entity] for entity in _insert_order(definition, by_entity)]
+
+
+def _insert_order(definition: AppDefinition, tables: dict[str, Table]) -> list[str]:
+    """Return the entities so that each comes after the targets of its required foreign keys."""
+    needs = {
+        entity: {
+            relation.target
+            for name, relation in definition.entities[entity].relations.items()
+            if relation.kind in ("many_to_one", "one_to_one")
+            and relation.required
+            and relation.target != entity
+            and _stores(definition, entity, name, relation)
+        }
+        for entity in tables
+    }
+    order: list[str] = []
+    while len(order) < len(tables):
+        ready = [e for e in tables if e not in order and needs[e] <= set(order)]
+        # A cycle of required foreign keys: keep the order of the definition.
+        order.append(ready[0] if ready else next(e for e in tables if e not in order))
+    return order
+
+
+def _ts_value(value: Any, spec: Field) -> str:
+    if value is not None and spec.type == "datetime":
+        return f"new Date({json.dumps(value)})"
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _ts_object(entries: list[tuple[str, str]]) -> str:
+    return "{ " + ", ".join(f"{key}: {value}" for key, value in entries) + " }"

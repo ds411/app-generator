@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from appgen.bindings.nextjs import versions
-from appgen.bindings.nextjs.db import build_tables
+from appgen.bindings.nextjs.db import build_tables, seed_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.theme import build_theme
@@ -127,6 +127,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
             "db:migrate": "drizzle-kit migrate",
             "db:push": "drizzle-kit push",
             "db:studio": "drizzle-kit studio",
+            "db:seed": "tsx src/shared/db/run-seed.ts",
         },
         "dependencies": dict(sorted(dependencies.items())),
         "devDependencies": dict(sorted(dev_dependencies.items())),
@@ -162,6 +163,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "layers": FSD_LAYERS,
             "tables": tables,
             "tables_by_entity": {table.entity: table for table in tables},
+            "seed": seed_tables(definition, tables),
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,

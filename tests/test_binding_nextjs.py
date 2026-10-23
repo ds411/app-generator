@@ -13,6 +13,7 @@ import pytest
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.model import route_dir
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.mock_data import mock_data
 from appgen.dsl import AppDefinition, load_definition, load_definition_text
 from appgen.gen import (
     Binding,
@@ -442,6 +443,7 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     assert "image: ${POSTGRES_IMAGE:-postgres:18-alpine}" in compose
     assert "DATABASE_URL: postgres://postgres:postgres@db:5432/project_tracker" in compose
     assert 'DATABASE_MIGRATE: "true"' in compose
+    assert 'DATABASE_SEED: "true"' in compose
     assert "condition: service_healthy" in compose
 
 
@@ -577,3 +579,40 @@ def test_a_page_form_and_the_form_elements_are_covered(nextjs: Binding, tmp_path
     ]
     assert pages
     assert all("const params = useParams();" in page for page in pages)
+
+
+def test_the_app_has_a_seed_with_the_mock_records(
+    definition: AppDefinition, result: GenerationResult
+) -> None:
+    files = _files(result)
+    package = json.loads(files["package.json"])
+    assert package["scripts"]["db:seed"] == "tsx src/shared/db/run-seed.ts"
+    assert "tsx" in package["devDependencies"]
+    assert 'process.env.DATABASE_SEED === "true"' in files["instrumentation.ts"]
+    assert "DATABASE_SEED=false" in files[".env.example"]
+    assert '"server-only"' not in files["src/shared/db/connect.ts"]
+    assert 'import { connect } from "./connect";' in files["src/shared/db/run-seed.ts"]
+    data = files["src/shared/db/seed-data.ts"]
+    records = mock_data(definition)
+    for entity, rows in records.items():
+        for record in rows:
+            assert f'{{ id: "{record["id"]}"' in data, entity
+    project = next(r for r in records["Project"] if r["name"] == "Meridian Portal")
+    assert f'name: "Meridian Portal", key: "{project["key"]}"' in data
+    seed = files["src/shared/db/seed.ts"]
+    # The required foreign keys decide the order of the inserts.
+    order = [seed.index(f"tx.insert({t}Table)") for t in ("person", "project", "task", "comment")]
+    assert order == sorted(order)
+    assert "tx.insert(projectMembersTable).values(seed.projectMembersSeed);" in seed
+    # The optional foreign key of a task (its assignee) comes after all inserts.
+    assert "for (const { id, ...values } of seed.taskSeedLinks)" in seed
+    assert "assigneeId: null" in data
+
+
+def test_the_seed_of_the_edge_cases_inserts_a_target_first(nextjs: Binding) -> None:
+    files = _files(generate(load_definition(EDGE_CASES), nextjs))
+    seed = files["src/shared/db/seed.ts"]
+    # Owner has a required one_to_one foreign key to Profile.
+    assert seed.index("tx.insert(profileTable)") < seed.index("tx.insert(ownerTable)")
+    # Item refers to itself with an optional foreign key: a link.
+    assert "seed.itemSeedLinks" in seed

@@ -1,6 +1,7 @@
 {{ trace_header("app") }}
 # Run the app with a Postgres database: docker compose up --build
-# The app applies the migrations in drizzle/ when it starts.
+# The app applies the migrations in drizzle/ when it starts, and fills
+# the empty tables with the seed records.
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:18-alpine}
@@ -21,6 +22,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/{{ app.name | snake }}
       DATABASE_MIGRATE: "true"
+      DATABASE_SEED: "true"
     ports:
       - "3000:3000"
     depends_on:
