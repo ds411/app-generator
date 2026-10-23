@@ -1,0 +1,11 @@
+{{ trace_header("app") }}
+# {{ app.title }} ({{ app.name }})
+
+Binding: {{ binding.name }}
+Covers: {{ binding.covers | join(", ") }}
+
+## Entities
+
+{% for entity_name, entity in definition.entities.items() %}
+- {{ entity_name }} {{ trace(entity.id) }}
+{% endfor %}

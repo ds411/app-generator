@@ -1,4 +1,0 @@
-Entity Task of project-tracker
-- title: string (required)
-- due_date: date
-- done: boolean

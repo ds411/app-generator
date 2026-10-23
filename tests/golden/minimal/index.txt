@@ -1,7 +1,0 @@
-Project Tracker (project-tracker)
-Binding: minimal
-Covers: app, entity, field
-
-Entities:
-- Project
-- Task

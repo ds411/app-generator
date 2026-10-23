@@ -41,6 +41,8 @@ class Manifest:
     generated: dict[str, str] = field(default_factory=dict[str, str])
     """The hash of each generated file, by path."""
     extensions: dict[str, ExtensionEntry] = field(default_factory=dict[str, ExtensionEntry])
+    traces: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    """The element IDs of each generated file that cannot hold comments (ADR 0004)."""
 
     def to_json(self) -> str:
         """Return the manifest as JSON text, with sorted keys and a final newline."""
@@ -52,6 +54,7 @@ class Manifest:
                 path: {"element": entry.element_id, "orphaned": entry.orphaned}
                 for path, entry in sorted(self.extensions.items())
             },
+            "traces": {path: list(ids) for path, ids in sorted(self.traces.items())},
         }
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
@@ -69,6 +72,7 @@ class Manifest:
                     str(k): ExtensionEntry(v["element"], bool(v["orphaned"]))
                     for k, v in data["extensions"].items()
                 },
+                traces={str(k): tuple(str(i) for i in v) for k, v in data["traces"].items()},
             )
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise ManifestError(f"The manifest is not valid: {error}") from None
@@ -150,6 +154,8 @@ def write_result(
         data = file.content.encode("utf-8")
         target = out_dir / path
         new.generated[path] = content_hash(data)
+        if file.traces:
+            new.traces[path] = file.traces
         if target.is_file() and target.read_bytes() == data:
             report.unchanged.append(path)
             continue
