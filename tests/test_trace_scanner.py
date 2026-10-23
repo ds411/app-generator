@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from appgen.trace import DEFAULT_IGNORE, Trace, comment_openers, scan_folder, scan_text
+from appgen.trace import (
+    DEFAULT_IGNORE,
+    Trace,
+    comment_openers,
+    find_skipped_traces,
+    scan_folder,
+    scan_text,
+)
 
 
 def _ids(traces: list[Trace]) -> list[str]:
@@ -113,6 +120,59 @@ def test_ignores_tags_that_do_not_follow_a_comment_opener(text: str) -> None:
 
 def test_ignores_the_later_lines_of_a_block_comment() -> None:
     assert scan_text("/**\n * @trace app\n */\n", "a.ts") == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("text", "path", "line", "column"),
+    [
+        ('x = "@trace app"\n', "a.py", 1, 6),
+        ("x = 1  # see @trace app\n", "a.py", 1, 14),
+        ('"""\n@trace:gap app\n"""\n', "a.py", 2, 1),
+        ("/**\n * @trace app\n */\n", "a.ts", 2, 4),
+        ('const a = "@trace app"; // @trace entities.Task\n', "a.ts", 1, 12),
+    ],
+)
+def test_warns_about_trace_text_that_the_scan_skips(
+    text: str, path: str, line: int, column: int
+) -> None:
+    warnings = find_skipped_traces(text, path)
+
+    assert [(w.line, w.column, w.code, w.element_id) for w in warnings] == [
+        (line, column, "skipped-trace", "app")
+    ]
+    assert warnings[0].file == path
+    assert warnings[0].hint is not None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# @trace app file\nx = 1  # @trace app\n",
+        '@trace("x")\ndef f(): ...\n',
+        "x = 1  # @traced app\n",
+    ],
+)
+def test_no_warning_for_read_traces_or_other_text(text: str) -> None:
+    assert find_skipped_traces(text, "a.py") == []
+
+
+def test_no_warning_for_examples_in_markdown_code() -> None:
+    text = "Write `// @trace app` in a comment.\n\n```ts\nconst a = 1; @trace app\n```\n"
+
+    assert find_skipped_traces(text, "README.md") == []
+    warnings = find_skipped_traces("Text @trace app\n", "README.md")
+    assert [w.hint for w in warnings] == [
+        "Put the trace in a comment of its own line, for example '<!-- @trace app -->'."
+    ]
+
+
+def test_scan_folder_gives_the_warnings(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text('# @trace app file\nx = "@trace app"\n')
+
+    result = scan_folder(tmp_path)
+
+    assert [(w.file, w.line) for w in result.warnings] == [("a.py", 2)]
+    assert [t.line for t in result.traces] == [1]
 
 
 def test_files_of_an_unknown_type_have_no_traces() -> None:

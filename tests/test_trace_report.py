@@ -75,6 +75,18 @@ def test_min_coverage_sets_the_exit_code(
     assert report.exit_code == exit_code
 
 
+def test_a_warning_does_not_change_the_result(definition: AppDefinition, tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text('# @trace app file\nx = "@trace app"\n')
+
+    report = check_traces(definition, tmp_path)
+
+    assert [w.code for w in report.warnings] == ["skipped-trace"]
+    assert report.passed
+    assert report.exit_code == 0
+    assert "Warnings: 1\n  a.py:2:6: skipped-trace:" in render(report, "text")
+    assert json.loads(render(report, "json"))["warnings"][0]["line"] == 2
+
+
 def test_text_gives_all_reasons_for_a_failure(report: CheckReport) -> None:
     assert render(report, "text").endswith(
         "Result: failed: 2 invalid traces and the coverage 35.7 % is lower than 50.0 %.\n"
