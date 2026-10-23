@@ -8,21 +8,33 @@
 # The daemon of the environment setup script does not continue into the
 # session, so each session must start it again.
 #
-# The hook does nothing outside cloud sessions (CLAUDE_CODE_REMOTE is
-# not "true"), or when Docker is not installed. A failed step prints a
-# message and does not stop the session.
+# The hook also loads the defaults of scripts/sandbox.env (the mirror
+# images of the checks) into the session: it adds the file to
+# CLAUDE_ENV_FILE, so that each command of the session reads it.
 #
-# Environment variables:
-#   POSTGRES_IMAGE  The Postgres image to pull (no pull if not set).
-#   NODE_IMAGE      The image to build (default localhost/appgen-node:24-alpine).
+# The hook does nothing outside cloud sessions (CLAUDE_CODE_REMOTE is
+# not "true"). Without Docker, it only loads the defaults. A failed step
+# prints a message and does not stop the session.
+#
+# Environment variables (scripts/sandbox.env gives the defaults):
+#   POSTGRES_IMAGE  The Postgres image to pull.
+#   NODE_IMAGE      The image to build (only if its name starts with localhost/).
 #   APPGEN_CA_FILE  The CA bundle of the proxy (default /root/.ccr/ca-bundle.crt).
 
 set -u
 
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
+
+root=${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+# shellcheck source=scripts/sandbox.env
+. "$root/scripts/sandbox.env"
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    printf '. "%s"\n' "$root/scripts/sandbox.env" >>"$CLAUDE_ENV_FILE"
+fi
+
 command -v docker >/dev/null 2>&1 || exit 0
 
-image=${NODE_IMAGE:-localhost/appgen-node:24-alpine}
+image=$NODE_IMAGE
 ca_file=${APPGEN_CA_FILE:-/root/.ccr/ca-bundle.crt}
 
 say() {
@@ -46,8 +58,8 @@ if ! docker info >/dev/null 2>&1; then
     fi
 fi
 
-postgres=${POSTGRES_IMAGE:-}
-if [ -n "$postgres" ] && ! docker image inspect "$postgres" >/dev/null 2>&1; then
+postgres=$POSTGRES_IMAGE
+if ! docker image inspect "$postgres" >/dev/null 2>&1; then
     say "pull $postgres"
     docker pull --quiet "$postgres" >/dev/null || say "the pull of $postgres failed"
 fi
