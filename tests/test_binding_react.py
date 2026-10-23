@@ -97,6 +97,20 @@ def test_each_package_of_the_shadcn_components_has_a_version() -> None:
     assert sorted(set(names) - set(versions.COMPONENT_PACKAGES)) == []
 
 
+def test_the_dockerfile_builds_with_pnpm_and_serves_with_nginx_as_non_root(
+    result: GenerationResult,
+) -> None:
+    files = _files(result)
+    dockerfile = files["Dockerfile"]
+    assert dockerfile.startswith("# syntax=docker/dockerfile:1\n")
+    assert "# @trace app file" in dockerfile
+    assert "RUN pnpm install" in dockerfile
+    assert "FROM nginxinc/nginx-unprivileged:" in dockerfile
+    assert "USER nginx" in dockerfile
+    assert "try_files $uri $uri/ /index.html;" in files["nginx.conf"]
+    assert "node_modules" in files[".dockerignore"]
+
+
 def test_each_page_has_a_slice_and_a_route(
     definition: AppDefinition, result: GenerationResult
 ) -> None:
