@@ -1,0 +1,160 @@
+# The features of the list views that the main example does not use,
+# for the view tests of the React binding: each filter kind, nested field
+# paths, the formats, cards without a grid, a board without a card, and
+# custom actions.
+version: 0
+app: { name: views, title: Views }
+entities:
+  Team:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+    relations:
+      lead: { kind: many_to_one, target: Member }
+  Member:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+      email: { type: email }
+      site: { type: url }
+    relations:
+      team: { kind: many_to_one, target: Team }
+  Item:
+    fields:
+      code: { type: string, required: true }
+      kind:
+        type: enum
+        values: [book, tool, part]
+      stage:
+        type: enum
+        values: [new, open, closed]
+        default: new
+      price: { type: decimal }
+      share: { type: decimal }
+      count: { type: integer }
+      in_stock: { type: boolean }
+      received: { type: date }
+      updated_at: { type: datetime }
+      notes: { type: text }
+    relations:
+      owner: { kind: many_to_one, target: Member }
+      tags: { kind: many_to_many, target: Member }
+operations:
+  list_items: { kind: list, entity: Item }
+  delete_item: { kind: delete, entity: Item }
+  restock: { kind: custom, entity: Item }
+pages:
+  items:
+    path: /items
+    title: Items
+    entity: Item
+    content: { view: item_table }
+  item_cards:
+    path: /items/cards
+    title: Item cards
+    entity: Item
+    content: { view: item_cards }
+  item_board:
+    path: /items/board
+    title: Item board
+    entity: Item
+    content: { view: item_board }
+  item:
+    path: "/items/{id}"
+    title: Item
+    entity: Item
+  team_items:
+    path: "/teams/{team}/items/{id}"
+    title: Team item
+    entity: Item
+  members:
+    path: /members
+    title: Members
+    entity: Member
+    content: { view: member_cards }
+ui:
+  tokens:
+    breakpoint:
+      md: { $value: 768px }
+  defaults:
+    page_size: 5
+    states:
+      loading: { indicator: spinner, text: Loading }
+      error: { title: The data did not load, action: retry }
+  views:
+    item_table:
+      kind: table
+      entity: Item
+      columns:
+        code: { link: item }
+        kind: { format: badge }
+        price: { format: currency, align: end }
+        share: { format: percent, align: center, sortable: false }
+        count: { format: number }
+        in_stock: {}
+        received: { format: date }
+        updated_at: { format: datetime, hide_below: md }
+        owner: {}
+        lead: { field: owner.team.lead.name, label: Team lead }
+        email: { field: owner.email }
+        tags: {}
+      filters:
+        search: { kind: search, fields: [code, notes, owner.name], default: "" }
+        kind: { kind: select, field: kind }
+        stage: { kind: select, field: stage, multiple: true, default: [new, open] }
+        owner: { kind: select, field: owner, multiple: true }
+        tag: { kind: select, field: tags }
+        team: { kind: select, field: owner.team }
+        in_stock: { kind: boolean, field: in_stock }
+        received: { kind: date_range, field: received }
+      sort: { field: owner.name, direction: desc }
+      selection: true
+      row_click: open
+      row_actions:
+        open: { kind: navigate, page: item }
+        team: { kind: navigate, page: team_items, params: { team: owner.team } }
+        delete:
+          kind: operation
+          operation: delete_item
+          variant: destructive
+          confirm: { title: "Delete the item?" }
+          on_success: { toast: Deleted., navigate: items }
+        restock: { kind: operation, operation: restock }
+        flag: { kind: custom, label: Flag }
+      bulk_actions:
+        delete: { kind: operation, operation: delete_item, variant: destructive }
+        export: { kind: custom }
+      actions:
+        cards: { kind: navigate, page: item_cards, label: Cards }
+        sync: { kind: custom, label: Sync, variant: outline }
+      states:
+        empty: { title: No items, text: Add an item., action: sync }
+        error: { title: Items did not load, action: sync }
+    item_cards:
+      kind: cards
+      entity: Item
+      card:
+        subtitle: owner.team
+        fields: [price, received, tags, in_stock]
+        footer: [owner, updated_at]
+      filters:
+        search: { kind: search, label: Find, fields: [code] }
+      row_actions:
+        open: { kind: navigate, page: item }
+    item_board:
+      kind: board
+      entity: Item
+      group_by: stage
+      columns:
+        open: { limit: 2 }
+      sort: { field: code }
+    member_cards:
+      kind: cards
+      entity: Member
+      card: { title: name, subtitle: email, fields: [site] }
+      grid:
+        columns: 3
+        responsive:
+          md: { columns: 1 }
+      sort: { field: team.name }
+      pagination: { page_size: 6, page_sizes: [6, 12] }

@@ -218,7 +218,7 @@ def test_layout_variants(react: Binding, tmp_path: Path) -> None:
     files = _files(result)
 
     library = files["src/widgets/layouts/ui/library-layout.tsx"]
-    assert library.index("<SidebarInset>") < library.index("{nav}")
+    assert library.index("<SidebarInset") < library.index("{nav}")
     assert 'const nav = mode === "hidden" ? null : (' in library
     assert '<PageBreadcrumbs className="hidden max-lg:block min-w-0 overflow-hidden" />' in library
     assert "max-lg:[--shell-sidebar-width-icon:var(--size-rail)]" in library
@@ -240,6 +240,72 @@ def test_layout_variants(react: Binding, tmp_path: Path) -> None:
         shell = element.kind in ("layout", "sidebar", "topbar", "content", "menu_item")
         if shell and not element.id.startswith("ui.navigation.unused"):
             assert status[element.id] == "covered", element.id
+
+
+def test_each_list_view_has_a_widget_and_its_page_shows_it(result: GenerationResult) -> None:
+    files = _files(result)
+    for name in ("project-table", "task-board", "task-table", "person-cards", "comment-table"):
+        assert f"src/widgets/{name}/index.ts" in files
+        assert f"src/widgets/{name}/ui/{name}-view.tsx" in files
+    page = files["src/pages/projects/ui/projects-page.tsx"]
+    assert 'import { ProjectTableView } from "@/widgets/project-table";' in page
+    assert "<ProjectTableView /> {/* @trace pages.projects.content */}" in page
+    assert '"@tanstack/react-table": "8.21.3"' in files["package.json"]
+    for path in ("data-table", "filters/date-range-filter", "values/avatar-value"):
+        assert f"src/shared/ui/{path}.tsx" in files
+
+
+def test_a_table_view_follows_its_definition(result: GenerationResult) -> None:
+    table = _files(result)["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert "export function ProjectTableView({ where }: ProjectTableViewProps)" in table
+    assert "personApi.list()," in table
+    assert "{ // @trace ui.views.project_table.columns.name" in table
+    assert 'meta: { width: "var(--size-column-lg)" },' in table
+    assert 'meta: { className: "text-right max-md:hidden" },' in table
+    assert "status: [], // @trace ui.views.project_table.filters.status" in table
+    assert "const PAGE_SIZE = 20; // @trace ui.views.project_table.pagination" in table
+    assert "const PAGE_SIZES: number[] = [10, 20, 50];" in table
+    assert "return sortBy(rows, (row) => row.dueDate);" in table
+    assert "onRowClick={(record) => run(rowActions.open, [record])}" in table
+    assert 'confirmLabel: "Delete",' in table
+    assert 'toast: "The project is deleted.", // @trace' in table
+    assert "          selection\n" in table
+    assert 'import { archiveProject } from "@/features/archive-project";' in table
+
+
+def test_a_board_view_has_its_columns_and_moves_its_cards(result: GenerationResult) -> None:
+    board = _files(result)["src/widgets/task-board/ui/task-board-view.tsx"]
+    assert (
+        '{ value: "in_progress", label: "In progress", color: "var(--status-progress)", '
+        "limit: 8 }, // @trace ui.views.task_board.columns.in_progress"
+    ) in board
+    assert 'return updateTask(record.id, { status: value as Task["status"] });' in board
+    assert "<DropdownMenuLabel>Move to</DropdownMenuLabel>" in board
+    assert '<ViewLoading indicator="skeleton" shape="board" text="Loading the board" />' in board
+
+
+VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"
+
+
+def test_the_view_features_have_traces_for_each_element(react: Binding, tmp_path: Path) -> None:
+    definition = load_definition(VIEWS)
+    result = generate(definition, react)
+    files = _files(result)
+    table = files["src/widgets/item-table/ui/item-table-view.tsx"]
+    assert "function rowActionsFor(lookups: Lookups)" in table
+    assert "const rowActions = rowActionsFor(lookups);" in table
+    assert 'stage: ["new", "open"],' in table
+    cards = files["src/widgets/member-cards/ui/member-cards-view.tsx"]
+    assert '<div className="grid grid-cols-3 gap-4 max-md:grid-cols-1">' in cards
+    assert '<ViewLoading indicator="spinner" shape="cards" text="Loading" />' in cards
+
+    write_result(result, tmp_path, "react")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    for element in iter_elements(definition):
+        if element.id.startswith("ui.views.") and element.kind not in ("sort", "grid"):
+            assert status.get(element.id) in ("covered", "gap"), element.id
 
 
 def test_each_entity_has_a_slice_with_types_meta_mock_data_and_an_api(

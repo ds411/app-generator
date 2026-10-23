@@ -1,0 +1,56 @@
+{{ trace_header("app") }}
+"use client";
+
+import { CalendarIcon, XIcon } from "lucide-react";
+
+import { Button } from "@/shared/ui/button";
+import { Calendar } from "@/shared/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { formatValue } from "@/shared/lib/format";
+import { type DateRange, fromIsoDay, isoDay } from "@/shared/lib/query";
+
+/** A range of days for a date filter. */
+export function DateRangeFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: DateRange;
+  onChange: (value: DateRange) => void;
+}) {
+  const active = Boolean(value.from || value.to);
+  const text = active
+    ? `${formatValue(value.from, "date") || "…"} – ${formatValue(value.to, "date") || "…"}`
+    : label;
+  return (
+    <div className="flex items-center">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 border-dashed">
+            <CalendarIcon />
+            {text}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="range"
+            numberOfMonths={2}
+            selected={ { from: fromIsoDay(value.from), to: fromIsoDay(value.to) } }
+            onSelect={(range) =>
+              onChange({
+                from: range?.from ? isoDay(range.from) : undefined,
+                to: range?.to ? isoDay(range.to) : undefined,
+              })
+            }
+          />
+        </PopoverContent>
+      </Popover>
+      {active && (
+        <Button variant="ghost" size="icon" className="size-8" aria-label={`Clear ${label}`} onClick={() => onChange({})}>
+          <XIcon />
+        </Button>
+      )}
+    </div>
+  );
+}

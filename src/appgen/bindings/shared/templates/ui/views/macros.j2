@@ -1,0 +1,426 @@
+{#- Macros of the list view templates (table, cards, and board). -#}
+
+{% macro imports(plan, shape, lucide=[], react=[], ui=[]) -%}
+{% set ns = namespace(icons=lucide | list) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if plan.filters %}{% set ns.icons = ns.icons + ["XIcon"] %}{% endif %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+{% set react_names = react + (["useState"] if shape != "table" or plan.filters else []) %}
+{% if react_names %}
+import { {{ react_names | unique | sort | join(", ") }} } from "react";
+{% endif %}
+{% if shape == "board" %}
+import { toast } from "sonner";
+{% endif %}
+
+{% for entity in ([plan.entity] + plan.lookups) | unique %}
+import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+{% for line in plan.imports %}
+{{ line }}
+{% endfor %}
+{% set badge_names = ["badges"] if "badges." in plan.code() else [] %}
+{% if plan.needs("badgeOptions") %}{% set badge_names = badge_names + ["badgeOptions"] %}{% endif %}
+{% if badge_names %}
+import { {{ badge_names | join(", ") }} } from "@/shared/config/badges";
+{% endif %}
+{% if plan.needs("formatValue") %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if plan.needs("pageHref") %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% set query = ["sortBy"] %}
+{% if plan.lookups %}{% set query = query + ["byId"] %}{% endif %}
+{% if plan.needs("matchesSearch") %}{% set query = query + ["matchesSearch"] %}{% endif %}
+{% if plan.needs("inDateRange") %}{% set query = query + ["inDateRange"] %}{% endif %}
+{% if shape == "cards" %}{% set query = query + ["pageCount", "pageOf"] %}{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "date_range") | list %}{% set query = query + ["type DateRange"] %}{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "select") | list %}{% set query = query + ["type Option"] %}{% endif %}
+import { {{ query | join(", ") }} } from "@/shared/lib/query";
+{% if "link" in plan.uses %}
+import { Link } from "@/shared/lib/router";
+{% endif %}
+import { useResource } from "@/shared/lib/use-resource";
+{% set actions = [] %}
+{% if plan.actions or plan.bulk_actions %}{% set actions = actions + ["ActionButton"] %}{% endif %}
+{% if plan.actions or plan.row_actions or plan.bulk_actions %}{% set actions = actions + ["type ActionSpec"] %}{% endif %}
+{% if plan.row_actions or shape == "board" %}{% set actions = actions + ["RowActionsMenu"] %}{% endif %}
+{% set actions = actions + ["useActionRunner"] if (plan.actions or plan.row_actions or plan.bulk_actions) else actions %}
+{% if actions %}
+import { {{ actions | join(", ") }} } from "@/shared/ui/actions";
+{% endif %}
+{% for line in ui %}
+{{ line }}
+{% endfor %}
+{% if plan.filters %}
+import { Button } from "@/shared/ui/button";
+{% endif %}
+{% for f in plan.filters | unique(attribute="kind") %}
+{% if f.kind == "search" %}
+import { SearchFilter } from "@/shared/ui/filters/search-filter";
+{% elif f.kind == "boolean" %}
+import { BooleanFilter } from "@/shared/ui/filters/boolean-filter";
+{% elif f.kind == "date_range" %}
+import { DateRangeFilter } from "@/shared/ui/filters/date-range-filter";
+{% endif %}
+{% endfor %}
+{% if plan.filters | selectattr("kind", "eq", "select") | selectattr("multiple") | list %}
+import { MultiSelectFilter } from "@/shared/ui/filters/multi-select-filter";
+{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "select") | rejectattr("multiple") | list %}
+import { SelectFilter } from "@/shared/ui/filters/select-filter";
+{% endif %}
+{% if "avatar" in plan.uses %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "badge" in plan.uses %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "formatted" in plan.uses %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% set state = ["ViewLoading", "ViewMessage"] %}
+{% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
+import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+{%- endmacro %}
+
+{% macro data(plan) -%}
+{% set entities = ([plan.entity] + plan.lookups) | unique | list %}
+{% if plan.lookups %}
+type Lookups = {
+{% for entity in plan.lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+{% else %}
+type Lookups = Record<string, never>;
+{% endif %}
+
+type ViewData = { records: {{ plan.type }}[]; lookups: Lookups };
+
+/** Read the records of the view, and the related records that its fields show. */
+async function load(): Promise<ViewData> {
+  const [{% for entity in entities %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for entity in entities %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return {
+    records: {{ plan.var }}List.items,
+    lookups: { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+  };
+}
+
+/** Load the data again after a change of the records. */
+function subscribe(listener: () => void): () => void {
+  const stops = [{% for entity in entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{%- endmacro %}
+
+{% macro filters(plan) -%}
+{% if plan.filters %}
+type Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: {{ f.state_type }};
+{% endfor %}
+};
+
+const INITIAL_FILTERS: Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: {{ f.default }}, {{ trace(f.element_id) }}
+{% endfor %}
+};
+
+{% set code = plan.filters | map(attribute="match") | join(" ") %}
+/** Return true if a record passes all filters. */
+function matches(row: {{ plan.type }}, filters: Filters, {{ lookups_param(code) }}: Lookups): boolean {
+  return (
+{% for f in plan.filters %}
+    ({{ f.match }}){{ " &&" if not loop.last }}
+{% endfor %}
+  );
+}
+{% set options = plan.filters | selectattr("kind", "eq", "select") | list %}
+{% if options %}
+
+{% set options_code = options | map(attribute="options") | join(" ") %}
+/** Return the options of the select filters. */
+function filterOptions({{ lookups_param(options_code) }}: Lookups): Record<string, Option[]> {
+  return {
+{% for f in options %}
+    {{ f.key }}: {{ f.options }},
+{% endfor %}
+  };
+}
+{% endif %}
+{% endif %}
+{%- endmacro %}
+
+{% macro sort_function(plan) -%}
+{% if plan.sort %}
+
+/** Sort the records as the view defines: {{ plan.sort.path }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
+function sortRecords(rows: {{ plan.type }}[], {{ lookups_param(plan.sort.sort_expr) }}: Lookups): {{ plan.type }}[] { {{ trace(plan.view.sort.id) }}
+  return sortBy(rows, (row) => {{ plan.sort.sort_expr }}{{ ", true" if plan.sort_desc }});
+}
+{% else %}
+
+function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }}[] {
+  return sortBy(rows, (row) => row.id);
+}
+{% endif %}
+{%- endmacro %}
+
+{% macro action_spec(a, records_type) -%}
+  { {{ trace(a.element_id) }}
+    key: {{ js(a.name) }},
+    label: {{ js(a.label) }},
+{% if a.action.icon %}
+    icon: {{ a.action.icon | pascal }}Icon,
+{% endif %}
+{% if a.action.variant != "default" %}
+    variant: {{ js(a.action.variant) }},
+{% endif %}
+{% if a.action.confirm %}
+    confirm: { {{ trace(a.action.confirm.id) }}
+      title: {{ js(a.action.confirm.title) }},
+{% if a.action.confirm.message %}
+      message: {{ js(a.action.confirm.message) }},
+{% endif %}
+{% if a.action.confirm.confirm_label %}
+      confirmLabel: {{ js(a.action.confirm.confirm_label) }},
+{% endif %}
+    },
+{% endif %}
+{% if a.href %}
+    href: ({{ "record: " ~ records_type if "record" in a.href }}) => {{ a.href }},
+{% endif %}
+{% if a.run %}
+    run: ({{ "records: " ~ records_type ~ "[]" if "records" in a.run }}) => {{ a.run }},
+{% endif %}
+{% set on_success = a.action.on_success if a.action.on_success is defined else none %}
+{% if on_success and on_success.toast %}
+    toast: {{ js(on_success.toast) }}, {{ trace(on_success.id) }}
+{% endif %}
+{% if a.navigate_to %}
+    navigateTo: {{ a.navigate_to }},
+{% endif %}
+  },
+{%- endmacro %}
+
+{% macro action_group(name, items, type) -%}
+{% if items %}
+{% set keys = items | map(attribute="name") | map("camel") | map("tojson") | join(" | ") %}
+{% set code = items | map(attribute="href") | select | join(" ") %}
+{% if "lookups." in code %}
+/** The {{ "row" if name == "rowActions" else "bulk" }} actions. Their paths read related records. */
+function {{ name }}For(lookups: Lookups): Record<{{ keys }}, ActionSpec<{{ type }}>> {
+  return {
+{% for a in items %}
+    {{ a.name | camel }}: {{ action_spec(a, type) | trim | indent(2) }}
+{% endfor %}
+  };
+}
+{% else %}
+const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
+{% for a in items %}
+  {{ a.name | camel }}: {{ action_spec(a, type) | trim }}
+{% endfor %}
+};
+{% endif %}
+{% endif %}
+{%- endmacro %}
+
+{% macro action_lookups(plan) -%}
+{% for name, items in (("rowActions", plan.row_actions), ("bulkActions", plan.bulk_actions)) %}
+{% if "lookups." in (items | map(attribute="href") | select | join(" ")) %}
+  const {{ name }} = {{ name }}For(lookups);
+{% endif %}
+{% endfor %}
+{%- endmacro %}
+
+{% macro actions(plan) -%}
+{{ action_group("viewActions", plan.actions, plan.type) }}
+{{ action_group("rowActions", plan.row_actions, plan.type) }}
+{{ action_group("bulkActions", plan.bulk_actions, plan.type) }}
+{%- endmacro %}
+
+{% macro state_action(plan, name) -%}
+{%- set a = plan.action(name) -%}
+<ActionButton action={viewActions.{{ a.name | camel }}} records={[]} onRun={run} />
+{%- endmacro %}
+
+{% macro states(plan, shape) -%}
+{% set s = plan.states %}
+{% for id in plan.state_ids %}
+  {{ trace(id) }}
+{% endfor %}
+  if (resource.status === "loading") {
+    return <ViewLoading indicator={{ js(s.loading.indicator) }} shape={{ js(shape) }}{% if s.loading.text %} text={{ jsx_attr(s.loading.text) }}{% endif %} />;
+  }
+  if (resource.status === "error") {
+    return (
+      <ViewMessage
+        tone="error"
+        title={{ jsx_attr(s.error.title or "Something went wrong") }}
+{% if s.error.text %}
+        text={{ jsx_attr(s.error.text) }}
+{% endif %}
+{% if s.error.icon %}
+        icon={ {{- s.error.icon | pascal }}Icon}
+{% endif %}
+{% if s.error.action == "retry" %}
+        action={<RetryButton onRetry={resource.reload} />}
+{% elif s.error.action and plan.action(s.error.action) %}
+        action={ {{- state_action(plan, s.error.action) }}}
+{% endif %}
+      />
+    );
+  }
+{%- endmacro %}
+
+{% macro empty_state(plan) -%}
+{% set s = plan.states.empty %}
+      <ViewMessage
+        title={{ jsx_attr(s.title or "No records yet") }}
+{% if s.text %}
+        text={{ jsx_attr(s.text) }}
+{% endif %}
+{% if s.icon %}
+        icon={ {{- s.icon | pascal }}Icon}
+{% endif %}
+{% if s.action and plan.action(s.action) %}
+        action={ {{- state_action(plan, s.action) }}}
+{% endif %}
+      />
+{%- endmacro %}
+
+{% macro toolbar(plan) -%}
+{% if plan.filters or plan.actions %}
+      <div className="flex flex-wrap items-center gap-2">
+{% for f in plan.filters %}
+{% if f.kind == "search" %}
+        <SearchFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.kind == "boolean" %}
+        <BooleanFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.kind == "date_range" %}
+        <DateRangeFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.multiple %}
+        <MultiSelectFilter label={{ jsx_attr(f.label) }} options={options.{{ f.key }} ?? []} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% else %}
+        <SelectFilter label={{ jsx_attr(f.label) }} options={options.{{ f.key }} ?? []} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% endif %}
+{% endfor %}
+{% if plan.filters %}
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+            Reset
+            <XIcon />
+          </Button>
+        )}
+{% endif %}
+{% if plan.actions %}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {Object.values(viewActions).map((action) => (
+            <ActionButton key={action.key} action={action} records={[]} onRun={run} />
+          ))}
+        </div>
+{% endif %}
+      </div>
+{%- endif %}
+{%- endmacro %}
+
+
+{% macro record_card(plan, board=false) -%}
+{% set card = plan.card %}
+{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
+/** The card of one record. */
+{% set uses_lookups = "lookups." in code %}
+function RecordCard({
+  row,
+{% if uses_lookups %}
+  lookups,
+{% endif %}
+{% if plan.row_actions or board %}
+  menu,
+{% endif %}
+}: {
+  row: {{ plan.type }};
+{% if uses_lookups %}
+  lookups: Lookups;
+{% endif %}
+{% if plan.row_actions or board %}
+  menu?: ReactNode;
+{% endif %}
+}) {
+  return (
+    <Card className="gap-3 py-4 transition-shadow hover:shadow-md"> {% if card.element_id %}{{ trace(card.element_id, jsx=True) }}{% endif %}
+
+      <CardHeader className="px-4">
+        <CardTitle className="line-clamp-2 text-base leading-snug">
+{% if card.href %}
+          <Link href={ {{- card.href }}} className="underline-offset-4 hover:underline">
+            {{ card.title }}
+          </Link>
+{% else %}
+          {{ card.title }}
+{% endif %}
+        </CardTitle>
+{% if card.subtitle %}
+        <CardDescription className="truncate">{{ card.subtitle }}</CardDescription>
+{% endif %}
+{% if card.badge or plan.row_actions or board %}
+        <CardAction className="flex items-center gap-1">
+{% if card.badge %}
+          {{ card.badge }} {{ trace(card.badge_id, jsx=True) }}
+{% endif %}
+{% if plan.row_actions or board %}
+          {menu}
+{% endif %}
+        </CardAction>
+{% endif %}
+      </CardHeader>
+{% if card.fields %}
+      <CardContent className="px-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+{% for field_label, jsx in card.fields %}
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+            <dd className="truncate">{{ jsx }}</dd>
+          </div>
+{% endfor %}
+        </dl>
+      </CardContent>
+{% endif %}
+{% if card.footer %}
+      <CardFooter className="flex-wrap gap-2 px-4 text-sm text-muted-foreground">
+{% for jsx in card.footer %}
+        {{ jsx }}
+{% endfor %}
+      </CardFooter>
+{% endif %}
+    </Card>
+  );
+}
+{%- endmacro %}
+
+{% macro card_imports(plan, board=false) -%}
+{% set card = plan.card %}
+{% set names = ["Card", "CardHeader", "CardTitle"] %}
+{% if card.subtitle %}{% set names = names + ["CardDescription"] %}{% endif %}
+{% if card.badge or plan.row_actions or board %}{% set names = names + ["CardAction"] %}{% endif %}
+{% if card.fields %}{% set names = names + ["CardContent"] %}{% endif %}
+{% if card.footer %}{% set names = names + ["CardFooter"] %}{% endif %}
+import { {{ names | sort | join(", ") }} } from "@/shared/ui/card";
+{%- endmacro %}
+
+
+{% macro card_uses_lookups(plan) -%}
+{% set card = plan.card %}
+{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
+{{ "yes" if "lookups." in code }}
+{%- endmacro %}

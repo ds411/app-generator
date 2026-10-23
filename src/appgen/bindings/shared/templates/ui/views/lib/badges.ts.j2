@@ -1,0 +1,41 @@
+{{ trace_header("app") }}
+// The badge sets: a label, a color token, and an icon for each enum value.
+import type { LucideIcon } from "lucide-react";
+{% set icons = ui_views.badge_icons %}
+{% if icons %}
+import { {% for icon in icons %}{{ icon | pascal }}Icon{{ ", " if not loop.last }}{% endfor %} } from "lucide-react";
+{% endif %}
+
+import type { Option } from "@/shared/lib/query";
+
+export type BadgeStyle = {
+  label: string;
+  /** A CSS color, for example `var(--status-success)`. */
+  color?: string;
+  icon?: LucideIcon;
+};
+
+export type BadgeSet = Record<string, BadgeStyle>;
+
+export const badges = {
+{% for set_name, badge_set in ui_views.badge_sets.items() %}
+  {{ set_name | camel }}: { {{ trace(badge_set.id) }}
+{% for value_name, value in badge_set["values"].items() %}
+    {{ js(value_name) }}: { {{ trace(value.id) }}
+      label: {{ js(value.label or label(value_name)) }},
+{% if value.color %}
+      color: {{ js(css_var(value.color)) }},
+{% endif %}
+{% if value.icon %}
+      icon: {{ value.icon | pascal }}Icon,
+{% endif %}
+    },
+{% endfor %}
+  },
+{% endfor %}
+} satisfies Record<string, BadgeSet>;
+
+/** Return the options of a select filter from a badge set. */
+export function badgeOptions(set: BadgeSet): Option[] {
+  return Object.entries(set).map(([value, style]) => ({ value, label: style.label }));
+}

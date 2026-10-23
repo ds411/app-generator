@@ -1,10 +1,14 @@
 {{ trace_header(element_id) }}
 {% set params = route_params(element.path) %}
 {% set custom = element.content is not none and element.content.custom %}
-{% if params %}
+{% set view = element.content.view if element.content is not none and element.content.view in ui_views.list_views else none %}
+{% if params and not view %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
 import { PageHeader } from "@/widgets/page-header";
+{% if view %}
+import { {{ view | pascal }}View } from "@/widgets/{{ view | kebab }}";
+{% endif %}
 {% if custom %}
 
 import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
@@ -13,7 +17,7 @@ import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
 export function {{ name | pascal }}Page() {
 {% if custom and element.entity %}
   const params = useParams();
-{% elif params %}
+{% elif params and not view %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
   return (
@@ -26,6 +30,8 @@ export function {{ name | pascal }}Page() {
       />
 {% if custom %}
       <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
+{% elif view %}
+      <{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
 {% else %}
 {% for param in params %}
       <p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>

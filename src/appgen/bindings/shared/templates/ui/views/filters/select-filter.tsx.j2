@@ -1,0 +1,36 @@
+{{ trace_header("app") }}
+"use client";
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+import type { Option } from "@/shared/lib/query";
+
+const ALL = "__all__";
+
+/** A choice of one value, or of all values, for a select filter. */
+export function SelectFilter({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Option[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <Select value={value ?? ALL} onValueChange={(next) => onChange(next === ALL ? null : next)}>
+      <SelectTrigger size="sm" aria-label={label} className="w-full sm:w-44">
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{`${label}: all`}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}

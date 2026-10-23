@@ -169,14 +169,14 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
       }
     >
 {% if sidebar.side == "right" %}
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         {topbar}
         {page}
       </SidebarInset>
       {nav}
 {% else %}
       {nav}
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         {topbar}
         {page}
       </SidebarInset>

@@ -57,3 +57,6 @@ COMPONENT_PACKAGES: dict[str, str] = {
 `appgen.bindings.shared.shadcn` lists the packages of each component.
 A test checks that this mapping has a version for each of them.
 """
+
+TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
+"""The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
