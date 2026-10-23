@@ -1,0 +1,8 @@
+# expect: unknown-reference
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }
+    relations:
+      project: { kind: many_to_one, target: Project }

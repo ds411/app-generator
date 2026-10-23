@@ -1,0 +1,6 @@
+# expect: yaml-syntax
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string }

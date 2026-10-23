@@ -1,0 +1,8 @@
+# expect: duplicate-name
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }
+  TASK:
+    fields: { title: { type: string } }

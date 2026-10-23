@@ -1,0 +1,8 @@
+# expect: duplicate-key
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }
+  Task:
+    fields: { name: { type: string } }

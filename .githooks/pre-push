@@ -68,7 +68,7 @@ check_python() {
 }
 
 # Parts
-if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
+if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
     check_python
 fi
 

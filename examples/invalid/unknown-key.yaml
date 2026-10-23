@@ -1,0 +1,6 @@
+# expect: unknown-key
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string, lenght: 10 } }

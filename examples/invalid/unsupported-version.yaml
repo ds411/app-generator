@@ -1,0 +1,6 @@
+# expect: unsupported-version
+version: 3
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields: { title: { type: string } }

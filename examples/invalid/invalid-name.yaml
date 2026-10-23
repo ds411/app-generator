@@ -1,0 +1,6 @@
+# expect: invalid-name
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  task:
+    fields: { title: { type: string } }

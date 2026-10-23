@@ -1,0 +1,12 @@
+# expect: invalid-inverse
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Project:
+    fields: { name: { type: string } }
+    relations:
+      tasks: { kind: one_to_many, target: Task, inverse: title_of }
+  Task:
+    fields: { title: { type: string } }
+    relations:
+      title_of: { kind: many_to_many, target: Project }

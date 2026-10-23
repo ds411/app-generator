@@ -1,0 +1,6 @@
+# expect: missing-key
+version: 0
+app: { name: broken }
+entities:
+  Task:
+    fields: { title: { type: string } }
