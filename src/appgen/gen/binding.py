@@ -27,6 +27,8 @@ class Output:
     """The output path, relative to the output folder. A Jinja2 template."""
     for_each: ElementKind | None = None
     """The element kind to render the template for, or None to render it once."""
+    extension: bool = False
+    """True for an extension rule: the file is created once and never overwritten (ADR 0005)."""
 
 
 @dataclass(frozen=True, slots=True)

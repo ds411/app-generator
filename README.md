@@ -81,6 +81,15 @@ The rendering is deterministic: a missing template value stops the
 run, the files are sorted by path, and each file has LF line endings
 and one final newline. The golden file tests in `tests/golden/` compare
 the output of the `minimal` binding with committed files.
+
+`write_result()` writes a generation result into an output folder and
+keeps a manifest in `.appgen/manifest.json`. The manifest lists each
+generated file with its SHA-256 hash, and each extension file apart
+(ADR 0005). A new run deletes the generated files that no rule writes
+any more. It stops, and writes nothing, if a generated file has manual
+edits or if a new file would overwrite a file that appgen did not
+make, unless `force` is set. It never overwrites or deletes an
+extension file.
 A binding registers itself with an entry point in the group
 `appgen.bindings` in `pyproject.toml`:
 

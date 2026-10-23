@@ -96,3 +96,13 @@ def test_normalize_path() -> None:
     for bad in ["", "/etc/passwd", "../x", "a/../../x"]:
         with pytest.raises(GenerationError):
             normalize_path(bad)
+
+
+def test_an_extension_rule_makes_an_extension_file(
+    tmp_path: Path, definition: AppDefinition
+) -> None:
+    binding = _binding(
+        tmp_path, {"t.j2": "x"}, (Output("t.j2", "x/{{ name }}.ext", "entity", extension=True),)
+    )
+    first = generate(definition, binding).files[0]
+    assert (first.kind, first.element_id) == ("extension", "entities.Project")

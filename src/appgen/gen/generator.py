@@ -1,7 +1,7 @@
 """Generate the files of a binding from an app definition."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import jinja2
 
@@ -18,6 +18,10 @@ class GeneratedFile:
     path: str
     """The path relative to the output folder, with `/` as separator."""
     content: str
+    kind: Literal["generated", "extension"] = "generated"
+    """A generated file is written on each run. An extension file is created once."""
+    element_id: str | None = None
+    """The element of the output rule, for a rule with `for_each`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +75,12 @@ def _render(
         content = environment.get_template(output.template).render(context)
     except jinja2.UndefinedError as error:
         raise GenerationError(f"The template {where} needs a missing value: {error}") from None
-    return GeneratedFile(normalize_path(path), normalize_content(content))
+    return GeneratedFile(
+        normalize_path(path),
+        normalize_content(content),
+        kind="extension" if output.extension else "generated",
+        element_id=context.get("element_id"),
+    )
 
 
 def _contexts(
