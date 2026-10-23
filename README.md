@@ -28,17 +28,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 
 ## Commands
 
-| Task                 | Command                                             |
-| -------------------- | --------------------------------------------------- |
-| Show the CLI help    | `uv run appgen --help`                              |
-| Lint                 | `uv run ruff check`                                 |
-| Check the formatting | `uv run ruff format --check`                        |
-| Format the code      | `uv run ruff format`                                |
-| Type check           | `uv run pyright`                                    |
-| Test                 | `uv run pytest`                                     |
-| Run all hook checks  | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null` |
-| Update golden files  | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`              |
-| Update the schema    | `uv run appgen schema --out schema/app.schema.json` |
+| Task                  | Command                                                    |
+| --------------------- | ---------------------------------------------------------- |
+| Show the CLI help     | `uv run appgen --help`                                     |
+| Validate a definition | `uv run appgen validate examples/project-tracker/app.yaml` |
+| Lint                  | `uv run ruff check`                                        |
+| Check the formatting  | `uv run ruff format --check`                               |
+| Format the code       | `uv run ruff format`                                       |
+| Type check            | `uv run pyright`                                           |
+| Test                  | `uv run pytest`                                            |
+| Run all hook checks   | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null`        |
+| Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
+| Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
 
 ## Layout
 
