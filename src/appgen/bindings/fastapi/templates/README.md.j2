@@ -45,12 +45,18 @@ its settings from environment variables or from a `.env` file (see
 
 ## Local database
 
-To run the API without a Postgres server, use SQLite. Set this URL in
-`.env`, then migrate the database and start the API:
+To run the API without a Postgres server, use SQLite. Write the URL
+into `.env`, then migrate the database and start the API:
 
 ```sh
-DATABASE_URL=sqlite+aiosqlite:///./local.db
+printf 'DATABASE_URL=sqlite+aiosqlite:///./local.db\n' > .env
+uv run alembic upgrade head
+uv run fastapi dev app/main.py
 ```
+
+The API and Alembic read `DATABASE_URL` from `.env` or from an
+exported environment variable. A shell variable that you do not export
+has no effect.
 
 The database is the file `local.db`. The models and the migrations work
 on both databases. Use Postgres in production: SQLite has one writer at

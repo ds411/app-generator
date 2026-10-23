@@ -159,38 +159,39 @@ applies the migrations when it starts.
    uv sync
    ```
 
-2. Copy the settings file:
+2. Write the settings file `.env` for SQLite:
 
    ```sh
-   cp .env.example .env
+   printf 'DATABASE_URL=sqlite+aiosqlite:///./local.db\n' > .env
    ```
 
-3. Set `DATABASE_URL` in `.env` to a SQLite file:
+   The API and Alembic read `DATABASE_URL` from `.env`. Do not only set
+   `DATABASE_URL` in the shell: a shell variable that you do not export
+   has no effect. SQLite keeps the data in the file `local.db`.
 
-   ```sh
-   DATABASE_URL=sqlite+aiosqlite:///./local.db
-   ```
-
-   To use the Postgres container instead, set the URL of its FastAPI
+   To use the Postgres container instead, write the URL of its FastAPI
    database:
 
    ```sh
-   DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/project_tracker_api
+   printf 'DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/project_tracker_api\n' > .env
    ```
 
-4. Apply the migrations:
+3. Apply the migrations:
 
    ```sh
    uv run alembic upgrade head
    ```
 
-5. Start the API:
+   The output shows `Context impl SQLiteImpl.` for SQLite and
+   with `Context impl PostgresqlImpl.` for Postgres.
+
+4. Start the API:
 
    ```sh
    uv run fastapi dev app/main.py
    ```
 
-6. Open <http://localhost:8000/docs> for the API documentation.
+5. Open <http://localhost:8000/docs> for the API documentation.
    `GET /health` gives `{"status":"ok"}`.
 
 To run the tests of the app, run `uv run pytest`. The tests start their
