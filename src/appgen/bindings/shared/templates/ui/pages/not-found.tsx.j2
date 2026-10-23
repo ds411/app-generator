@@ -1,0 +1,19 @@
+{{ trace_header("app") }}
+"use client";
+
+import { Button } from "@/shared/ui/button";
+import { Link } from "@/shared/lib/router";
+
+/** The page for a path that no page has. */
+export function NotFoundPage() {
+  return (
+    <div className="flex flex-col items-center gap-4 py-24 text-center">
+      <p className="text-sm font-medium text-muted-foreground">404</p>
+      <h1 className="{{ ui_plan.text_class('heading', 'text-2xl font-semibold tracking-tight') }}">This page does not exist</h1>
+      <p className="text-muted-foreground">Make sure that the address is correct.</p>
+      <Button asChild>
+        <Link href="/">Go to the start page</Link>
+      </Button>
+    </div>
+  );
+}

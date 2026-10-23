@@ -1,0 +1,32 @@
+{{ trace_header("app") }}
+// The pages of the app: the paths, the titles, and the parents. The
+// breadcrumbs, the search, and the links use them.
+
+export type PageName = {{ ui_plan.pages | map("camel") | map("tojson") | join(" | ") or "never" }};
+
+export type PageInfo = {
+  /** The path, with a `{name}` segment for each parameter. */
+  path: string;
+  title: string;
+  /** The label in the breadcrumbs. */
+  breadcrumb: string;
+  parent: PageName | null;
+  /** The entity whose record the page shows, if the breadcrumb shows the record. */
+  recordEntity: string | null;
+  /** The path parameter with the ID of that record. */
+  recordParam: string | null;
+};
+
+export const pages: Record<PageName, PageInfo> = {
+{% for page_name, info in ui_plan.pages.items() %}
+{% set crumb = info.crumbs[-1] %}
+  {{ page_name | camel }}: { {{ trace(info.page.id) }}
+    path: {{ js(info.page.path) }},
+    title: {{ js(info.page.title) }},
+    breadcrumb: {{ js(crumb[1]) }},
+    parent: {{ js(info.parent | camel) if info.parent else "null" }},
+    recordEntity: {{ js(info.page.entity) if crumb[2] else "null" }},
+    recordParam: {{ js(info.params[-1]) if crumb[2] else "null" }},
+  },
+{% endfor %}
+};

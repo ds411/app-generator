@@ -224,6 +224,15 @@ They use the template globals of `appgen.bindings.shared.typescript`
 (`HELPERS`), which both bindings add. A binding template with the same
 path wins over a shared template.
 
+`ui/` holds the shared UI code: the app shell (layouts, menus,
+breadcrumbs, page search, page header, and the 404 page) for now. The
+templates render the values of `appgen.bindings.shared.ui`, and they are
+client components that import only `@/shared/*`, `@/widgets/*`,
+`@/features/*`, and `@/entities/<entity>`. Each binding writes
+`@/shared/lib/router` with `Link` (prop `href`), `useNavigate`,
+`usePathname`, and `useParams`, so that the same UI code works with the
+router of each binding.
+
 ### React binding
 
 `appgen generate <definition> -b react -o <dir>` writes a standalone
@@ -239,6 +248,17 @@ The UI uses Tailwind CSS and shadcn/ui. The binding takes the shadcn/ui
 components from the shared templates (`src/appgen/bindings/shared/`),
 and writes into `src/shared/ui` only the components that the UI of the
 definition uses, with their npm packages.
+
+Each layout of the definition is an app shell in `src/widgets/layouts`:
+a shadcn/ui sidebar with the menu, a top bar with the breadcrumbs, the
+page search (Ctrl+K), and the mode toggle, the content region, and a
+footer. The router puts each page in its layout (the page layout, else
+`ui.defaults.layout`), and unknown paths show a 404 page. The menu marks
+the active route. The breadcrumbs come from the page paths, and a page of
+a record shows the display field of the record. The responsive rules of
+the layout change the sidebar mode (expanded, icons, drawer, or hidden),
+the widths, the top bar parts, and the content padding on screens
+narrower than each breakpoint token.
 
 The theme comes from the design tokens, with the shared template
 `theme/globals.css.j2`: one CSS variable for each token, with a light and

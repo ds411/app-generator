@@ -19,6 +19,7 @@ from appgen.bindings.shared.typescript import (
     members,
     to_json,
 )
+from appgen.bindings.shared.ui import ui_plan
 from appgen.dsl.model import AppDefinition
 
 __all__ = ["HELPERS", "Member", "context", "members", "mock_records", "to_json"]
@@ -86,6 +87,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
+        "ui_plan": ui_plan(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",
             "mode_toggle": shadcn.has_mode_toggle(definition),

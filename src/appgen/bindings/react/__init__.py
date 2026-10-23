@@ -10,7 +10,7 @@ from pathlib import Path
 from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
-from appgen.bindings.shared import shadcn
+from appgen.bindings.shared import shadcn, ui
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -49,6 +49,70 @@ _HOOKS = tuple(
 )
 
 
+# The app shell: the layouts, the menus, the breadcrumbs, and the search
+# (shared templates, see `appgen.bindings.shared.ui`).
+_APP_SHELL = (
+    Output(template="ui/config/pages.ts.j2", path="src/shared/config/pages.ts"),
+    Output(template="ui/lib/pages.ts.j2", path="src/shared/lib/pages.ts"),
+    Output(template="ui/lib/use-media-query.ts.j2", path="src/shared/lib/use-media-query.ts"),
+    Output(template="ui/lib/use-resource.ts.j2", path="src/shared/lib/use-resource.ts"),
+    Output(template="src/shared/lib/router.tsx.j2", path="src/shared/lib/router.tsx"),
+    Output(
+        template="ui/widgets/layout/layout.tsx.j2",
+        path="src/widgets/layouts/ui/{{ name | kebab }}-layout.tsx",
+        for_each="layout",
+    ),
+    Output(
+        template="ui/widgets/layout/index.ts.j2",
+        path="src/widgets/layouts/index.ts",
+        when="ui_plan.layouts",
+    ),
+    Output(
+        template="ui/widgets/navigation/menu.tsx.j2",
+        path="src/widgets/navigation/ui/{{ name | kebab }}-menu.tsx",
+        for_each="menu",
+        when="name in ui_plan.menus",
+    ),
+    Output(
+        template="ui/widgets/navigation/index.ts.j2",
+        path="src/widgets/navigation/index.ts",
+        when="ui_plan.menus",
+    ),
+    *(
+        Output(
+            template=f"ui/widgets/breadcrumbs/{template}.j2",
+            path=f"src/widgets/page-breadcrumbs/{path}",
+            when="ui_plan.breadcrumbs",
+        )
+        for template, path in (
+            ("index.ts", "index.ts"),
+            ("page-breadcrumbs.tsx", "ui/page-breadcrumbs.tsx"),
+            ("record-labels.ts", "model/record-labels.ts"),
+        )
+    ),
+    Output(
+        template="ui/features/search-pages/index.ts.j2",
+        path="src/features/search-pages/index.ts",
+        when="ui_plan.search",
+    ),
+    Output(
+        template="ui/features/search-pages/page-search.tsx.j2",
+        path="src/features/search-pages/ui/page-search.tsx",
+        when="ui_plan.search",
+    ),
+    Output(template="ui/widgets/page-header/index.ts.j2", path="src/widgets/page-header/index.ts"),
+    Output(
+        template="ui/widgets/page-header/page-header.tsx.j2",
+        path="src/widgets/page-header/ui/page-header.tsx",
+    ),
+    Output(template="src/pages/not-found/index.ts.j2", path="src/pages/not-found/index.ts"),
+    Output(
+        template="ui/pages/not-found.tsx.j2",
+        path="src/pages/not-found/ui/not-found-page.tsx",
+    ),
+)
+
+
 def _gap_rules(template: str, suffix: str, kind: str, when: str | None = None) -> list[Output]:
     """Return the rules of the generated file and the extension file of a gap."""
     return [
@@ -82,6 +146,7 @@ BINDING = Binding(
         Output(template="src/app/main.tsx.j2", path="src/app/main.tsx"),
         Output(template="src/app/app.tsx.j2", path="src/app/app.tsx"),
         Output(template="src/app/router.tsx.j2", path="src/app/router.tsx"),
+        *_APP_SHELL,
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
         Output(template="src/layer.md.j2", path="src/features/README.md"),
@@ -172,9 +237,12 @@ BINDING = Binding(
     covers=frozenset(
         {"app", "page", "entity", "field", "relation", "operation", "param"}
         | {"theme", "tokens", "token_group", "token"}
+        | {"layout", "sidebar", "topbar", "content", "footer"}
+        | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
+        | {"menu", "menu_group", "menu_item", "menu_sub_item"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,
     filters={"json": to_json},
-    helpers=HELPERS | {"gap_spec": gap_spec},
+    helpers=HELPERS | ui.HELPERS | {"gap_spec": gap_spec},
 )

@@ -36,4 +36,11 @@ export default tseslint.config(
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    // The router module exports a link component and the router hooks.
+    files: ["src/shared/lib/router.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

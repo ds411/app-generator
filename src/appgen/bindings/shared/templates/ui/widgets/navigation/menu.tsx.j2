@@ -1,0 +1,119 @@
+{{ trace_header(element_id) }}
+{% set icons = menu_icons(element) %}
+{% set collapsible = element.groups.values() | selectattr("collapsible") | list %}
+{% set has_sub = menu_has_sub_items(element) %}
+{% set has_label = collapsible or element.groups.values() | selectattr("label") | list %}
+"use client";
+
+{% if collapsible or icons %}
+import { {% if collapsible %}ChevronRightIcon, {% endif %}{% for icon in icons %}{{ icon | pascal }}Icon{{ ", " if not loop.last }}{% endfor %} } from "lucide-react";
+{% endif %}
+
+{% if collapsible %}
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui/collapsible";
+{% endif %}
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+{% if has_label %}
+  SidebarGroupLabel,
+{% endif %}
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+{% if has_sub %}
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+{% endif %}
+} from "@/shared/ui/sidebar";
+import { isActivePath, pageHref } from "@/shared/lib/pages";
+import { Link, usePathname } from "@/shared/lib/router";
+
+{% macro menu_item(item_name, item) %}
+          <SidebarMenuItem> {{ trace(item.id, jsx=True) }}
+            <SidebarMenuButton asChild isActive={isActivePath(pageHref({{ js(item.page | camel) }}), pathname)} tooltip={{ jsx_attr(item.label or ui_plan.pages[item.page].page.title) }}>
+              <Link href={pageHref({{ js(item.page | camel) }})}>
+                <{{ (item.icon or "circle") | pascal }}Icon />
+                <span>{{ jsx_text(item.label or ui_plan.pages[item.page].page.title) }}</span>
+              </Link>
+            </SidebarMenuButton>
+{% if item["items"] %}
+            <SidebarMenuSub>
+{% for sub_name, sub in item["items"].items() %}
+              <SidebarMenuSubItem> {{ trace(sub.id, jsx=True) }}
+                <SidebarMenuSubButton asChild isActive={isActivePath(pageHref({{ js(sub.page | camel) }}), pathname)}>
+                  <Link href={pageHref({{ js(sub.page | camel) }})}>
+{% if sub.icon %}
+                    <{{ sub.icon | pascal }}Icon />
+{% endif %}
+                    <span>{{ jsx_text(sub.label or ui_plan.pages[sub.page].page.title) }}</span>
+                  </Link>
+                </SidebarMenuSubButton>
+              </SidebarMenuSubItem>
+{% endfor %}
+            </SidebarMenuSub>
+{% endif %}
+          </SidebarMenuItem>
+{% endmacro %}
+/** The menu {{ js(name) }}: its items, and its groups of items. */
+export function {{ name | pascal }}Menu() {
+  const pathname = usePathname();
+  return (
+    <>
+{% if element["items"] %}
+      <SidebarGroup>
+        <SidebarMenu>
+{% for item_name, item in element["items"].items() %}
+{{ menu_item(item_name, item) }}
+{%- endfor %}
+        </SidebarMenu>
+      </SidebarGroup>
+{% endif %}
+{% for group_name, group in element.groups.items() %}
+{% if group.collapsible %}
+      <Collapsible defaultOpen className="group/collapsible"> {{ trace(group.id, jsx=True) }}
+        <SidebarGroup>
+          <SidebarGroupLabel asChild>
+            <CollapsibleTrigger>
+{% if group.icon %}
+              <{{ group.icon | pascal }}Icon className="mr-2" />
+{% endif %}
+              {{ jsx_text(group.label or label(group_name)) }}
+              <ChevronRightIcon className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
+            </CollapsibleTrigger>
+          </SidebarGroupLabel>
+          <CollapsibleContent>
+            <SidebarGroupContent>
+              <SidebarMenu>
+{% for item_name, item in group["items"].items() %}
+{{ menu_item(item_name, item) | indent(4, first=True) }}
+{%- endfor %}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </CollapsibleContent>
+        </SidebarGroup>
+      </Collapsible>
+{% else %}
+      <SidebarGroup> {{ trace(group.id, jsx=True) }}
+{% if group.label %}
+        <SidebarGroupLabel>
+{% if group.icon %}
+          <{{ group.icon | pascal }}Icon className="mr-2" />
+{% endif %}
+          {{ jsx_text(group.label) }}
+        </SidebarGroupLabel>
+{% endif %}
+        <SidebarGroupContent>
+          <SidebarMenu>
+{% for item_name, item in group["items"].items() %}
+{{ menu_item(item_name, item) | indent(2, first=True) }}
+{%- endfor %}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+{% endif %}
+{% endfor %}
+    </>
+  );
+}

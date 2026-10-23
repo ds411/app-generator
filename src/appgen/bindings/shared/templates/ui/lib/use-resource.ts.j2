@@ -1,0 +1,41 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useEffect, useState } from "react";
+
+export type Resource<T> =
+  | { status: "loading" }
+  | { status: "error"; error: unknown }
+  | { status: "success"; data: T };
+
+/**
+ * Load data, and load it again when the key changes or when `subscribe`
+ * reports a change. `load` must give the data of the key.
+ */
+export function useResource<T>(
+  key: string,
+  load: () => Promise<T>,
+  subscribe?: (listener: () => void) => () => void,
+): Resource<T> & { reload: () => void } {
+  const [state, setState] = useState<{ key: string; resource: Resource<T> } | null>(null);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    load().then(
+      (data) => active && setState({ key, resource: { status: "success", data } }),
+      (error: unknown) => active && setState({ key, resource: { status: "error", error } }),
+    );
+    return () => {
+      active = false;
+    };
+    // The key identifies the data of `load`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, version]);
+
+  useEffect(() => subscribe?.(() => setVersion((value) => value + 1)), [subscribe]);
+
+  const reload = () => setVersion((value) => value + 1);
+  if (state === null || state.key !== key) return { status: "loading", reload };
+  return { ...state.resource, reload };
+}

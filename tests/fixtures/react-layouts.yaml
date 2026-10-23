@@ -1,0 +1,70 @@
+# Layout variants for the app shell tests of the React binding: a right
+# sidebar that hides on small screens, a menu with sub-items, a layout
+# without a sidebar, and a page without a layout.
+version: 0
+app: { name: layouts, title: Layouts }
+entities:
+  Book:
+    display_field: title
+    fields:
+      title: { type: string, required: true }
+  Chapter:
+    display_field: heading
+    fields:
+      heading: { type: string, required: true }
+    relations:
+      book: { kind: many_to_one, target: Book, required: true }
+operations:
+  list_books: { kind: list, entity: Book }
+pages:
+  home: { path: /, title: Home, layout: plain }
+  books: { path: /books, title: Books, entity: Book }
+  book_detail: { path: "/books/{id}", title: Book, entity: Book }
+  chapter_detail: { path: "/books/{book_id}/chapters/{id}", title: Chapter, entity: Chapter }
+  settings: { path: /settings, title: Settings, breadcrumb: Preferences }
+  about: { path: /about, title: About, layout: bare }
+ui:
+  theme: { default_mode: dark, mode_toggle: true }
+  tokens:
+    breakpoint:
+      sm: { $value: 640px }
+      lg: { $value: 1024px }
+    size:
+      wide: { $value: 20rem }
+      rail: { $value: 4rem }
+    spacing:
+      4: { $value: 1rem }
+  layouts:
+    library:
+      sidebar: { navigation: main, side: right, width: "{size.wide}" }
+      topbar: { breadcrumbs: false, mode_toggle: false, search: false }
+      responsive:
+        lg:
+          sidebar: { mode: icons, width: "{size.rail}" }
+          topbar: { breadcrumbs: true, search: true }
+        sm:
+          sidebar: { mode: hidden }
+          topbar: { mode_toggle: true }
+          content: { padding: "{spacing.4}" }
+    plain:
+      topbar: { breadcrumbs: true }
+      content: { max_width: "{size.wide}" }
+    bare:
+      content: {}
+  navigation:
+    main:
+      items:
+        books:
+          page: books
+          icon: book-open
+          items:
+            settings: { page: settings, icon: settings }
+      groups:
+        other:
+          items:
+            home: { page: home }
+    unused:
+      items:
+        about: { page: about }
+  defaults:
+    layout: library

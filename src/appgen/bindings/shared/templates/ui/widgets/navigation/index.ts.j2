@@ -1,0 +1,4 @@
+{{ trace_header("app") }}
+{% for menu_name in ui_plan.menus %}
+export { {{ menu_name | pascal }}Menu } from "./ui/{{ menu_name | kebab }}-menu";
+{% endfor %}

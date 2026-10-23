@@ -1,0 +1,36 @@
+{{ trace_header("app") }}
+// The router interface of the shared UI code. The UI imports links and
+// router hooks from this module, not from React Router, so that the same
+// UI code works with the router of each front-end binding.
+import type { ComponentProps } from "react";
+import {
+  Link as RouterLink,
+  useLocation,
+  useNavigate as useRouterNavigate,
+  useParams as useRouterParams,
+} from "react-router";
+
+export type LinkProps = Omit<ComponentProps<typeof RouterLink>, "to"> & { href: string };
+
+/** A link to a path of the app. */
+export function Link({ href, ...props }: LinkProps) {
+  return <RouterLink to={href} {...props} />;
+}
+
+/** Return a function that opens a path of the app. */
+export function useNavigate(): (href: string) => void {
+  const navigate = useRouterNavigate();
+  return (href) => {
+    void navigate(href);
+  };
+}
+
+/** Return the path of the current page, for example `/projects/42`. */
+export function usePathname(): string {
+  return useLocation().pathname;
+}
+
+/** Return the path parameters of the current page. */
+export function useParams(): Record<string, string | undefined> {
+  return useRouterParams();
+}

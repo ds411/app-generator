@@ -1,19 +1,52 @@
 {{ trace_header("app") }}
-import { createBrowserRouter } from "react-router";
+{% set default_layout = definition.ui.defaults.layout if definition.ui and definition.ui.defaults else none %}
+{% set used_layouts = ui_plan.layouts | select("in", ui_plan.pages.values() | map(attribute="layout") | list + [default_layout]) | list %}
+{% set bare_pages = ui_plan.pages_of(none) %}
+{% set use_root = bare_pages or not default_layout %}
+import { createBrowserRouter{% if used_layouts %}, Outlet{% endif %} } from "react-router";
 
 {% for page_name in definition.pages %}
 import { {{ page_name | pascal }}Page } from "@/pages/{{ page_name | kebab }}";
 {% endfor %}
+import { NotFoundPage } from "@/pages/not-found";
+{% if used_layouts %}
+import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{ ", " if not loop.last }}{% endfor %} } from "@/widgets/layouts";
+{% endif %}
+{% if use_root %}
 
 import { RootLayout } from "./layout/root-layout";
+{% endif %}
 
+// The pages, grouped by layout. Each layout shows its pages in the outlet.
 export const router = createBrowserRouter([
+{% for layout_name in used_layouts %}
+  {
+    element: (
+      <{{ layout_name | pascal }}Layout>
+        <Outlet />
+      </{{ layout_name | pascal }}Layout>
+    ),
+    children: [
+{% for info in ui_plan.pages_of(layout_name) %}
+      { path: {{ route_path(info.page.path) | tojson }}, element: <{{ info.name | pascal }}Page /> }, {{ trace(info.page.id) }}
+{% endfor %}
+{% if layout_name == default_layout %}
+      { path: "*", element: <NotFoundPage /> },
+{% endif %}
+    ],
+  },
+{% endfor %}
+{% if use_root %}
   {
     element: <RootLayout />,
     children: [
-{% for page_name, page in definition.pages.items() %}
-      { path: {{ route_path(page.path) | tojson }}, element: <{{ page_name | pascal }}Page /> }, {{ trace(page.id) }}
+{% for info in bare_pages %}
+      { path: {{ route_path(info.page.path) | tojson }}, element: <{{ info.name | pascal }}Page /> }, {{ trace(info.page.id) }}
 {% endfor %}
+{% if not default_layout %}
+      { path: "*", element: <NotFoundPage /> },
+{% endif %}
     ],
   },
+{% endif %}
 ]);
