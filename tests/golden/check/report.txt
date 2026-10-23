@@ -1,0 +1,35 @@
+Trace check: 2 files, 6 traces.
+
+Invalid traces: 2
+  app.py:10:19: unknown-element: The definition has no element 'entities.Task.fields.titel'.
+    @trace entities.Task.fields.titel
+    hint: Did you mean 'entities.Task.fields.title'?
+  operations.ts:4:6: unknown-kind: The trace kind 'todo' is not known.
+    @trace:todo operations.list_tasks
+    hint: The kinds are: generated, gap, manual.
+
+Uncovered elements: 8
+  entities.Project.fields.status (field)
+  entities.Project.relations.tasks (relation)
+  entities.Task.fields.title (field)
+  entities.Task.fields.due_date (field)
+  entities.Task.relations.project (relation)
+  operations.create_task (operation)
+  operations.list_tasks (operation)
+  pages.projects (page)
+
+Open gaps: 1
+  operations.complete_task (operation): operations.ts:1
+
+Coverage:
+  kind       covered  gaps  uncovered  coverage
+  app              1     0          0   100.0 %
+  entity           2     0          0   100.0 %
+  field            2     0          3    40.0 %
+  relation         0     0          2     0.0 %
+  operation        0     1          2     0.0 %
+  page             0     0          1     0.0 %
+  all              5     1          8    35.7 %
+  Excluded kinds: param.
+
+Result: failed: 2 invalid traces and the coverage 35.7 % is lower than 50.0 %.

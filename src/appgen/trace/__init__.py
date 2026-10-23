@@ -7,6 +7,15 @@ from appgen.trace.coverage import (
     KindCoverage,
     compute_coverage,
 )
+from appgen.trace.report import (
+    REPORT_VERSION,
+    CheckReport,
+    ReportFormat,
+    check_traces,
+    render,
+    render_json,
+    render_text,
+)
 from appgen.trace.scanner import (
     DEFAULT_IGNORE,
     TRACE_KINDS,
@@ -26,18 +35,25 @@ from appgen.trace.validity import (
 
 __all__ = [
     "DEFAULT_IGNORE",
+    "REPORT_VERSION",
     "TRACE_KINDS",
+    "CheckReport",
     "CoverageReport",
     "CoverageStatus",
     "ElementCoverage",
     "KindCoverage",
+    "ReportFormat",
     "ScanResult",
     "Trace",
     "TraceProblem",
+    "check_traces",
     "comment_openers",
     "compute_coverage",
     "find_invalid_traces",
     "generated_outside_output",
+    "render",
+    "render_json",
+    "render_text",
     "scan_folder",
     "scan_text",
     "unknown_elements",
