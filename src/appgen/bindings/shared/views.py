@@ -30,6 +30,7 @@ from appgen.dsl.ui.views import (
     TableView,
     View,
 )
+from appgen.gen.binding import Output
 from appgen.gen.naming import camel, pascal, words
 
 type ValueKind = Literal["field", "id", "one", "many"]
@@ -829,3 +830,65 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "grid_classes": grid_classes,
 }
 """The helpers of the view templates."""
+
+
+_VIEW = "src/widgets/{{ name | kebab }}"
+
+
+def view_rules() -> tuple[Output, ...]:
+    """Return the output rules of the list views: tables, card lists, and boards.
+
+    Each view is a widget. The runtime files of the views are in the app
+    only if a view needs them. The bindings that use the views put
+    `ViewContext` in their context as `ui_views`, and the view helpers
+    (`HELPERS`) in their helpers.
+    """
+    return (
+        *(
+            Output(template=f"ui/views/{template}", path=path, when=when)
+            for template, path, when in (
+                ("lib/format.ts.j2", "src/shared/lib/format.ts", "ui_views.list_views"),
+                ("lib/query.ts.j2", "src/shared/lib/query.ts", "ui_views.list_views"),
+                ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.list_views"),
+                ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.list_views"),
+                ("ui/view-state.tsx.j2", "src/shared/ui/view-state.tsx", "ui_views.list_views"),
+                (
+                    "ui/list-pagination.tsx.j2",
+                    "src/shared/ui/list-pagination.tsx",
+                    "'table' in ui_views.features or 'cards' in ui_views.features",
+                ),
+                (
+                    "ui/data-table.tsx.j2",
+                    "src/shared/ui/data-table.tsx",
+                    "'table' in ui_views.features",
+                ),
+                *(
+                    (f"{folder}/{part}.tsx.j2", f"src/shared/ui/{folder}/{part}.tsx", when)
+                    for folder, part, when in (
+                        ("values", "badge-value", "'badge' in ui_views.features"),
+                        ("values", "avatar-value", "'avatar' in ui_views.features"),
+                        ("values", "formatted-value", "'formatted' in ui_views.features"),
+                        ("filters", "search-filter", "'search' in ui_views.features"),
+                        ("filters", "boolean-filter", "'boolean' in ui_views.features"),
+                        ("filters", "date-range-filter", "'date_range' in ui_views.features"),
+                        ("filters", "select-filter", "'select' in ui_views.features"),
+                        ("filters", "multi-select-filter", "'multi_select' in ui_views.features"),
+                    )
+                ),
+            )
+        ),
+        *(
+            Output(
+                template=f"ui/views/{kind}-view.tsx.j2",
+                path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
+                for_each=f"{kind}_view",
+            )
+            for kind in ("table", "cards", "board")
+        ),
+        *(
+            Output(
+                template="ui/views/index.ts.j2", path=_VIEW + "/index.ts", for_each=f"{kind}_view"
+            )
+            for kind in ("table", "cards", "board")
+        ),
+    )

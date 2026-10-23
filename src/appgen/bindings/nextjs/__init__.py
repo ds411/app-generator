@@ -12,7 +12,7 @@ from pathlib import Path
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
-from appgen.bindings.shared import shadcn, typescript, ui
+from appgen.bindings.shared import shadcn, typescript, ui, views
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.gen.binding import Binding, Output
 
@@ -140,6 +140,7 @@ BINDING = Binding(
         ),
         Output(template="app/layout.tsx.j2", path="app/layout.tsx"),
         *_APP_SHELL,
+        *views.view_rules(),
         Output(
             template="app/page.tsx.j2",
             path="{{ nextjs.pages[name].route_file }}",
@@ -225,10 +226,16 @@ BINDING = Binding(
     covers=frozenset(
         {"app", "page", "entity", "field", "relation", "operation", "param"}
         | {"theme", "tokens", "token_group", "token"}
+        | {"layout", "sidebar", "topbar", "content", "footer"}
+        | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
+        | {"menu", "menu_group", "menu_item", "menu_sub_item"}
+        | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
+        | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
+        | {"badge_set", "badge_value"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": typescript.to_json},
-    helpers=typescript.HELPERS | ui.HELPERS | {"gap_spec": gap_spec},
+    helpers=typescript.HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
 )

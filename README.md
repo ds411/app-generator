@@ -166,7 +166,11 @@ menus, the top bar with the breadcrumbs, the page search, and the color
 mode switch. Pages without a layout are in `app/(bare)/`, and
 `app/not-found.tsx` shows the 404 page in the default layout. The
 shared UI code imports `@/shared/lib/router`, which the binding writes
-with `next/link` and `next/navigation`. Each element
+with `next/link` and `next/navigation`. Each table, card list, and
+board view is a widget in `src/widgets/<view>` from the shared view
+templates, and a page with the view as its content shows it. The views
+read and change the records with the server actions of the entity
+slices. Each element
 of a kind that the binding does not cover yet gets an extension file in
 `src/gaps/`. The app gets the shadcn/ui components that its UI uses, in
 `src/shared/ui/`, and their npm packages. The theme in
@@ -251,7 +255,8 @@ views in `ui/views/` (tables, card lists, and boards, with their filters,
 actions, states, and value formats). The app shell templates render the
 values of `appgen.bindings.shared.ui`, and the view templates render the
 `ViewPlan` of each view from `appgen.bindings.shared.views` (the
-template global `ui_views`). The templates are
+template global `ui_views`, with the output rules of
+`views.view_rules()`). The templates are
 client components that import only `@/shared/*`, `@/widgets/*`,
 `@/features/*`, and `@/entities/<entity>`. Each binding writes
 `@/shared/lib/router` with `Link` (prop `href`), `useNavigate`,

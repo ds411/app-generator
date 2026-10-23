@@ -13,6 +13,7 @@ from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.ui import ui_plan
+from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
 from appgen.gen.naming import kebab, pascal
 
@@ -105,6 +106,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         **versions.UI_DEPENDENCIES,
         **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
     }
+    if "table" in ViewContext(definition).features:
+        dependencies |= versions.TABLE_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,
@@ -146,6 +149,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
+        "ui_views": ViewContext(definition),
         "nextjs": {
             "default_layout": default_layout,
             "groups": [(layout, route_group(layout)) for layout in sorted(groups, key=str)],

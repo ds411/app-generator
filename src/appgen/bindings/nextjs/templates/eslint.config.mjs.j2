@@ -19,8 +19,11 @@ export default defineConfig([
   {
     // The shadcn/ui sources break two rules of the React Compiler on
     // purpose (a random skeleton width, and a media query in an effect).
+    // The data table uses TanStack Table, which the React Compiler does
+    // not memoize.
     files: ["src/shared/ui/**", "src/shared/lib/use-*.ts"],
     rules: {
+      "react-hooks/incompatible-library": "off",
       "react-hooks/purity": "off",
       "react-hooks/set-state-in-effect": "off",
     },

@@ -14,7 +14,14 @@ from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.model import route_dir
 from appgen.bindings.shared import shadcn
 from appgen.dsl import AppDefinition, load_definition, load_definition_text
-from appgen.gen import Binding, GenerationResult, find_binding, generate, write_result
+from appgen.gen import (
+    Binding,
+    GenerationResult,
+    find_binding,
+    generate,
+    iter_elements,
+    write_result,
+)
 from appgen.trace import check_traces
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
@@ -419,3 +426,54 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     assert "DATABASE_URL: postgres://postgres:postgres@db:5432/project_tracker" in compose
     assert 'DATABASE_MIGRATE: "true"' in compose
     assert "condition: service_healthy" in compose
+
+
+def test_each_list_view_has_a_widget_and_its_page_shows_it(result: GenerationResult) -> None:
+    files = _files(result)
+    for name in ("project-table", "task-board", "task-table", "person-cards", "comment-table"):
+        assert f"src/widgets/{name}/index.ts" in files
+        assert f"src/widgets/{name}/ui/{name}-view.tsx" in files
+    page = files["src/pages/projects/ui/projects-page.tsx"]
+    assert '// @trace pages.projects file\n"use client";' in page
+    assert 'import { ProjectTableView } from "@/widgets/project-table";' in page
+    assert "<ProjectTableView /> {/* @trace pages.projects.content */}" in page
+    assert '"@tanstack/react-table": "8.21.3"' in files["package.json"]
+    assert '"react-hooks/incompatible-library": "off",' in files["eslint.config.mjs"]
+    for path in ("data-table", "filters/date-range-filter", "values/avatar-value"):
+        assert f"src/shared/ui/{path}.tsx" in files
+
+
+def test_the_views_use_the_server_actions_of_the_entities(result: GenerationResult) -> None:
+    files = _files(result)
+    table = files["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert "personApi.list()," in table
+    assert 'import { archiveProject } from "@/features/archive-project";' in table
+    board = files["src/widgets/task-board/ui/task-board-view.tsx"]
+    assert 'return updateTask(record.id, { status: value as Task["status"] });' in board
+    assert "  updateTask,\n" in files["src/entities/task/index.ts"]
+
+
+VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"
+
+
+def test_each_view_element_has_a_trace(nextjs: Binding, tmp_path: Path) -> None:
+    definition = load_definition(VIEWS)
+    result = generate(definition, nextjs)
+    write_result(result, tmp_path, "nextjs")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    for element in iter_elements(definition):
+        if element.id.startswith("ui.views.") and element.kind not in ("sort", "grid"):
+            assert status.get(element.id) in ("covered", "gap"), element.id
+
+
+def test_the_app_shell_and_the_views_are_covered(
+    definition: AppDefinition, result: GenerationResult, tmp_path: Path
+) -> None:
+    write_result(result, tmp_path, "nextjs")
+    status = {e.element_id: e.status for e in check_traces(definition, tmp_path).coverage.elements}
+    kinds = {"layout", "menu", "menu_item", "table_view", "board_view", "cards_view", "column"}
+    for element in iter_elements(definition):
+        if element.kind in kinds:
+            assert status[element.id] == "covered", element.id
