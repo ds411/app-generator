@@ -22,6 +22,24 @@ so put hand-written code there.
 | Type check    | `pnpm typecheck` |
 | Build         | `pnpm build`     |
 | Run the build | `pnpm start`     |
+| Write the migrations | `pnpm db:generate` |
+| Apply the migrations | `pnpm db:migrate`  |
+
+## Database
+
+The app uses Postgres with Drizzle ORM. Copy `.env.example` to
+`.env.local`, and set `DATABASE_URL`. The schema is in
+`src/shared/db/schema/`. `pnpm db:generate` writes the SQL migrations
+into `drizzle/`: keep them in version control. With
+`DATABASE_MIGRATE=true`, the server applies them when it starts.
+
+## Docker
+
+`docker compose up --build` starts Postgres and the app on
+<http://localhost:3000>. The app applies the migrations when it starts.
+The `Dockerfile` builds a standalone Next.js server that runs as a
+non-root user. If `drizzle/` does not exist, the build writes the first
+migration from the schema.
 
 ## Structure
 
