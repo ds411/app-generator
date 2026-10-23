@@ -1,32 +1,38 @@
 {% set info = nextjs.pages[name] %}
+{% set custom = element.content is not none and element.content.custom %}
 {{ trace_header(element_id) }}
-{% if nextjs.mode_toggle %}
-import { ModeToggle } from "@/features/toggle-theme";
+"use client";
 
-{% endif %}
 {% if info.params %}
-export type {{ info.component }}Props = {
-  params: { {% for param in info.params %}{{ param }}: string{{ "; " if not loop.last }}{% endfor %} };
-};
+import { useParams } from "@/shared/lib/router";
+{% endif %}
+import { PageHeader } from "@/widgets/page-header";
+{% if custom %}
 
-export function {{ info.component }}({ params }: {{ info.component }}Props) {
-{% else %}
+import { {{ name | pascal }}Content } from "./{{ info.slice }}-content.gen";
+{% endif %}
+
 export function {{ info.component }}() {
+{% if custom and element.entity %}
+  const params = useParams();
+{% elif info.params %}
+  const { {% for param in info.params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-2 p-6">
-      <header className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">{{ element.title }}</h1>
-{% if nextjs.mode_toggle %}
-        <ModeToggle />
-{% endif %}
-      </header>
+    <>
+      <PageHeader
+        title={{ jsx_attr(element.title) }}
 {% if element.description %}
-      <p className="text-muted-foreground">{{ element.description }}</p>
+        description={{ jsx_attr(element.description) }}
 {% endif %}
+      />
+{% if custom %}
+      <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
+{% else %}
 {% for param in info.params %}
-      <p className="text-sm text-muted-foreground">{{ param }}: {params.{{ param }}}</p>
+      <p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>
 {% endfor %}
-    </main>
+{% endif %}
+    </>
   );
 }

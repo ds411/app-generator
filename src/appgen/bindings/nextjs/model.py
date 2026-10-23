@@ -12,6 +12,7 @@ from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.theme import build_theme
+from appgen.bindings.shared.ui import ui_plan
 from appgen.dsl.model import AppDefinition, Page
 from appgen.gen.naming import kebab, pascal
 
@@ -43,11 +44,13 @@ class PageInfo:
     """The route folder in `app/`, for example `projects/[id]`, or `` for `/`."""
     params: tuple[str, ...]
     """The names of the path parameters, for example `("id",)`."""
+    group: str
+    """The route group of the layout of the page, for example `(app-shell)`."""
 
     @property
     def route_file(self) -> str:
-        """The path of the route file, for example `app/projects/[id]/page.tsx`."""
-        return "/".join(part for part in ("app", self.route_dir, "page.tsx") if part)
+        """The path of the route file, for example `app/(app-shell)/projects/[id]/page.tsx`."""
+        return "/".join(part for part in ("app", self.group, self.route_dir, "page.tsx") if part)
 
 
 def route_dir(path: str) -> tuple[str, tuple[str, ...]]:
@@ -68,8 +71,17 @@ def route_dir(path: str) -> tuple[str, tuple[str, ...]]:
     return "/".join(parts), tuple(params)
 
 
-def page_info(name: str, page: Page) -> PageInfo:
-    """Return the names and the paths of a page."""
+BARE_GROUP = "(bare)"
+"""The route group of the pages without a layout."""
+
+
+def route_group(layout: str | None) -> str:
+    """Return the route group of a layout: `app_shell` gives `(app-shell)`."""
+    return f"({kebab(layout)})" if layout else BARE_GROUP
+
+
+def page_info(name: str, page: Page, layout: str | None = None) -> PageInfo:
+    """Return the names and the paths of a page with its effective layout."""
     folder, params = route_dir(page.path)
     return PageInfo(
         name=name,
@@ -78,6 +90,7 @@ def page_info(name: str, page: Page) -> PageInfo:
         component=f"{pascal(name)}Page",
         route_dir=folder,
         params=params,
+        group=route_group(layout),
     )
 
 
@@ -118,15 +131,24 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
-    pages = {name: page_info(name, page) for name, page in definition.pages.items()}
+    plan = ui_plan(definition)
+    pages = {
+        name: page_info(name, page, plan.pages[name].layout)
+        for name, page in definition.pages.items()
+    }
     components = shadcn.used_components(definition)
     ui = definition.ui
+    default_layout = ui.defaults.layout if ui is not None and ui.defaults else None
+    groups = {info.layout for info in plan.pages.values()}
     theme = ui.theme if ui is not None else None
     tables = build_tables(definition)
     return {
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
+        "ui_plan": plan,
         "nextjs": {
+            "default_layout": default_layout,
+            "groups": [(layout, route_group(layout)) for layout in sorted(groups, key=str)],
             "default_mode": theme.default_mode if theme is not None else "system",
             "mode_toggle": shadcn.has_mode_toggle(definition),
             "shadcn": [component.name for component in components],

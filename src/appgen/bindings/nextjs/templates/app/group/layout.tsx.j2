@@ -1,0 +1,9 @@
+{{ trace_header(element_id) }}
+import type { ReactNode } from "react";
+
+import { {{ name | pascal }}Layout } from "@/widgets/layouts";
+
+/** The route group of the pages with the layout {{ name }}. */
+export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
+  return <{{ name | pascal }}Layout>{children}</{{ name | pascal }}Layout>;
+}

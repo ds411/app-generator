@@ -159,7 +159,14 @@ minimal = "appgen.bindings.minimal:BINDING"
 Next.js 16 app: the App Router, TypeScript in strict mode, Tailwind
 CSS, and pnpm. The Next.js `app/` folder in the root holds only the
 routes. Each route renders a page slice of Feature-Sliced Design in
-`src/pages`, and the other FSD layers are in `src/` too. Each element
+`src/pages`, and the other FSD layers are in `src/` too. Each layout of
+`ui.layouts` with pages is a route group (`app/(app-shell)/`) whose
+`layout.tsx` renders the shared layout widget: the sidebar with the
+menus, the top bar with the breadcrumbs, the page search, and the color
+mode switch. Pages without a layout are in `app/(bare)/`, and
+`app/not-found.tsx` shows the 404 page in the default layout. The
+shared UI code imports `@/shared/lib/router`, which the binding writes
+with `next/link` and `next/navigation`. Each element
 of a kind that the binding does not cover yet gets an extension file in
 `src/gaps/`. The app gets the shadcn/ui components that its UI uses, in
 `src/shared/ui/`, and their npm packages. The theme in

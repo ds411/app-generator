@@ -1,0 +1,48 @@
+{{ trace_header("app") }}
+"use client";
+
+// The router interface of the shared UI code. The UI imports links and
+// router hooks from this module, not from Next.js, so that the same UI
+// code works with the router of each front-end binding.
+import NextLink from "next/link";
+import {
+  useParams as useNextParams,
+  usePathname as useNextPathname,
+  useRouter,
+} from "next/navigation";
+import { type ComponentProps, useMemo } from "react";
+
+export type LinkProps = Omit<ComponentProps<typeof NextLink>, "href"> & { href: string };
+
+/** A link to a path of the app. */
+export function Link(props: LinkProps) {
+  return <NextLink {...props} />;
+}
+
+/** Return a function that opens a path of the app. */
+export function useNavigate(): (href: string) => void {
+  const router = useRouter();
+  return (href) => {
+    router.push(href);
+  };
+}
+
+/** Return the path of the current page, for example `/projects/42`. */
+export function usePathname(): string {
+  return useNextPathname() ?? "/";
+}
+
+/** Return the path parameters of the current page. */
+export function useParams(): Record<string, string | undefined> {
+  const params = useNextParams();
+  return useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(params ?? {}).map(([key, value]) => [
+          key,
+          Array.isArray(value) ? value[0] : value,
+        ]),
+      ),
+    [params],
+  );
+}

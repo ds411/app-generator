@@ -1,0 +1,22 @@
+{{ trace_header("app") }}
+import { NotFoundPage } from "@/pages/not-found";
+{% if nextjs.default_layout %}
+import { {{ nextjs.default_layout | pascal }}Layout } from "@/widgets/layouts";
+{% endif %}
+
+/** The page for a path that no route has. */
+export default function NotFound() {
+{% if nextjs.default_layout %}
+  return (
+    <{{ nextjs.default_layout | pascal }}Layout>
+      <NotFoundPage />
+    </{{ nextjs.default_layout | pascal }}Layout>
+  );
+{% else %}
+  return (
+    <main className="p-6">
+      <NotFoundPage />
+    </main>
+  );
+{% endif %}
+}
