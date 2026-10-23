@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from appgen.dsl.model import AppDefinition
+from appgen.gen.manifest import Manifest, read_manifest
 from appgen.trace.coverage import CoverageReport, ElementCoverage, KindCoverage, compute_coverage
 from appgen.trace.scanner import DEFAULT_IGNORE, Trace, TraceProblem, scan_folder
 from appgen.trace.validity import find_invalid_traces, valid_traces
@@ -55,9 +56,22 @@ def check_traces(
     exclude_kinds: Iterable[str] = (),
     generated_files: Collection[str] | None = None,
     min_coverage: float | None = None,
+    use_manifest: bool = True,
 ) -> CheckReport:
-    """Scan a code folder, and compare its traces with a definition."""
+    """Scan a code folder, and compare its traces with a definition.
+
+    If `use_manifest` is true and the folder has an output manifest, the
+    manifest gives the generated files (unless `generated_files` is
+    given), and the traces of the generated files that cannot hold
+    comments. Raise ManifestError if the manifest cannot be read.
+    """
     scan = scan_folder(code_folder, ignore=ignore, use_gitignore=use_gitignore)
+    manifest = read_manifest(Path(code_folder)) if use_manifest else None
+    if manifest is not None:
+        if generated_files is None:
+            generated_files = set(manifest.generated)
+        scan.traces.extend(manifest_traces(manifest))
+        scan.traces.sort()
     invalid = find_invalid_traces(definition, scan, generated_files)
     traces = valid_traces(scan, invalid)
     excluded = sorted(set(exclude_kinds))
@@ -69,6 +83,26 @@ def check_traces(
         excluded_kinds=excluded,
         min_coverage=None if min_coverage is None else float(min_coverage),
     )
+
+
+def manifest_traces(manifest: Manifest) -> list[Trace]:
+    """Return the file traces that the manifest gives for the files that cannot hold comments.
+
+    These traces have no position in their file, so their line and column are 0.
+    """
+    return [
+        Trace(
+            file=path,
+            line=0,
+            column=0,
+            element_id=element_id,
+            kind="generated",
+            scope="file",
+            text=f"@trace {element_id} file",
+        )
+        for path, ids in sorted(manifest.traces.items())
+        for element_id in ids
+    ]
 
 
 def render(report: CheckReport, format: ReportFormat) -> str:

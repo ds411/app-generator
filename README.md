@@ -150,3 +150,9 @@ exit code is 0 if the check passes, and 1 if there is an invalid trace
 or if the coverage is lower than `--min-coverage <percent>`. It is 2
 if the definition is not valid. `--exclude-kind <kind>` and
 `--ignore <pattern>` take more than one value if you repeat them.
+
+If the code folder has an output manifest (`.appgen/manifest.json`),
+the check reads the list of generated files and the traces of the files
+without comments (for example JSON files) from it. Then a `generated`
+trace in a file that appgen did not write is an invalid trace. The
+pre-push hook runs the check on the output of the test binding.
