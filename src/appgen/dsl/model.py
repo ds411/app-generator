@@ -9,7 +9,9 @@ from pydantic import JsonValue, PrivateAttr, StringConstraints
 
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
+from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
+from appgen.dsl.ui.page import PageContent
 
 DSL_VERSION = 0
 """The DSL version that this loader reads."""
@@ -96,9 +98,17 @@ class Page(Element):
     """A screen of a front-end app."""
 
     path: Annotated[str, StringConstraints(pattern=r"^/")]
+    """The route of the page, for example `/projects/{id}`."""
     title: Text
     entity: EntityName | None = None
     description: Text | None = None
+    layout: MemberName | None = None
+    """A layout in `ui.layouts`. The default is `ui.defaults.layout`."""
+    content: PageContent | None = None
+    actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
+    """The actions in the page header."""
+    breadcrumb: Text | None = None
+    """The label of the page in the breadcrumbs. The default is the title."""
 
 
 class App(Element):
