@@ -227,8 +227,8 @@ def _resolve(path: DataPath) -> tuple[type[BaseModel] | None, int]:
     position = 0
     while position < len(path):
         info = model.model_fields.get(str(path[position]))
-        child = _child_model(info.annotation) if info else None
-        if info is None or child is None:
+        children = _child_models(info.annotation) if info else []
+        if info is None or not children:
             return None, end
         if _is_mapping(info.annotation):
             # The next part is the key of the mapping, for example the entity name.
@@ -237,8 +237,14 @@ def _resolve(path: DataPath) -> tuple[type[BaseModel] | None, int]:
             position += 2
         else:
             position += 1
-        model = child
         end = position
+        if len(children) > 1:
+            # A union, for example of views: take a member that has the next key.
+            following = str(path[position]) if position < len(path) else None
+            children = [child for child in children if following in child.model_fields]
+            if not children:
+                return None, end
+        model = children[0]
     return model, end
 
 
@@ -254,13 +260,15 @@ def _is_mapping(annotation: object) -> bool:
     return get_origin(_unwrap(annotation)) is dict
 
 
-def _child_model(annotation: object) -> type[BaseModel] | None:
-    """Return the model in an annotation, or None if it has no model or more than one."""
+def _child_models(annotation: object) -> list[type[BaseModel]]:
+    """Return the models in an annotation, for example the members of a union."""
     annotation = _unwrap(annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation
-    found = {model for arg in get_args(annotation) if (model := _child_model(arg)) is not None}
-    return found.pop() if len(found) == 1 else None
+        return [annotation]
+    models: list[type[BaseModel]] = []
+    for arg in get_args(annotation):
+        models += [model for model in _child_models(arg) if model not in models]
+    return models
 
 
 def _literal_choices(expected: str) -> list[str]:

@@ -54,6 +54,489 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
     },
+    "BadgeRef": {
+      "additionalProperties": false,
+      "description": "A field that shows as a badge.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "badge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "title": "BadgeRef",
+      "type": "object"
+    },
+    "BadgeSet": {
+      "additionalProperties": false,
+      "description": "A label, a color, and an icon for each value of an enum field.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/FieldRef"
+        },
+        "values": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BadgeValue"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "title": "BadgeSet",
+      "type": "object"
+    },
+    "BadgeValue": {
+      "additionalProperties": false,
+      "description": "The look of one enum value.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "BadgeValue",
+      "type": "object"
+    },
+    "BoardColumn": {
+      "additionalProperties": false,
+      "description": "The look of a column of a board: one enum value.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        }
+      },
+      "title": "BoardColumn",
+      "type": "object"
+    },
+    "BoardView": {
+      "additionalProperties": false,
+      "description": "Cards in columns, one column for each value of an enum field.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "kind": {
+          "const": "board",
+          "title": "Kind",
+          "type": "string"
+        },
+        "group_by": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BoardColumn"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Card"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "move": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Row Actions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity",
+        "kind",
+        "group_by"
+      ],
+      "title": "BoardView",
+      "type": "object"
+    },
+    "BooleanFilter": {
+      "additionalProperties": false,
+      "description": "A yes or no filter on a boolean field.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonScalar"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/JsonScalar"
+              },
+              "type": "array"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "kind": {
+          "const": "boolean",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "BooleanFilter",
+      "type": "object"
+    },
+    "Card": {
+      "additionalProperties": false,
+      "description": "The content of a card in a card list or a board.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "badge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BadgeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "footer": {
+          "items": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "title": "Footer",
+          "type": "array"
+        }
+      },
+      "title": "Card",
+      "type": "object"
+    },
+    "CardsView": {
+      "additionalProperties": false,
+      "description": "A grid of cards.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Filter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Row Actions",
+          "type": "object"
+        },
+        "kind": {
+          "const": "cards",
+          "title": "Kind",
+          "type": "string"
+        },
+        "card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Card"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "entity",
+        "kind"
+      ],
+      "title": "CardsView",
+      "type": "object"
+    },
     "ColorMode": {
       "enum": [
         "light",
@@ -61,6 +544,98 @@
         "system"
       ],
       "type": "string"
+    },
+    "Column": {
+      "additionalProperties": false,
+      "description": "A column of a table.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Format"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "badge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "align": {
+          "default": "start",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "sortable": {
+          "default": true,
+          "title": "Sortable",
+          "type": "boolean"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Column",
+      "type": "object"
     },
     "Confirm": {
       "additionalProperties": false,
@@ -190,6 +765,55 @@
       "title": "CustomAction",
       "type": "object"
     },
+    "DateRangeFilter": {
+      "additionalProperties": false,
+      "description": "A range of dates.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonScalar"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/JsonScalar"
+              },
+              "type": "array"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "kind": {
+          "const": "date_range",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "DateRangeFilter",
+      "type": "object"
+    },
     "Defaults": {
       "additionalProperties": false,
       "description": "Values that apply when a UI element does not set them.",
@@ -207,10 +831,30 @@
             }
           ],
           "default": null
+        },
+        "page_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Size"
         }
       },
       "title": "Defaults",
       "type": "object"
+    },
+    "Direction": {
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "type": "string"
     },
     "Entity": {
       "additionalProperties": false,
@@ -454,6 +1098,10 @@
       "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$",
       "type": "string"
     },
+    "FieldRef": {
+      "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$",
+      "type": "string"
+    },
     "FieldType": {
       "enum": [
         "string",
@@ -470,6 +1118,22 @@
         "json"
       ],
       "type": "string"
+    },
+    "Filter": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SearchFilter"
+        },
+        {
+          "$ref": "#/$defs/SelectFilter"
+        },
+        {
+          "$ref": "#/$defs/BooleanFilter"
+        },
+        {
+          "$ref": "#/$defs/DateRangeFilter"
+        }
+      ]
     },
     "Footer": {
       "additionalProperties": false,
@@ -559,9 +1223,74 @@
       "title": "FormAction",
       "type": "object"
     },
+    "Format": {
+      "enum": [
+        "text",
+        "number",
+        "currency",
+        "percent",
+        "date",
+        "datetime",
+        "relative_time",
+        "boolean",
+        "badge",
+        "email",
+        "url",
+        "avatar"
+      ],
+      "type": "string"
+    },
+    "Grid": {
+      "additionalProperties": false,
+      "description": "A column grid.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "columns": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Columns",
+          "type": "integer"
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Grid",
+      "type": "object"
+    },
     "IconName": {
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
+    },
+    "JsonScalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "JsonValue": {},
     "Layout": {
@@ -1173,6 +1902,38 @@
       "title": "PageContent",
       "type": "object"
     },
+    "Pagination": {
+      "additionalProperties": false,
+      "description": "The pages of a list.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "page_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Size"
+        },
+        "page_sizes": {
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": "Page Sizes",
+          "type": "array"
+        }
+      },
+      "title": "Pagination",
+      "type": "object"
+    },
     "Relation": {
       "additionalProperties": false,
       "description": "A relation from one entity to another entity.",
@@ -1252,6 +2013,114 @@
       ],
       "type": "string"
     },
+    "SearchFilter": {
+      "additionalProperties": false,
+      "description": "A text search in one or more fields.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonScalar"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/JsonScalar"
+              },
+              "type": "array"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "kind": {
+          "const": "search",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "SearchFilter",
+      "type": "object"
+    },
+    "SelectFilter": {
+      "additionalProperties": false,
+      "description": "A choice of enum values or related records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonScalar"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/JsonScalar"
+              },
+              "type": "array"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "kind": {
+          "const": "select",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "multiple": {
+          "default": false,
+          "title": "Multiple",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "SelectFilter",
+      "type": "object"
+    },
     "Sidebar": {
       "additionalProperties": false,
       "description": "The sidebar region of a layout.",
@@ -1328,6 +2197,162 @@
         "hidden"
       ],
       "type": "string"
+    },
+    "Sort": {
+      "additionalProperties": false,
+      "description": "A sort order.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "default": "asc"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "title": "Sort",
+      "type": "object"
+    },
+    "TableView": {
+      "additionalProperties": false,
+      "description": "A table of records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Filter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Row Actions",
+          "type": "object"
+        },
+        "kind": {
+          "const": "table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Column"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "row_click": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "selection": {
+          "default": false,
+          "title": "Selection",
+          "type": "boolean"
+        },
+        "bulk_actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Bulk Actions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity",
+        "kind",
+        "columns"
+      ],
+      "title": "TableView",
+      "type": "object"
     },
     "Text": {
       "minLength": 1,
@@ -1703,6 +2728,26 @@
           "title": "Navigation",
           "type": "object"
         },
+        "badges": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BadgeSet"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Badges",
+          "type": "object"
+        },
+        "views": {
+          "additionalProperties": {
+            "$ref": "#/$defs/View"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Views",
+          "type": "object"
+        },
         "defaults": {
           "anyOf": [
             {
@@ -1727,6 +2772,19 @@
         "destructive"
       ],
       "type": "string"
+    },
+    "View": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TableView"
+        },
+        {
+          "$ref": "#/$defs/CardsView"
+        },
+        {
+          "$ref": "#/$defs/BoardView"
+        }
+      ]
     }
   },
   "additionalProperties": false,
