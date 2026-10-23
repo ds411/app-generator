@@ -1,0 +1,46 @@
+{{ trace_header("app") }}
+
+# {{ app.title }}
+
+{% if app.description %}
+{{ app.description }}
+
+{% endif %}
+appgen generated this Next.js 16 app from the app definition
+`{{ app.name }}`. Do not edit the generated files: change the app
+definition, and generate the app again. Files with `.ext.` in the name
+are extension files. appgen creates them once and never changes them,
+so put hand-written code there.
+
+## Commands
+
+| Task          | Command          |
+| ------------- | ---------------- |
+| Install       | `pnpm install`   |
+| Run (dev)     | `pnpm dev`       |
+| Lint          | `pnpm lint`      |
+| Type check    | `pnpm typecheck` |
+| Build         | `pnpm build`     |
+| Run the build | `pnpm start`     |
+
+## Structure
+
+The code follows [Feature-Sliced Design](https://feature-sliced.design).
+The Next.js `app/` folder holds only the routes. Each route renders a
+page from the FSD `pages` layer. The FSD layers are in `src/`. A layer
+imports only the layers below it:
+
+| Layer | Content |
+| ----- | ------- |
+{% for layer, text in nextjs.layers %}
+| `src/{{ layer }}` | {{ text }} |
+{% endfor %}
+
+The empty `pages/` folder in the root stops Next.js from reading
+`src/pages` as routes of the Pages Router.
+
+## Traces
+
+Comments such as `// @trace pages.projects` refer to the elements of
+the app definition. `appgen check` reads them and reports the elements
+without code and the traces that are not valid.

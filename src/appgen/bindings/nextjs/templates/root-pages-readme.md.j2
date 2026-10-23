@@ -1,0 +1,8 @@
+{{ trace_header("app") }}
+
+# pages
+
+This folder is empty on purpose. Next.js reads routes from `pages/` in
+the root, if the folder exists, and else from `src/pages`. The FSD
+`pages` layer is in `src/pages`, so this folder keeps Next.js from
+reading the FSD pages as routes. The routes are in `app/`.

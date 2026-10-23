@@ -1,0 +1,19 @@
+{{ trace_header("app") }}
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+
+import "@/app/styles/globals.css";
+import { appConfig } from "@/shared/config";
+
+export const metadata: Metadata = {
+  title: { default: appConfig.title, template: `%s · ${appConfig.title}` },
+  description: appConfig.description,
+};
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <html lang="en">
+      <body className="min-h-svh antialiased">{children}</body>
+    </html>
+  );
+}

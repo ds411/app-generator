@@ -1,0 +1,9 @@
+{{ trace_header(element_id) }}
+// TODO(appgen): the Next.js binding does not generate code for the {{ element_kind }}
+// `{{ element_id }}`. Write the code by hand, here or in a better place with
+// the same trace. Then change the kind of the trace from gap to manual.
+{% if element.description is defined and element.description %}
+//
+// {{ element.description }}
+{% endif %}
+export {};

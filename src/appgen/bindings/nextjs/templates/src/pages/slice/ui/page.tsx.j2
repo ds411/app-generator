@@ -1,0 +1,23 @@
+{% set info = nextjs.pages[name] %}
+{{ trace_header(element_id) }}
+{% if info.params %}
+export type {{ info.component }}Props = {
+  params: { {% for param in info.params %}{{ param }}: string{{ "; " if not loop.last }}{% endfor %} };
+};
+
+export function {{ info.component }}({ params }: {{ info.component }}Props) {
+{% else %}
+export function {{ info.component }}() {
+{% endif %}
+  return (
+    <main className="mx-auto flex max-w-5xl flex-col gap-2 p-6">
+      <h1 className="text-2xl font-semibold tracking-tight">{{ element.title }}</h1>
+{% if element.description %}
+      <p className="text-muted-foreground">{{ element.description }}</p>
+{% endif %}
+{% for param in info.params %}
+      <p className="text-sm text-muted-foreground">{{ param }}: {params.{{ param }}}</p>
+{% endfor %}
+    </main>
+  );
+}

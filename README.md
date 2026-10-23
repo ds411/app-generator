@@ -51,7 +51,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/dsl/`      | The app definition DSL: the model, the loader, and checks.  |
 | `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
-| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, and `react` writes a React 19 app. |
+| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, `nextjs` writes a Next.js 16 app, and `react` writes a React 19 app. |
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
@@ -142,6 +142,22 @@ A binding registers itself with an entry point in the group
 ```toml
 [project.entry-points."appgen.bindings"]
 minimal = "appgen.bindings.minimal:BINDING"
+```
+
+### Next.js binding
+
+`appgen generate <definition> -b nextjs -o <dir>` writes a full-stack
+Next.js 16 app: the App Router, TypeScript in strict mode, Tailwind
+CSS, and pnpm. The Next.js `app/` folder in the root holds only the
+routes. Each route renders a page slice of Feature-Sliced Design in
+`src/pages`, and the other FSD layers are in `src/` too. Each element
+of a kind that the binding does not cover yet gets an extension file in
+`src/gaps/`. The exact package versions are in
+`src/appgen/bindings/nextjs/versions.py`. To try the output:
+
+```sh
+uv run appgen generate examples/project-tracker/app.yaml -b nextjs -o /tmp/tracker-next
+cd /tmp/tracker-next && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 ```
 
 ### React binding
