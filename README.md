@@ -488,3 +488,10 @@ the check reads the list of generated files and the traces of the files
 without comments (for example JSON files) from it. Then a `generated`
 trace in a file that appgen did not write is an invalid trace. The
 pre-push hook runs the check on the output of the test binding.
+
+When the definition changes, a new run regenerates the generated files
+and keeps the extension files. A trace in hand-written code to an element
+that the change renames or removes is then an invalid trace, so
+`appgen check` shows the drift until the developer updates the code.
+`tests/test_definition_change.py` proves this for each binding: it adds a
+field, renames an entity, and removes a page in a copy of the example.
