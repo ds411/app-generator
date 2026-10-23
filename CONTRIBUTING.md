@@ -18,6 +18,7 @@ the generated code refer back to the app definition.
 - [Definition of done](#definition-of-done)
 - [Generated code](#generated-code)
 - [Tooling](#tooling)
+- [Pre-push hook](#pre-push-hook)
 - [AI-assisted work](#ai-assisted-work)
 
 ## Workflow
@@ -27,9 +28,9 @@ the generated code refer back to the app definition.
 3. Make a branch from `main`.
 4. Make commits that follow the commit format.
 5. Open a pull request that closes the story.
-6. Merge the pull request with "Squash and merge" when the checks pass
-   and the review is complete. Use the squash commit message from the
-   pull request description.
+6. Merge the pull request with "Squash and merge" when the pre-push
+   hook passes and the review is complete. Use the squash commit
+   message from the pull request description.
 
 ## Planning
 
@@ -168,16 +169,16 @@ Refs #14
 - Link each story that the pull request completes with `Closes #<n>`.
 - Keep one story in one pull request where possible.
 - Open the pull request as a draft until it is ready for review.
-- Merge with "Squash and merge" only after the checks pass and the
-  review is complete.
+- Merge with "Squash and merge" only after the pre-push hook passes
+  and the review is complete.
 
 ## Definition of done
 
 A story is done when all these conditions are true:
 
 - All acceptance criteria are true.
-- Tests for the change exist and pass in CI.
-- Lint and type checks pass.
+- Tests for the change exist and pass in the pre-push hook.
+- Lint and type checks pass in the pre-push hook.
 - For changes to the generator or a binding:
   - A second generation run gives the same output (no diff).
   - The generated example apps build.
@@ -208,6 +209,30 @@ A story is done when all these conditions are true:
   TypeScript apps. Each generated app has a Dockerfile.
 - The README gives the setup, lint, and test commands for this
   repository. The first code changes add them.
+
+## Pre-push hook
+
+We run no CI on pull requests, because GitHub Actions minutes cost
+money. A git pre-push hook runs the checks instead. Enable it once per
+clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+- `.githooks/pre-push` runs the checks of each part that the push
+  changes, and stops the push if a check fails. For the Python part,
+  the checks are `ruff check`, `ruff format --check`, `pyright`, and
+  `pytest`.
+- The hook checks the working tree. Push from a clean working tree, so
+  that the hook checks the pushed code.
+- To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.
+- Do not skip the hook with `git push --no-verify` for a pull request
+  that is ready for review.
+- When you add a part (for example a binding), add its checks and its
+  path patterns to the hook.
+- Claude Code sessions enable the hook with a SessionStart hook in
+  `.claude/settings.json`.
 
 ## AI-assisted work
 
