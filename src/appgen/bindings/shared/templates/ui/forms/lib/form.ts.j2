@@ -66,3 +66,21 @@ export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
   }
 }
 
+/**
+ * Return the form errors of an error of a submit. A server error with
+ * issues (for example a `ValidationError` of a server action) puts each
+ * message on its field.
+ */
+export function submitErrors(error: unknown): FormErrors {
+  const message = error instanceof Error ? error.message : "The form did not save.";
+  const errors: FormErrors = { _form: message };
+  const issues: unknown = error instanceof Error && "issues" in error ? error.issues : undefined;
+  if (Array.isArray(issues)) {
+    for (const issue of issues as { path?: unknown; message?: unknown }[]) {
+      if (typeof issue.path !== "string" || typeof issue.message !== "string") continue;
+      const key = issue.path.split(".")[0] || "_form";
+      if (key !== "_form") errors[key] ??= issue.message;
+    }
+  }
+  return errors;
+}

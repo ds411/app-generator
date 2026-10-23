@@ -171,7 +171,11 @@ board view is a widget in `src/widgets/<view>` from the shared view
 templates, and a page with the view as its content shows it. Each
 detail view and dashboard is a widget from the shared templates too: a
 page with a detail view shows the record of the ID in its path, and a
-page with a dashboard shows its widgets. The views
+page with a dashboard shows its widgets. Each form is a feature slice
+in `src/features/<form>-form` from the shared form templates: it opens
+in a dialog, a sheet, or a page, as the definition says, and checks the
+input with the same zod schemas as the server actions. A server error
+shows its messages on the fields. The views and the forms
 read and change the records with the server actions of the entity
 slices. Each element
 of a kind that the binding does not cover yet gets an extension file in
