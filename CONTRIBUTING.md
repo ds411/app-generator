@@ -256,7 +256,9 @@ git config core.hooksPath .githooks
 - The check scripts of the front ends also run the Playwright UI tests
   (`ui-tests/`, `scripts/smoke_test.py --ui`) in the light and the dark
   mode. They need the Chromium of Playwright (`pnpm --dir ui-tests exec
-  playwright install chromium`), or `PLAYWRIGHT_CHROMIUM_EXECUTABLE`.
+  playwright install chromium`). Without it, they use the Chromium of
+  the environment at `/opt/pw-browsers/chromium` (cloud sessions have
+  one). `PLAYWRIGHT_CHROMIUM_EXECUTABLE` selects another Chromium.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.
