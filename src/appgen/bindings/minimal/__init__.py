@@ -2,7 +2,8 @@
 
 It writes an index file, a JSON file (a file type without comments), and
 one Markdown file for each entity, with traces. It covers only the app, the
-entities, and the fields. All other elements become gaps.
+entities, and the fields. All other elements become gaps, each with an
+extension file in `gaps/`.
 """
 
 from pathlib import Path
@@ -19,4 +20,5 @@ BINDING = Binding(
         Output(template="app.json.j2", path="app.json"),
     ),
     covers=frozenset({"app", "entity", "field"}),
+    gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
 )

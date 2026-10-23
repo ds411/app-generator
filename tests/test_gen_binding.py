@@ -102,13 +102,19 @@ def test_minimal_binding_writes_one_file_for_each_entity(minimal: Binding) -> No
 
 def test_elements_of_uncovered_kinds_are_gaps(minimal: Binding) -> None:
     result = generate(DEFINITION, minimal)
-    assert result.gaps == [
-        Gap("entities.Project.relations.tasks", "relation"),
-        Gap("entities.Task.relations.project", "relation"),
-        Gap("operations.complete_task", "operation"),
-        Gap("operations.complete_task.params.note", "param"),
-        Gap("pages.projects", "page"),
+    assert [(g.element_id, g.kind) for g in result.gaps] == [
+        ("entities.Project.relations.tasks", "relation"),
+        ("entities.Task.relations.project", "relation"),
+        ("operations.complete_task", "operation"),
+        ("operations.complete_task.params.note", "param"),
+        ("pages.projects", "page"),
     ]
+
+
+def test_a_binding_without_a_gap_rule_only_lists_the_gaps(minimal: Binding) -> None:
+    result = generate(DEFINITION, replace(minimal, gap_rule=None))
+    assert result.gaps[0] == Gap("entities.Project.relations.tasks", "relation")
+    assert not any(f.kind == "extension" for f in result.files)
 
 
 def test_a_binding_that_covers_all_kinds_has_no_gaps(minimal: Binding) -> None:
