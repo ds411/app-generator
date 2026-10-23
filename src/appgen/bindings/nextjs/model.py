@@ -10,6 +10,7 @@ from typing import Any
 
 from appgen.bindings.nextjs import versions
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.theme import build_theme
 from appgen.dsl.model import AppDefinition, Page
 from appgen.gen.naming import kebab, pascal
 
@@ -114,13 +115,19 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
     pages = {name: page_info(name, page) for name, page in definition.pages.items()}
     components = shadcn.used_components(definition)
+    ui = definition.ui
+    theme = ui.theme if ui is not None else None
     return {
+        "theme": build_theme(definition),
+        "theme_element": theme.id if theme is not None else "app",
         "nextjs": {
+            "default_mode": theme.default_mode if theme is not None else "system",
+            "mode_toggle": shadcn.has_mode_toggle(definition),
             "shadcn": [component.name for component in components],
             "hooks": shadcn.hooks(components),
             "layers": FSD_LAYERS,
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
-        }
+        },
     }

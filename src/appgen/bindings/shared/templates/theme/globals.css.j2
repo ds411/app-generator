@@ -1,0 +1,55 @@
+{# The global CSS of a front-end app: Tailwind CSS, and the theme from the
+   design tokens. The context needs `theme` (appgen.bindings.shared.theme.Theme). #}
+{% macro declare(variable) -%}
+--{{ variable.name }}: {{ variable.value }};{% if variable.element_id %} {{ trace(variable.element_id) }}{% endif %}
+{%- endmacro %}
+{{ trace_header("app", *theme.file_ids) }}
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+{% for variable in theme.light %}
+  {{ declare(variable) }}
+{% endfor %}
+}
+
+.dark {
+{% for variable in theme.dark %}
+  {{ declare(variable) }}
+{% endfor %}
+}
+
+@theme inline {
+{% for variable in theme.inline %}
+  {{ declare(variable) }}
+{% endfor %}
+}
+{% if theme.static %}
+
+@theme static {
+{% for variable in theme.static %}
+  {{ declare(variable) }}
+{% endfor %}
+}
+{% endif %}
+{% for utility in theme.utilities %}
+
+{{ trace(utility.element_id, "begin") }}
+@utility {{ utility.name }} {
+{% for prop, value in utility.declarations %}
+  {{ prop }}: {{ value }};
+{% endfor %}
+}
+{{ trace(utility.element_id, "end") }}
+{% endfor %}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground{% if theme.body_typography %} {{ theme.body_typography }}{% endif %};
+  }
+}

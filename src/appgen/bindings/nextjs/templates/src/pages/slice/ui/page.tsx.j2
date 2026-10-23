@@ -1,5 +1,9 @@
 {% set info = nextjs.pages[name] %}
 {{ trace_header(element_id) }}
+{% if nextjs.mode_toggle %}
+import { ModeToggle } from "@/features/toggle-theme";
+
+{% endif %}
 {% if info.params %}
 export type {{ info.component }}Props = {
   params: { {% for param in info.params %}{{ param }}: string{{ "; " if not loop.last }}{% endfor %} };
@@ -11,7 +15,12 @@ export function {{ info.component }}() {
 {% endif %}
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-2 p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{{ element.title }}</h1>
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">{{ element.title }}</h1>
+{% if nextjs.mode_toggle %}
+        <ModeToggle />
+{% endif %}
+      </header>
 {% if element.description %}
       <p className="text-muted-foreground">{{ element.description }}</p>
 {% endif %}
