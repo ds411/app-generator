@@ -44,12 +44,15 @@ for the plan and the rules.
    ```
 
    Each generated app has a README with its commands, and a Dockerfile.
+   [docs/example-apps.md](docs/example-apps.md) shows how to run each
+   example app on your machine and in Docker.
 
 To write your own definition, copy `examples/project-tracker/app.yaml`
 and change it. The docs:
 
 | Document                             | Content                                              |
 | ------------------------------------ | ---------------------------------------------------- |
+| [docs/example-apps.md](docs/example-apps.md) | How to generate, check, and run the example apps. |
 | [docs/dsl.md](docs/dsl.md)           | The reference of the app definition, with examples.  |
 | [docs/traces.md](docs/traces.md)     | The trace format, generation gaps, and the checker reports. |
 | [docs/bindings.md](docs/bindings.md) | How to write a binding.                              |
