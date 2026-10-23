@@ -28,6 +28,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null) || base=""
     else
         base=$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null) || base=""
+        # A squash merge leaves the remote branch behind the default
+        # branch. Do not count the changes of the default branch: use
+        # its merge base when that base is newer.
+        main_base=$(git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null) || main_base=""
+        if [ -n "$base" ] && [ -n "$main_base" ] &&
+            git merge-base --is-ancestor "$base" "$main_base"; then
+            base=$main_base
+        fi
     fi
 
     if [ -z "$base" ]; then
