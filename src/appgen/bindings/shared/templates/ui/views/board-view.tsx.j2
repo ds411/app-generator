@@ -48,7 +48,7 @@ export type {{ name | pascal }}ViewProps = {
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
 {% if plan.actions or plan.row_actions %}
-  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{{ m.runner(plan) }}
 {% endif %}
   const [dragged, setDragged] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
@@ -176,6 +176,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% if plan.actions or plan.row_actions %}
       {dialog}
 {% endif %}
+{{ m.form_dialogs(plan) }}
     </div>
   );
 }

@@ -428,3 +428,43 @@ def test_regeneration_keeps_the_code_in_the_extension_files(
     statuses = {e.element_id: e.status for e in report.coverage.elements}
     assert statuses["ui.views.task_detail.tabs.activity"] == "covered"
     assert statuses["operations.assign_task.params.note"] == "covered"
+
+
+def test_each_form_has_a_feature_slice_with_its_schema_and_rules(result: GenerationResult) -> None:
+    files = _files(result)
+    form = files["src/features/new-project-form/ui/new-project-form.tsx"]
+    assert "const SCHEMA = projectInputSchema.pick({ name: true," in form
+    assert (
+        'errors.name ??= "Enter a name."; // @trace ui.forms.new_project.fields.name.rules.required'
+    ) in form
+    assert '"zod": "4.6.7"' in files["package.json"]
+    assert "export const projectInputSchema" in files["src/entities/project/model/schema.ts"]
+    table = files["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert 'import { NewProjectFormDialog } from "@/features/new-project-form";' in table
+    assert 'form: "edit_project",' in table
+
+
+FORMS = Path(__file__).parent / "fixtures" / "react-forms.yaml"
+
+
+def test_the_form_features_have_traces_for_each_element(react: Binding, tmp_path: Path) -> None:
+    definition = load_definition(FORMS)
+    result = generate(definition, react)
+    files = _files(result)
+    page = files["src/pages/new-book/ui/new-book-page.tsx"]
+    assert "<NewBookFormPage routeParams={params} /> {/* @trace pages.new_book.content */}" in page
+    new_book = files["src/features/new-book-form/ui/new-book-form.tsx"]
+    assert 'compareRule(values.receivedAt, "gte", values.published)' in new_book
+    shelf_book = files["src/features/shelf-book-form/ui/shelf-book-form.tsx"]
+    assert 'shelfId: routeParams?.["shelf_id"] ?? null,' in shelf_book
+    assert "SheetContent" in files["src/features/quick-edit-form/ui/quick-edit-form.tsx"]
+    for widget in ("option-radio", "date-input", "date-time-input", "relation-select"):
+        assert f"src/shared/ui/form-widgets/{widget}.tsx" in files
+
+    write_result(result, tmp_path, "react")
+    report = check_traces(definition, tmp_path)
+    assert report.invalid == []
+    status = {e.element_id: e.status for e in report.coverage.elements}
+    for element in iter_elements(definition):
+        if element.id.startswith("ui.forms."):
+            assert status.get(element.id) in ("covered", "gap"), element.id

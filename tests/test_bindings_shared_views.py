@@ -19,7 +19,7 @@ VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"
 
 @pytest.fixture(scope="module")
 def example() -> ViewContext:
-    return ViewContext(load_definition(EXAMPLE))
+    return ViewContext(load_definition(EXAMPLE), forms=True)
 
 
 @pytest.fixture(scope="module")
@@ -89,10 +89,20 @@ def test_the_actions_give_their_paths_and_their_code(views: ViewContext) -> None
     assert [a.name for a in plan.actions] == ["cards", "sync"]
 
 
-def test_a_form_action_waits_for_the_forms(example: ViewContext) -> None:
+def test_a_form_action_opens_its_form(example: ViewContext) -> None:
     plan = example.view_plan("project_table")
+    assert [a.name for a in plan.row_actions] == ["open", "edit", "delete"]
+    action = plan.action("new_project")
+    assert action is not None
+    assert action.form == "new_project"
+    assert [f.component for f in plan.forms] == ["NewProjectForm", "EditProjectForm"]
+
+
+def test_a_form_action_waits_for_the_forms_of_the_binding() -> None:
+    plan = ViewContext(load_definition(EXAMPLE)).view_plan("project_table")
     assert [a.name for a in plan.row_actions] == ["open", "delete"]
     assert plan.action("new_project") is None
+    assert plan.forms == []
 
 
 def test_a_board_moves_a_card_with_its_operation(example: ViewContext, views: ViewContext) -> None:

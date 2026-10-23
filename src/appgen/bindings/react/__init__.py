@@ -10,7 +10,7 @@ from pathlib import Path
 from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
-from appgen.bindings.shared import shadcn, ui, views
+from appgen.bindings.shared import forms, shadcn, ui, views
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -148,6 +148,7 @@ BINDING = Binding(
         Output(template="src/app/router.tsx.j2", path="src/app/router.tsx"),
         *_APP_SHELL,
         *views.view_rules(),
+        *forms.form_rules(),
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
         Output(template="src/layer.md.j2", path="src/features/README.md"),
@@ -183,6 +184,12 @@ BINDING = Binding(
             template="src/entities/entity/model/types.ts.j2",
             path=_ENTITY + "/model/types.ts",
             for_each="entity",
+        ),
+        Output(
+            template="src/entities/entity/model/schema.ts.j2",
+            path=_ENTITY + "/model/schema.ts",
+            for_each="entity",
+            when="ui_forms.names",
         ),
         Output(
             template="src/entities/entity/model/meta.ts.j2",
@@ -244,6 +251,9 @@ BINDING = Binding(
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
+        | {"form", "form_section", "form_field", "form_on_success"}
+        | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
+        | {"compare_rule"}
         | {"custom_widget", "custom_rule", "custom_action"}
     ),
     context=context,

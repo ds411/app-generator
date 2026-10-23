@@ -1,0 +1,168 @@
+{{ trace_header("app") }}
+"use client";
+
+import { CheckIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
+import { useState } from "react";
+
+import { Badge } from "@/shared/ui/badge";
+import { Button } from "@/shared/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/shared/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { cn } from "@/shared/lib/utils";
+
+import type { FieldOption } from "./option-select";
+
+function OptionList({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: FieldOption[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <Command>
+      <CommandInput placeholder="Search" />
+      <CommandList>
+        <CommandEmpty>No results.</CommandEmpty>
+        <CommandGroup>
+          {options.map((option) => (
+            <CommandItem key={option.value} value={`${option.label} ${option.value}`} onSelect={() => onToggle(option.value)}>
+              <CheckIcon className={cn(!selected.includes(option.value) && "opacity-0")} />
+              {option.label}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+
+/** A search box with a list of records, for a relation to one record. */
+export function RelationSelect({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder = "Select a record",
+  clearable = false,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  options: FieldOption[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+  placeholder?: string;
+  clearable?: boolean;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((option) => option.value === value);
+  return (
+    <div className="flex gap-1">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            aria-invalid={invalid}
+            disabled={disabled}
+            className={cn("min-w-0 flex-1 justify-between font-normal", !current && "text-muted-foreground")}
+          >
+            <span className="truncate">{current?.label ?? placeholder}</span>
+            <ChevronsUpDownIcon className="opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-(--radix-popover-trigger-width) min-w-56 p-0" align="start">
+          <OptionList
+            options={options}
+            selected={value ? [value] : []}
+            onToggle={(next) => {
+              onChange(next === value && clearable ? null : next);
+              setOpen(false);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      {clearable && value && (
+        <Button type="button" variant="ghost" size="icon" aria-label="Clear" disabled={disabled} onClick={() => onChange(null)}>
+          <XIcon />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** A search box with a list of records, for a relation to many records. */
+export function RelationMultiSelect({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder = "Select records",
+  disabled,
+  invalid,
+}: {
+  id: string;
+  options: FieldOption[];
+  value: string[];
+  onChange: (value: string[]) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const chosen = options.filter((option) => value.includes(option.value));
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            aria-invalid={invalid}
+            disabled={disabled}
+            className="w-full justify-between font-normal text-muted-foreground"
+          >
+            <span className="truncate">{chosen.length > 0 ? `${chosen.length} selected` : placeholder}</span>
+            <ChevronsUpDownIcon className="opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-(--radix-popover-trigger-width) min-w-56 p-0" align="start">
+          <OptionList
+            options={options}
+            selected={value}
+            onToggle={(next) => onChange(value.includes(next) ? value.filter((item) => item !== next) : [...value, next])}
+          />
+        </PopoverContent>
+      </Popover>
+      {chosen.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {chosen.map((option) => (
+            <Badge key={option.value} variant="secondary" className="gap-1 pr-1">
+              {option.label}
+              <button
+                type="button"
+                aria-label={`Remove ${option.label}`}
+                disabled={disabled}
+                className="rounded-sm opacity-60 hover:opacity-100"
+                onClick={() => onChange(value.filter((item) => item !== option.value))}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

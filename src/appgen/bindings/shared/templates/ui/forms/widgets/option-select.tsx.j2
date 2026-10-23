@@ -1,0 +1,45 @@
+{{ trace_header("app") }}
+"use client";
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+
+export type FieldOption = { value: string; label: string };
+
+const NONE = "__none__";
+
+/** A select of one option. A field without a required value can select "None". */
+export function OptionSelect({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder = "Select a value",
+  clearable = false,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  options: FieldOption[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+  placeholder?: string;
+  clearable?: boolean;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  return (
+    <Select value={value ?? ""} onValueChange={(next) => onChange(next === NONE ? null : next)} disabled={disabled}>
+      <SelectTrigger id={id} className="w-full" aria-invalid={invalid}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {clearable && <SelectItem value={NONE}>None</SelectItem>}
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}

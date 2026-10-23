@@ -1,0 +1,59 @@
+{{ trace_header("app") }}
+"use client";
+
+import { CalendarIcon } from "lucide-react";
+import { useState } from "react";
+
+import { Button } from "@/shared/ui/button";
+import { Calendar } from "@/shared/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { formatValue } from "@/shared/lib/format";
+import { fromIsoDay, isoDay } from "@/shared/lib/query";
+import { cn } from "@/shared/lib/utils";
+
+/** A date picker. The value is a day as `YYYY-MM-DD`. */
+export function DateInput({
+  id,
+  value,
+  onChange,
+  placeholder = "Pick a date",
+  disabled,
+  invalid,
+}: {
+  id: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          aria-invalid={invalid}
+          className={cn("w-full min-w-0 justify-start font-normal", !value && "text-muted-foreground")}
+        >
+          <CalendarIcon />
+          <span className="truncate">{value ? formatValue(value, "date") : placeholder}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          captionLayout="dropdown"
+          selected={fromIsoDay(value ?? undefined)}
+          onSelect={(day) => {
+            onChange(day ? isoDay(day) : null);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
