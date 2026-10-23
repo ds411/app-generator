@@ -50,12 +50,17 @@ class Element(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     _location: Location | None = PrivateAttr(default=None)
+    _value_locations: dict[str, Location] = PrivateAttr(default_factory=dict[str, Location])
     _id: str = PrivateAttr(default="")
 
     @property
     def location(self) -> Location | None:
         """The position of the element in its source file, if it comes from a file."""
         return self._location
+
+    def location_of(self, key: str) -> Location | None:
+        """The position of the value of a key of the element, or else of the element."""
+        return self._value_locations.get(key, self._location)
 
     @property
     def id(self) -> str:

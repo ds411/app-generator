@@ -12,6 +12,7 @@ from appgen.dsl.model import (
     Page,
     Relation,
 )
+from appgen.dsl.validator import check_file, validate_definition
 
 __all__ = [
     "App",
@@ -25,6 +26,8 @@ __all__ = [
     "Operation",
     "Page",
     "Relation",
+    "check_file",
     "load_definition",
     "load_definition_text",
+    "validate_definition",
 ]

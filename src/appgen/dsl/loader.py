@@ -1,13 +1,14 @@
 """Load a YAML app definition into the typed model."""
 
 import difflib
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, TypeAliasType, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
-from appgen.dsl.diagnostics import DefinitionError, Diagnostic
+from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.ids import element_id, index_elements, walk_elements
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.source import DataPath, SourceMap, YamlDocument, read_yaml, read_yaml_file
@@ -52,8 +53,13 @@ def _load(document: YamlDocument) -> AppDefinition:
     except ValidationError as error:
         diagnostics = [_diagnostic(detail, source_map) for detail in error.errors()]
         raise DefinitionError(_unique(diagnostics)) from None
+    value_locations: dict[DataPath, dict[str, Location]] = defaultdict(dict[str, Location])
+    for key, location in source_map.values.items():
+        if key:
+            value_locations[key[:-1]][str(key[-1])] = location
     for path, element in walk_elements(definition):
         element._location = source_map.element(path)  # pyright: ignore[reportPrivateUsage]
+        element._value_locations = value_locations.get(path, {})  # pyright: ignore[reportPrivateUsage]
     definition._index = index_elements(definition)  # pyright: ignore[reportPrivateUsage]
     return definition
 
@@ -195,10 +201,10 @@ def _did_you_mean(value: str, choices: list[str]) -> str | None:
 
 
 def _unique(diagnostics: list[Diagnostic]) -> list[Diagnostic]:
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     result: list[Diagnostic] = []
     for diagnostic in sorted(diagnostics, key=lambda d: d.location):
-        key = (str(diagnostic.location), diagnostic.code)
+        key = (str(diagnostic.location), diagnostic.code, diagnostic.message)
         if key not in seen:
             seen.add(key)
             result.append(diagnostic)
