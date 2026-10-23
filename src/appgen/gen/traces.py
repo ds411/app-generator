@@ -28,6 +28,7 @@ JSX_STYLE: CommentStyle = ("{/* ", " */}")
 _SUFFIX_STYLES: dict[str, CommentStyle] = {
     ".ts": _SLASH,
     ".mts": _SLASH,
+    ".cts": _SLASH,
     ".js": _SLASH,
     ".mjs": _SLASH,
     ".cjs": _SLASH,
@@ -51,7 +52,7 @@ _SUFFIX_STYLES: dict[str, CommentStyle] = {
 def comment_style(path: str) -> CommentStyle | None:
     """Return the comment syntax of a file, or None if the file type has no comments."""
     name = PurePosixPath(path).name
-    if name == "Dockerfile" or name == ".env" or name.startswith(".env."):
+    if name == "Dockerfile" or name.startswith(("Dockerfile.", ".env.")) or name == ".env":
         return _HASH
     return _SUFFIX_STYLES.get(PurePosixPath(name).suffix)
 

@@ -1,6 +1,6 @@
 """Generate the files of a binding from an app definition."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import jinja2
@@ -33,6 +33,8 @@ class Gap:
 
     element_id: str
     kind: str
+    path: str | None = None
+    """The extension file of the gap, if the binding has a gap rule."""
 
 
 @dataclass(slots=True)
@@ -55,18 +57,33 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     environment = make_environment(binding.template_dir)
     environment.globals.update(trace_globals(definition))
     elements = list(iter_elements(definition))
-    result = GenerationResult(
-        gaps=[Gap(e.id, e.kind) for e in elements if e.kind not in binding.covers]
-    )
+    gap_elements = [e for e in elements if e.kind not in binding.covers]
     files: dict[str, GeneratedFile] = {}
+
+    def add(generated: GeneratedFile) -> None:
+        if generated.path in files:
+            raise GenerationError(f"Two output rules write the file '{generated.path}'.")
+        files[generated.path] = generated
+
     for output in binding.outputs:
         for context in _contexts(binding, output, definition, elements):
-            generated = _render(environment, output, context)
-            if generated.path in files:
-                raise GenerationError(f"Two output rules write the file '{generated.path}'.")
-            files[generated.path] = generated
-    result.files = [files[path] for path in sorted(files)]
-    return result
+            add(_render(environment, output, context))
+
+    gaps: list[Gap] = []
+    for element in gap_elements:
+        if binding.gap_rule is None:
+            gaps.append(Gap(element.id, element.kind))
+            continue
+        rule = replace(binding.gap_rule, for_each=element.kind, extension=True)
+        context = _element_context(_base_context(binding, definition), element)
+        generated = _render(environment, rule, context)
+        if "TODO(appgen)" not in generated.content:
+            raise GenerationError(
+                f"The gap rule writes the file '{generated.path}' without a TODO(appgen) comment."
+            )
+        add(generated)
+        gaps.append(Gap(element.id, element.kind, generated.path))
+    return GenerationResult(files=[files[path] for path in sorted(files)], gaps=gaps)
 
 
 def _render(
@@ -107,20 +124,25 @@ def _contexts(
     The context holds no clock or random values. A set has no order, so
     the context gives the covered kinds as a sorted list.
     """
-    base: dict[str, Any] = {
+    base = _base_context(binding, definition)
+    if output.for_each is None:
+        return [base]
+    return [_element_context(base, e) for e in elements if e.kind == output.for_each]
+
+
+def _base_context(binding: Binding, definition: AppDefinition) -> dict[str, Any]:
+    return {
         "definition": definition,
         "app": definition.app,
         "binding": {"name": binding.name, "covers": sorted(binding.covers)},
     }
-    if output.for_each is None:
-        return [base]
-    return [
-        {
-            **base,
-            "element": e.element,
-            "element_id": e.id,
-            "name": e.name,
-        }
-        for e in elements
-        if e.kind == output.for_each
-    ]
+
+
+def _element_context(base: dict[str, Any], element: DefinitionElement) -> dict[str, Any]:
+    return {
+        **base,
+        "element": element.element,
+        "element_id": element.id,
+        "element_kind": element.kind,
+        "name": element.name,
+    }

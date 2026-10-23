@@ -92,6 +92,12 @@ run for an ID that is not an element. Each file that can hold comments
 must have a trace. For a file without comments (for example JSON), the
 manifest records the traces.
 
+A binding can declare a `gap_rule`: an output rule that the generator
+renders once for each element of a kind that the binding does not
+cover. Each such file is an extension file (ADR 0005) with a gap trace
+and a `TODO(appgen):` comment. The generator creates it once, and never
+overwrites or deletes it.
+
 `write_result()` writes a generation result into an output folder and
 keeps a manifest in `.appgen/manifest.json`. The manifest lists each
 generated file with its SHA-256 hash, and each extension file apart

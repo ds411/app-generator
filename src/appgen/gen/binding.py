@@ -49,3 +49,10 @@ class Binding:
     """The output layout: the rules that map templates to output files."""
     covers: frozenset[ElementKind]
     """The element kinds that the binding generates code for."""
+    gap_rule: Output | None = None
+    """The extension file for each element of a kind that the binding does not cover.
+
+    The generator renders the rule once for each gap element, as an
+    extension file (ADR 0005). `for_each` and `extension` of the rule do
+    not apply. Without a gap rule, the gaps are only listed.
+    """
