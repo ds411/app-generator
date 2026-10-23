@@ -32,6 +32,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | --------------------- | ---------------------------------------------------------- |
 | Show the CLI help     | `uv run appgen --help`                                     |
 | Validate a definition | `uv run appgen validate examples/project-tracker/app.yaml` |
+| Check the traces      | `uv run appgen check <definition> <code-folder>`           |
 | Lint                  | `uv run ruff check`                                        |
 | Check the formatting  | `uv run ruff format --check`                               |
 | Format the code       | `uv run ruff format`                                       |
@@ -134,3 +135,11 @@ The validity check (`appgen.trace.find_invalid_traces`) lists the
 malformed traces, and the traces to element IDs that the definition
 does not have, with a "did you mean" hint where possible. With the list
 of generated files, it also lists `generated` traces in other files.
+
+`appgen check <definition> <code-folder>` runs the scanner and both
+reports. `--format text` (the default) prints a report for people, and
+`--format json` prints a stable JSON document (`"version": 1`). The
+exit code is 0 if the check passes, and 1 if there is an invalid trace
+or if the coverage is lower than `--min-coverage <percent>`. It is 2
+if the definition is not valid. `--exclude-kind <kind>` and
+`--ignore <pattern>` take more than one value if you repeat them.

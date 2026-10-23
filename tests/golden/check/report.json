@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "passed": false,
+  "files": 2,
+  "traces": 6,
+  "invalid": [
+    {
+      "file": "app.py",
+      "line": 10,
+      "column": 19,
+      "code": "unknown-element",
+      "message": "The definition has no element 'entities.Task.fields.titel'.",
+      "text": "@trace entities.Task.fields.titel",
+      "element_id": "entities.Task.fields.titel",
+      "hint": "Did you mean 'entities.Task.fields.title'?"
+    },
+    {
+      "file": "operations.ts",
+      "line": 4,
+      "column": 6,
+      "code": "unknown-kind",
+      "message": "The trace kind 'todo' is not known.",
+      "text": "@trace:todo operations.list_tasks",
+      "element_id": "operations.list_tasks",
+      "hint": "The kinds are: generated, gap, manual."
+    }
+  ],
+  "uncovered": [
+    {
+      "id": "entities.Project.fields.status",
+      "kind": "field"
+    },
+    {
+      "id": "entities.Project.relations.tasks",
+      "kind": "relation"
+    },
+    {
+      "id": "entities.Task.fields.title",
+      "kind": "field"
+    },
+    {
+      "id": "entities.Task.fields.due_date",
+      "kind": "field"
+    },
+    {
+      "id": "entities.Task.relations.project",
+      "kind": "relation"
+    },
+    {
+      "id": "operations.create_task",
+      "kind": "operation"
+    },
+    {
+      "id": "operations.list_tasks",
+      "kind": "operation"
+    },
+    {
+      "id": "pages.projects",
+      "kind": "page"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "operations.complete_task",
+      "kind": "operation",
+      "traces": [
+        {
+          "file": "operations.ts",
+          "line": 1
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "percent": 35.71,
+    "total": 14,
+    "covered": 5,
+    "gaps": 1,
+    "uncovered": 8,
+    "min_percent": 50.0,
+    "excluded_kinds": [
+      "param"
+    ],
+    "by_kind": [
+      {
+        "kind": "app",
+        "percent": 100.0,
+        "total": 1,
+        "covered": 1,
+        "gaps": 0,
+        "uncovered": 0
+      },
+      {
+        "kind": "entity",
+        "percent": 100.0,
+        "total": 2,
+        "covered": 2,
+        "gaps": 0,
+        "uncovered": 0
+      },
+      {
+        "kind": "field",
+        "percent": 40.0,
+        "total": 5,
+        "covered": 2,
+        "gaps": 0,
+        "uncovered": 3
+      },
+      {
+        "kind": "relation",
+        "percent": 0.0,
+        "total": 2,
+        "covered": 0,
+        "gaps": 0,
+        "uncovered": 2
+      },
+      {
+        "kind": "operation",
+        "percent": 0.0,
+        "total": 3,
+        "covered": 0,
+        "gaps": 1,
+        "uncovered": 2
+      },
+      {
+        "kind": "page",
+        "percent": 0.0,
+        "total": 1,
+        "covered": 0,
+        "gaps": 0,
+        "uncovered": 1
+      }
+    ]
+  }
+}
