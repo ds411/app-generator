@@ -1,0 +1,14 @@
+{% set layer = output_path.split("/")[1] %}
+{{ trace_header("app") }}
+# The `{{ layer }}` layer
+
+{% if layer == "widgets" %}
+Large, self-contained parts of a page, for example the app shell and
+the data views. A widget can use features, entities, and shared code.
+{% elif layer == "features" %}
+User actions that change data, for example forms and record actions. A
+feature can use entities and shared code.
+{% else %}
+The business entities: their types and their data access. An entity
+can use shared code only.
+{% endif %}

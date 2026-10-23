@@ -56,6 +56,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     comments has no trace (ADR 0004).
     """
     environment = make_environment(binding.template_dir)
+    environment.globals.update(binding.helpers)
     environment.globals.update(trace_globals(definition))
     base = _base_context(binding, definition)
     elements = list(iter_elements(definition))

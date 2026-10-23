@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 from textwrap import dedent
 
 import pytest
@@ -8,6 +9,7 @@ from appgen.dsl.ui import TokenGroup
 from appgen.gen import (
     Binding,
     Gap,
+    Output,
     UnknownBindingError,
     available_bindings,
     element_kind,
@@ -124,3 +126,26 @@ def test_a_binding_that_covers_all_kinds_has_no_gaps(minimal: Binding) -> None:
         covers=frozenset({"app", "entity", "field", "relation", "operation", "param", "page"}),
     )
     assert generate(DEFINITION, full).gaps == []
+
+
+def _shout(name: str) -> str:
+    return repr(name.upper())
+
+
+def test_templates_can_call_the_helpers_and_the_naming_filters(tmp_path: Path) -> None:
+    (tmp_path / "page.ts.j2").write_text(
+        "{{ trace_header(element_id) }}\nexport const {{ name | camel }} = {{ shout(name) }};\n"
+    )
+    binding = Binding(
+        name="temp",
+        description="A binding for one test.",
+        template_dir=tmp_path,
+        outputs=(Output(template="page.ts.j2", path="{{ name | kebab }}.ts", for_each="page"),),
+        covers=frozenset({"page"}),
+        helpers={"shout": _shout},
+    )
+
+    result = generate(DEFINITION, binding)
+
+    assert result.files[0].path == "projects.ts"
+    assert "export const projects = 'PROJECTS';" in result.files[0].content

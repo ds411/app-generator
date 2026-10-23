@@ -51,7 +51,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/dsl/`      | The app definition DSL: the model, the loader, and checks.  |
 | `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
-| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core.    |
+| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, and `react` writes a React 19 app. |
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
@@ -94,6 +94,12 @@ run for an ID that is not an element. Each file that can hold comments
 must have a trace. For a file without comments (for example JSON), the
 manifest records the traces.
 
+Templates can use the naming filters `camel`, `pascal`, `kebab`,
+`snake`, and `constant` (see `src/appgen/gen/naming.py`), for example
+`{{ name | pascal }}`. A binding can give its templates Python
+functions in `helpers`, for example a function that converts a field
+type to a TypeScript type. A helper must be deterministic.
+
 Templates get the design tokens as `tokens`: a flat list of
 `ResolvedToken`, sorted by path. Each entry has the final value for the
 light and the dark mode, with all references resolved, and keeps its
@@ -121,12 +127,28 @@ any more. It stops, and writes nothing, if a generated file has manual
 edits or if a new file would overwrite a file that appgen did not
 make, unless `force` is set. It never overwrites or deletes an
 extension file.
+
 A binding registers itself with an entry point in the group
 `appgen.bindings` in `pyproject.toml`:
 
 ```toml
 [project.entry-points."appgen.bindings"]
 minimal = "appgen.bindings.minimal:BINDING"
+```
+
+### React binding
+
+`appgen generate <definition> -b react -o <dir>` writes a standalone
+React 19 app with mock data: TypeScript in strict mode, Vite, React
+Router, and pnpm, with the code in the layers of Feature-Sliced Design
+(`src/app`, `src/pages`, `src/widgets`, `src/features`,
+`src/entities`, and `src/shared`). Each page of the definition gets a
+route and a slice in `src/pages`. The binding is in
+`src/appgen/bindings/react/`. To try the output:
+
+```sh
+uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker
+cd /tmp/tracker && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 ```
 
 ## Traces
