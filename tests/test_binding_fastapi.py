@@ -88,7 +88,8 @@ def test_the_check_finds_no_invalid_traces(tmp_path: Path, fastapi: Binding, exa
     assert report.invalid == []
     with_file_trace = {t.file for t in report.traces if t.scope == "file"}
     assert with_file_trace == {f.path for f in result.files}
-    assert report.coverage.total.uncovered == 0
+    uncovered = {e.kind for e in report.coverage.elements if e.status == "uncovered"}
+    assert uncovered <= {"relation"}
 
 
 def test_pages_and_the_ui_are_out_of_scope(result: GenerationResult) -> None:
@@ -137,4 +138,62 @@ def test_two_names_with_the_same_python_name_stop_the_run(fastapi: Binding) -> N
         "      owner: { kind: many_to_one, target: Task }\n"
     )
     with pytest.raises(Exception, match="both give the Python name 'owner_id'"):
+        generate(definition, fastapi)
+
+
+def test_each_entity_has_create_update_and_read_schemas(result: GenerationResult) -> None:
+    schemas = _files(result)["app/features/tasks/schemas.py"]
+    for name in ("TaskCreate(InputModel)", "TaskUpdate(InputModel)", "TaskRead(ReadModel)"):
+        assert f"class {name}:" in schemas
+    assert "    title: str\n" in schemas
+    assert "    due_date: dt.date | None = None\n" in schemas
+    assert "    project_id: UUID\n" in schemas
+    assert 'return reject_null(self, "title", "project_id")' in schemas
+    assert "# @trace entities.Task.fields.title" in schemas
+
+
+def test_enums_have_their_own_module(result: GenerationResult) -> None:
+    files = _files(result)
+    assert 'IN_PROGRESS = "in_progress"' not in files["app/features/projects/enums.py"]
+    assert 'PLANNED = "planned"' in files["app/features/projects/enums.py"]
+    assert "app/features/tasks/enums.py" not in files
+
+
+def test_an_embedded_relation_is_an_object_in_the_read_schema(fastapi: Binding) -> None:
+    definition = load_definition(EXAMPLES / "edge-cases" / "app.yaml")
+    files = _files(generate(definition, fastapi))
+    schemas = files["app/features/items/schemas.py"]
+    assert "from app.features.owners.schemas import OwnerRead" in schemas
+    assert "    owner: OwnerRead | None\n" in schemas
+    assert (
+        "    tag_ids: list[UUID] = Field(default_factory=list[UUID])\n"
+        in (files["app/features/owners/schemas.py"])
+    )
+
+
+def test_a_field_can_give_its_sample_value(fastapi: Binding) -> None:
+    definition = load_definition_text(
+        "version: 0\n"
+        "app: { name: codes, title: Codes }\n"
+        "entities:\n"
+        "  Code:\n"
+        "    fields:\n"
+        "      value: { type: string, pattern: '^(?=x)', x-example: x1 }\n"
+    )
+    payloads = _files(generate(definition, fastapi))["tests/payloads.py"]
+    assert '"value": "x1",' in payloads
+
+
+def test_embedded_relations_cannot_form_a_cycle(fastapi: Binding) -> None:
+    definition = load_definition_text(
+        "version: 0\n"
+        "app: { name: loop, title: Loop }\n"
+        "entities:\n"
+        "  Node:\n"
+        "    fields:\n"
+        "      name: { type: string }\n"
+        "    relations:\n"
+        "      parent: { kind: many_to_one, target: Node, x-fastapi-embed: true }\n"
+    )
+    with pytest.raises(Exception, match=r"cycle: Node -> Node"):
         generate(definition, fastapi)

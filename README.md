@@ -221,8 +221,9 @@ cd /tmp/tracker && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
 `appgen generate <definition> -b fastapi -o <dir>` writes a standalone
 REST API: FastAPI 0.161 on Python 3.14, with uv. Each entity is a
-vertical slice in `app/features/<slice>/`. Pages and the UI are out of
-the scope of the binding. The binding is in
+vertical slice in `app/features/<slice>/`, with Pydantic schemas for
+the input and the output of the API. Pages and the UI are out of the
+scope of the binding. The binding is in
 `src/appgen/bindings/fastapi/`, and
 [ADR 0006](docs/adr/0006-fastapi-binding.md) describes its design. To
 try the output:
