@@ -115,14 +115,14 @@ fi
 
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/nextjs/*' 'src/appgen/bindings/shared/*' \
-    'examples/project-tracker/*' 'scripts/check-nextjs.sh' 'scripts/smoke_test.py' \
+    'examples/project-tracker/*' 'scripts/check-nextjs.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
     'pyproject.toml' 'uv.lock' '.githooks/*'; then
     check_nextjs
 fi
 
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
-    'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' \
+    'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
     'pyproject.toml' 'uv.lock' '.githooks/*'; then
     check_react
 fi

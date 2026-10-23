@@ -92,6 +92,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
+| UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 
 ## Layout
 
@@ -106,6 +107,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
 | `docs/`                | The user docs: the DSL, traces, and bindings.               |
+| `ui-tests/`            | The Playwright UI tests of the generated front ends.        |
 | `docs/adr/`            | The architecture decision records.                          |
 | `.githooks/`           | The git hooks (pre-push checks).                            |
 
@@ -154,6 +156,21 @@ of each entity in the FastAPI app. The check scripts of the bindings
 the pre-push hook runs it. The script header lists the environment
 variables, for example `POSTGRES_IMAGE` for a mirror of the Postgres
 image.
+
+`ui-tests/` holds the Playwright UI tests of the front ends (pnpm).
+`scripts/smoke_test.py --ui` runs them on a running Next.js or React
+app: each page of the definition opens in the light and the dark mode
+without a script error, the CSS variable of each color token has the
+value of the mode, the components use the primary color, and the body
+uses the background color and the font size of the tokens. The tests
+save a screenshot of each page in `ui-tests/screenshots/<binding>/<mode>/`,
+which git ignores. Install the browser once:
+
+```sh
+pnpm --dir ui-tests install
+pnpm --dir ui-tests exec playwright install chromium
+uv run scripts/smoke_test.py react --ui
+```
 
 ## Bindings
 

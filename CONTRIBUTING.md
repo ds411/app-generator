@@ -249,6 +249,10 @@ git config core.hooksPath .githooks
   built, and requests one page for each entity (Next.js and React) or
   the list endpoint of each entity (FastAPI). Run it for all apps with
   `uv run scripts/smoke_test.py`.
+- The check scripts of the front ends also run the Playwright UI tests
+  (`ui-tests/`, `scripts/smoke_test.py --ui`) in the light and the dark
+  mode. They need the Chromium of Playwright (`pnpm --dir ui-tests exec
+  playwright install chromium`), or `PLAYWRIGHT_CHROMIUM_EXECUTABLE`.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.

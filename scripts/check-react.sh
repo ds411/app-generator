@@ -1,18 +1,21 @@
 #!/bin/sh
 # Generate the project tracker with the React binding, and check the
 # output: install, lint, type check, build, Docker image, traces, and
-# the smoke test (scripts/smoke_test.py: start the app and request it).
+# the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
+# app, request it, and run the Playwright tests in ui-tests/).
 # The pre-push hook runs this script when a push changes the generator
 # or the React binding. Run it by hand from the repository root:
 #
 #   scripts/check-react.sh [output folder]
 #
 # Without an output folder, the script uses a temporary folder and
-# deletes it at the end. The script needs pnpm and Docker.
+# deletes it at the end. The script needs pnpm, Docker, and the Chromium
+# of Playwright (see scripts/smoke_test.py).
 #
 # Environment variables:
 #   NODE_IMAGE, NGINX_IMAGE   Build arguments of the Docker image.
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
+#   PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the UI tests.
 
 set -eu
 
@@ -57,6 +60,6 @@ step "appgen check"
 uv run --locked appgen check "$definition" "$out"
 
 step "smoke test"
-uv run --locked scripts/smoke_test.py react --app "$out" --image appgen-check-react
+uv run --locked scripts/smoke_test.py react --app "$out" --image appgen-check-react --ui
 
 step "passed"
