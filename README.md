@@ -116,3 +116,10 @@ with a text scan. It skips the paths in `.gitignore` files and in an
 ignore list (by default `node_modules/`, `.venv/`, `.git/`, and other
 tool folders). It reports each malformed trace with its file, line, and
 column.
+
+The coverage (`appgen.trace.compute_coverage`) gives the status of each
+definition element: covered (a `generated` or a `manual` trace), an
+open gap (only `gap` traces), or uncovered (no trace). It gives the
+coverage as a percentage, in total and for each element kind. A list of
+excluded kinds removes elements and the elements under them from the
+coverage, for example `ui` for an app without a front end.
