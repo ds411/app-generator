@@ -388,7 +388,10 @@ def test_bulk_actions_need_selection() -> None:
 def test_unknown_view_kind_gets_a_hint() -> None:
     [diagnostic] = errors(VALID.replace("kind: cards", "kind: card"))
 
-    assert diagnostic.message == "The kind 'card' is not valid. Expected 'table', 'cards', 'board'."
+    assert (
+        diagnostic.message
+        == "The kind 'card' is not valid. Expected 'table', 'cards', 'board', 'detail'."
+    )
     assert diagnostic.hint == "Did you mean 'cards'?"
 
 

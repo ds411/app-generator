@@ -1,9 +1,10 @@
-"""Badges and data views: tables, card lists, and boards (ADR 0003)."""
+"""Badges and views: tables, card lists, boards, and detail views (ADR 0003)."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 import pydantic
-from pydantic import Discriminator, StringConstraints, Tag
+from pydantic import Discriminator, StringConstraints, Tag, model_validator
+from pydantic_core import PydanticCustomError
 
 from appgen.dsl.element import (
     ENTITY_NAME_PATTERN,
@@ -210,10 +211,70 @@ class BoardView(ViewBase):
     row_actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
 
 
+class DetailHeader(Element):
+    """The header of a detail view."""
+
+    title: FieldPath | None = None
+    """The default is the display field of the entity."""
+    subtitle: FieldPath | None = None
+    badges: list[FieldPath] = pydantic.Field(default_factory=list[str])
+    """Enum fields that show as badges, with the badge set of each field."""
+
+
+class DetailSection(Element):
+    """A card with fields of the record, or a generation gap."""
+
+    title: Text | None = None
+    description: Text | None = None
+    fields: list[FieldPath] = pydantic.Field(default_factory=list[str])
+    columns: Annotated[int, pydantic.Field(ge=1, le=4)] = 1
+    custom: bool = False
+    """Hand-written code gives the content (a generation gap)."""
+
+
+class DetailTab(Element):
+    """A tab of a detail view: sections, a list of related records, or a gap."""
+
+    label: Text | None = None
+    icon: IconName | None = None
+    sections: dict[MemberName, DetailSection] = pydantic.Field(
+        default_factory=dict[str, DetailSection]
+    )
+    relation: MemberName | None = None
+    """A one_to_many or many_to_many relation of the entity."""
+    view: MemberName | None = None
+    """A table or a card list of the target entity of the relation."""
+    custom: bool = False
+
+    @model_validator(mode="after")
+    def _one_content(self) -> Self:
+        related = self.relation is not None or self.view is not None
+        if sum([bool(self.sections), related, self.custom]) != 1:
+            raise PydanticCustomError(
+                "tab_content",
+                "Set exactly one of: sections, relation and view, or custom: true",
+            )
+        if related and (self.relation is None or self.view is None):
+            raise PydanticCustomError("tab_content", "Set both relation and view")
+        return self
+
+
+class DetailView(ViewBase):
+    """One record in sections and tabs. The page gives the record."""
+
+    kind: Literal["detail"]
+    header: DetailHeader | None = None
+    sections: dict[MemberName, DetailSection] = pydantic.Field(
+        default_factory=dict[str, DetailSection]
+    )
+    tabs: dict[MemberName, DetailTab] = pydantic.Field(default_factory=dict[str, DetailTab])
+
+
 type View = Annotated[
     Annotated[TableView, Tag("tag-table")]
     | Annotated[CardsView, Tag("tag-cards")]
-    | Annotated[BoardView, Tag("tag-board")],
+    | Annotated[BoardView, Tag("tag-board")]
+    | Annotated[DetailView, Tag("tag-detail")],
     Discriminator(kind_tag),
 ]
 """A view of the records of an entity. The `kind` key selects the type."""

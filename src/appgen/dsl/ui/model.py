@@ -5,6 +5,7 @@ from typing import Annotated
 import pydantic
 
 from appgen.dsl.element import Element, MemberName
+from appgen.dsl.ui.dashboards import Dashboard
 from appgen.dsl.ui.forms import Form
 from appgen.dsl.ui.layout import Layout, Menu, Theme
 from appgen.dsl.ui.tokens import Tokens
@@ -30,4 +31,5 @@ class UI(Element):
     badges: dict[MemberName, BadgeSet] = pydantic.Field(default_factory=dict[str, BadgeSet])
     views: dict[MemberName, View] = pydantic.Field(default_factory=dict[str, View])
     forms: dict[MemberName, Form] = pydantic.Field(default_factory=dict[str, Form])
+    dashboards: dict[MemberName, Dashboard] = pydantic.Field(default_factory=dict[str, Dashboard])
     defaults: Defaults | None = None

@@ -5,11 +5,21 @@ The validator runs these checks after the checks of the data part.
 
 import difflib
 import re
-from collections.abc import Collection, Generator, Iterable, Iterator
+from collections.abc import Collection, Generator, Iterable, Iterator, Mapping
+from typing import cast
 
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field
+from appgen.dsl.ui.dashboards import (
+    FILTER_OPS,
+    RELATIVE_DATES,
+    ChartWidget,
+    CustomWidget,
+    ListWidget,
+    StatWidget,
+    Widget,
+)
 from appgen.dsl.ui.fields import (
     DATE_TYPES,
     NUMBER_TYPES,
@@ -33,6 +43,7 @@ from appgen.dsl.ui.views import (
     CardsView,
     Column,
     DateRangeFilter,
+    DetailView,
     Filter,
     SearchFilter,
     SelectFilter,
@@ -56,6 +67,7 @@ FORMAT_TYPES: dict[str, frozenset[str] | None] = {
 }
 """The field types (and relation kinds) that each column format suits. None: all."""
 
+MANY_KINDS = frozenset({"one_to_many", "many_to_many"})
 STRING_TYPES = frozenset({"string", "text", "email", "url"})
 FORM_OPERATION_KINDS = ("create", "update", "custom")
 ROUTE_DEFAULT = re.compile(r"^\$route\.[a-z][a-z0-9_]*$")
@@ -216,7 +228,7 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
         yield _missing(view, "entity", "entity", view.entity, definition.entities)
         return
     entity = view.entity
-    if view.sort is not None:
+    if not isinstance(view, DetailView) and view.sort is not None:
         yield from _check_paths(definition, view.sort, "field", entity, [view.sort.field])
     match view:
         case TableView():
@@ -241,6 +253,178 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
                 yield from _check_card(definition, entity, view.card)
         case BoardView():
             yield from _check_board(definition, entity, view)
+        case DetailView():
+            yield from _check_detail(definition, entity, view)
+
+
+def _check_detail(definition: AppDefinition, entity: str, view: DetailView) -> Iterator[Diagnostic]:
+    if view.header is not None:
+        header = view.header
+        for key in ("title", "subtitle"):
+            path = getattr(header, key)
+            if path is not None:
+                yield from _check_paths(definition, header, key, entity, [path])
+        for path in header.badges:
+            target = yield from _resolve(definition, header, "badges", entity, path)
+            if target is not None:
+                yield from _check_suits(header, "badges", "A badge", target, FORMAT_TYPES["badge"])
+    sections = list(view.sections.values())
+    for tab in view.tabs.values():
+        sections += tab.sections.values()
+        if tab.relation is not None and tab.view is not None:
+            yield from _check_related_tab(definition, entity, tab.relation, tab.view, tab)
+    for section in sections:
+        yield from _check_paths(definition, section, "fields", entity, section.fields)
+
+
+def _check_related_tab(
+    definition: AppDefinition, entity: str, relation_name: str, view_name: str, tab: Element
+) -> Iterator[Diagnostic]:
+    relations = definition.entities[entity].relations
+    relation = relations.get(relation_name)
+    if relation is None:
+        yield _missing(tab, "relation", "relation", relation_name, relations)
+        return
+    if relation.kind not in MANY_KINDS:
+        yield _error(
+            "unsuitable-field",
+            f"A tab lists related records of a one_to_many or many_to_many relation, but "
+            f"'{entity}.{relation_name}' is {relation.kind}.",
+            tab,
+            at="relation",
+        )
+        return
+    views = definition.ui.views if definition.ui else {}
+    yield from _check_list_view(views, tab, "view", view_name, relation.target)
+
+
+def _check_list_view(
+    views: Mapping[str, View], element: Element, key: str, name: str, entity: str | None
+) -> Iterator[Diagnostic]:
+    """A view that shows a list must be a table or a card list (of an entity, if given)."""
+    view = views.get(name)
+    if view is None:
+        yield _missing(element, key, "view", name, views)
+    elif not isinstance(view, TableView | CardsView):
+        yield _error(
+            "unsuitable-view",
+            f"The view '{name}' is a {view.kind} view. A list needs a table or a card list.",
+            element,
+            at=key,
+        )
+    elif entity is not None and view.entity != entity:
+        yield _error(
+            "unsuitable-view",
+            f"The view '{name}' shows '{view.entity}', but this list shows '{entity}'.",
+            element,
+            at=key,
+        )
+
+
+def check_ui_dashboards(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Dashboard widgets must refer to entities, fields, and views that exist and suit them."""
+    if definition.ui is None:
+        return
+    for dashboard in definition.ui.dashboards.values():
+        for widget in dashboard.widgets.values():
+            yield from _check_widget(definition, widget)
+
+
+def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnostic]:
+    match widget:
+        case StatWidget() | ChartWidget():
+            if widget.entity not in definition.entities:
+                yield _missing(widget, "entity", "entity", widget.entity, definition.entities)
+                return
+            yield from _check_aggregate(definition, widget)
+            yield from _check_record_filter(definition, widget, widget.entity, widget.filter)
+            if isinstance(widget, ChartWidget):
+                yield from _check_chart_group(definition, widget)
+        case ListWidget():
+            views = definition.ui.views if definition.ui else {}
+            yield from _check_list_view(views, widget, "view", widget.view, None)
+            view = views.get(widget.view)
+            if isinstance(view, TableView | CardsView) and view.entity in definition.entities:
+                yield from _check_record_filter(definition, widget, view.entity, widget.filter)
+                if widget.sort is not None:
+                    yield from _check_paths(
+                        definition, widget.sort, "field", view.entity, [widget.sort.field]
+                    )
+        case CustomWidget():
+            pass
+
+
+def _check_aggregate(
+    definition: AppDefinition, widget: StatWidget | ChartWidget
+) -> Iterator[Diagnostic]:
+    if widget.aggregate == "count":
+        if widget.field is not None:
+            yield _error(
+                "invalid-value",
+                "A count needs no field.",
+                widget,
+                at="field",
+                hint="Remove the key 'field', or use another aggregate, for example sum.",
+            )
+        return
+    if widget.field is None:
+        yield _error(
+            "missing-key",
+            f"The aggregate '{widget.aggregate}' needs a number field.",
+            widget,
+            hint="Add the key 'field'.",
+        )
+        return
+    target = yield from _resolve(definition, widget, "field", widget.entity, widget.field)
+    if target is not None:
+        what = f"The aggregate '{widget.aggregate}'"
+        yield from _check_suits(widget, "field", what, target, NUMBER_TYPES)
+
+
+def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterator[Diagnostic]:
+    target = yield from _resolve(definition, widget, "group_by", widget.entity, widget.group_by)
+    if target is None:
+        return
+    types = frozenset({"enum", *DATE_TYPES, *SINGLE_KINDS})
+    yield from _check_suits(widget, "group_by", "A chart group", target, types)
+    if widget.badge is not None and target.type == "enum":
+        yield from _check_badge_ref(definition, widget, widget.badge, target)
+
+
+def _check_record_filter(
+    definition: AppDefinition, element: Element, entity: str, record_filter: Mapping[str, object]
+) -> Iterator[Diagnostic]:
+    for path, condition in record_filter.items():
+        target = yield from _resolve(definition, element, "filter", entity, path)
+        if target is None:
+            continue
+        conditions: dict[str, object] = (
+            cast(dict[str, object], condition) if isinstance(condition, dict) else {"eq": condition}
+        )
+        for op, value in conditions.items():
+            if op not in FILTER_OPS:
+                yield _missing(element, "filter", "filter operator", op, FILTER_OPS)
+                continue
+            values = cast(list[object], value) if isinstance(value, list) else [value]
+            for item in values:
+                yield from _check_filter_value(element, target, item)
+
+
+def _check_filter_value(
+    element: Element, target: FieldTarget, value: object
+) -> Iterator[Diagnostic]:
+    if isinstance(value, str) and value.startswith("$"):
+        if value not in RELATIVE_DATES or target.type not in DATE_TYPES:
+            yield _error(
+                "invalid-value",
+                f"The filter value {value!r} is not valid for the field "
+                f"'{target.entity}.{target.name}' ({target.type}).",
+                element,
+                at="filter",
+                hint="Use $today or $now only for date and datetime fields.",
+            )
+    elif target.enum_values and value not in target.enum_values:
+        yield _missing(element, "filter", "enum value", str(value), target.enum_values)
 
 
 def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Iterator[Diagnostic]:

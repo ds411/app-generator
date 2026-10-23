@@ -18,6 +18,16 @@
         }
       ]
     },
+    "Aggregate": {
+      "enum": [
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max"
+      ],
+      "type": "string"
+    },
     "App": {
       "additionalProperties": false,
       "description": "The name and the description of the app.",
@@ -537,6 +547,90 @@
       "title": "CardsView",
       "type": "object"
     },
+    "ChartWidget": {
+      "additionalProperties": false,
+      "description": "A chart of an aggregate for each group of records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "span": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "chart",
+          "title": "Kind",
+          "type": "string"
+        },
+        "chart": {
+          "enum": [
+            "bar",
+            "line",
+            "donut"
+          ],
+          "title": "Chart",
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "group_by": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "aggregate": {
+          "$ref": "#/$defs/Aggregate",
+          "default": "count"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filter": {
+          "$ref": "#/$defs/RecordFilter"
+        },
+        "badge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "chart",
+        "entity",
+        "group_by"
+      ],
+      "title": "ChartWidget",
+      "type": "object"
+    },
     "ColorMode": {
       "enum": [
         "light",
@@ -848,6 +942,101 @@
       "title": "CustomRule",
       "type": "object"
     },
+    "CustomWidget": {
+      "additionalProperties": false,
+      "description": "A widget that hand-written code gives (a generation gap).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "span": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "custom",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CustomWidget",
+      "type": "object"
+    },
+    "Dashboard": {
+      "additionalProperties": false,
+      "description": "Widgets on a grid.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "widgets": {
+          "additionalProperties": {
+            "$ref": "#/$defs/appgen__dsl__ui__dashboards__Widget"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Widgets",
+          "type": "object"
+        }
+      },
+      "required": [
+        "widgets"
+      ],
+      "title": "Dashboard",
+      "type": "object"
+    },
     "DateRangeFilter": {
       "additionalProperties": false,
       "description": "A range of dates.",
@@ -930,6 +1119,254 @@
         }
       },
       "title": "Defaults",
+      "type": "object"
+    },
+    "DetailHeader": {
+      "additionalProperties": false,
+      "description": "The header of a detail view.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "badges": {
+          "items": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "title": "Badges",
+          "type": "array"
+        }
+      },
+      "title": "DetailHeader",
+      "type": "object"
+    },
+    "DetailSection": {
+      "additionalProperties": false,
+      "description": "A card with fields of the record, or a generation gap.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldPath"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "columns": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Columns",
+          "type": "integer"
+        },
+        "custom": {
+          "default": false,
+          "title": "Custom",
+          "type": "boolean"
+        }
+      },
+      "title": "DetailSection",
+      "type": "object"
+    },
+    "DetailTab": {
+      "additionalProperties": false,
+      "description": "A tab of a detail view: sections, a list of related records, or a gap.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DetailSection"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Sections",
+          "type": "object"
+        },
+        "relation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom": {
+          "default": false,
+          "title": "Custom",
+          "type": "boolean"
+        }
+      },
+      "title": "DetailTab",
+      "type": "object"
+    },
+    "DetailView": {
+      "additionalProperties": false,
+      "description": "One record in sections and tabs. The page gives the record.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "kind": {
+          "const": "detail",
+          "title": "Kind",
+          "type": "string"
+        },
+        "header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DetailHeader"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DetailSection"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Sections",
+          "type": "object"
+        },
+        "tabs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DetailTab"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Tabs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity",
+        "kind"
+      ],
+      "title": "DetailView",
       "type": "object"
     },
     "Direction": {
@@ -1526,7 +1963,7 @@
         "widget": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Widget"
+              "$ref": "#/$defs/appgen__dsl__ui__forms__Widget"
             },
             {
               "type": "null"
@@ -1872,6 +2309,78 @@
         "value"
       ],
       "title": "LengthRule",
+      "type": "object"
+    },
+    "ListWidget": {
+      "additionalProperties": false,
+      "description": "A short list of records in a table or a card list.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "span": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "list",
+          "title": "Kind",
+          "type": "string"
+        },
+        "view": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "filter": {
+          "$ref": "#/$defs/RecordFilter"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "default": 5,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "view"
+      ],
+      "title": "ListWidget",
       "type": "object"
     },
     "MemberName": {
@@ -2524,6 +3033,15 @@
       "title": "PatternRule",
       "type": "object"
     },
+    "RecordFilter": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/FieldPath"
+      },
+      "type": "object"
+    },
     "Relation": {
       "additionalProperties": false,
       "description": "A relation from one entity to another entity.",
@@ -2829,6 +3347,108 @@
         "field"
       ],
       "title": "Sort",
+      "type": "object"
+    },
+    "StatWidget": {
+      "additionalProperties": false,
+      "description": "A stat tile: a count or another aggregate of records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "span": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "stat",
+          "title": "Kind",
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "aggregate": {
+          "$ref": "#/$defs/Aggregate",
+          "default": "count"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filter": {
+          "$ref": "#/$defs/RecordFilter"
+        },
+        "format": {
+          "default": "number",
+          "enum": [
+            "number",
+            "currency",
+            "percent"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "entity"
+      ],
+      "title": "StatWidget",
       "type": "object"
     },
     "TableView": {
@@ -3370,6 +3990,16 @@
           "title": "Forms",
           "type": "object"
         },
+        "dashboards": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Dashboard"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Dashboards",
+          "type": "object"
+        },
         "defaults": {
           "anyOf": [
             {
@@ -3405,10 +4035,29 @@
         },
         {
           "$ref": "#/$defs/BoardView"
+        },
+        {
+          "$ref": "#/$defs/DetailView"
         }
       ]
     },
-    "Widget": {
+    "appgen__dsl__ui__dashboards__Widget": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StatWidget"
+        },
+        {
+          "$ref": "#/$defs/ChartWidget"
+        },
+        {
+          "$ref": "#/$defs/ListWidget"
+        },
+        {
+          "$ref": "#/$defs/CustomWidget"
+        }
+      ]
+    },
+    "appgen__dsl__ui__forms__Widget": {
       "enum": [
         "text",
         "textarea",
