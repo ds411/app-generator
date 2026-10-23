@@ -101,7 +101,7 @@ check_react() {
 }
 
 # Parts
-if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
+if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'docs/*' '*.md' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
     check_python
     check_traces
 fi
