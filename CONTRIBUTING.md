@@ -224,7 +224,9 @@ git config core.hooksPath .githooks
   changes, and stops the push if a check fails. For the Python part,
   the checks are `ruff check`, `ruff format --check`, `pyright`,
   `pytest`, and `appgen check` on the golden output of the bindings
-  (`tests/golden/`). The trace check fails on an invalid trace.
+  (`tests/golden/`). The trace check fails on an invalid trace. A
+  change to a Markdown file also runs these checks, because
+  `tests/test_docs.py` checks the docs.
 - When a push changes the generator core or the FastAPI binding, the
   hook also runs `scripts/check-fastapi.sh`. The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
