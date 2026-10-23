@@ -3,6 +3,11 @@
 GitHub has no native template for milestones. Use this file when you
 create or change a milestone.
 
+Define each milestone in `.github/planning/milestones.yml`. On each
+push to `main`, the "Planning sync" workflow creates or updates the
+milestones on GitHub. It matches milestones by title, so a new title
+makes a new milestone.
+
 ## Fields
 
 | Field       | Rule                                                                                    |

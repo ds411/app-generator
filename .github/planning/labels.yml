@@ -1,0 +1,46 @@
+# Labels for this repository. The "Planning sync" workflow creates or
+# updates them on each push to main. See CONTRIBUTING.md, section "Labels".
+
+- name: story
+  color: 1D76DB
+  description: A story. The story form adds this label.
+
+- name: "area: dsl"
+  color: C5DEF5
+  description: The YAML DSL, its schema, and validation.
+
+- name: "area: generator"
+  color: C5DEF5
+  description: The generator core, templates, and generation gaps.
+
+- name: "area: traces"
+  color: C5DEF5
+  description: The trace format, the trace scanner, and the checker.
+
+- name: "area: cli"
+  color: C5DEF5
+  description: The command line interface.
+
+- name: "area: tooling"
+  color: C5DEF5
+  description: The repository setup, CI, and Docker.
+
+- name: "binding: nextjs"
+  color: D4C5F9
+  description: The Next.js binding.
+
+- name: "binding: react"
+  color: D4C5F9
+  description: The React binding.
+
+- name: "binding: fastapi"
+  color: D4C5F9
+  description: The FastAPI binding.
+
+- name: bug
+  color: D73A4A
+  description: Something that does not work as specified.
+
+- name: blocked
+  color: B60205
+  description: Work cannot continue until a dependency is done.

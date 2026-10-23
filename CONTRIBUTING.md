@@ -37,6 +37,9 @@ We plan with GitHub milestones and issues.
 
 - A **milestone** is a deliverable increment with a goal, a scope, and
   exit criteria. Use [the milestone template](.github/MILESTONE_TEMPLATE.md).
+  Define each milestone in `.github/planning/milestones.yml`. The
+  "Planning sync" workflow creates or updates the milestones on each
+  push to `main`.
 - A **story** is an issue that one pull request can deliver. Each story
   belongs to one milestone. Use the "Story" issue form.
 - Work on the milestones in their number order. A story can start
@@ -72,6 +75,10 @@ We plan with GitHub milestones and issues.
 | `binding: fastapi` | The FastAPI binding.                                  |
 | `bug`              | Something that does not work as specified.            |
 | `blocked`          | Work cannot continue until a dependency is done.      |
+
+`.github/planning/labels.yml` defines these labels. The "Planning sync"
+workflow creates or updates them on each push to `main`. To add or
+change a label, change that file.
 
 ## Branches
 
