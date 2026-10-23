@@ -75,7 +75,9 @@ put this line at the top of the file:
 
 YAML 1.1 reads `yes`, `no`, `on`, and `off` as booleans. Put quotes
 around such a value when it is a name, for example an enum value
-`"on"`.
+`"on"`. If a boolean is where a string must be, `appgen validate` says
+that YAML read the value as a boolean, and gives its file, line, and
+column.
 
 ## Names and IDs
 

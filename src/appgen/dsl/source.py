@@ -23,6 +23,8 @@ class SourceMap:
     root: Location
     keys: dict[DataPath, Location] = field(default_factory=dict[DataPath, Location])
     values: dict[DataPath, Location] = field(default_factory=dict[DataPath, Location])
+    booleans: dict[DataPath, str] = field(default_factory=dict[DataPath, str])
+    """The text of each plain value that YAML reads as a boolean, for example `on`."""
 
     def element(self, path: DataPath) -> Location:
         """Return the location of an element: its key, or the nearest parent."""
@@ -113,7 +115,11 @@ class _Builder:
             return self._mapping(node, path)
         if isinstance(node, SequenceNode):
             return [self.build(item, (*path, index)) for index, item in enumerate(node.value)]
-        return self.constructor.construct_object(node, deep=True)  # pyright: ignore[reportUnknownMemberType]
+        value = self.constructor.construct_object(node, deep=True)  # pyright: ignore[reportUnknownMemberType]
+        if isinstance(value, bool) and isinstance(node, ScalarNode) and not node.style:
+            # YAML 1.1 reads `on`, `off`, `yes`, and `no` as booleans too.
+            self.source_map.booleans[path] = str(node.value)
+        return value
 
     def _mapping(self, node: MappingNode, path: DataPath) -> dict[str, object]:
         result: dict[str, object] = {}

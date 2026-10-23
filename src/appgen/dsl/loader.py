@@ -24,6 +24,8 @@ _TYPE_MESSAGES = {
     "float_type": "Expected a number.",
     "too_short": "Expected one or more items.",
 }
+_STRING_ERRORS = frozenset({"string_type", "literal_error", "string_pattern_mismatch"})
+"""The errors of a value that must be a string."""
 
 
 def load_definition(path: Path | str) -> AppDefinition:
@@ -110,6 +112,16 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
         )
     location = source_map.element(path) if is_key else source_map.value(path)
     value = detail["input"]
+    if isinstance(value, bool) and kind in _STRING_ERRORS and path in source_map.booleans:
+        text = source_map.booleans[path]
+        return Diagnostic(
+            code="invalid-value",
+            message=f"YAML reads '{text}' as a boolean ({str(value).lower()}), "
+            "but a string must be here.",
+            location=location,
+            hint=f'Put the value in quotes: "{text}".',
+            element_id=element,
+        )
     if kind == "literal_error":
         expected = detail.get("ctx", {}).get("expected", "")
         return Diagnostic(
