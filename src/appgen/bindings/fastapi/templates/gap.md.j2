@@ -1,0 +1,11 @@
+{{ trace_header(element_id) }}
+# Gap: {{ element_id }}
+
+The FastAPI binding does not generate code for the {{ element_kind }} `{{ name }}`.
+{% if element.description is defined and element.description %}
+
+{{ element.description }}
+{% endif %}
+
+TODO(appgen): write the {{ element_kind }} `{{ name }}` by hand. When it is done,
+change the kind of the trace in the header from gap to manual.

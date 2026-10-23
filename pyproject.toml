@@ -19,6 +19,7 @@ appgen = "appgen.cli:app"
 [project.entry-points."appgen.bindings"]
 minimal = "appgen.bindings.minimal:BINDING"
 nextjs = "appgen.bindings.nextjs:BINDING"
+fastapi = "appgen.bindings.fastapi:BINDING"
 react = "appgen.bindings.react:BINDING"
 
 [build-system]
@@ -37,15 +38,19 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py314"
+# The golden files are the output of the bindings, with their own config.
+extend-exclude = ["tests/golden"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pyright]
 include = ["src", "tests"]
+exclude = ["tests/golden"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["golden"]
 addopts = ["--strict-markers", "--strict-config"]

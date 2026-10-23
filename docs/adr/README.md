@@ -22,3 +22,4 @@ gives the rules.
 | 0003   | [UI DSL](0003-ui-dsl.md)                                               | Accepted |
 | 0004   | [Trace format](0004-trace-format.md)                                   | Accepted |
 | 0005   | [Generation gaps](0005-generation-gaps.md)                             | Accepted |
+| 0006   | [FastAPI binding](0006-fastapi-binding.md)                             | Accepted |

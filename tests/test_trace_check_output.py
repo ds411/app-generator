@@ -1,6 +1,7 @@
 """The trace check on the output of the test binding (`minimal`)."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -99,3 +100,17 @@ def test_check_command_stops_on_a_broken_manifest(output: Path) -> None:
 
     assert result.exit_code == 2
     assert "manifest" in result.output
+
+
+def test_check_does_not_count_the_kinds_that_the_binding_excludes(
+    definition: AppDefinition, tmp_path: Path
+) -> None:
+    binding = replace(find_binding("minimal"), excludes=frozenset({"page"}))
+    write_result(generate(definition, binding), tmp_path, binding.name)
+
+    report = check_traces(definition, tmp_path)
+
+    assert report.excluded_kinds == ["page"]
+    assert report.coverage.excluded == ["pages.projects"]
+    manifest = json.loads((tmp_path / ".appgen" / "manifest.json").read_text())
+    assert manifest["excluded_kinds"] == ["page"]

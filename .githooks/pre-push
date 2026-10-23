@@ -71,6 +71,7 @@ check_python() {
 # files, which the tests compare with a fresh generator run).
 check_traces() {
     run uv run --locked appgen check tests/fixtures/project-tracker.yaml tests/golden/minimal
+    run uv run --locked appgen check tests/fixtures/project-tracker.yaml tests/golden/fastapi
 }
 
 # Parts

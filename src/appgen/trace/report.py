@@ -63,7 +63,9 @@ def check_traces(
     If `use_manifest` is true and the folder has an output manifest, the
     manifest gives the generated files (unless `generated_files` is
     given), and the traces of the generated files that cannot hold
-    comments. Raise ManifestError if the manifest cannot be read.
+    comments. The coverage also excludes the element kinds that the
+    manifest lists as out of the scope of the binding. Raise
+    ManifestError if the manifest cannot be read.
     """
     scan = scan_folder(code_folder, ignore=ignore, use_gitignore=use_gitignore)
     manifest = read_manifest(Path(code_folder)) if use_manifest else None
@@ -72,6 +74,7 @@ def check_traces(
             generated_files = set(manifest.generated)
         scan.traces.extend(manifest_traces(manifest))
         scan.traces.sort()
+        exclude_kinds = [*exclude_kinds, *manifest.excluded_kinds]
     invalid = find_invalid_traces(definition, scan, generated_files)
     traces = valid_traces(scan, invalid)
     excluded = sorted(set(exclude_kinds))

@@ -51,7 +51,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/dsl/`      | The app definition DSL: the model, the loader, and checks.  |
 | `src/appgen/dsl/ui/`   | The UI part of the DSL: design tokens and UI elements.      |
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
-| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, `nextjs` writes a Next.js 16 app, and `react` writes a React 19 app. |
+| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, `nextjs` writes a Next.js 16 app, `react` writes a React 19 app, and `fastapi` writes a FastAPI REST API. |
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
@@ -127,6 +127,12 @@ cover. Each such file is an extension file (ADR 0005) with a gap trace
 and a `TODO(appgen):` comment. The generator creates it once, and never
 overwrites or deletes it.
 
+A binding can also declare `excludes`: the element kinds that are out
+of its scope, for example `page` and `ui` for a back-end binding. The
+generator makes no gap for an element of an excluded kind, or for the
+elements under it. The manifest records the excluded kinds, and
+`appgen check` does not count these elements in the coverage.
+
 `write_result()` writes a generation result into an output folder and
 keeps a manifest in `.appgen/manifest.json`. The manifest lists each
 generated file with its SHA-256 hash, and each extension file apart
@@ -184,6 +190,21 @@ exists. An entity sets the number of records with the extension key
 ```sh
 uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker
 cd /tmp/tracker && pnpm install && pnpm lint && pnpm typecheck && pnpm build
+```
+
+### FastAPI binding
+
+`appgen generate <definition> -b fastapi -o <dir>` writes a standalone
+REST API: FastAPI 0.161 on Python 3.14, with uv. Each entity is a
+vertical slice in `app/features/<slice>/`. Pages and the UI are out of
+the scope of the binding. The binding is in
+`src/appgen/bindings/fastapi/`, and
+[ADR 0006](docs/adr/0006-fastapi-binding.md) describes its design. To
+try the output:
+
+```sh
+uv run appgen generate examples/project-tracker/app.yaml -b fastapi -o /tmp/tracker-api
+cd /tmp/tracker-api && uv sync && uv run ruff check && uv run pyright && uv run pytest
 ```
 
 ## Traces

@@ -223,8 +223,8 @@ git config core.hooksPath .githooks
 - `.githooks/pre-push` runs the checks of each part that the push
   changes, and stops the push if a check fails. For the Python part,
   the checks are `ruff check`, `ruff format --check`, `pyright`,
-  `pytest`, and `appgen check` on the output of the test binding
-  (`tests/golden/minimal`). The trace check fails on an invalid trace.
+  `pytest`, and `appgen check` on the golden output of the bindings
+  (`tests/golden/`). The trace check fails on an invalid trace.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.
