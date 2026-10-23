@@ -40,12 +40,28 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 
 ## Layout
 
-| Path              | Content                                                    |
-| ----------------- | ---------------------------------------------------------- |
-| `src/appgen/`     | The generator and the CLI.                                 |
-| `src/appgen/dsl/` | The app definition DSL: the model, the loader, and checks. |
-| `tests/`          | The tests.                                                 |
-| `docs/adr/`       | The architecture decision records.                         |
-| `.githooks/`      | The git hooks (pre-push checks).                           |
+| Path                   | Content                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `src/appgen/`          | The generator and the CLI.                                  |
+| `src/appgen/dsl/`      | The app definition DSL: the model, the loader, and checks.  |
+| `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
+| `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core.    |
+| `tests/`               | The tests.                                                  |
+| `docs/adr/`            | The architecture decision records.                          |
+| `.githooks/`           | The git hooks (pre-push checks).                            |
 
 [ADR 0002](docs/adr/0002-app-definition-dsl-v0.md) describes the DSL.
+
+## Bindings
+
+A binding is a `Binding` object (see `src/appgen/gen/binding.py`). It
+declares its name, its template folder, its output layout (a list of
+`Output` rules), and the element kinds that it covers. The generator
+marks each element of a kind that the binding does not cover as a gap.
+A binding registers itself with an entry point in the group
+`appgen.bindings` in `pyproject.toml`:
+
+```toml
+[project.entry-points."appgen.bindings"]
+minimal = "appgen.bindings.minimal:BINDING"
+```

@@ -6,6 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.14"
 dependencies = [
+    "jinja2>=3.1.6",
     "pydantic>=2.12",
     "pyyaml>=6.0.3",
     "typer>=0.27",
@@ -13,6 +14,9 @@ dependencies = [
 
 [project.scripts]
 appgen = "appgen.cli:app"
+
+[project.entry-points."appgen.bindings"]
+minimal = "appgen.bindings.minimal:BINDING"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
