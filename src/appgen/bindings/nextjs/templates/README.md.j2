@@ -33,6 +33,22 @@ The app uses Postgres with Drizzle ORM. Copy `.env.example` to
 into `drizzle/`: keep them in version control. With
 `DATABASE_MIGRATE=true`, the server applies them when it starts.
 
+### Local database
+
+To run the app without a Postgres server, use PGlite, an embedded
+Postgres that runs in the Node.js process. Set these values in
+`.env.local`, then run `pnpm db:generate` and `pnpm dev`:
+
+```sh
+DATABASE_URL=pglite:./.pglite
+DATABASE_MIGRATE=true
+```
+
+PGlite keeps the data in the folder `.pglite/`. It uses the same schema
+and the same migrations as Postgres. Only one process can open the
+folder: stop the server before you run `pnpm db:migrate`. Use Postgres
+in production.
+
 ## Docker
 
 `docker compose up --build` starts Postgres and the app on

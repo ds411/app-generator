@@ -1,9 +1,18 @@
 {{ trace_header("app") }}
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import type { PgliteDatabase } from "drizzle-orm/pglite";
+import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
 
-import { getDb } from "./client";
+import { getDb, usesPglite } from "./client";
+import type * as schema from "./schema";
 
 /** Apply the migrations in `drizzle/` (from `pnpm db:generate`) to the database. */
 export async function migrateDatabase(): Promise<void> {
-  await migrate(getDb(), { migrationsFolder: "drizzle" });
+  const config = { migrationsFolder: "drizzle" };
+  if (usesPglite()) {
+    await migratePglite(getDb() as PgliteDatabase<typeof schema>, config);
+  } else {
+    await migratePostgres(getDb() as PostgresJsDatabase<typeof schema>, config);
+  }
 }

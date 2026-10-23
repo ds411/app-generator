@@ -298,7 +298,9 @@ at start when `DATABASE_MIGRATE=true`. The app has a multi-stage
 `Dockerfile` (a standalone Next.js server as a non-root user, with the
 migrations in `drizzle/`) and a `compose.yaml` with Postgres:
 `docker compose up --build` starts both, and the app migrates the
-database when it starts.
+database when it starts. For a local run without a Postgres server, set
+`DATABASE_URL=pglite:./.pglite` to use PGlite, an embedded Postgres
+([ADR 0007](docs/adr/0007-local-database.md)).
 
 Each entity slice in `src/entities/` has the same public API as in the
 React app, so that the shared UI templates work in both apps: the types,
@@ -510,9 +512,11 @@ Pydantic schemas, a repository, and one module for each operation. A
 custom operation has a generated endpoint and an extension file for its
 logic, and each entity has an extension file for its custom validation.
 Each operation has generated API tests that run against Postgres in a
-container. Errors use the problem details format (RFC 9457). An Alembic
+container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. A Dockerfile and a Compose
-file run the API with Postgres. Pages and the UI are out of the scope of
+file run the API with Postgres. For a local run without a Postgres
+server, set `DATABASE_URL=sqlite+aiosqlite:///./local.db` ([ADR
+0007](docs/adr/0007-local-database.md)). Pages and the UI are out of the scope of
 the binding. The binding is in `src/appgen/bindings/fastapi/`, and [ADR
 0006](docs/adr/0006-fastapi-binding.md) describes its design. To try the
 output:

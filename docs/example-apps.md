@@ -2,19 +2,21 @@
 
 This guide shows how to generate the three example apps from
 `examples/project-tracker/app.yaml`, check their traces, and run them.
-You can run each app on your machine or in Docker.
+You can run each app on your machine or in Docker. On your machine,
+the Next.js app and the FastAPI app can use a local database instead of
+a Postgres server.
 
-| Binding   | App                                  | Data                 | Local URL               | Docker URL              |
-| --------- | ------------------------------------ | -------------------- | ----------------------- | ----------------------- |
-| `nextjs`  | A full-stack app (Next.js 16)        | Postgres             | <http://localhost:3000> | <http://localhost:3000> |
-| `fastapi` | A REST API (FastAPI 0.161)           | Postgres             | <http://localhost:8000> | <http://localhost:8000> |
-| `react`   | A front end (React 19)               | Mock data in memory  | <http://localhost:5173> | <http://localhost:8080> |
+| Binding   | App                           | Data in Docker      | Local database       | Local URL               | Docker URL              |
+| --------- | ----------------------------- | ------------------- | -------------------- | ----------------------- | ----------------------- |
+| `nextjs`  | A full-stack app (Next.js 16) | Postgres            | PGlite or Postgres   | <http://localhost:3000> | <http://localhost:3000> |
+| `fastapi` | A REST API (FastAPI 0.161)    | Postgres            | SQLite or Postgres   | <http://localhost:8000> | <http://localhost:8000> |
+| `react`   | A front end (React 19)        | Mock data in memory | Mock data in memory  | <http://localhost:5173> | <http://localhost:8080> |
 
 ## Contents
 
 - [Requirements](#requirements)
 - [Generate and check the apps](#generate-and-check-the-apps)
-- [Start Postgres for the local runs](#start-postgres-for-the-local-runs)
+- [Choose the database for the local runs](#choose-the-database-for-the-local-runs)
 - [Next.js app](#nextjs-app)
 - [FastAPI app](#fastapi-app)
 - [React app](#react-app)
@@ -28,7 +30,8 @@ You can run each app on your machine or in Docker.
   FastAPI app.
 - Node.js 24 and [pnpm](https://pnpm.io/) for the Next.js and React
   apps.
-- Docker with Docker Compose, for the Docker runs and for Postgres.
+- Docker with Docker Compose, for the Docker runs. The local runs need
+  Docker only if you use Postgres.
 
 Install appgen from the repository root:
 
@@ -58,11 +61,25 @@ its report shows the kinds `page` and `ui` as excluded. See
 Run `appgen generate` again to update an app after you change the
 definition. appgen does not change the extension files.
 
-## Start Postgres for the local runs
+## Choose the database for the local runs
 
-The Next.js app and the FastAPI app need Postgres. The Docker runs
-start their own Postgres, so you need this step only for the local
-runs. Start one Postgres container for the two apps:
+The Next.js app and the FastAPI app use Postgres in Docker. The Docker
+runs start their own Postgres. For the local runs, you can use a local
+database or a Postgres server:
+
+- **Local database (no server).** The Next.js app uses PGlite, a
+  Postgres that runs in the Node.js process. The FastAPI app uses
+  SQLite, a database in a file. You need no Docker and no setup. The
+  steps below use this option.
+- **Postgres server.** Use it to test with the database of production.
+  Start the container below, and use the Postgres steps of each app.
+
+[ADR 0007](adr/0007-local-database.md) explains the choice of PGlite
+and SQLite.
+
+### Start Postgres
+
+Start one Postgres container for the two apps:
 
 ```sh
 docker run -d --name tracker-db -p 5432:5432 \
@@ -88,15 +105,14 @@ docker exec tracker-db createdb -U postgres project_tracker_api
    pnpm install
    ```
 
-2. Copy the settings file:
+2. Write the settings file `.env.local` for PGlite:
 
    ```sh
-   cp .env.example .env.local
+   printf 'DATABASE_URL=pglite:./.pglite\nDATABASE_MIGRATE=true\n' > .env.local
    ```
 
-   The `DATABASE_URL` in the file agrees with the Postgres container
-   above. Set `DATABASE_MIGRATE=true` in `.env.local`. Then the server
-   applies the migrations when it starts.
+   With `DATABASE_MIGRATE=true`, the server applies the migrations when
+   it starts. PGlite keeps the data in the folder `.pglite/`.
 
 3. Write the first migration from the schema. The command writes the
    SQL files into `drizzle/`:
@@ -113,7 +129,13 @@ docker exec tracker-db createdb -U postgres project_tracker_api
 
 5. Open <http://localhost:3000>.
 
-To apply the migrations without the server, run `pnpm db:migrate`.
+To apply the migrations without the server, stop the server and run
+`pnpm db:migrate`. Only one process can open the PGlite folder. To
+delete all data, stop the server and delete `.pglite/`.
+
+To use the Postgres container instead, copy the settings file in step 2
+(`cp .env.example .env.local`), and set `DATABASE_MIGRATE=true` in it.
+The `DATABASE_URL` in the file agrees with the Postgres container.
 
 ### Run in Docker
 
@@ -143,8 +165,14 @@ applies the migrations when it starts.
    cp .env.example .env
    ```
 
-3. Set `DATABASE_URL` in `.env` to the FastAPI database of the Postgres
-   container above:
+3. Set `DATABASE_URL` in `.env` to a SQLite file:
+
+   ```sh
+   DATABASE_URL=sqlite+aiosqlite:///./local.db
+   ```
+
+   To use the Postgres container instead, set the URL of its FastAPI
+   database:
 
    ```sh
    DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/project_tracker_api
@@ -166,7 +194,14 @@ applies the migrations when it starts.
    `GET /health` gives `{"status":"ok"}`.
 
 To run the tests of the app, run `uv run pytest`. The tests start their
-own Postgres with Testcontainers, so Docker must run.
+own Postgres with Testcontainers, so Docker must run. To run the tests
+on SQLite without Docker, set `TEST_DATABASE_URL`:
+
+```sh
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest
+```
+
+To delete all data of the local database, delete `local.db`.
 
 ### Run in Docker
 
@@ -259,11 +294,22 @@ arguments of the section above from the environment. It also reads
 example `--network host`. The script header lists all the environment
 variables.
 
+To test the local run of an app that you generated and installed, give
+its folder and `--local`. The script starts the app on your machine
+with PGlite or SQLite, without Docker. Build the Next.js app first with
+`pnpm build`:
+
+```sh
+uv run scripts/smoke_test.py nextjs --app /tmp/tracker-nextjs --local
+uv run scripts/smoke_test.py fastapi --app /tmp/tracker-fastapi --local
+```
+
 ## Clean up
 
 Stop a Compose run with `docker compose down -v` in the app folder.
-The `-v` option also deletes the database volume. Remove the Postgres
-container of the local runs:
+The `-v` option also deletes the database volume. The local databases
+are in the app folders: `.pglite/` (Next.js) and `local.db` (FastAPI).
+If you started the Postgres container for the local runs, remove it:
 
 ```sh
 docker rm -f tracker-db

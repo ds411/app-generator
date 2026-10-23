@@ -2,15 +2,15 @@
 # Generate the project tracker with the FastAPI binding, and check the
 # output: install, lint, format, type check, tests, Docker image,
 # traces, and the smoke test (scripts/smoke_test.py: start the app and
-# request it). The pre-push hook runs this script when a push changes the
-# generator or the FastAPI binding. Run it by hand from the repository
-# root:
+# request it), in Docker and with SQLite (--local). The pre-push hook
+# runs this script when a push changes the generator or the FastAPI
+# binding. Run it by hand from the repository root:
 #
 #   scripts/check-fastapi.sh [output folder]
 #
 # Without an output folder, the script uses a temporary folder and
-# deletes it at the end. The generated tests need Docker, or a database
-# in TEST_DATABASE_URL.
+# deletes it at the end. The generated tests run on Postgres (Docker, or
+# a database in TEST_DATABASE_URL), then on SQLite.
 #
 # Environment variables:
 #   POSTGRES_IMAGE            The Postgres image of the tests and the smoke test.
@@ -51,6 +51,9 @@ step "pyright"
 uv run pyright
 step "pytest"
 uv run pytest -q
+step "pytest on SQLite"
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
 
 step "docker build"
 set --
@@ -65,5 +68,8 @@ uv run --locked appgen check "$definition" "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-fastapi
+
+step "smoke test with the local database"
+uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
 
 step "passed"

@@ -23,7 +23,7 @@ When you write the code of an extension file, change `@trace:gap` to
 
 - FastAPI 0.161 on Python 3.14
 - Vertical slice architecture
-- SQLAlchemy 2 (async), Alembic, and Postgres
+- SQLAlchemy 2 (async), Alembic, and Postgres (SQLite for local runs)
 - uv
 
 ## Commands
@@ -43,9 +43,25 @@ The API documentation is at `/docs` when the API runs. The API reads
 its settings from environment variables or from a `.env` file (see
 `.env.example`), for example `DATABASE_URL`.
 
-The tests need Postgres. By default, they start Postgres in a container
+## Local database
+
+To run the API without a Postgres server, use SQLite. Set this URL in
+`.env`, then migrate the database and start the API:
+
+```sh
+DATABASE_URL=sqlite+aiosqlite:///./local.db
+```
+
+The database is the file `local.db`. The models and the migrations work
+on both databases. Use Postgres in production: SQLite has one writer at
+a time, and it stores the date and time values in UTC.
+
+## Tests
+
+The tests need a database. By default, they start Postgres in a container
 with Testcontainers, so Docker must run. To use a database that runs
-already, set `TEST_DATABASE_URL`. The tests delete all data in it.
+already, or SQLite, set `TEST_DATABASE_URL`, for example to
+`sqlite+aiosqlite:///./test.db`. The tests delete all data in it.
 
 Each operation has a test module in `tests/features/<slice>/`, with
 the success case and the main error cases. The factories in
