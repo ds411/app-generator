@@ -10,9 +10,9 @@ from collections.abc import Callable
 from typing import Any
 
 from appgen.bindings.react import versions
-from appgen.bindings.react.mock_data import mock_data
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
 from appgen.bindings.shared.typescript import (

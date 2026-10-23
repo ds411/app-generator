@@ -484,7 +484,8 @@ memory, and has the interface of an API client (`EntityApi` in
 create, update, and delete. The CRUD and list operations of the
 definition call it. The mock records come from a fixed seed, so the
 output stays the same, and each relation refers to a record that
-exists. An entity sets the number of records with the extension key
+exists. A key or a code field comes from the name of the record (for
+example the key `MP` for "Meridian Portal"). An entity sets the number of records with the extension key
 `x-mock-count` (default: 12).
 
 Each custom element of the definition is a generation gap (ADR 0005):
