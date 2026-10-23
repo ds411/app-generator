@@ -17,6 +17,12 @@ from appgen.trace.scanner import (
     scan_folder,
     scan_text,
 )
+from appgen.trace.validity import (
+    find_invalid_traces,
+    generated_outside_output,
+    unknown_elements,
+    valid_traces,
+)
 
 __all__ = [
     "DEFAULT_IGNORE",
@@ -30,6 +36,10 @@ __all__ = [
     "TraceProblem",
     "comment_openers",
     "compute_coverage",
+    "find_invalid_traces",
+    "generated_outside_output",
     "scan_folder",
     "scan_text",
+    "unknown_elements",
+    "valid_traces",
 ]
