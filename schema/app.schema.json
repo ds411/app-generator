@@ -637,6 +637,52 @@
       "title": "Column",
       "type": "object"
     },
+    "CompareOp": {
+      "enum": [
+        "eq",
+        "ne",
+        "lt",
+        "lte",
+        "gt",
+        "gte"
+      ],
+      "type": "string"
+    },
+    "CompareRule": {
+      "additionalProperties": false,
+      "description": "A rule that compares two fields of the form.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "compare",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "op": {
+          "$ref": "#/$defs/CompareOp"
+        },
+        "other": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "message": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "kind",
+        "field",
+        "op",
+        "other",
+        "message"
+      ],
+      "title": "CompareRule",
+      "type": "object"
+    },
     "Confirm": {
       "additionalProperties": false,
       "description": "A question that the user must confirm before an action runs.",
@@ -763,6 +809,43 @@
         "kind"
       ],
       "title": "CustomAction",
+      "type": "object"
+    },
+    "CustomRule": {
+      "additionalProperties": false,
+      "description": "A rule that hand-written code checks (a generation gap).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "custom",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CustomRule",
       "type": "object"
     },
     "DateRangeFilter": {
@@ -1102,6 +1185,83 @@
       "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$",
       "type": "string"
     },
+    "FieldRules": {
+      "additionalProperties": false,
+      "description": "Validation rules of a form field, in addition to the rules of the field type.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "required": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequiredRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LengthRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LengthRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PatternRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "min": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumberRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumberRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FieldRules",
+      "type": "object"
+    },
     "FieldType": {
       "enum": [
         "string",
@@ -1150,6 +1310,139 @@
         "text"
       ],
       "title": "Footer",
+      "type": "object"
+    },
+    "Form": {
+      "additionalProperties": false,
+      "description": "A form that calls an operation on submit.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "operation": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "mode": {
+          "$ref": "#/$defs/FormMode",
+          "default": "dialog"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "submit_label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cancel_label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FormField"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "sections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FormSection"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Sections",
+          "type": "object"
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rules": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FormRule"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Rules",
+          "type": "object"
+        },
+        "defaults": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Defaults",
+          "type": "object"
+        },
+        "on_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FormOnSuccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "entity",
+        "operation",
+        "fields"
+      ],
+      "title": "Form",
       "type": "object"
     },
     "FormAction": {
@@ -1223,6 +1516,209 @@
       "title": "FormAction",
       "type": "object"
     },
+    "FormField": {
+      "additionalProperties": false,
+      "description": "A field of a form: a field or a relation of the entity, or an operation parameter.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "widget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Widget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "placeholder": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "help": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "span": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Span",
+          "type": "integer"
+        },
+        "rows": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rows"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
+        "rules": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldRules"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FormField",
+      "type": "object"
+    },
+    "FormMode": {
+      "enum": [
+        "dialog",
+        "sheet",
+        "page"
+      ],
+      "type": "string"
+    },
+    "FormOnSuccess": {
+      "additionalProperties": false,
+      "description": "What the app does after the submit succeeds.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "toast": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "close": {
+          "default": true,
+          "title": "Close",
+          "type": "boolean"
+        },
+        "navigate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FormOnSuccess",
+      "type": "object"
+    },
+    "FormRule": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CompareRule"
+        },
+        {
+          "$ref": "#/$defs/CustomRule"
+        }
+      ]
+    },
+    "FormSection": {
+      "additionalProperties": false,
+      "description": "A group of form fields with a title.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "FormSection",
+      "type": "object"
+    },
     "Format": {
       "enum": [
         "text",
@@ -1242,7 +1738,7 @@
     },
     "Grid": {
       "additionalProperties": false,
-      "description": "A column grid.",
+      "description": "A column grid. Forms, card lists, and dashboards use grids.",
       "patternProperties": {
         "^x-": {}
       },
@@ -1346,6 +1842,36 @@
         }
       },
       "title": "Layout",
+      "type": "object"
+    },
+    "LengthRule": {
+      "additionalProperties": false,
+      "description": "A minimum or a maximum number of characters.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "LengthRule",
       "type": "object"
     },
     "MemberName": {
@@ -1594,6 +2120,42 @@
         "page"
       ],
       "title": "NavigateAction",
+      "type": "object"
+    },
+    "NumberRule": {
+      "additionalProperties": false,
+      "description": "A minimum or a maximum value.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "NumberRule",
       "type": "object"
     },
     "OnDelete": {
@@ -1934,6 +2496,34 @@
       "title": "Pagination",
       "type": "object"
     },
+    "PatternRule": {
+      "additionalProperties": false,
+      "description": "A regular expression that the value must match.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/Text"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "PatternRule",
+      "type": "object"
+    },
     "Relation": {
       "additionalProperties": false,
       "description": "A relation from one entity to another entity.",
@@ -2012,6 +2602,28 @@
         "many_to_many"
       ],
       "type": "string"
+    },
+    "RequiredRule": {
+      "additionalProperties": false,
+      "description": "The field needs a value.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RequiredRule",
+      "type": "object"
     },
     "SearchFilter": {
       "additionalProperties": false,
@@ -2748,6 +3360,16 @@
           "title": "Views",
           "type": "object"
         },
+        "forms": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Form"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Forms",
+          "type": "object"
+        },
         "defaults": {
           "anyOf": [
             {
@@ -2785,6 +3407,22 @@
           "$ref": "#/$defs/BoardView"
         }
       ]
+    },
+    "Widget": {
+      "enum": [
+        "text",
+        "textarea",
+        "number",
+        "select",
+        "radio",
+        "checkbox",
+        "switch",
+        "date",
+        "datetime",
+        "relation",
+        "custom"
+      ],
+      "type": "string"
     }
   },
   "additionalProperties": false,

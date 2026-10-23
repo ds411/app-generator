@@ -90,3 +90,41 @@ def _entity(definition: AppDefinition, name: str) -> Entity:
     if found is None:
         raise FieldPathError(f"The entity '{name}' does not exist.")
     return found
+
+
+WIDGET_TYPES: dict[str, frozenset[str] | None] = {
+    "text": frozenset({"string", "email", "url", "uuid"}),
+    "textarea": frozenset({"string", "text"}),
+    "number": NUMBER_TYPES,
+    "select": frozenset({"enum", *SINGLE_KINDS}),
+    "radio": frozenset({"enum"}),
+    "checkbox": frozenset({"boolean"}),
+    "switch": frozenset({"boolean"}),
+    "date": frozenset({"date"}),
+    "datetime": frozenset({"datetime"}),
+    "relation": frozenset({*SINGLE_KINDS, "many_to_many"}),
+    "custom": None,
+}
+"""The field types and relation kinds that each form widget suits. None: all."""
+
+_DEFAULT_WIDGETS = {
+    "string": "text",
+    "email": "text",
+    "url": "text",
+    "uuid": "text",
+    "text": "textarea",
+    "integer": "number",
+    "decimal": "number",
+    "enum": "select",
+    "boolean": "switch",
+    "date": "date",
+    "datetime": "datetime",
+    "many_to_one": "relation",
+    "one_to_one": "relation",
+    "many_to_many": "relation",
+}
+
+
+def default_widget(target: FieldTarget) -> str | None:
+    """Return the default form widget of a field, or None if it needs `widget: custom`."""
+    return _DEFAULT_WIDGETS.get(target.relation_kind or target.type)

@@ -4,21 +4,25 @@ The validator runs these checks after the checks of the data part.
 """
 
 import difflib
+import re
 from collections.abc import Collection, Generator, Iterable, Iterator
 
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
-from appgen.dsl.model import AppDefinition
+from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.ui.fields import (
     DATE_TYPES,
     NUMBER_TYPES,
     SINGLE_KINDS,
     TEXT_TYPES,
+    WIDGET_TYPES,
     FieldPathError,
     FieldTarget,
+    default_widget,
     member_names,
     resolve_path,
 )
+from appgen.dsl.ui.forms import CompareRule, Form, FormField
 from appgen.dsl.ui.tokens import check_tokens
 from appgen.dsl.ui.views import (
     BadgeRef,
@@ -52,6 +56,10 @@ FORMAT_TYPES: dict[str, frozenset[str] | None] = {
 }
 """The field types (and relation kinds) that each column format suits. None: all."""
 
+STRING_TYPES = frozenset({"string", "text", "email", "url"})
+FORM_OPERATION_KINDS = ("create", "update", "custom")
+ROUTE_DEFAULT = re.compile(r"^\$route\.[a-z][a-z0-9_]*$")
+
 
 def check_ui_tokens(definition: AppDefinition) -> Iterator[Diagnostic]:
     """The design tokens must have valid names, types, values, and references."""
@@ -67,6 +75,119 @@ def check_ui_views(definition: AppDefinition) -> Iterator[Diagnostic]:
         yield from _check_badge_set(definition, badge)
     for view in definition.ui.views.values():
         yield from _check_view(definition, view)
+
+
+def check_ui_forms(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Forms must call a suitable operation, and each form field must suit its widget."""
+    if definition.ui is None:
+        return
+    for form in definition.ui.forms.values():
+        yield from _check_form(definition, form)
+
+
+def _check_form(definition: AppDefinition, form: Form) -> Iterator[Diagnostic]:
+    if form.entity not in definition.entities:
+        yield _missing(form, "entity", "entity", form.entity, definition.entities)
+        return
+    params: dict[str, Field] | None = None
+    operation = definition.operations.get(form.operation)
+    if operation is None:
+        yield _missing(form, "operation", "operation", form.operation, definition.operations)
+    elif operation.entity != form.entity or operation.kind not in FORM_OPERATION_KINDS:
+        yield _error(
+            "unsuitable-operation",
+            f"A form on '{form.entity}' needs a create, update, or custom operation on "
+            f"'{form.entity}', but '{form.operation}' is a {operation.kind} operation on "
+            f"'{operation.entity}'.",
+            form,
+            at="operation",
+        )
+    elif operation.kind == "custom":
+        params = dict(operation.params)
+    for name, field in form.fields.items():
+        target = yield from _form_target(definition, form, params, field, name)
+        if target is not None:
+            yield from _check_form_field(field, target)
+    yield from _check_form_sections(form)
+    for rule in form.rules.values():
+        if isinstance(rule, CompareRule):
+            for key in ("field", "other"):
+                name = getattr(rule, key)
+                if name not in form.fields:
+                    yield _missing(rule, key, "form field", name, form.fields)
+    for name, value in form.defaults.items():
+        if name not in form.fields:
+            yield from _form_target(definition, form, params, form, name, at="defaults")
+        if isinstance(value, str) and value.startswith("$") and not ROUTE_DEFAULT.match(value):
+            yield _error(
+                "invalid-value",
+                f"The default {value!r} is not valid. Write a literal, or $route.<param>.",
+                form,
+                at="defaults",
+            )
+
+
+def _form_target(
+    definition: AppDefinition,
+    form: Form,
+    params: dict[str, Field] | None,
+    element: Element,
+    name: str,
+    at: str | None = None,
+) -> Generator[Diagnostic, None, FieldTarget | None]:
+    """Yield an error if a form field name is not a field, relation, or parameter."""
+    if params is not None:
+        if name in params:
+            return FieldTarget(form.operation, name, params[name])
+        yield _missing(element, at, "parameter", name, params)
+        return None
+    if name == "id":
+        yield _error("unsuitable-field", "A form cannot set the primary key 'id'.", element, at=at)
+        return None
+    return (yield from _resolve(definition, element, at, form.entity, name))
+
+
+def _check_form_field(field: FormField, target: FieldTarget) -> Iterator[Diagnostic]:
+    widget = field.widget or default_widget(target)
+    if widget is None:
+        shown = target.relation_kind or target.type
+        yield _error(
+            "missing-widget",
+            f"The field '{target.entity}.{target.name}' ({shown}) has no default widget.",
+            field,
+            hint="Set 'widget: custom' and write the widget by hand.",
+        )
+        return
+    yield from _check_suits(field, "widget", f"The widget '{widget}'", target, WIDGET_TYPES[widget])
+    if field.rules is None:
+        return
+    for key, types in (
+        ("min_length", STRING_TYPES),
+        ("max_length", STRING_TYPES),
+        ("pattern", STRING_TYPES),
+        ("min", NUMBER_TYPES),
+        ("max", NUMBER_TYPES),
+    ):
+        if getattr(field.rules, key) is not None:
+            yield from _check_suits(field.rules, key, f"The rule '{key}'", target, types)
+
+
+def _check_form_sections(form: Form) -> Iterator[Diagnostic]:
+    placed: dict[str, str] = {}
+    for section_name, section in form.sections.items():
+        for name in section.fields:
+            if name not in form.fields:
+                yield _missing(section, "fields", "form field", name, form.fields)
+            elif name in placed:
+                yield _error(
+                    "duplicate-name",
+                    f"The form field '{name}' is in the sections '{placed[name]}' and "
+                    f"'{section_name}'. A field can be in one section only.",
+                    section,
+                    at="fields",
+                )
+            else:
+                placed[name] = section_name
 
 
 def _check_badge_set(definition: AppDefinition, badge: BadgeSet) -> Iterator[Diagnostic]:
