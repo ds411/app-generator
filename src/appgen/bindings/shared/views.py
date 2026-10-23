@@ -15,7 +15,14 @@ from typing import Any, Literal
 from appgen.bindings.shared.gaps import gap_spec
 from appgen.bindings.shared.ui import css_class_var, css_var, js
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
-from appgen.dsl.ui.common import Action, Grid, NavigateAction, OperationAction, States
+from appgen.dsl.ui.common import (
+    Action,
+    FormAction,
+    Grid,
+    NavigateAction,
+    OperationAction,
+    States,
+)
 from appgen.dsl.ui.fields import resolve_path
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
@@ -118,7 +125,22 @@ class ActionPlan:
     """For an operation or a custom action: a TypeScript expression of `records`."""
     navigate_to: str | None = None
     """The TypeScript path of the page that opens after a success, or None."""
+    form: str | None = None
+    """For a form action that opens a dialog or a sheet: the name of the form."""
     imports: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FormRef:
+    """A form that a view opens: its component, its module, and what it needs."""
+
+    name: str
+    component: str
+    module: str
+    record: bool
+    """True if the form needs the record of the action."""
+    route_params: bool
+    """True if the form reads the path parameters of the page."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +216,8 @@ class ViewPlan:
     board_columns: list[BoardColumnPlan] = field(default_factory=list[BoardColumnPlan])
     move: str | None = None
     """The TypeScript that moves `record` to the column `value` of a board."""
+    forms: list[FormRef] = field(default_factory=lambda: list[FormRef]())
+    """The forms that the actions of the view open in a dialog or a sheet."""
     uses: set[str] = field(default_factory=set[str])
     """The value components and helpers that the view uses, for its imports."""
     icons: set[str] = field(default_factory=set[str])
@@ -237,8 +261,10 @@ class ViewPlan:
 class ViewContext:
     """The values that the view templates read: badges, values, and view plans."""
 
-    def __init__(self, definition: AppDefinition) -> None:
+    def __init__(self, definition: AppDefinition, *, forms: bool = False) -> None:
+        """Make the context; `forms` is True if the binding generates the forms (`form_rules`)."""
         self.definition = definition
+        self.with_forms = forms
         ui = definition.ui
         self.badge_sets: dict[str, BadgeSet] = dict(ui.badges) if ui else {}
         self.list_views: dict[str, str] = {
@@ -248,6 +274,10 @@ class ViewContext:
         }
         """The kind of each list view (`table`, `cards`, or `board`), by name."""
         self._plans: dict[str, ViewPlan] = {}
+        # A local import: the forms module imports this module.
+        from appgen.bindings.shared.forms import FormContext
+
+        self.forms = FormContext(definition)
 
     @property
     def badge_icons(self) -> list[str]:
@@ -416,6 +446,17 @@ class ViewContext:
             plan.bulk_actions = self._actions(view.entity, view.bulk_actions.items(), "bulk")
         all_actions = [*plan.actions, *plan.row_actions, *plan.bulk_actions]
         plan.imports = sorted({line for action in all_actions for line in action.imports})
+        for form_name in dict.fromkeys(a.form for a in all_actions if a.form):
+            form_plan = self.forms.plan(form_name)
+            plan.forms.append(
+                FormRef(
+                    form_name,
+                    form_plan.component,
+                    form_plan.module,
+                    form_plan.needs_record,
+                    form_plan.route_params,
+                )
+            )
         plan.icons |= {a.action.icon for a in all_actions if a.action.icon}
         states = plan.states
         plan.icons |= {s.icon for s in (states.empty, states.error) if s and s.icon}
@@ -694,11 +735,12 @@ class ViewContext:
         return result
 
     def _action(self, entity: str, name: str, action: Action, scope: str) -> ActionPlan | None:
-        """Return the plan of an action, or None if the template cannot render it yet.
+        """Return the plan of an action, or None if the view cannot run it.
 
-        Form actions come with the forms. An action of a view (not of a row)
-        has no record, so it can only open a page without parameters or run
-        a custom action.
+        An action of a view (not of a row) has no record, so it can only
+        open a page without parameters, open a create form, or run a custom
+        action. A form action opens the page of the form, or the form in a
+        dialog or a sheet. A bulk action cannot open a form.
         """
         definition = self.definition
         action_label = action.label or label(name)
@@ -740,6 +782,15 @@ class ViewContext:
                     imports=(f'import {{ {op} }} from "{module}";',),
                 )
             return None
+        if isinstance(action, FormAction):
+            if not self.with_forms:
+                return None
+            form = self.forms.plan(action.form)
+            if scope == "bulk" or (form.needs_record and not record):
+                return None
+            if form.page_href is not None:
+                return ActionPlan(**common, href=form.page_href)
+            return ActionPlan(**common, form=action.form)
         if action.kind == "custom":
             gap = gap_path(definition, action.id)
             function = gap[1]

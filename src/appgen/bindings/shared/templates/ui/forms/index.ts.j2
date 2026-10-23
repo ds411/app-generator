@@ -1,0 +1,4 @@
+{{ trace_header(element_id) }}
+{% set plan = ui_forms.plan(name) %}
+{% set c = plan.component %}
+export { {{ c }}{% if plan.mode != "page" %}, {{ c }}Dialog{% endif %}{% if plan.host_page %}, {{ c }}Page{% endif %} } from "./ui/{{ name | kebab }}-form";

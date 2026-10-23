@@ -58,7 +58,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
   const [filters, updateFilters] = useState<Filters>(INITIAL_FILTERS);
 {% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}
-  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{{ m.runner(plan) }}
 {% endif %}
 
 {{ m.states(plan, "table") }}
@@ -133,6 +133,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}
       {dialog}
 {% endif %}
+{{ m.form_dialogs(plan) }}
     </div>
   );
 }

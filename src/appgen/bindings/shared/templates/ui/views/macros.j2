@@ -7,7 +7,7 @@
 {% if ns.icons %}
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
-{% set react_names = react + (["useState"] if shape != "table" or plan.filters else []) %}
+{% set react_names = react + (["useState"] if shape != "table" or plan.filters or plan.forms else []) %}
 {% if react_names %}
 import { {{ react_names | unique | sort | join(", ") }} } from "react";
 {% endif %}
@@ -81,6 +81,12 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% endif %}
 {% if "formatted" in plan.uses %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% for f in plan.forms %}
+import { {{ f.component }}Dialog } from "{{ f.module }}";
+{% endfor %}
+{% if plan.forms | selectattr("route_params") | list %}
+import { useParams } from "@/shared/lib/router";
 {% endif %}
 {% set state = ["ViewLoading", "ViewMessage"] %}
 {% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
@@ -198,6 +204,9 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
 {% endif %}
 {% if a.href %}
     href: ({{ "record: " ~ records_type if "record" in a.href }}) => {{ a.href }},
+{% endif %}
+{% if a.form %}
+    form: {{ js(a.form) }},
 {% endif %}
 {% if a.run %}
     run: ({{ "records: " ~ records_type ~ "[]" if "records" in a.run }}) => {{ a.run }},
@@ -423,4 +432,34 @@ import { {{ names | sort | join(", ") }} } from "@/shared/ui/card";
 {% set card = plan.card %}
 {% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
 {{ "yes" if "lookups." in code }}
+{%- endmacro %}
+
+
+{% macro runner(plan) -%}
+{% if plan.forms %}
+  const [openForm, setOpenForm] = useState<{ name: string; record?: {{ plan.type }} } | null>(null);
+{% if plan.forms | selectattr("route_params") | list %}
+  const routeParams = useParams();
+{% endif %}
+  const { run, dialog } = useActionRunner<{{ plan.type }}>({
+    openForm: (name, records) => setOpenForm({ name, record: records[0] }),
+  });
+{% else %}
+  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{% endif %}
+{%- endmacro %}
+
+{% macro form_dialogs(plan) -%}
+{% for f in plan.forms %}
+      <{{ f.component }}Dialog
+        open={openForm?.name === {{ js(f.name) }}}
+        onOpenChange={(open) => !open && setOpenForm(null)}
+{% if f.record %}
+        record={openForm?.record}
+{% endif %}
+{% if f.route_params %}
+        routeParams={routeParams}
+{% endif %}
+      />
+{% endfor %}
 {%- endmacro %}

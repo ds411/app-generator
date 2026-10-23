@@ -252,11 +252,16 @@ path wins over a shared template.
 `ui/` holds the shared UI code: the app shell (layouts, menus,
 breadcrumbs, page search, page header, and the 404 page), and the list
 views in `ui/views/` (tables, card lists, and boards, with their filters,
-actions, states, and value formats). The app shell templates render the
+actions, states, and value formats), and the forms in `ui/forms/` (with
+their widgets and rules). The app shell templates render the
 values of `appgen.bindings.shared.ui`, and the view templates render the
 `ViewPlan` of each view from `appgen.bindings.shared.views` (the
 template global `ui_views`, with the output rules of
-`views.view_rules()`). The templates are
+`views.view_rules()`). The form templates render the `FormPlan` of each
+form from `appgen.bindings.shared.forms` (the template global
+`ui_forms`, with the output rules of `forms.form_rules()`). A binding
+that generates the forms makes `ViewContext(definition, forms=True)`, so
+that the form actions of the views open the forms. The templates are
 client components that import only `@/shared/*`, `@/widgets/*`,
 `@/features/*`, and `@/entities/<entity>`. Each binding writes
 `@/shared/lib/router` with `Link` (prop `href`), `useNavigate`,
@@ -304,7 +309,22 @@ many values), a switch, and a date range. The enum values show as
 badges with the label, the color token, and the icon of their badge set.
 The actions open a page, run an operation or a custom action, ask for a
 confirmation, and show a toast. Each view shows its loading, empty, and
-error states. Form actions come with the forms.
+error states.
+
+Each form is a feature slice in `src/features/<form>-form`, with the
+shadcn/ui field components in the sections and the grid of the form. A
+form validates its values with the required, length, number, and pattern
+rules of its fields, the zod schema of its operation (the entity slice
+writes `<Entity>InputSchema` and `<Entity>PatchSchema` in
+`model/schema.ts`), the compare rules, and the custom rules. The widgets
+are text and number inputs, text areas, selects, radio groups, check
+boxes, switches, date and date and time inputs, and relation selects
+(one record or many records), and a custom widget is a generation gap.
+A form in page mode is the content of its page and reads the record from
+the path. The other forms open in a dialog or a sheet from the form
+actions of the views. After a save, a form shows its toast, and closes or
+resets, or opens its page. A default value can come from a path
+parameter of the page (`$route.<param>`).
 
 The theme comes from the design tokens, with the shared template
 `theme/globals.css.j2`: one CSS variable for each token, with a light and

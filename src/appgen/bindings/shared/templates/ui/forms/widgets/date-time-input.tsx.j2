@@ -1,0 +1,63 @@
+{{ trace_header("app") }}
+"use client";
+
+import { Input } from "@/shared/ui/input";
+import { isoDay } from "@/shared/lib/query";
+
+import { DateInput } from "./date-input";
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/** Return a local date and time as an ISO 8601 text with the offset of the time zone. */
+function toIso(day: string, time: string): string {
+  const date = new Date(`${day}T${time || "00:00"}`);
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const hours = pad(Math.floor(Math.abs(offset) / 60));
+  const minutes = pad(Math.abs(offset) % 60);
+  return `${day}T${pad(date.getHours())}:${pad(date.getMinutes())}:00${sign}${hours}:${minutes}`;
+}
+
+/** A date picker and a time box. The value is an ISO 8601 text with an offset. */
+export function DateTimeInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const date = value ? new Date(value) : null;
+  const day = date ? isoDay(date) : null;
+  const time = date ? `${pad(date.getHours())}:${pad(date.getMinutes())}` : "";
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
+      <DateInput
+        id={id}
+        value={day}
+        onChange={(next) => onChange(next ? toIso(next, time) : null)}
+        placeholder={placeholder}
+        disabled={disabled}
+        invalid={invalid}
+      />
+      <Input
+        type="time"
+        aria-label="Time"
+        className="w-full"
+        value={time}
+        disabled={disabled || !day}
+        aria-invalid={invalid}
+        onChange={(event) => day && onChange(toIso(day, event.target.value))}
+      />
+    </div>
+  );
+}

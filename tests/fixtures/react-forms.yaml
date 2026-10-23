@@ -1,0 +1,208 @@
+# The features of the forms that the main example does not use, for the
+# form tests of the React binding: each widget and rule, forms in pages,
+# defaults from the path, and custom operations with params.
+version: 0
+app: { name: forms, title: Forms }
+entities:
+  Shelf:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+    relations:
+      books: { kind: one_to_many, target: Book, inverse: shelf }
+  Author:
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+  Book:
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 80 }
+      isbn: { type: string, pattern: "^[0-9-]+$" }
+      contact: { type: email }
+      site: { type: url }
+      summary: { type: text }
+      pages: { type: integer, min: 1 }
+      price: { type: decimal }
+      format:
+        type: enum
+        values: [paper, hard, ebook]
+      genre:
+        type: enum
+        values: [fiction, history, science]
+      signed: { type: boolean }
+      available: { type: boolean, default: true }
+      published: { type: date }
+      received_at: { type: datetime }
+      extra: { type: json }
+    relations:
+      shelf: { kind: many_to_one, target: Shelf, inverse: books }
+      authors: { kind: many_to_many, target: Author }
+operations:
+  create_book: { kind: create, entity: Book }
+  update_book: { kind: update, entity: Book }
+  list_books: { kind: list, entity: Book }
+  lend_book:
+    kind: custom
+    entity: Book
+    returns: Book
+    params:
+      reader: { type: string, required: true, min_length: 2 }
+      days: { type: integer, required: true, min: 1, max: 60 }
+      until: { type: date }
+      kind:
+        type: enum
+        values: [short, long]
+  rate_book:
+    kind: custom
+    entity: Book
+    returns: none
+    params:
+      stars: { type: integer, required: true }
+pages:
+  books:
+    path: /books
+    title: Books
+    entity: Book
+    content: { view: book_table }
+  new_book:
+    path: /books/new
+    title: New book
+    entity: Book
+    content: { form: new_book }
+  book:
+    path: "/books/{id}"
+    title: Book
+    entity: Book
+  edit_book:
+    path: "/books/{id}/edit"
+    title: Edit book
+    entity: Book
+    content: { form: edit_book }
+  shelf_book:
+    path: "/shelves/{shelf_id}/books/new"
+    title: New book on a shelf
+    entity: Book
+    content: { form: shelf_book }
+ui:
+  tokens:
+    breakpoint:
+      md: { $value: 768px }
+  views:
+    book_table:
+      kind: table
+      entity: Book
+      columns:
+        title: { link: book }
+        format: {}
+        shelf: {}
+      row_actions:
+        edit: { kind: form, form: edit_book }
+        lend: { kind: form, form: lend_book, label: Lend }
+        rate: { kind: form, form: rate_book, label: Rate }
+        quick: { kind: form, form: quick_edit, label: Quick edit }
+      selection: true
+      bulk_actions:
+        lend: { kind: form, form: lend_book }
+      actions:
+        new: { kind: form, form: new_book, label: New book }
+        quick_new: { kind: form, form: quick_book, label: Quick add }
+        lend: { kind: form, form: lend_book }
+  forms:
+    new_book:
+      entity: Book
+      operation: create_book
+      mode: page
+      title: New book
+      grid:
+        columns: 3
+        responsive:
+          md: { columns: 1 }
+      sections:
+        main:
+          title: Main
+          description: The facts of the book.
+          fields: [title, isbn, contact, site, summary]
+        details: { fields: [pages, price, format, genre, signed, available, published, received_at, shelf, authors, extra] }
+      fields:
+        title:
+          span: 2
+          rules:
+            required: { message: The book needs a title. }
+            min_length: { value: 2 }
+            max_length: { value: 60, message: Keep it short. }
+        isbn: { help: Digits and dashes., rules: { pattern: { value: "^[0-9-]{10,}$" } } }
+        contact: {}
+        site: {}
+        summary: { widget: textarea, rows: 3, span: 3 }
+        pages: { rules: { min: { value: 1 }, max: { value: 5000, message: Too many pages. } } }
+        price: { step: 0.01 }
+        format: { widget: radio }
+        genre: { widget: select, placeholder: Pick a genre }
+        signed: { widget: checkbox }
+        available: { widget: switch }
+        published: {}
+        received_at: {}
+        shelf: {}
+        authors: {}
+        extra: { widget: custom }
+      rules:
+        received_after:
+          kind: compare
+          field: received_at
+          op: gte
+          other: published
+          message: The book arrives after it is published.
+      defaults: { format: paper, genre: fiction }
+      on_success: { toast: Added., navigate: book }
+    edit_book:
+      entity: Book
+      operation: update_book
+      mode: page
+      fields:
+        title: {}
+        format: {}
+        shelf: { widget: select }
+      on_success: { navigate: books }
+    shelf_book:
+      entity: Book
+      operation: create_book
+      fields:
+        title: {}
+        shelf: {}
+      defaults: { shelf: $route.shelf_id }
+    quick_book:
+      entity: Book
+      operation: create_book
+      fields:
+        title: {}
+        isbn: { widget: custom }
+      rules:
+        unique_title: { kind: custom, fields: [title], message: The title is in use. }
+        whole: { kind: custom }
+      on_success: { close: false, toast: Added. }
+    quick_edit:
+      entity: Book
+      operation: update_book
+      mode: sheet
+      fields:
+        title: {}
+        genre: {}
+    lend_book:
+      entity: Book
+      operation: lend_book
+      title: Lend the book
+      description: The reader gets the book for some days.
+      submit_label: Lend
+      cancel_label: Back
+      fields:
+        reader: { placeholder: A name }
+        days: {}
+        until: {}
+        kind: { widget: radio }
+      defaults: { days: 14 }
+    rate_book:
+      entity: Book
+      operation: rate_book
+      fields:
+        stars: { widget: custom }

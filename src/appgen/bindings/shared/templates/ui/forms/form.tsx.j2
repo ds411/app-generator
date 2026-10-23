@@ -1,0 +1,448 @@
+{% set plan = ui_forms.plan(name) %}
+{% set form = plan.form %}
+{% set c = plan.component %}
+{% set title = form.title or label(name) %}
+{% set ns = namespace(lines=[]) %}
+{% for f in plan.fields %}
+{% if f.widget != "custom" and f.kind == "many" %}{% set ns.lines = ns.lines + ["RelationMultiSelect"] %}
+{% elif f.kind == "one" and f.widget not in ("select", "radio", "custom") %}{% set ns.lines = ns.lines + ["RelationSelect"] %}
+{% endif %}
+{% endfor %}
+{% set relation_names = ns.lines | unique | sort | list %}
+{% set widgets = plan.widgets %}
+{% set uses_record = plan.needs_record or plan.kind == "update" %}
+{% set on_success = form.on_success %}
+{% set close = on_success.close if on_success else true %}
+{{ trace_header(element_id) }}
+"use client";
+
+import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
+
+{% for line in plan.imports %}
+{{ line }}
+{% endfor %}
+{% for entity in plan.lookups if entity != plan.entity %}
+import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+{% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
+import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
+{% endif %}
+{% set form_lib = ["type FormErrors", "schemaErrors"] %}
+{% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
+import { {{ form_lib | join(", ") }} } from "@/shared/lib/form";
+{% if plan.navigate and "pageHref" in plan.navigate %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% if plan.navigate %}
+import { useNavigate } from "@/shared/lib/router";
+{% endif %}
+{% if plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
+import { useResource } from "@/shared/lib/use-resource";
+{% endif %}
+import { Button } from "@/shared/ui/button";
+{% if "checkbox" in widgets %}
+import { Checkbox } from "@/shared/ui/checkbox";
+{% endif %}
+{% if form.mode == "dialog" or plan.mode == "dialog" %}
+import { Dialog, DialogContent, {% if form.description %}DialogDescription, {% endif %}DialogHeader, DialogTitle } from "@/shared/ui/dialog";
+{% endif %}
+{% set field_names = ["Field", "FieldError", "FieldLabel"] %}
+{% if plan.fields | selectattr("help") | list %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}
+{% if plan.sections %}{% set field_names = field_names + ["FieldLegend", "FieldSet"] %}{% if plan.sections | selectattr("description") | list and "FieldDescription" not in field_names %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}{% endif %}
+import { {{ field_names | sort | join(", ") }} } from "@/shared/ui/field";
+{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | list %}
+import { Input } from "@/shared/ui/input";
+{% endif %}
+{% if form.mode == "sheet" %}
+import { Sheet, SheetContent, {% if form.description %}SheetDescription, {% endif %}SheetHeader, SheetTitle } from "@/shared/ui/sheet";
+{% endif %}
+import { Spinner } from "@/shared/ui/spinner";
+{% if "switch" in widgets %}
+import { Switch } from "@/shared/ui/switch";
+{% endif %}
+{% if "textarea" in widgets %}
+import { Textarea } from "@/shared/ui/textarea";
+{% endif %}
+{% if "date" in widgets %}
+import { DateInput } from "@/shared/ui/form-widgets/date-input";
+{% endif %}
+{% if "datetime" in widgets %}
+import { DateTimeInput } from "@/shared/ui/form-widgets/date-time-input";
+{% endif %}
+{% if "radio" in widgets %}
+import { OptionRadio } from "@/shared/ui/form-widgets/option-radio";
+{% endif %}
+{% if plan.fields | selectattr("widget", "eq", "select") | rejectattr("kind", "eq", "many") | list %}
+import { OptionSelect } from "@/shared/ui/form-widgets/option-select";
+{% endif %}
+{% if relation_names %}
+import { {{ relation_names | join(", ") }} } from "@/shared/ui/form-widgets/relation-select";
+{% endif %}
+
+/** The values of the widgets of the form. */
+type Values = {
+{% for f in plan.fields %}
+  {{ f.key }}: {{ f.value_type }};
+{% endfor %}
+};
+
+type RouteParams = Readonly<Record<string, string | undefined>>;
+{% for f in plan.fields if f.options and not f.target %}
+
+const {{ f.key | snake | upper }}_OPTIONS = {{ f.options }};
+{% endfor %}
+{% if plan.lookups %}
+
+type Lookups = {
+{% for entity in plan.lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+
+/** Read the records that the relation fields offer. */
+async function loadLookups(): Promise<Lookups> {
+  const [{% for entity in plan.lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for entity in plan.lookups %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return {
+{% for entity in plan.lookups %}
+    {{ entity | camel }}: new Map({{ entity | camel }}List.items.map((item) => [item.id, item])),
+{% endfor %}
+  };
+}
+
+function subscribeLookups(listener: () => void): () => void {
+  const stops = [{% for entity in plan.lookups %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{% endif %}
+
+{% set initial_code = plan.fields | map(attribute="initial") | join(" ") %}
+/** The first values: the record, the defaults of the form, or the defaults of the fields. */
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined): Values {
+  return {
+{% for f in plan.fields %}
+    {{ f.key }}: {{ f.initial }},
+{% endfor %}
+  };
+}
+
+/** The input of the operation: an empty value is null, or no value. */
+function toInput(values: Values) {
+  return {
+{% for f in plan.fields %}
+    {{ f.key }}: {{ f.to_input }},
+{% endfor %}
+  };
+}
+
+const SCHEMA = {{ plan.schema }};
+
+/** Check the values with the rules of the fields and of the form, and return the input. */
+function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; errors: FormErrors } {
+  const errors: FormErrors = {};
+{% for f in plan.fields %}
+{% if f.required and f.kind != "boolean" %}
+{% if f.kind in ("text", "json") %}
+  if (values.{{ f.key }}.trim() === "") errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+
+{% elif f.kind == "many" %}
+  if (values.{{ f.key }}.length === 0) errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+
+{% else %}
+  if (values.{{ f.key }} === null) errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+
+{% endif %}
+{% endif %}
+{% if f.rules_id %}
+  {{ trace(f.rules_id) }}
+{% endif %}
+{% for check in f.checks %}
+  if ({{ check.condition }}) errors.{{ f.key }} ??= {{ js(check.message) }}; {{ trace(check.element_id) }}
+{% endfor %}
+{% endfor %}
+  const result = SCHEMA.safeParse(toInput(values));
+  if (!result.success) schemaErrors(result.error, errors);
+{% for rule in plan.rules if rule.condition %}
+  if ({{ rule.condition }}) errors.{{ rule.fields[0] }} ??= {{ js(rule.message) }}; {{ trace(rule.element_id) }}
+{% endfor %}
+  if (!result.success || Object.keys(errors).length > 0) return { errors };
+{% for rule in plan.rules if rule.gap_name %}
+  if (!{{ rule.gap_name }}(result.data as {{ plan.rule_values }})) { {{ trace(rule.element_id) }}
+{% if rule.fields %}
+{% for key in rule.fields %}
+    errors.{{ key }} ??= {{ js(rule.message) }};
+{% endfor %}
+{% else %}
+    errors._form ??= {{ js(rule.message) }};
+{% endif %}
+  }
+{% endfor %}
+{% if plan.rules | selectattr("gap_name") | list %}
+  if (Object.keys(errors).length > 0) return { errors };
+{% endif %}
+  return { input: result.data, errors };
+}
+
+export type {{ c }}Props = {
+{% if uses_record %}
+  /** The record that the form {{ "edits" if plan.kind == "update" else "runs the operation on" }}. */
+  record?: {{ plan.type }};
+{% endif %}
+  /** The path parameters of the page, for the defaults of the form. */
+  routeParams?: RouteParams;
+  onSuccess?: () => void;
+  onCancel?: () => void;
+};
+
+{% if form.description %}
+/** {{ title }}: {{ form.description }} */
+{% else %}
+/** The form {{ title }}. */
+{% endif %}
+export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess, onCancel }: {{ c }}Props) {
+{% if plan.navigate %}
+  const navigate = useNavigate();
+{% endif %}
+{% if plan.lookups %}
+  const lookups = useResource({{ js(name ~ "_form") }}, loadLookups, subscribeLookups);
+  const related: Lookups = lookups.status === "success" ? lookups.data : { {% for entity in plan.lookups %}{{ entity | camel }}: new Map(){{ ", " if not loop.last }}{% endfor %} };
+{% endif %}
+  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams));
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const change = <K extends keyof Values>(key: K, value: Values[K]) => {
+    const next = { ...values, [key]: value };
+    setValues(next);
+    if (submitted) setErrors(validate(next).errors);
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitted(true);
+    const { input, errors: found } = validate(values);
+    setErrors(found);
+{% if plan.needs_record %}
+    if (!input || !record) return;
+{% else %}
+    if (!input) return;
+{% endif %}
+    setBusy(true);
+    try {
+      {{ "const result = " if plan.navigate and "result" in plan.navigate }}await {{ plan.call }};
+{% if on_success and on_success.toast %}
+      toast.success({{ js(on_success.toast) }}); {{ trace(on_success.id) }}
+{% elif on_success %}
+      toast.success("Saved."); {{ trace(on_success.id) }}
+{% else %}
+      toast.success("Saved.");
+{% endif %}
+{% if not close %}
+      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams));
+      setSubmitted(false);
+{% endif %}
+      onSuccess?.();
+{% if plan.navigate %}
+      navigate({{ plan.navigate }});
+{% endif %}
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The form did not save.";
+      setErrors({ _form: message });
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+{% macro widget(f) -%}
+{% set id = '"' ~ (name | kebab) ~ "-" ~ (f.name | kebab) ~ '"' %}
+{% set invalid = "Boolean(errors." ~ f.key ~ ")" %}
+{% set placeholder = (" placeholder=" ~ jsx_attr(f.placeholder)) if f.placeholder else "" %}
+{% set options = (f.key | snake | upper ~ "_OPTIONS") if not f.target else f.options | replace("lookups.", "related.") %}
+{% if f.widget == "custom" %}
+<{{ f.gap_name }} id={{ id }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value ?? {{ f.empty }})} disabled={busy} />
+{%- elif f.kind == "many" %}
+<RelationMultiSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.kind == "one" and f.widget != "select" and f.widget != "radio" %}
+<RelationSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "select" %}
+<OptionSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value as Values[{{ js(f.key) }}])}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "radio" %}
+<OptionRadio id={{ id }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value as Values[{{ js(f.key) }}])} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "checkbox" %}
+<Checkbox id={{ id }} checked={values.{{ f.key }}} onCheckedChange={(value) => change({{ js(f.key) }}, value === true)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.widget == "switch" %}
+<Switch id={{ id }} checked={values.{{ f.key }}} onCheckedChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.widget == "date" %}
+<DateInput id={{ id }}{{ placeholder }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "datetime" %}
+<DateTimeInput id={{ id }}{{ placeholder }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "textarea" %}
+<Textarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.widget == "number" or f.kind == "number" %}
+<Input id={{ id }} type="number" inputMode="decimal"{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }} ?? ""} onChange={(event) => change({{ js(f.key) }}, event.target.value === "" ? null : Number(event.target.value))} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- else %}
+<Input id={{ id }} type={{ js(f.input_type) }}{{ placeholder }} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- endif %}
+{%- endmacro %}
+
+{% macro field(f, indent) -%}
+{% set id = (name | kebab) ~ "-" ~ (f.name | kebab) %}
+{% set horizontal = f.widget in ("checkbox", "switch") %}
+{% filter indent(indent, true) %}
+<Field{% if horizontal %} orientation="horizontal"{% endif %} data-invalid={Boolean(errors.{{ f.key }})}{% if f.classes %} className={{ js(f.classes) }}{% endif %}> {{ trace(f.element_id, jsx=True) }}
+{% if horizontal %}
+  {{ widget(f) }}
+  <FieldLabel htmlFor={{ js(id) }}>{{ jsx_text(f.label) }}</FieldLabel>
+{% else %}
+  <FieldLabel htmlFor={{ js(id) }}>
+    {{ jsx_text(f.label) }}
+{% if f.required and f.kind != "boolean" %}
+    <span aria-hidden className="text-destructive">*</span>
+{% endif %}
+  </FieldLabel>
+  {{ widget(f) }}
+{% endif %}
+{% if f.help %}
+  <FieldDescription>{{ jsx_text(f.help) }}</FieldDescription>
+{% endif %}
+  <FieldError>{errors.{{ f.key }}}</FieldError>
+</Field>
+{% endfilter %}
+{%- endmacro %}
+  return (
+    <form noValidate onSubmit={submit} className="space-y-6"> {{ trace(element_id, jsx=True) }}
+{% if form.grid %}
+      {{ trace(form.grid.id, jsx=True) }}
+{% for override in form.grid.responsive.values() %}
+      {{ trace(override.id, jsx=True) }}
+{% endfor %}
+{% endif %}
+{% for section in plan.sections %}
+      <FieldSet> {{ trace(section.element_id, jsx=True) }}
+{% if section.title %}
+        <FieldLegend>{{ jsx_text(section.title) }}</FieldLegend>
+{% endif %}
+{% if section.description %}
+        <FieldDescription>{{ jsx_text(section.description) }}</FieldDescription>
+{% endif %}
+        <div className={{ js(plan.grid) }}>
+{% for f in section.fields %}
+{{ field(f, 10) }}
+{% endfor %}
+        </div>
+      </FieldSet>
+{% endfor %}
+{% if plan.loose %}
+      <div className={{ js(plan.grid) }}>
+{% for f in plan.loose %}
+{{ field(f, 8) }}
+{% endfor %}
+      </div>
+{% endif %}
+      {errors._form && (
+        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {errors._form}
+        </p>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+            {{ jsx_text(form.cancel_label or "Cancel") }}
+          </Button>
+        )}
+        <Button type="submit" disabled={busy}>
+          {busy && <Spinner />}
+          {{ jsx_text(form.submit_label or ("Create" if plan.kind == "create" else "Save")) }}
+        </Button>
+      </div>
+    </form>
+  );
+}
+{% if plan.mode != "page" %}
+
+export type {{ c }}DialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+{% if uses_record %}
+  record?: {{ plan.type }};
+{% endif %}
+  routeParams?: RouteParams;
+};
+
+/** The form {{ title }} in a {{ "side sheet" if plan.mode == "sheet" else "dialog" }}. */
+export function {{ c }}Dialog({ open, onOpenChange, {{ "record, " if uses_record }}routeParams }: {{ c }}DialogProps) {
+{% set wide = (form.grid.columns if form.grid else 1) > 1 %}
+{% if uses_record %}
+  const body = record ? (
+    <{{ c }} key={record.id} record={record} routeParams={routeParams} onSuccess={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />
+  ) : null;
+{% else %}
+  const body = <{{ c }} routeParams={routeParams} onSuccess={() => onOpenChange(false)} onCancel={() => onOpenChange(false)} />;
+{% endif %}
+{% if plan.mode == "sheet" %}
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-{{ "xl" if wide else "md" }}"{% if not form.description %} aria-describedby={undefined}{% endif %}>
+        <SheetHeader>
+          <SheetTitle>{{ jsx_text(title) }}</SheetTitle>
+{% if form.description %}
+          <SheetDescription>{{ jsx_text(form.description) }}</SheetDescription>
+{% endif %}
+        </SheetHeader>
+        <div className="px-4 pb-4">{open && body}</div>
+      </SheetContent>
+    </Sheet>
+  );
+{% else %}
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto{{ " sm:max-w-2xl" if wide }}"{% if not form.description %} aria-describedby={undefined}{% endif %}>
+        <DialogHeader>
+          <DialogTitle>{{ jsx_text(title) }}</DialogTitle>
+{% if form.description %}
+          <DialogDescription>{{ jsx_text(form.description) }}</DialogDescription>
+{% endif %}
+        </DialogHeader>
+        {open && body}
+      </DialogContent>
+    </Dialog>
+  );
+{% endif %}
+}
+{% endif %}
+{% if plan.host_page %}
+
+/** The form {{ title }} as the content of a page. */
+export function {{ c }}Page({ routeParams }: { routeParams: RouteParams }) {
+{% if uses_record and plan.record_param %}
+  const id = routeParams[{{ js(plan.record_param) }}] ?? "";
+  const resource = useResource(`{{ name }}_form:${id}`, () => {{ plan.entity | camel }}Api.get(id));
+  if (resource.status === "loading") {
+    return (
+      <div role="status" className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
+        <Spinner />
+        Loading
+      </div>
+    );
+  }
+  if (resource.status === "error") {
+    return (
+      <p role="alert" className="py-16 text-sm text-destructive">
+        The record did not load.
+      </p>
+    );
+  }
+{% endif %}
+  return (
+    <div className="max-w-3xl rounded-xl border bg-card p-6 text-card-foreground shadow-xs">
+      <{{ c }}{% if uses_record and plan.record_param %} record={resource.data}{% endif %} routeParams={routeParams} onCancel={() => window.history.back()} />
+    </div>
+  );
+}
+{% endif %}

@@ -39,6 +39,8 @@ export type ActionSpec<T> = {
   confirm?: { title: string; message?: string; confirmLabel?: string };
   /** For an action that opens a page: the path of the page, for the first record. */
   href?: (record: T) => string;
+  /** For an action that opens a form in a dialog or a sheet: the name of the form. */
+  form?: string;
   /** For an action that runs code: the code. */
   run?: (records: T[]) => Promise<unknown>;
   /** The message after a success. */
@@ -55,14 +57,19 @@ function errorText(error: unknown): string {
 
 /**
  * Run the actions of a view: ask for a confirmation, run the action, and
- * show the result. Render `dialog` once in the view.
+ * show the result. Render `dialog` once in the view. `openForm` opens the
+ * form of a form action.
  */
-export function useActionRunner<T>() {
+export function useActionRunner<T>(options: { openForm?: (form: string, records: T[]) => void } = {}) {
   const navigate = useNavigate();
   const [pending, setPending] = useState<Pending<T> | null>(null);
   const [busy, setBusy] = useState(false);
 
   const execute = async (action: ActionSpec<T>, records: T[]) => {
+    if (action.form) {
+      options.openForm?.(action.form, records);
+      return;
+    }
     if (action.href) {
       // A view action has no record: its page has no path parameters.
       navigate(action.href(records[0] as T));

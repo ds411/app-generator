@@ -1,0 +1,68 @@
+{{ trace_header("app") }}
+// The checks of the forms: the messages of the zod issues, and the rules
+// that compare two fields.
+import type { z } from "zod";
+
+/** The messages of a form, by field key. The key `_form` is for the whole form. */
+export type FormErrors = Record<string, string>;
+
+export type CompareOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte";
+
+function isEmpty(value: unknown): boolean {
+  return value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+/** Return true if two values pass a compare rule. An empty value passes. */
+export function compareRule(a: unknown, op: CompareOp, b: unknown): boolean {
+  if (isEmpty(a) || isEmpty(b)) return true;
+  const order =
+    typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true });
+  switch (op) {
+    case "eq":
+      return order === 0;
+    case "ne":
+      return order !== 0;
+    case "lt":
+      return order < 0;
+    case "lte":
+      return order <= 0;
+    case "gt":
+      return order > 0;
+    case "gte":
+      return order >= 0;
+  }
+}
+
+/** Return a message for a zod issue, in the words of the forms. */
+export function issueMessage(issue: z.core.$ZodIssue): string {
+  switch (issue.code) {
+    case "too_small":
+      return issue.origin === "string"
+        ? `Use ${String(issue.minimum)} or more characters.`
+        : `Use ${String(issue.minimum)} or more.`;
+    case "too_big":
+      return issue.origin === "string"
+        ? `Use ${String(issue.maximum)} or fewer characters.`
+        : `Use ${String(issue.maximum)} or less.`;
+    case "invalid_format":
+      if (issue.format === "email") return "Enter a valid email address.";
+      if (issue.format === "url") return "Enter a valid URL.";
+      if (issue.format === "uuid") return "Select a value.";
+      return "Use the correct format.";
+    case "invalid_value":
+      return "Select a value.";
+    case "invalid_type":
+      return issue.expected === "int" ? "Enter a whole number." : "Enter a value.";
+    default:
+      return issue.message;
+  }
+}
+
+/** Add the messages of a zod error to the form errors. A field keeps its first message. */
+export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
+  for (const issue of error.issues) {
+    const key = issue.path.length > 0 ? String(issue.path[0]) : "_form";
+    errors[key] ??= issueMessage(issue);
+  }
+}
+

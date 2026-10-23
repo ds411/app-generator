@@ -12,6 +12,7 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.react.mock_data import mock_data
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
 from appgen.bindings.shared.typescript import (
@@ -63,6 +64,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     }
     if "table" in ViewContext(definition).features:
         dependencies |= versions.TABLE_PACKAGES
+    if definition.ui is not None and definition.ui.forms:
+        dependencies |= versions.FORM_PACKAGES
     return {
         "name": definition.app.name,
         "private": True,
@@ -91,7 +94,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": ui_plan(definition),
-        "ui_views": ViewContext(definition),
+        "ui_views": ViewContext(definition, forms=True),
+        "ui_forms": FormContext(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",
             "mode_toggle": shadcn.has_mode_toggle(definition),

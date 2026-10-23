@@ -38,7 +38,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
 {% if plan.actions or plan.row_actions %}
-  const { run, dialog } = useActionRunner<{{ plan.type }}>();
+{{ m.runner(plan) }}
 {% endif %}
 {% if plan.filters %}
 
@@ -122,6 +122,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% if plan.actions or plan.row_actions %}
       {dialog}
 {% endif %}
+{{ m.form_dialogs(plan) }}
     </div>
   );
 }

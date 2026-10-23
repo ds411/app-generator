@@ -1,0 +1,44 @@
+{{ trace_header("app") }}
+"use client";
+
+import { Label } from "@/shared/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
+
+import type { FieldOption } from "./option-select";
+
+/** Radio buttons, one for each option, in a row that wraps. */
+export function OptionRadio({
+  id,
+  options,
+  value,
+  onChange,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  options: FieldOption[];
+  value: string | null;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  return (
+    <RadioGroup
+      id={id}
+      value={value ?? ""}
+      onValueChange={onChange}
+      disabled={disabled}
+      aria-invalid={invalid}
+      className="flex flex-wrap gap-x-5 gap-y-2"
+    >
+      {options.map((option) => (
+        <div key={option.value} className="flex items-center gap-2">
+          <RadioGroupItem id={`${id}-${option.value}`} value={option.value} aria-invalid={invalid} />
+          <Label htmlFor={`${id}-${option.value}`} className="font-normal">
+            {option.label}
+          </Label>
+        </div>
+      ))}
+    </RadioGroup>
+  );
+}

@@ -14,4 +14,14 @@ export {
 } from "./api/{{ name | kebab }}-api";
 export { {{ var }}MockData } from "./api/{{ name | kebab }}-mock-data";
 export { {{ var }}Meta } from "./model/meta";
+{% if ui_forms.names %}
+{% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
+export {
+  {{ var }}InputSchema,
+  {{ var }}PatchSchema,
+{% for op in customs %}
+  {{ op }}ParamsSchema,
+{% endfor %}
+} from "./model/schema";
+{% endif %}
 export * from "./model/types";

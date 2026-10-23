@@ -38,10 +38,15 @@ _WIDGET_COMPONENTS: dict[str, tuple[str, ...]] = {
     "switch": ("switch",),
     "date": ("popover", "calendar"),
     "datetime": ("popover", "calendar", "input"),
-    "relation": ("popover", "command"),
+    "relation": ("popover", "command", "badge"),
     "custom": (),
 }
-_FORM_MODES: dict[str, tuple[str, ...]] = {"dialog": ("dialog",), "sheet": ("sheet",), "page": ()}
+# A form in `page` mode without a page that shows it opens in a dialog.
+_FORM_MODES: dict[str, tuple[str, ...]] = {
+    "dialog": ("dialog",),
+    "sheet": ("sheet",),
+    "page": ("dialog",),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +207,7 @@ def _list_components(definition: AppDefinition) -> set[str]:
 
 
 def _form_components(definition: AppDefinition, form: Form) -> set[str]:
-    names = {"field", "label", *_FORM_MODES[form.mode]}
+    names = {"field", "label", "spinner", *_FORM_MODES[form.mode]}
     operation = definition.operations.get(form.operation)
     params = operation.params if operation is not None and operation.kind == "custom" else None
     for name, form_field in form.fields.items():
