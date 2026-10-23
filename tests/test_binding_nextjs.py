@@ -372,3 +372,22 @@ def test_regeneration_keeps_the_extension_files(
     write_result(generate(definition, find_binding("nextjs")), tmp_path, "nextjs")
     for path in paths:
         assert "Done by hand" in path.read_text()
+
+
+def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -> None:
+    files = _files(result)
+    dockerfile = files["Dockerfile"]
+    assert "# @trace app file" in dockerfile
+    assert f"FROM node:{versions.NODE_VERSION}-alpine AS base" in dockerfile
+    assert "ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone" in dockerfile
+    assert "RUN if [ ! -d drizzle ]; then pnpm db:generate; fi" in dockerfile
+    assert "COPY --from=build --chown=node:node /app/drizzle ./drizzle" in dockerfile
+    assert "USER node" in dockerfile
+    assert 'CMD ["node", "server.js"]' in dockerfile
+    assert "node_modules\n.next\n" in files[".dockerignore"]
+    compose = files["compose.yaml"]
+    assert "# @trace app file" in compose
+    assert "image: postgres:18-alpine" in compose
+    assert "DATABASE_URL: postgres://postgres:postgres@db:5432/project_tracker" in compose
+    assert 'DATABASE_MIGRATE: "true"' in compose
+    assert "condition: service_healthy" in compose

@@ -170,7 +170,11 @@ table in `src/shared/db/schema/` (a foreign key column for each
 `many_to_many` relation), with a trace on each table, column, and
 relation. A relation and its inverse are stored once. `pnpm db:generate`
 writes the SQL migrations with drizzle-kit, and the server applies them
-at start when `DATABASE_MIGRATE=true`.
+at start when `DATABASE_MIGRATE=true`. The app has a multi-stage
+`Dockerfile` (a standalone Next.js server as a non-root user, with the
+migrations in `drizzle/`) and a `compose.yaml` with Postgres:
+`docker compose up --build` starts both, and the app migrates the
+database when it starts.
 
 Each entity slice in `src/entities/` has the same public API as in the
 React app, so that the shared UI templates work in both apps: the types,

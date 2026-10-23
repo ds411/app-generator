@@ -53,6 +53,9 @@ BINDING = Binding(
         Output(template="eslint.config.mjs.j2", path="eslint.config.mjs"),
         Output(template="postcss.config.mjs.j2", path="postcss.config.mjs"),
         Output(template="gitignore.j2", path=".gitignore"),
+        Output(template="Dockerfile.j2", path="Dockerfile"),
+        Output(template="dockerignore.j2", path=".dockerignore"),
+        Output(template="compose.yaml.j2", path="compose.yaml"),
         Output(template="README.md.j2", path="README.md"),
         Output(template="root-pages-readme.md.j2", path="pages/README.md"),
         *(
