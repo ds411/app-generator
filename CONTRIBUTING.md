@@ -273,10 +273,15 @@ Claude Code cloud sessions (the sandbox) need some setup for the
 checks. The repository does this setup, so a new session needs no
 manual steps.
 
-- The SessionStart hook `.claude/hooks/session-start.sh` starts the
-  Docker daemon, pulls `POSTGRES_IMAGE`, and builds the Node image
-  `localhost/appgen-node:24-alpine` that trusts the CA of the session
-  proxy.
+- `scripts/sandbox-setup.sh` starts the Docker daemon, pulls
+  `POSTGRES_IMAGE`, and builds the Node image
+  `localhost/appgen-node:24-alpine` (`NODE_IMAGE`) if they do not
+  exist. The Node image trusts the CA of the session proxy, so that
+  `pnpm install` in `docker build` works. Its name must start with
+  `localhost/`, else BuildKit pulls the image of the same name from
+  Docker Hub. The SessionStart hook `.claude/hooks/session-start.sh`
+  runs the script, and `scripts/check-nextjs.sh` and
+  `scripts/check-react.sh` run it again in cloud sessions.
 - Docker Hub gives status 429 and ghcr.io is blocked in the sandbox,
   so the checks use mirror images. `scripts/sandbox.env` gives these
   variables. The SessionStart hook loads the file into the session, and

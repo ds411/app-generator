@@ -34,6 +34,14 @@ step() {
     echo "check-react: $*"
 }
 
+# In a cloud session, use the mirror images, start Docker, and build the
+# Node image (NODE_IMAGE). Outside cloud sessions, this does nothing.
+if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+    # shellcheck source=scripts/sandbox.env
+    . scripts/sandbox.env
+    scripts/sandbox-setup.sh
+fi
+
 step "generate $definition in $out"
 uv run --locked appgen generate "$definition" -b react -o "$out" >/dev/null
 
