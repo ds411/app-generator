@@ -308,3 +308,30 @@ def test_an_operation_cannot_have_the_name_of_a_slice_module(fastapi: Binding) -
     )
     with pytest.raises(Exception, match="has the name of a module of the slice 'tasks'"):
         generate(definition, fastapi)
+
+
+def test_each_entity_has_a_validation_extension_file(result: GenerationResult) -> None:
+    by_path = {f.path: f for f in result.files}
+    for slice_name in ("projects", "tasks"):
+        ext = by_path[f"app/features/{slice_name}/validation_ext.py"]
+        assert ext.kind == "extension"
+        assert "async def validate(session: AsyncSession, record: " in ext.content
+    repository = by_path["app/features/tasks/repository.py"].content
+    assert "from app.features.tasks.validation_ext import validate" in repository
+    assert "    await validate(session, record, created=True)\n" in repository
+    assert "    await validate(session, record, created=False)\n" in repository
+
+
+def test_regeneration_keeps_the_code_in_the_extension_files(
+    tmp_path: Path, definition: AppDefinition, result: GenerationResult, fastapi: Binding
+) -> None:
+    write_result(result, tmp_path, fastapi.name)
+    validation = tmp_path / "app" / "features" / "tasks" / "validation_ext.py"
+    operation = tmp_path / "app" / "features" / "tasks" / "complete_task_ext.py"
+    validation.write_text("# my validation\n")
+    operation.write_text("# my operation\n")
+
+    write_result(generate(definition, fastapi), tmp_path, fastapi.name)
+
+    assert validation.read_text() == "# my validation\n"
+    assert operation.read_text() == "# my operation\n"

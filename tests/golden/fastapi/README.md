@@ -6,7 +6,15 @@ appgen generated this REST API from the app definition `project-tracker`,
 with the FastAPI binding. Do not edit the generated files: change the app
 definition, and run `appgen generate` again. Write your own code in the
 extension files (`*_ext.py`), which appgen creates once and never
-changes.
+changes:
+
+- `<operation>_ext.py`: the logic of a custom operation. Until you write
+  it, the endpoint gives 501.
+- `validation_ext.py`: the rules that the create and update operations
+  check before they store a record. By default, it accepts all records.
+
+When you write the code of an extension file, change `@trace:gap` to
+`@trace:manual` in its header.
 
 ## Stack
 
@@ -61,6 +69,7 @@ A slice has these modules:
 | `<operation>.py`    | One module for each CRUD or list operation: its endpoint and its handler. |
 | `<operation>_gen.py` | The endpoint of a custom operation.                        |
 | `<operation>_ext.py` | The logic of a custom operation. Write it here.            |
+| `validation_ext.py` | The custom validation of the entity. Write it here.        |
 
 ## Errors and pages
 
