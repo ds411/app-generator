@@ -153,3 +153,86 @@
     **Demo:** One run of the pre-push checks that generates, builds, tests, and checks all three apps.
 
     **Depends on:** M5, M6, and M7.
+
+- title: "M9: Honest gap report"
+  description: |
+    **Goal:** The trace report shows all open work, and the stubs of the generated apps are safe to show.
+
+    **Scope**
+    - In: open gaps for stubs that generated code calls, stubs with written code, warnings for skipped trace text, a better "did you mean" hint, a list of orphaned extension files, a 501 status for the FastAPI stubs, and the element ID of a stub widget in development builds only.
+    - Out: The logic of the stubs. Changes to the trace format.
+
+    **Exit criteria**
+    - [ ] `appgen check` reports the 8 stubs of each app as open gaps.
+    - [ ] After the change scenario, the checker suggests the renamed element and lists the orphaned extension files.
+    - [ ] A call to a FastAPI custom operation stub returns status 501.
+
+    **Demo:** `appgen check` on the three generated apps, before and after the change scenario.
+
+    **Depends on:** M8.
+
+- title: "M10: Generated app fixes"
+  description: |
+    **Goal:** The generated apps fix the problems that the M8 evaluation found.
+
+    **Scope**
+    - In: seed data and a 404 page for Next.js, consistent mock data for React, the fixes of the app shell (breadcrumb, sidebar, task board, duplicate actions, detail headings), and schema changes after the first FastAPI migration.
+    - Out: New DSL keys (M12). Sign-in and an API client for React (M13).
+
+    **Exit criteria**
+    - [ ] The Next.js smoke and UI tests see pages with data.
+    - [ ] A detail page for an unknown ID returns status 404 in Next.js.
+    - [ ] The Playwright UI tests check each fix of the app shell in the light and the dark mode.
+
+    **Demo:** The pre-push checks of the three apps, and the screenshots of the UI tests.
+
+    **Depends on:** M8.
+
+- title: "M11: Fast and stable checks"
+  description: |
+    **Goal:** The checks are fast, stable, and work in a new sandbox session without manual steps.
+
+    **Scope**
+    - In: stable chart screenshots, visual comparison, the Chromium version, Docker and pnpm caches, parallel app checks, mirror images, the Node image with the proxy CA, the session start hook, the GitHub REST calls, and the uv TLS variable.
+    - Out: CI on GitHub Actions (M13).
+
+    **Exit criteria**
+    - [ ] A layout change fails a UI test.
+    - [ ] In a new session, the pre-push hook runs all checks without manual setup.
+    - [ ] A second run of all checks takes less time than the first run.
+
+    **Demo:** `APPGEN_CHECK_ALL=1 git push` in a new session, two times.
+
+    **Depends on:** M8.
+
+- title: "M12: DSL extensions"
+  description: |
+    **Goal:** An app author can control more of the UI and write shorter definitions.
+
+    **Scope**
+    - In: number formats, the place of actions, layout hints, responsive and motion hints, a CRUD shorthand, a clear error for YAML 1.1 booleans, schemas for `x-` keys, a second example definition, and optional keys for FastAPI routes and tables.
+    - Out: The reserved sections `auth`, `access`, `workflows`, and `translations` (M13).
+
+    **Exit criteria**
+    - [ ] `appgen validate` accepts both example definitions.
+    - [ ] The three bindings generate and check both examples.
+    - [ ] The docs describe each new key.
+
+    **Demo:** `appgen generate` and `appgen check` on the second example with each binding.
+
+    **Depends on:** M10.
+
+- title: "M13: Deferred work"
+  description: |
+    **Goal:** Keep the stories that the project defers until after the next increments.
+
+    **Scope**
+    - In: sign-in, roles, workflows, translations, production hardening, an API client for React, and CI. Each story has the `deferred` label.
+    - Out: All work. Do not start a story in this milestone until a person moves it to an active milestone.
+
+    **Exit criteria**
+    - [ ] A person moved or closed each story.
+
+    **Demo:** Not applicable.
+
+    **Depends on:** M12.

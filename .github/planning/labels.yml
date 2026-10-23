@@ -44,3 +44,7 @@
 - name: blocked
   color: B60205
   description: Work cannot continue until a dependency is done.
+
+- name: deferred
+  color: BFBFBF
+  description: Planned, but deferred. Do not start this work yet.
