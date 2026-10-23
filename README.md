@@ -123,3 +123,8 @@ open gap (only `gap` traces), or uncovered (no trace). It gives the
 coverage as a percentage, in total and for each element kind. A list of
 excluded kinds removes elements and the elements under them from the
 coverage, for example `ui` for an app without a front end.
+
+The validity check (`appgen.trace.find_invalid_traces`) lists the
+malformed traces, and the traces to element IDs that the definition
+does not have, with a "did you mean" hint where possible. With the list
+of generated files, it also lists `generated` traces in other files.

@@ -102,6 +102,20 @@ class TraceProblem:
     element_id: str | None = None
     hint: str | None = None
 
+    @classmethod
+    def of(cls, trace: Trace, code: str, message: str, hint: str | None = None) -> TraceProblem:
+        """Make a problem at the position of a trace."""
+        return cls(
+            file=trace.file,
+            line=trace.line,
+            column=trace.column,
+            code=code,
+            message=message,
+            text=trace.text,
+            element_id=trace.element_id,
+            hint=hint,
+        )
+
     def __str__(self) -> str:
         text = f"{self.file}:{self.line}:{self.column}: error[{self.code}]: {self.message}"
         if self.hint:
@@ -182,7 +196,7 @@ def scan_text(text: str, path: str) -> tuple[list[Trace], list[TraceProblem]]:
             assert trace is not None
             if trace.scope == "file" and number not in header:
                 problems.append(
-                    _problem(
+                    TraceProblem.of(
                         trace,
                         "file-trace-not-in-header",
                         "A file trace must be in the header of the file: the comment lines "
@@ -203,7 +217,7 @@ def scan_text(text: str, path: str) -> tuple[list[Trace], list[TraceProblem]]:
             else:
                 traces.append(trace)
     problems.extend(
-        _problem(
+        TraceProblem.of(
             begin,
             "unclosed-block",
             f"The block trace of '{begin.element_id}' has no end.",
@@ -276,14 +290,14 @@ def _parse(
 def _close_block(blocks: list[Trace], end: Trace) -> TraceProblem | None:
     """Check that an end trace closes the innermost open block."""
     if not blocks:
-        return _problem(
+        return TraceProblem.of(
             end,
             "unmatched-end",
             f"The end trace of '{end.element_id}' has no begin trace.",
         )
     begin = blocks[-1]
     if (begin.kind, begin.element_id) != (end.kind, end.element_id):
-        return _problem(
+        return TraceProblem.of(
             end,
             "mismatched-end",
             f"The end trace does not agree with the innermost open block: "
@@ -291,19 +305,6 @@ def _close_block(blocks: list[Trace], end: Trace) -> TraceProblem | None:
             hint="Blocks can nest, but they cannot overlap.",
         )
     return None
-
-
-def _problem(trace: Trace, code: str, message: str, hint: str | None = None) -> TraceProblem:
-    return TraceProblem(
-        file=trace.file,
-        line=trace.line,
-        column=trace.column,
-        code=code,
-        message=message,
-        text=trace.text,
-        element_id=trace.element_id,
-        hint=hint,
-    )
 
 
 def _kind_text(kind: str) -> str:
