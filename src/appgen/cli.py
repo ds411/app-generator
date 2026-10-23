@@ -10,6 +10,7 @@ import typer
 from appgen import __version__
 from appgen.dsl import Diagnostic, check_file
 from appgen.dsl.schema import json_schema_text
+from appgen.gen.manifest import ManifestError
 from appgen.trace import DEFAULT_IGNORE, check_traces, render
 
 
@@ -138,7 +139,10 @@ def check(
     The report lists the invalid traces, the uncovered elements, and the
     open gaps, and gives the coverage. The exit code is 0 if the check
     passes, 1 if there is an invalid trace or the coverage is too low,
-    and 2 if the definition is not valid.
+    and 2 if the definition or the output manifest is not valid.
+
+    If the folder has an output manifest (`.appgen/manifest.json`), the
+    check reads the generated files and their traces from it.
     """
     definition, diagnostics = check_file(definition_file)
     if definition is None or diagnostics:
@@ -146,14 +150,18 @@ def check(
             typer.echo(str(diagnostic), err=True)
         typer.echo(f"{definition_file}: the app definition is not valid.", err=True)
         raise typer.Exit(code=2)
-    report = check_traces(
-        definition,
-        code_folder,
-        ignore=[*DEFAULT_IGNORE, *(ignore or [])],
-        use_gitignore=use_gitignore,
-        exclude_kinds=exclude_kinds or [],
-        min_coverage=min_coverage,
-    )
+    try:
+        report = check_traces(
+            definition,
+            code_folder,
+            ignore=[*DEFAULT_IGNORE, *(ignore or [])],
+            use_gitignore=use_gitignore,
+            exclude_kinds=exclude_kinds or [],
+            min_coverage=min_coverage,
+        )
+    except ManifestError as error:
+        typer.echo(f"{code_folder}: {error}", err=True)
+        raise typer.Exit(code=2) from None
     typer.echo(render(report, "json" if output_format is OutputFormat.JSON else "text"), nl=False)
     raise typer.Exit(code=report.exit_code)
 

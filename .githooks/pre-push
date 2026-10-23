@@ -67,9 +67,16 @@ check_python() {
     run uv run --locked pytest
 }
 
+# Check the traces of the output of the test binding (the golden
+# files, which the tests compare with a fresh generator run).
+check_traces() {
+    run uv run --locked appgen check tests/fixtures/project-tracker.yaml tests/golden/minimal
+}
+
 # Parts
 if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
     check_python
+    check_traces
 fi
 
 if [ "$failed" -ne 0 ]; then
