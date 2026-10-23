@@ -377,6 +377,9 @@ uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracke
 cd /tmp/tracker && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 ```
 
+`scripts/check-react.sh` runs these steps, `docker build`, and
+`appgen check` on the output. The pre-push hook runs it.
+
 ### FastAPI binding
 
 `appgen generate <definition> -b fastapi -o <dir>` writes a standalone

@@ -94,6 +94,12 @@ check_nextjs() {
     run scripts/check-nextjs.sh
 }
 
+# Generate the project tracker with the React binding, and install,
+# lint, type check, build, and check the output.
+check_react() {
+    run scripts/check-react.sh
+}
+
 # Parts
 if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
     check_python
@@ -112,6 +118,13 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'examples/project-tracker/*' 'scripts/check-nextjs.sh' \
     'pyproject.toml' 'uv.lock' '.githooks/*'; then
     check_nextjs
+fi
+
+if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
+    'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
+    'examples/project-tracker/*' 'scripts/check-react.sh' \
+    'pyproject.toml' 'uv.lock' '.githooks/*'; then
+    check_react
 fi
 
 if [ "$failed" -ne 0 ]; then

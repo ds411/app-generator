@@ -238,6 +238,12 @@ git config core.hooksPath .githooks
   and runs `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. It needs pnpm and Docker. Run it by
   hand with `scripts/check-nextjs.sh [output folder]`.
+- When a push changes the generator core, the React binding, or the
+  shared binding code, the hook also runs `scripts/check-react.sh`. The
+  script generates the project tracker with the React binding, and runs
+  `pnpm install`, lint, type check, build, `docker build`, and
+  `appgen check` on the output. It needs pnpm and Docker. Run it by hand
+  with `scripts/check-react.sh [output folder]`.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.
