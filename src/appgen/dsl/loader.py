@@ -1,7 +1,6 @@
 """Load a YAML app definition into the typed model."""
 
 import difflib
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, TypeAliasType, get_args, get_origin
 
@@ -9,7 +8,8 @@ from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic
-from appgen.dsl.model import AppDefinition, Element
+from appgen.dsl.ids import element_id, index_elements, walk_elements
+from appgen.dsl.model import AppDefinition
 from appgen.dsl.source import DataPath, SourceMap, YamlDocument, read_yaml, read_yaml_file
 
 _TYPE_MESSAGES = {
@@ -54,31 +54,21 @@ def _load(document: YamlDocument) -> AppDefinition:
         raise DefinitionError(_unique(diagnostics)) from None
     for path, element in walk_elements(definition):
         element._location = source_map.element(path)  # pyright: ignore[reportPrivateUsage]
+    definition._index = index_elements(definition)  # pyright: ignore[reportPrivateUsage]
     return definition
-
-
-def walk_elements(element: Element, path: DataPath = ()) -> Iterator[tuple[DataPath, Element]]:
-    """Yield each element of the tree under an element, with its path, in source order."""
-    yield path, element
-    for name in type(element).model_fields:
-        value = getattr(element, name)
-        if isinstance(value, Element):
-            yield from walk_elements(value, (*path, name))
-        elif isinstance(value, dict):
-            for key, item in value.items():  # pyright: ignore[reportUnknownVariableType]
-                if isinstance(item, Element):
-                    yield from walk_elements(item, (*path, name, str(key)))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
     kind = detail["type"]
     path, is_key = _data_path(detail["loc"])
+    element = _element_id(path)
     if kind == "missing":
         parent = path[:-1]
         return Diagnostic(
             code="missing-key",
             message=f"The key '{path[-1]}' is missing.",
             location=source_map.element(parent) if parent else source_map.root,
+            element_id=element,
         )
     if kind == "extra_forbidden":
         return Diagnostic(
@@ -86,6 +76,7 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
             message=f"The key '{path[-1]}' is not known here.",
             location=source_map.element(path),
             hint=_did_you_mean(str(path[-1]), _known_keys(path[:-1])),
+            element_id=element,
         )
     location = source_map.element(path) if is_key else source_map.value(path)
     value = detail["input"]
@@ -96,6 +87,7 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
             message=f"The value {value!r} is not valid. Expected {expected}.",
             location=location,
             hint=_did_you_mean(str(value), _literal_choices(expected)),
+            element_id=element,
         )
     if kind == "string_pattern_mismatch":
         pattern = detail.get("ctx", {}).get("pattern", "")
@@ -104,11 +96,13 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
             code="invalid-name" if is_key else "invalid-value",
             message=f"The {what} {value!r} does not match the pattern {pattern}.",
             location=location,
+            element_id=element,
         )
     return Diagnostic(
         code="invalid-value",
         message=_TYPE_MESSAGES.get(kind, detail["msg"] + "."),
         location=location,
+        element_id=element,
     )
 
 
@@ -131,18 +125,41 @@ def _data_path(loc: tuple[int | str, ...]) -> tuple[DataPath, bool]:
 
 def _known_keys(path: DataPath) -> list[str]:
     """Return the keys that the model permits for the mapping at a path."""
+    model, _ = _resolve(path)
+    return list(model.model_fields) if model else []
+
+
+def _element_id(path: DataPath) -> str | None:
+    """Return the ID of the innermost element that contains a path."""
+    _, end = _resolve(path)
+    return element_id(path[:end]) if end else None
+
+
+def _resolve(path: DataPath) -> tuple[type[BaseModel] | None, int]:
+    """Follow a data path through the model classes.
+
+    Return the model class at the end of the path (None if the path does
+    not end at an element), and the length of the longest prefix of the
+    path that ends at an element.
+    """
     model: type[BaseModel] = AppDefinition
-    parts = iter(path)
-    for part in parts:
-        info = model.model_fields.get(str(part))
+    end = 0
+    position = 0
+    while position < len(path):
+        info = model.model_fields.get(str(path[position]))
         child = _child_model(info.annotation) if info else None
-        if child is None:
-            return []
-        if _is_mapping(info.annotation if info else None):
-            # Skip the key of the mapping, for example the entity name.
-            next(parts, None)
+        if info is None or child is None:
+            return None, end
+        if _is_mapping(info.annotation):
+            # The next part is the key of the mapping, for example the entity name.
+            if position + 1 == len(path):
+                return None, end
+            position += 2
+        else:
+            position += 1
         model = child
-    return list(model.model_fields)
+        end = position
+    return model, end
 
 
 def _unwrap(annotation: object) -> object:

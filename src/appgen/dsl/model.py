@@ -1,5 +1,7 @@
 """The typed model of an app definition (DSL version 0, see ADR 0002)."""
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Annotated, Literal
 
 import pydantic
@@ -48,11 +50,20 @@ class Element(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     _location: Location | None = PrivateAttr(default=None)
+    _id: str = PrivateAttr(default="")
 
     @property
     def location(self) -> Location | None:
         """The position of the element in its source file, if it comes from a file."""
         return self._location
+
+    @property
+    def id(self) -> str:
+        """The element ID, for example `entities.Task.fields.title` (ADR 0002).
+
+        The root of the definition has the empty ID.
+        """
+        return self._id
 
 
 class Field(Element):
@@ -133,3 +144,14 @@ class AppDefinition(Element):
     entities: Annotated[dict[EntityName, Entity], pydantic.Field(min_length=1)]
     operations: dict[MemberName, Operation] = pydantic.Field(default_factory=dict[str, Operation])
     pages: dict[MemberName, Page] = pydantic.Field(default_factory=dict[str, Page])
+
+    _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
+
+    @property
+    def elements(self) -> Mapping[str, Element]:
+        """All elements of the definition by ID, in source order."""
+        return MappingProxyType(self._index)
+
+    def find(self, element_id: str) -> Element | None:
+        """Return the element with an ID, or None if no element has the ID."""
+        return self._index.get(element_id)
