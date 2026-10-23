@@ -4,17 +4,17 @@
 
 - title: "M0: Repository foundation"
   description: |
-    **Goal:** The repo has a Python project, CI, and the workflow templates.
+    **Goal:** The repo has a Python project, a pre-push hook for checks, and the workflow templates.
 
     **Scope**
-    - In: GitHub workflow templates, CONTRIBUTING.md, the uv Python project, the CI workflow, and the ADR folder.
-    - Out: Generator code.
+    - In: GitHub workflow templates, CONTRIBUTING.md, the uv Python project, the pre-push hook, and the ADR folder.
+    - Out: Generator code. CI on GitHub Actions (the pre-push hook replaces it, to save cost).
 
     **Exit criteria**
-    - [ ] CI runs lint, type checks, and tests on each pull request.
+    - [ ] The pre-push hook runs lint, type checks, and tests, and stops a push with a failed check.
     - [ ] The README gives the setup, lint, and test commands.
 
-    **Demo:** Open a pull request and see the CI checks run.
+    **Demo:** Push a branch with a failed test, and see the hook stop the push.
 
     **Depends on:** None.
 
@@ -73,13 +73,13 @@
     **Goal:** A maintainer can see what the code covers and which traces are wrong.
 
     **Scope**
-    - In: the trace scanner, the coverage report, the invalid trace report, text and JSON output, CI exit codes, and `appgen check`.
+    - In: the trace scanner, the coverage report, the invalid trace report, text and JSON output, exit codes, and `appgen check`.
     - Out: An IDE integration.
 
     **Exit criteria**
     - [ ] `appgen check` lists uncovered definition elements and open gaps.
     - [ ] `appgen check` lists malformed traces and traces to unknown elements.
-    - [ ] CI fails for invalid traces.
+    - [ ] The pre-push hook stops a push for invalid traces.
 
     **Demo:** `appgen check` on the test binding output, before and after a change to the definition.
 
@@ -90,7 +90,7 @@
     **Goal:** The generator writes a full-stack Next.js app with a detailed UI.
 
     **Scope**
-    - In: Next.js 16 App Router with TypeScript, FSD, shadcn/ui, the theme from design tokens, Drizzle and Postgres, server actions, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile and Docker Compose file, and CI.
+    - In: Next.js 16 App Router with TypeScript, FSD, shadcn/ui, the theme from design tokens, Drizzle and Postgres, server actions, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile and Docker Compose file, and the pre-push checks.
     - Out: Authentication.
 
     **Exit criteria**
@@ -107,7 +107,7 @@
     **Goal:** The generator writes a standalone FastAPI REST API.
 
     **Scope**
-    - In: FastAPI 0.161 on Python 3.14 with uv, vertical slices, Pydantic schemas, SQLAlchemy and Alembic with Postgres, endpoints, API tests, generation gaps, the Dockerfile and Docker Compose file, and CI.
+    - In: FastAPI 0.161 on Python 3.14 with uv, vertical slices, Pydantic schemas, SQLAlchemy and Alembic with Postgres, endpoints, API tests, generation gaps, the Dockerfile and Docker Compose file, and the pre-push checks.
     - Out: Authentication. A UI.
 
     **Exit criteria**
@@ -124,7 +124,7 @@
     **Goal:** The generator writes a standalone React app with a detailed UI and mock data.
 
     **Scope**
-    - In: React 19 with TypeScript, Vite, React Router, FSD, shadcn/ui, the theme from design tokens, entity types and mock data, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile, and CI.
+    - In: React 19 with TypeScript, Vite, React Router, FSD, shadcn/ui, the theme from design tokens, entity types and mock data, layouts and navigation, data views, forms, detail views and dashboards, generation gaps, the Dockerfile, and the pre-push checks.
     - Out: Calls to a real API.
 
     **Exit criteria**
@@ -145,11 +145,11 @@
     - Out: Production hardening.
 
     **Exit criteria**
-    - [ ] CI generates, builds, and runs all three apps.
+    - [ ] The pre-push checks generate, build, and run all three apps.
     - [ ] The Playwright UI tests pass in light and dark mode.
     - [ ] After a change to the definition, the gap code stays and the checker reports the drift.
     - [ ] The evaluation report is complete.
 
-    **Demo:** One CI run that generates, builds, tests, and checks all three apps.
+    **Demo:** One run of the pre-push checks that generates, builds, tests, and checks all three apps.
 
     **Depends on:** M5, M6, and M7.
