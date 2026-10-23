@@ -8,18 +8,18 @@ each line and a trailing comma, which the formatter keeps as it is.
 LINE_LENGTH = 100
 
 
-def call(prefix: str, func: str, args: list[str], indent: int = 4) -> str:
-    """Return `<prefix><func>(<args>)` on one line if it fits, else on many lines.
+def call(prefix: str, func: str, args: list[str], indent: int = 4, suffix: str = "") -> str:
+    """Return `<prefix><func>(<args>)<suffix>` on one line if it fits, else on many lines.
 
     The result has no indent on its first line. The indent applies to the
     next lines.
     """
     pad = " " * indent
-    one_line = f"{prefix}{func}({', '.join(args)})"
+    one_line = f"{prefix}{func}({', '.join(args)}){suffix}"
     if not args or indent + len(one_line) <= LINE_LENGTH:
         return one_line
     inner = "".join(f"{pad}    {arg},\n" for arg in args)
-    return f"{prefix}{func}(\n{inner}{pad})"
+    return f"{prefix}{func}(\n{inner}{pad}){suffix}"
 
 
 def from_import(module: str, names: set[str]) -> str:

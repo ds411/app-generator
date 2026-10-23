@@ -2,10 +2,14 @@
 # @trace app file
 """The entry point of the API: `create_app` makes the FastAPI app."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import Settings
+from app.core.db import make_engine, make_sessions
 from app.core.health import router as health_router
 
 # @trace entities.Project
@@ -13,16 +17,28 @@ from app.features.projects.router import router as projects_router
 
 # @trace entities.Task
 from app.features.tasks.router import router as tasks_router
+from app.models import configure_models
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    """Close the connections of the database when the app stops."""
+    yield
+    await app.state.engine.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Return the FastAPI app with the routers of all slices."""
     settings = settings or Settings()
+    configure_models()
     app = FastAPI(
         title="Project Tracker",
         version="0.1.0",
+        lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.engine = make_engine(settings.database_url)
+    app.state.sessions = make_sessions(app.state.engine)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

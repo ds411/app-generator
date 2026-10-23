@@ -12,6 +12,7 @@ changes.
 
 - FastAPI 0.161 on Python 3.14
 - Vertical slice architecture
+- SQLAlchemy 2 (async), Alembic, and Postgres
 - uv
 
 ## Commands
@@ -19,13 +20,20 @@ changes.
 | Task               | Command                                   |
 | ------------------ | ----------------------------------------- |
 | Install            | `uv sync`                                 |
+| Migrate the database | `uv run alembic upgrade head`           |
 | Start the API      | `uv run fastapi dev app/main.py`          |
 | Lint               | `uv run ruff check`                       |
 | Check the format   | `uv run ruff format --check`              |
 | Type check         | `uv run pyright`                          |
 | Test               | `uv run pytest`                           |
 
-The API documentation is at `/docs` when the API runs.
+The API documentation is at `/docs` when the API runs. The API reads
+its settings from environment variables or from a `.env` file (see
+`.env.example`), for example `DATABASE_URL`.
+
+The tests need Postgres. By default, they start Postgres in a container
+with Testcontainers, so Docker must run. To use a database that runs
+already, set `TEST_DATABASE_URL`. The tests delete all data in it.
 
 ## Layout
 
@@ -35,7 +43,9 @@ the code of the feature.
 | Folder                  | Content                                              |
 | ----------------------- | ---------------------------------------------------- |
 | `app/main.py`           | The entry point. It adds the router of each slice.   |
-| `app/core/`             | Code that all slices share: settings, health, and schema bases. |
+| `app/models.py`         | Imports the models of all slices.                    |
+| `app/core/`             | Code that all slices share: settings, database, health, and schema bases. |
+| `migrations/`           | The Alembic migrations.                              |
 | `app/features/<slice>/` | One slice for each entity.                           |
 | `tests/`                | The tests, with one folder for each slice.           |
 
@@ -44,6 +54,7 @@ A slice has these modules:
 | Module       | Content                                                     |
 | ------------ | ----------------------------------------------------------- |
 | `router.py`  | The router of the slice, with the prefix of the entity.     |
+| `models.py`  | The SQLAlchemy model: the table, its columns, and relations. |
 | `schemas.py` | The Pydantic schemas: create, update, and read.             |
 | `enums.py`   | The enums of the enum fields, if the entity has some.       |
 

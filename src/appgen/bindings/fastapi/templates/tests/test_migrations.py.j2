@@ -1,0 +1,38 @@
+{{ trace_header("app") }}
+"""The migrations agree with the models, and they run in both directions."""
+
+import asyncio
+
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from sqlalchemy import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.core.db import Base
+from tests.conftest import alembic_config
+
+
+def _differences(connection: Connection) -> list[object]:
+    context = MigrationContext.configure(connection)
+    return list(compare_metadata(context, Base.metadata))
+
+
+async def _compare(database_url: str) -> list[object]:
+    engine = create_async_engine(database_url)
+    async with engine.connect() as connection:
+        differences = await connection.run_sync(_differences)
+    await engine.dispose()
+    return differences
+
+
+def test_the_migrations_create_the_schema_of_the_models(migrated_url: str) -> None:
+    assert asyncio.run(_compare(migrated_url)) == []
+
+
+def test_the_migrations_can_go_down_and_up_again(migrated_url: str) -> None:
+    config = alembic_config(migrated_url)
+    command.downgrade(config, "base")
+    command.upgrade(config, "head")
+
+    assert asyncio.run(_compare(migrated_url)) == []

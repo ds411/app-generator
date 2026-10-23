@@ -88,8 +88,7 @@ def test_the_check_finds_no_invalid_traces(tmp_path: Path, fastapi: Binding, exa
     assert report.invalid == []
     with_file_trace = {t.file for t in report.traces if t.scope == "file"}
     assert with_file_trace == {f.path for f in result.files}
-    uncovered = {e.kind for e in report.coverage.elements if e.status == "uncovered"}
-    assert uncovered <= {"relation"}
+    assert report.coverage.total.uncovered == 0
 
 
 def test_pages_and_the_ui_are_out_of_scope(result: GenerationResult) -> None:
@@ -197,3 +196,37 @@ def test_embedded_relations_cannot_form_a_cycle(fastapi: Binding) -> None:
     )
     with pytest.raises(Exception, match=r"cycle: Node -> Node"):
         generate(definition, fastapi)
+
+
+def test_each_entity_has_a_model_with_columns_and_relations(fastapi: Binding) -> None:
+    definition = load_definition(EXAMPLES / "project-tracker" / "app.yaml")
+    files = _files(generate(definition, fastapi))
+    tasks = files["app/features/tasks/models.py"]
+    assert '    __tablename__ = "tasks"\n' in tasks
+    assert "    title: Mapped[str] = mapped_column(String(200))\n" in tasks
+    assert 'ForeignKey("projects.id", ondelete="CASCADE")' in tasks
+    assert "    project: Mapped[Project] = relationship(\n" in tasks
+    assert 'foreign_keys="Comment.task_id"' in tasks
+    projects = files["app/features/projects/models.py"]
+    assert "projects_members = Table(" in projects
+    assert "def member_ids(self) -> list[UUID]:" in projects
+    assert "from app.features.tasks.models import Task" in files["app/models.py"]
+
+
+def test_the_migration_creates_each_table_and_foreign_key(fastapi: Binding) -> None:
+    definition = load_definition(EXAMPLES / "project-tracker" / "app.yaml")
+    migration = _files(generate(definition, fastapi))["migrations/versions/0001_schema.py"]
+    for table in ("people", "projects", "tasks", "comments", "projects_members"):
+        assert f'        "{table}",\n' in migration
+        assert f'op.drop_table("{table}")' in migration
+    assert '"fk_tasks_project_id_projects",' in migration
+    assert 'sa.UniqueConstraint("email", name="uq_people_email")' in migration
+    assert 'op.create_index("ix_tasks_project_id", "tasks", ["project_id"])' in migration
+
+
+def test_one_side_of_a_one_to_one_pair_has_the_foreign_key(fastapi: Binding) -> None:
+    app = python_app(load_definition(EXAMPLES / "edge-cases" / "app.yaml"))
+    [owner_profile] = [r for r in app.entity("Owner").relations if r.name == "profile"]
+    [profile_owner] = app.entity("Profile").relations
+    assert (owner_profile.side, owner_profile.fk) == ("fk", "profile_id")
+    assert profile_owner.side == "back"
