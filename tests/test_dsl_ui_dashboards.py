@@ -1,14 +1,16 @@
 from textwrap import dedent
 
 import pytest
+from ui_support import UI_TOKENS
 
 from appgen.dsl import AppDefinition, DefinitionError, Diagnostic, load_definition_text
 from appgen.dsl.ui.dashboards import ChartWidget, CustomWidget, ListWidget, StatWidget
 from appgen.dsl.ui.views import DetailView
 from appgen.dsl.validator import validate_definition
 
-VALID = dedent(
-    """\
+VALID = (
+    dedent(
+        """\
     version: 0
     app: { name: demo, title: Demo }
     entities:
@@ -63,7 +65,7 @@ VALID = dedent(
                 notes: { title: Notes, custom: true }
             activity: { label: Activity, custom: true }
           actions:
-            edit: { kind: form, form: edit_task }
+            edit: { kind: custom, label: Edit }
         project_detail:
           kind: detail
           entity: Project
@@ -131,6 +133,11 @@ VALID = dedent(
               span: 3
             team: { kind: custom, label: Team, span: 1 }
     """
+    )
+    + UI_TOKENS
+    + "pages:\n"
+    + "  projects: { path: /projects, title: Projects }\n"
+    + "  tasks: { path: /tasks, title: Tasks }\n"
 )
 
 

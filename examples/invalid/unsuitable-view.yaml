@@ -1,0 +1,17 @@
+# expect: unsuitable-view
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+pages:
+  task: { path: /task, title: Task, content: { view: task_detail } }
+ui:
+  views:
+    task_detail: { kind: detail, entity: Task }

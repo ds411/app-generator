@@ -1,0 +1,15 @@
+# expect: unsuitable-operation
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+ui:
+  forms:
+    new_task: { entity: Task, operation: delete_task, fields: { title: {} } }

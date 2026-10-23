@@ -1,0 +1,16 @@
+# expect: invalid-token-value
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+ui:
+  tokens:
+    color:
+      primary: { $value: blue }

@@ -1,6 +1,7 @@
 from textwrap import dedent
 
 import pytest
+from ui_support import UI_TOKENS
 
 from appgen.dsl import AppDefinition, DefinitionError, Diagnostic, load_definition_text
 from appgen.dsl.ui.views import (
@@ -13,8 +14,9 @@ from appgen.dsl.ui.views import (
 )
 from appgen.dsl.validator import validate_definition
 
-VALID = dedent(
-    """\
+VALID = (
+    dedent(
+        """\
     version: 0
     app: { name: demo, title: Demo }
     entities:
@@ -107,6 +109,10 @@ VALID = dedent(
           sort: { field: due_date }
           move: update_task
     """
+    )
+    + UI_TOKENS
+    + "pages:\n"
+    + '  project_detail: { path: "/projects/{id}", title: Project, entity: Project }\n'
 )
 
 

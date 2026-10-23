@@ -35,6 +35,16 @@ DIAGNOSTIC_CODES = {
     "invalid-option",
     "missing-inverse",
     "invalid-inverse",
+    "invalid-token-value",
+    "token-type-mismatch",
+    "token-loop",
+    "unsuitable-token",
+    "unsuitable-field",
+    "unsuitable-badge",
+    "unsuitable-operation",
+    "unsuitable-view",
+    "missing-selection",
+    "missing-widget",
 }
 
 

@@ -1,0 +1,17 @@
+# expect: unsuitable-badge
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      status: { type: enum, values: [todo, done] }
+      priority: { type: enum, values: [low, high] }
+ui:
+  badges:
+    priority: { field: Task.priority }
+  views:
+    task_table:
+      kind: table
+      entity: Task
+      columns:
+        status: { badge: priority }

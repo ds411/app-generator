@@ -1,0 +1,15 @@
+# expect: unsuitable-field
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Task:
+    fields:
+      title: { type: string }
+      status: { type: enum, values: [todo, done] }
+      meta: { type: json }
+operations:
+  create_task: { kind: create, entity: Task }
+  delete_task: { kind: delete, entity: Task }
+ui:
+  views:
+    task_board: { kind: board, entity: Task, group_by: title }
