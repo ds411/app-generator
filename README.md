@@ -75,6 +75,25 @@ line at the top of the file:
 
 A relative path to `schema/app.schema.json` also works.
 
+## One definition, three apps
+
+The proof of concept generates three standalone apps from one
+definition: a full-stack app (Next.js), a back-end REST API (FastAPI),
+and a front-end app with mock data (React). Generate and check each app
+of the example:
+
+```sh
+for binding in nextjs fastapi react; do
+  uv run appgen generate examples/project-tracker/app.yaml -b $binding -o /tmp/tracker-$binding
+  uv run appgen check examples/project-tracker/app.yaml /tmp/tracker-$binding
+done
+```
+
+Each check reports no invalid traces and 100 % coverage. The FastAPI
+app leaves out the pages and the UI by design, so its report lists the
+kinds `page` and `ui` as excluded. `tests/test_end_to_end.py` runs these
+steps with the CLI.
+
 ## Bindings
 
 A binding is a `Binding` object (see `src/appgen/gen/binding.py`). It
@@ -165,6 +184,11 @@ routes. Each route renders a page slice of Feature-Sliced Design in
 menus, the top bar with the breadcrumbs, the page search, and the color
 mode switch. Pages without a layout are in `app/(bare)/`, and
 `app/not-found.tsx` shows the 404 page in the default layout. The
+actions of a page header are a widget in `src/widgets/page-actions`, and
+the actions of a top bar are a part of its layout widget (shared
+template `ui/widgets/actions/action-bar.tsx.j2`). An action of a page
+with a record (a page with an entity and path parameters) gets the
+record of the last path parameter. The
 shared UI code imports `@/shared/lib/router`, which the binding writes
 with `next/link` and `next/navigation`. Each table, card list, and
 board view is a widget in `src/widgets/<view>` from the shared view
@@ -306,7 +330,9 @@ page search (Ctrl+K), and the mode toggle, the content region, and a
 footer. The router puts each page in its layout (the page layout, else
 `ui.defaults.layout`), and unknown paths show a 404 page. The menu marks
 the active route. The breadcrumbs come from the page paths, and a page of
-a record shows the display field of the record. The responsive rules of
+a record shows the display field of the record. The page actions and the
+top bar actions are widgets from the shared template
+`ui/widgets/actions/action-bar.tsx.j2`, as in the Next.js app. The responsive rules of
 the layout change the sidebar mode (expanded, icons, drawer, or hidden),
 the widths, the top bar parts, and the content padding on screens
 narrower than each breakpoint token.

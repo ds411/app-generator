@@ -262,6 +262,47 @@ class ViewPlan:
         return next((a for a in self.actions if a.name == name), None)
 
 
+@dataclass(slots=True)
+class ActionBarPlan:
+    """The actions of a page header or of a top bar, outside of a view.
+
+    The actions of a page with a record (a page with an entity and path
+    parameters) get the record of the last path parameter. The actions of
+    a top bar have no record.
+    """
+
+    element_id: str
+    """The ID of the page or of the top bar."""
+    component: str
+    """The name of the React component."""
+    type: str
+    """The TypeScript type of the records of the actions."""
+    entity: str | None = None
+    """The entity of the record, for a page with a record."""
+    param: str | None = None
+    """The path parameter with the ID of the record."""
+    actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
+    record_actions: set[str] = field(default_factory=set[str])
+    """The actions that need the record."""
+    forms: list[FormRef] = field(default_factory=list[FormRef])
+    imports: list[str] = field(default_factory=list[str])
+    icons: set[str] = field(default_factory=set[str])
+
+    @property
+    def var(self) -> str:
+        return camel(self.entity or "")
+
+    def code(self) -> str:
+        """Return the TypeScript expressions of the actions, to find the helpers that they call."""
+        return " ".join(
+            (a.href or "") + (a.run or "") + (a.navigate_to or "") for a in self.actions
+        )
+
+    def needs(self, name: str) -> bool:
+        """Return True if the code of the actions calls a helper, for example `pageHref`."""
+        return f"{name}(" in self.code()
+
+
 class UsesParts(Protocol):
     """A plan that notes the value components that its JSX uses."""
 
@@ -294,11 +335,83 @@ class ViewContext:
         self.forms = FormContext(definition)
         self._details: dict[str, Any] = {}
         self._dashboards: dict[str, Any] = {}
+        self._bars: dict[str, ActionBarPlan] = {}
 
     @property
     def runtime(self) -> bool:
-        """Return True if the app has a view or a dashboard, which need the runtime files."""
-        return bool(self.list_views or self.detail_views or self.dashboards)
+        """Return True if the app has views, dashboards, or page actions: they need the runtime."""
+        return bool(
+            self.list_views or self.detail_views or self.dashboards or self.page_action_bars
+        )
+
+    @property
+    def page_action_bars(self) -> list[str]:
+        """Return the pages with actions in the page header that the templates can render."""
+        return [
+            name for name, page in self.definition.pages.items() if self.action_bar(page.id).actions
+        ]
+
+    def action_bar(self, element_id: str) -> ActionBarPlan:
+        """Return the plan of the actions of a page (`pages.<name>`) or a top bar."""
+        if element_id not in self._bars:
+            self._bars[element_id] = self._build_bar(element_id)
+        return self._bars[element_id]
+
+    def _build_bar(self, element_id: str) -> ActionBarPlan:
+        definition = self.definition
+        parts = element_id.split(".")
+        if parts[0] == "pages":
+            page = definition.pages[parts[1]]
+            params = _path_params(page.path)
+            entity = page.entity if params else None
+            plan = ActionBarPlan(
+                element_id=element_id,
+                component=f"{pascal(parts[1])}PageActions",
+                type=pascal(entity) if entity else "never",
+                entity=entity,
+                param=params[-1] if entity else None,
+            )
+            items = list(page.actions.items())
+        else:
+            # `ui.layouts.<layout>.topbar`
+            assert definition.ui is not None
+            topbar = definition.ui.layouts[parts[2]].topbar
+            assert topbar is not None
+            plan = ActionBarPlan(
+                element_id=element_id,
+                component=f"{pascal(parts[2])}TopbarActions",
+                type="never",
+            )
+            items = list(topbar.actions.items())
+        for name, action in items:
+            entity = plan.entity or self._action_entity(action)
+            if entity is None:
+                continue
+            row = self._action(entity, name, action, "row" if plan.entity else "view")
+            if row is None or "lookups." in (row.href or ""):
+                continue
+            plan.actions.append(row)
+            code = (row.href or "") + (row.run or "")
+            if "record" in code:
+                plan.record_actions.add(name)
+        plan.forms = self.form_refs(plan.actions)
+        record_forms = {f.name for f in plan.forms if f.record}
+        plan.record_actions |= {a.name for a in plan.actions if a.form in record_forms}
+        if not plan.record_actions:
+            # No action needs the record, so the page does not read it.
+            plan.entity, plan.param, plan.type = None, None, "never"
+        plan.imports = sorted({line for a in plan.actions for line in a.imports})
+        plan.icons = {a.action.icon for a in plan.actions if a.action.icon}
+        return plan
+
+    def _action_entity(self, action: Action) -> str | None:
+        """Return an entity for an action without a record: the entity of its form or page."""
+        definition = self.definition
+        if isinstance(action, FormAction):
+            return definition.ui.forms[action.form].entity if definition.ui else None
+        if isinstance(action, NavigateAction):
+            return definition.pages[action.page].entity or next(iter(definition.entities))
+        return next(iter(definition.entities))
 
     def detail_plan(self, name: str) -> DetailPlan:
         """Return the plan of a detail view (see `appgen.bindings.shared.details`)."""
@@ -967,10 +1080,12 @@ _VIEW = "src/widgets/{{ name | kebab }}"
 
 
 def view_rules() -> tuple[Output, ...]:
-    """Return the output rules of the views and the dashboards.
+    """Return the output rules of the views, the dashboards, and the action bars.
 
     Each view (a table, a card list, a board, or a detail view) and each
-    dashboard is a widget. The runtime files of the views are in the app
+    dashboard is a widget. The actions of a page header are a widget in
+    `src/widgets/page-actions`, and the actions of a top bar are a part of
+    its layout widget. The runtime files of the views are in the app
     only if a view needs them. The bindings that use the views put
     `ViewContext` in their context as `ui_views`, and the view helpers
     (`HELPERS`) in their helpers.
@@ -1047,5 +1162,22 @@ def view_rules() -> tuple[Output, ...]:
         ),
         Output(
             template="ui/dashboards/index.ts.j2", path=_VIEW + "/index.ts", for_each="dashboard"
+        ),
+        Output(
+            template="ui/widgets/actions/action-bar.tsx.j2",
+            path="src/widgets/page-actions/ui/{{ name | kebab }}-actions.tsx",
+            for_each="page",
+            when="ui_views.action_bar(element_id).actions",
+        ),
+        Output(
+            template="ui/widgets/actions/index.ts.j2",
+            path="src/widgets/page-actions/index.ts",
+            when="ui_views.page_action_bars",
+        ),
+        Output(
+            template="ui/widgets/actions/action-bar.tsx.j2",
+            path="src/widgets/layouts/ui/{{ element_id.split('.')[2] | kebab }}-topbar-actions.tsx",
+            for_each="topbar",
+            when="ui_views.action_bar(element_id).actions",
         ),
     )

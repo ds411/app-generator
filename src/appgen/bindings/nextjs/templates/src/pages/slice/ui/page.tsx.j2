@@ -17,6 +17,10 @@ import { useParams } from "@/shared/lib/router";
 {% if dashboard %}
 import { {{ dashboard | pascal }}Dashboard } from "@/widgets/{{ dashboard | kebab }}";
 {% endif %}
+{% set page_actions = ui_views.action_bar(element_id).actions %}
+{% if page_actions %}
+import { {{ name | pascal }}PageActions } from "@/widgets/page-actions";
+{% endif %}
 import { PageHeader } from "@/widgets/page-header";
 {% if view or detail %}
 import { {{ (view or detail) | pascal }}View } from "@/widgets/{{ (view or detail) | kebab }}";
@@ -40,6 +44,9 @@ export function {{ info.component }}() {
         title={{ jsx_attr(element.title) }}
 {% if element.description %}
         description={{ jsx_attr(element.description) }}
+{% endif %}
+{% if page_actions %}
+        actions={<{{ name | pascal }}PageActions />}
 {% endif %}
       />
 {% if custom %}

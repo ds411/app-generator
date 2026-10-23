@@ -119,11 +119,25 @@ def test_pages_without_a_layout_are_in_the_bare_group(edge_files: dict[str, str]
     assert '<span className="font-semibold">{appConfig.title}</span>' in bare
 
 
-def test_uncovered_elements_get_gap_files(result: GenerationResult) -> None:
-    gap = _files(result)["src/gaps/ui.defaults.states.error.ext.ts"]
-    assert "// @trace:gap ui.defaults.states.error file" in gap
-    assert "TODO(appgen)" in gap
-    assert "operation" not in {g.kind for g in result.gaps}
+def test_the_binding_covers_each_element_of_the_project_tracker(result: GenerationResult) -> None:
+    assert result.gaps == []
+    assert not [path for path in _files(result) if path.startswith("src/gaps/")]
+
+
+def test_page_and_top_bar_actions_are_widgets(result: GenerationResult) -> None:
+    files = _files(result)
+    page = files["src/pages/task-detail/ui/task-detail-page.tsx"]
+    assert "actions={<TaskDetailPageActions />}" in page
+    actions = files["src/widgets/page-actions/ui/task-detail-actions.tsx"]
+    assert "// @trace pages.task_detail.actions.delete" in actions
+    assert "// @trace pages.task_detail.actions.delete.confirm" in actions
+    assert 'const id = useParams()["id"] ?? "";' in actions
+    assert "disabled={!record}" in actions
+    layout = files["src/widgets/layouts/ui/app-shell-layout.tsx"]
+    assert "<AppShellTopbarActions />" in layout
+    topbar = files["src/widgets/layouts/ui/app-shell-topbar-actions.tsx"]
+    assert "// @trace ui.layouts.app_shell.topbar.actions.new_task" in topbar
+    assert "routeParams={routeParams}" in topbar
 
 
 def test_two_runs_give_the_same_output(definition: AppDefinition, nextjs: Binding) -> None:
