@@ -1027,6 +1027,17 @@ transaction, and starts the session. The React app with
 `x-react-data: api` calls `POST /auth/sign-up`. The React app with mock
 data keeps a new user only in the browser tab.
 
+With `password_reset`, the Next.js app and the React app with
+`x-react-data: api` have the public pages `/forgot-password` (it asks
+for a reset link) and `/reset-password` (the page of the link: it sets a
+new password), and the sign-in page links to the first one. The React
+app calls the endpoints of the FastAPI app: set `PASSWORD_RESET_URL` to
+its page `/reset-password`. The Next.js app uses the same token rules
+as the FastAPI app, and the link starts with `PUBLIC_URL`. Its
+extension file `src/shared/auth/password-reset.ext.ts` delivers the
+link, with the same stub. The React app with mock data has no reset
+pages.
+
 ## access
 
 The optional `access` section gives each user a role, and each role the
@@ -1160,6 +1171,16 @@ use in the app does not show.
   `breadcrumb`, `More`, `Notifications`, `Close toast`, `Sign in`,
   `Password`, `Sign out`, `Sign up`, `Do you need an account?`,
   `Do you have an account?`.
+- The password reset: `Did you forget the password?`,
+  `Reset the password`,
+  `Enter your user name. The app sends you a link to set a new password.`,
+  `Send the link`,
+  `If the user name exists, the user gets a message with a reset link.`,
+  `Go to the sign-in`, `Set a new password`, `New password`,
+  `Set the password`,
+  `The password is changed. Sign in with the new password.`,
+  `The reset link is not valid, was used, or has ended.`,
+  `The request failed.`.
 - The page of an unknown path and the stubs of the generation gaps:
   `This page does not exist`, `Make sure that the address is correct.`,
   `Go to the start page`, `Not available yet.`,

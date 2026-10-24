@@ -11,6 +11,7 @@ from typing import Any
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import build_tables, seed_tables
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.auth import auth_pages
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -156,6 +157,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_plan": plan,
         "ui_views": ViewContext(definition, forms=True),
         "ui_forms": FormContext(definition),
+        "auth_pages": auth_pages(definition, server=True),
         **text_helpers(definition),
         "nextjs": {
             "default_layout": default_layout,

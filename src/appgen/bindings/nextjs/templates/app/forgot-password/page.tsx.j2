@@ -1,0 +1,11 @@
+{{ trace_header(definition.auth.password_reset.id) }}
+import type { Metadata } from "next";
+
+import { ForgotPasswordForm } from "@/features/password-reset";
+
+export const metadata: Metadata = { title: "Reset the password" };
+
+/** The page that asks for a reset link (ADR 0017). */
+export default function Route() {
+  return <ForgotPasswordForm />;
+}

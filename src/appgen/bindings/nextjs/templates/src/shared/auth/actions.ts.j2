@@ -9,7 +9,21 @@ import type { ActionResult } from "@/shared/api";
 import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
 
+{% if definition.auth.password_reset %}
+import {
+  MIN_PASSWORD_LENGTH,
+  RESET_SECONDS,
+  findResetUser,
+  makeResetToken,
+  publicUrl,
+  readResetToken,
+  resetTokenMatches,
+} from "./password-reset";
+import { deliverPasswordReset } from "./password-reset.ext";
+import { SESSION_COOKIE, checkPassword, setPassword, startSession } from "./session";
+{% else %}
 import { SESSION_COOKIE, checkPassword, startSession } from "./session";
+{% endif %}
 
 const signInSchema = z.object({ username: z.string().min(1).max(320), password: z.string().min(1).max(200) });
 
@@ -33,3 +47,42 @@ export async function signInAction(username: string, password: string): Promise<
 export async function signOutAction(): Promise<void> {
   (await cookies()).delete(SESSION_COOKIE);
 }
+{% if definition.auth.password_reset %}
+
+const resetRequestSchema = z.object({ username: z.string().min(1).max(320) });
+const resetSchema = z.object({ token: z.string().min(1).max(1000), newPassword: z.string().min(MIN_PASSWORD_LENGTH).max(200) });
+
+/** Send a reset link to a user (ADR 0017). The answer is the same for an unknown user name. */
+export async function requestPasswordResetAction(username: string): Promise<ActionResult<null>> { {{ trace(definition.auth.password_reset.id) }}
+  const input = resetRequestSchema.safeParse({ username });
+  if (!input.success) {
+    return { ok: false, error: { name: "Error", message: "Enter a user name." } };
+  }
+  const user = await findResetUser(input.data.username);
+  if (user !== null) {
+    try {
+      const token = makeResetToken(user.id, user.passwordHash, Math.floor(Date.now() / 1000) + RESET_SECONDS);
+      const link = `${publicUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+      await deliverPasswordReset({ id: user.id, username: input.data.username }, link);
+    } catch (error) {
+      console.error(error);
+      return { ok: false, error: { name: "Error", message: "The app could not send the reset link." } };
+    }
+  }
+  return { ok: true, data: null };
+}
+
+/** Set a new password with the token of a reset link. A used or an ended token gives an error. */
+export async function confirmPasswordResetAction(token: string, newPassword: string): Promise<ActionResult<null>> { {{ trace(definition.auth.password_reset.id) }}
+  const input = resetSchema.safeParse({ token, newPassword });
+  if (!input.success) {
+    return { ok: false, error: { name: "Error", message: `Use ${MIN_PASSWORD_LENGTH} or more characters.` } };
+  }
+  const found = readResetToken(input.data.token);
+  if (found === null || !(await resetTokenMatches(found))) {
+    return { ok: false, error: { name: "Error", message: "The reset link is not valid, was used, or has ended." } };
+  }
+  await setPassword(found.userId, input.data.newPassword);
+  return { ok: true, data: null };
+}
+{% endif %}

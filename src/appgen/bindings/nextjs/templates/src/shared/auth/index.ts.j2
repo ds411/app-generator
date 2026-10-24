@@ -1,5 +1,9 @@
 {{ trace_header(definition.auth.id) }}
+{% if definition.auth.password_reset %}
+import { confirmPasswordResetAction, requestPasswordResetAction, signInAction, signOutAction } from "./actions";
+{% else %}
 import { signInAction, signOutAction } from "./actions";
+{% endif %}
 
 /** Sign in. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
@@ -11,3 +15,17 @@ export async function signIn(username: string, password: string): Promise<string
 export async function signOut(): Promise<void> {
   await signOutAction();
 }
+{% if definition.auth.password_reset %}
+
+/** Ask for a reset link: the app sends it to the user. Return null, or the message of the error. */
+export async function requestPasswordReset(username: string): Promise<string | null> {
+  const result = await requestPasswordResetAction(username);
+  return result.ok ? null : result.error.message;
+}
+
+/** Set a new password with the token of a reset link. Return null, or the message of the error. */
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<string | null> {
+  const result = await confirmPasswordResetAction(token, newPassword);
+  return result.ok ? null : result.error.message;
+}
+{% endif %}

@@ -197,7 +197,7 @@ def test_without_a_sign_up_the_front_ends_have_no_sign_up_page(binding: Binding)
     text = EXAMPLE.read_text().replace(sign_up, "")
     app = files(binding, text)
     assert not [path for path in app if "sign-up" in path]
-    assert "Link" not in app["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert "/sign-up" not in app["src/features/sign-in/ui/sign-in-form.tsx"]
 
 
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)

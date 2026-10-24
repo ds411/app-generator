@@ -12,6 +12,7 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source
 from appgen.bindings.shared import shadcn
+from appgen.bindings.shared.auth import auth_pages
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -108,6 +109,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_plan": ui_plan(definition),
         "ui_views": ViewContext(definition, forms=True, endpoints=endpoints),
         "ui_forms": FormContext(definition),
+        "auth_pages": auth_pages(definition, server=api),
         **text_helpers(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",

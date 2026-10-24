@@ -37,7 +37,8 @@ function secret(): string {
   return value;
 }
 
-function sign(body: string): string {
+/** Return the signature of a text with AUTH_SECRET. */
+export function sign(body: string): string {
   return createHmac("sha256", secret()).update(body).digest("base64url");
 }
 

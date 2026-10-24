@@ -2,6 +2,9 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router";
 
+{% if auth_pages.password_reset %}
+import { ResetPasswordForm } from "@/features/password-reset";
+{% endif %}
 import { SignInForm } from "@/features/sign-in";
 {% if definition.auth.sign_up %}
 import { SignUpForm } from "@/features/sign-up";
@@ -42,5 +45,13 @@ export function SignUpRoute() {
   const [params] = useSearchParams();
   const next = params.get("next");
   return <SignUpForm next={next && next.startsWith("/") ? next : "/"} />;
+}
+{% endif %}
+{% if auth_pages.password_reset %}
+
+/** The page of a reset link: it sets a new password with the token of the link (ADR 0017). */
+export function ResetPasswordRoute() {
+  const [params] = useSearchParams();
+  return <ResetPasswordForm token={params.get("token") ?? ""} />;
 }
 {% endif %}

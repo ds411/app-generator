@@ -214,6 +214,23 @@ BINDING = Binding(
             )
         ),
         *(
+            Output(
+                template=template,
+                path=path,
+                when="definition.auth and definition.auth.password_reset",
+                extension=template.endswith(".ext.ts.j2"),
+            )
+            for template, path in (
+                ("src/shared/auth/password-reset.ts.j2", "src/shared/auth/password-reset.ts"),
+                (
+                    "src/shared/auth/password-reset.ext.ts.j2",
+                    "src/shared/auth/password-reset.ext.ts",
+                ),
+                ("app/forgot-password/page.tsx.j2", "app/forgot-password/page.tsx"),
+                ("app/reset-password/page.tsx.j2", "app/reset-password/page.tsx"),
+            )
+        ),
+        *(
             Output(template=template, path=path, when="definition.auth and definition.auth.sign_up")
             for template, path in (
                 (
@@ -305,7 +322,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "access", "role"}
+        | {"auth", "sign_up", "password_reset", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),

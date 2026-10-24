@@ -24,8 +24,11 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 // records of {{ definition.auth.user_entity }}, and each one signs in with the password
 // MOCK_PASSWORD. The session stays in the browser tab. An app with a back
 // end checks the passwords on the server.{% if sign_up %} A user of the sign-up
-// (ADR 0016) stays in the browser tab too, and signs in with its own password.{% endif %}
-
+// (ADR 0016) stays in the browser tab too, and signs in with its own password.{% endif +%}
+{% if definition.auth.password_reset %}
+// The password reset needs a server that sends the reset links (ADR 0017),
+// so an app with mock data has no reset pages. {{ trace(definition.auth.password_reset.id) }}
+{% endif %}
 
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
@@ -170,6 +173,29 @@ export async function signIn(username: string, password: string): Promise<string
   }
   return null;
 }
+
+{% if definition.auth.password_reset %}
+
+/** Ask the API for a reset link (`POST /auth/password-reset`). Return null, or the message of the error. */
+export async function requestPasswordReset(username: string): Promise<string | null> { {{ trace(definition.auth.password_reset.id) }}
+  try {
+    await apiRequest("POST", "/auth/password-reset", { username });
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+  return null;
+}
+
+/** Set a new password with the token of a reset link (`POST /auth/password-reset/confirm`). Return null, or the message of the error. */
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<string | null> { {{ trace(definition.auth.password_reset.id) }}
+  try {
+    await apiRequest("POST", "/auth/password-reset/confirm", { token, new_password: newPassword });
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+  return null;
+}
+{% endif %}
 
 /** Sign out. */
 export async function signOut(): Promise<void> {
