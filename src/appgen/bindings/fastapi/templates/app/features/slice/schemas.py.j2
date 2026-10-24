@@ -49,6 +49,10 @@ class {{ e.name }}Read(ReadModel):
     {{ trace(f.id) }}
     {{ f.declaration("read") }}
 {% endfor %}
+{% for c in e.computed %}
+    {{ trace(c.id) }}
+    {{ c.attr }}: {{ c.type }} | None
+{% endfor %}
 {% for r in e.read_relations %}
     {{ trace(r.id) }}
 {% for line in r.declarations("read") %}

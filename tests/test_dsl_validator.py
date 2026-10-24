@@ -376,3 +376,45 @@ def test_a_currency_code_has_three_capital_letters() -> None:
 
     [diagnostic] = error.value.diagnostics
     assert diagnostic.location.line == 12
+
+
+def test_a_computed_field_is_a_number_of_number_fields() -> None:
+    estimate = "estimate: { type: decimal, min: 0, max: 100, precision: 5, scale: 2 }"
+    double = estimate + "\n      double: { type: decimal, computed: estimate * 2 }"
+    assert codes(BASE.replace(estimate, double)) == []
+
+    for computed, code, message in (
+        ("title * 2", "unsuitable-field", "The path 'title' must give an 'integer' or a"),
+        ("missing * 2", "unknown-reference", "The entity 'Task' has no field or relation"),
+        ("estimate *", "invalid-value", "The expression is not valid: The expression ends"),
+        ("hours(estimate, estimate)", "unsuitable-field", "The path 'estimate' must give a date"),
+        ("hours(1, estimate)", "invalid-value", "The arguments of 'hours' must be field paths"),
+        ("project.name + 1", "unsuitable-field", "The path 'project.name' must give"),
+    ):
+        text = BASE.replace(
+            estimate, estimate + f"\n      x: {{ type: decimal, computed: '{computed}' }}"
+        )
+        diagnostic = check(text)[0]
+        assert (diagnostic.code, diagnostic.element_id) == (code, "entities.Task.fields.x")
+        assert diagnostic.message.startswith(message), diagnostic.message
+
+
+def test_a_computed_field_has_no_stored_options_and_no_nested_computed_fields() -> None:
+    estimate = "estimate: { type: decimal, min: 0, max: 100, precision: 5, scale: 2 }"
+    text = BASE.replace(
+        estimate,
+        estimate
+        + "\n      double: { type: decimal, computed: estimate * 2, required: true }"
+        + "\n      quad: { type: decimal, computed: double * 2 }"
+        + "\n      name: { type: string, computed: estimate }",
+    )
+    assert codes(text) == [
+        ("invalid-option", "entities.Task.fields.double"),
+        ("unsuitable-field", "entities.Task.fields.quad"),
+        ("invalid-option", "entities.Task.fields.name"),
+    ]
+
+
+def test_a_param_cannot_be_computed() -> None:
+    text = BASE.replace("reason: { type: text }", "reason: { type: integer, computed: '1' }")
+    assert codes(text) == [("invalid-option", "operations.close_task.params.reason")]

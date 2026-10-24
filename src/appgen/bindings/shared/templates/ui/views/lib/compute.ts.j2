@@ -1,0 +1,45 @@
+{{ trace_header("app") }}
+// The runtime of the computed fields. An expression of a computed field
+// calls these functions. An empty operand gives an empty value (null).
+
+type Num = number | null;
+
+/** Return a value as a number, or null if it is empty or not a number. */
+function num(value: unknown): Num {
+  if (value === null || value === undefined || value === "") return null;
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
+}
+
+/** Return a date (`YYYY-MM-DD`), a date and time (ISO 8601), or a Date as a time in ms. */
+function time(value: unknown): Num {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return value.getTime();
+  const text = String(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T00:00:00`) : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function apply(a: Num, b: Num, op: (a: number, b: number) => number): Num {
+  return a === null || b === null ? null : op(a, b);
+}
+
+/** Return the time from `start` to `end` in a unit of ms. */
+function between(start: unknown, end: unknown, unit: number): Num {
+  return apply(time(start), time(end), (a, b) => (b - a) / unit);
+}
+
+export const compute = {
+  num,
+  add: (a: Num, b: Num): Num => apply(a, b, (x, y) => x + y),
+  sub: (a: Num, b: Num): Num => apply(a, b, (x, y) => x - y),
+  mul: (a: Num, b: Num): Num => apply(a, b, (x, y) => x * y),
+  div: (a: Num, b: Num): Num => (b === 0 ? null : apply(a, b, (x, y) => x / y)),
+  neg: (a: Num): Num => (a === null ? null : -a),
+  /** The hours from `start` to `end`. */
+  hours: (start: unknown, end: unknown): Num => between(start, end, 3_600_000),
+  /** The days from `start` to `end`. */
+  days: (start: unknown, end: unknown): Num => between(start, end, 86_400_000),
+  /** Round a value to a number of decimal places. */
+  round: (a: Num, digits: number): Num => (a === null ? null : Number(a.toFixed(digits))),
+};

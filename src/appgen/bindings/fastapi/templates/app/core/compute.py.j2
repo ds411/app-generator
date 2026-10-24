@@ -1,0 +1,78 @@
+{{ trace_header("app") }}
+"""The runtime of the computed fields. An empty operand gives an empty value (None)."""
+
+import datetime as dt
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+type Num = Decimal | None
+
+
+def get(record: object, *attrs: str) -> Any:
+    """Return the value at a path of attributes, or None if a part of the path is None."""
+    value: Any = record
+    for attr in attrs:
+        if value is None:
+            return None
+        value = getattr(value, attr)
+    return value
+
+
+def num(value: object) -> Num:
+    """Return a value as a Decimal, or None if it is empty or not a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    return result if result.is_finite() else None
+
+
+def add(a: Num, b: Num) -> Num:
+    return None if a is None or b is None else a + b
+
+
+def sub(a: Num, b: Num) -> Num:
+    return None if a is None or b is None else a - b
+
+
+def mul(a: Num, b: Num) -> Num:
+    return None if a is None or b is None else a * b
+
+
+def div(a: Num, b: Num) -> Num:
+    return None if a is None or b is None or b == 0 else a / b
+
+
+def neg(a: Num) -> Num:
+    return None if a is None else -a
+
+
+def _between(start: object, end: object, unit: int) -> Num:
+    if not isinstance(start, dt.date) or not isinstance(end, dt.date):
+        return None
+    if isinstance(start, dt.datetime) != isinstance(end, dt.datetime):
+        return None
+    seconds = Decimal(str((end - start).total_seconds()))
+    return seconds / unit
+
+
+def hours(start: object, end: object) -> Num:
+    """Return the hours from `start` to `end`."""
+    return _between(start, end, 3600)
+
+
+def days(start: object, end: object) -> Num:
+    """Return the days from `start` to `end`."""
+    return _between(start, end, 86400)
+
+
+def round_to(a: Num, digits: int) -> Num:
+    """Round a value to a number of decimal places."""
+    return None if a is None else a.quantize(Decimal(1).scaleb(-digits))
+
+
+def to_int(a: Num) -> int | None:
+    """Round a value to an integer."""
+    return None if a is None else int(a.to_integral_value())

@@ -218,7 +218,8 @@ def _detail(entity: str, data: dict[str, object]) -> dict[str, object]:
 
 
 def _form(entity: str, data: dict[str, object], operation: str) -> dict[str, object]:
-    names = [*_fields(data), *_relations(data, (*_SINGLE_KINDS, "many_to_many"))]
+    stored = [n for n, f in _fields(data).items() if "computed" not in f]
+    names = [*stored, *_relations(data, (*_SINGLE_KINDS, "many_to_many"))]
     return {
         "entity": entity,
         "operation": operation,

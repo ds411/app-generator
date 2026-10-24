@@ -1823,6 +1823,17 @@
           ],
           "default": null,
           "title": "Currency"
+        },
+        "computed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

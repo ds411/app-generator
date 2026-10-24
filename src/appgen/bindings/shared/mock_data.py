@@ -95,16 +95,17 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
     for name, entity in definition.entities.items():
         rng = random.Random(f"{definition.app.name}:{name}")
         records: list[Record] = []
-        seen: dict[str, set[Any]] = {f: set() for f, field in entity.fields.items() if field.unique}
-        source = next((f for f in SOURCE_FIELDS if f in entity.fields), None)
+        fields = entity.stored_fields
+        seen: dict[str, set[Any]] = {f: set() for f, field in fields.items() if field.unique}
+        source = next((f for f in SOURCE_FIELDS if f in fields), None)
         derived = [
             f
-            for f, field in entity.fields.items()
+            for f, field in fields.items()
             if source is not None and f in DERIVED_FIELDS and field.type == "string"
         ]
         for index, record_id in enumerate(ids[name]):
             record: Record = {"id": record_id}
-            for field_name, field in entity.fields.items():
+            for field_name, field in fields.items():
                 if field_name in derived:
                     record[field_name] = None  # Set after the source, in the same key order.
                     continue

@@ -15,6 +15,15 @@ from pathlib import Path
 
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
+from appgen.dsl.expressions import (
+    Binary,
+    Call,
+    Expression,
+    ExpressionError,
+    FieldRef,
+    Negate,
+    parse_expression,
+)
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Field
 from appgen.dsl.ui.checks import (
@@ -26,6 +35,7 @@ from appgen.dsl.ui.checks import (
     check_ui_tokens,
     check_ui_views,
 )
+from appgen.dsl.ui.fields import FieldPathError, resolve_path
 
 type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 
@@ -200,10 +210,92 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
-            if param.unique:
+            for key in ("unique", "computed"):
+                if getattr(param, key):
+                    yield _error(
+                        "invalid-option", f"'{key}' is only for entity fields.", param, at=key
+                    )
+
+
+def check_computed(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A computed field is a number, and its expression refers to fields that suit it."""
+    for entity_name, entity in definition.entities.items():
+        for field in entity.computed_fields.values():
+            assert field.computed is not None
+            if field.type not in NUMBER_TYPES:
                 yield _error(
-                    "invalid-option", "'unique' is only for entity fields.", param, at="unique"
+                    "invalid-option",
+                    f"A computed field must be an 'integer' or a 'decimal', not '{field.type}'.",
+                    field,
+                    at="computed",
                 )
+                continue
+            for key in ("required", "unique", "default"):
+                if key in field.model_fields_set:
+                    yield _error(
+                        "invalid-option",
+                        f"'{key}' is not an option of a computed field.",
+                        field,
+                        at=key,
+                    )
+            try:
+                expression = parse_expression(field.computed)
+            except ExpressionError as error:
+                yield _error(
+                    "invalid-value",
+                    f"The expression is not valid: {error}",
+                    field,
+                    at="computed",
+                )
+                continue
+            yield from _check_expression(definition, entity_name, field, expression, False)
+
+
+def _check_expression(
+    definition: AppDefinition, entity: str, field: Field, expression: Expression, date: bool
+) -> Iterator[Diagnostic]:
+    match expression:
+        case FieldRef(path):
+            try:
+                target = resolve_path(definition, entity, path)
+            except FieldPathError as error:
+                yield _error("unknown-reference", str(error), field, at="computed")
+                return
+            member = target.member
+            types = {"date", "datetime"} if date else NUMBER_TYPES
+            if not isinstance(member, Field) or member.type not in types:
+                what = "a date or a date-time" if date else "an 'integer' or a 'decimal' field"
+                yield _error(
+                    "unsuitable-field",
+                    f"The path '{path}' must give {what}.",
+                    field,
+                    at="computed",
+                )
+            elif member.computed is not None:
+                yield _error(
+                    "unsuitable-field",
+                    f"The path '{path}' gives a computed field. Use the fields of its expression.",
+                    field,
+                    at="computed",
+                )
+        case Call(name, args):
+            for arg in args:
+                if not isinstance(arg, FieldRef):
+                    yield _error(
+                        "invalid-value",
+                        f"The arguments of '{name}' must be field paths of dates or date-times.",
+                        field,
+                        at="computed",
+                    )
+                else:
+                    yield from _check_expression(definition, entity, field, arg, True)
+        case Binary(_, left, right):
+            yield from _check_expression(definition, entity, field, left, False)
+            yield from _check_expression(definition, entity, field, right, False)
+        case Negate(operand):
+            yield from _check_expression(definition, entity, field, operand, False)
+        case _:
+            pass
 
 
 CHECKS: list[Check] = [
@@ -212,6 +304,7 @@ CHECKS: list[Check] = [
     check_relations,
     check_operations,
     check_fields,
+    check_computed,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

@@ -16,6 +16,15 @@ from typing import Any
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import call, from_import, import_block
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
+from appgen.dsl.expressions import (
+    Binary,
+    Call,
+    Expression,
+    FieldRef,
+    Negate,
+    Number,
+    parse_expression,
+)
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.gen.naming import constant, kebab, pascal, snake
 from appgen.gen.render import GenerationError
@@ -40,6 +49,8 @@ _FILTER_TYPES = frozenset(
 # The field types that a test can send and compare with the response as JSON.
 _EXACT_TYPES = frozenset({"string", "text", "integer", "boolean", "date", "email", "url", "enum"})
 _SAMPLE_COUNT = 5
+_COMPUTE_OPS = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
+"""The functions of `app/core/compute.py` for the operators of the expressions."""
 
 
 @dataclass(slots=True)
@@ -213,6 +224,8 @@ class PyRelation:
     ids_field: str | None = None
     """For the `m2m` side: the field of the input schemas with the IDs of the targets."""
     embed: bool = False
+    computed: bool = False
+    """True if a computed field reads the target: the model loads it with the record."""
 
     @property
     def many(self) -> bool:
@@ -225,7 +238,7 @@ class PyRelation:
     @property
     def lazy(self) -> str:
         """The loading strategy: the read schema needs the many-to-many and embedded targets."""
-        return "selectin" if self.side == "m2m" or self.embed else "raise"
+        return "selectin" if self.side == "m2m" or self.embed or self.computed else "raise"
 
     def model_lines(self, entity: PyEntity) -> list[str]:
         """Return the declarations of the relation in the model of its entity."""
@@ -306,6 +319,30 @@ class PyRelation:
             else:
                 lines.append(f"{self.attr}: {target}" + (" | None" if self.nullable else ""))
         return lines
+
+
+@dataclass(slots=True)
+class PyComputed:
+    """A computed field: a property of the model, and a field of the read schema."""
+
+    name: str
+    attr: str
+    id: str
+    type: str
+    """The Python type without `| None`: `int` or `Decimal`."""
+    lines: list[str]
+    """The statements of the body of the property, of `self`."""
+    source: str
+    """The expression in the definition."""
+
+    def property_lines(self) -> list[str]:
+        """Return the lines of the property of the model."""
+        return [
+            "@property",
+            f"def {self.attr}(self) -> {self.type} | None:",
+            f'    """The computed field `{self.name}`: {self.source}."""',
+            *(f"    {line}" for line in self.lines),
+        ]
 
 
 @dataclass(slots=True)
@@ -448,6 +485,7 @@ class PyEntity:
     relations: list[PyRelation] = field(default_factory=list[PyRelation])
     operations: list[PyOperation] = field(default_factory=list[PyOperation])
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
+    computed: list[PyComputed] = field(default_factory=list[PyComputed])
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
 
@@ -591,7 +629,7 @@ class PyEntity:
 
     def model_imports(self) -> str:
         """Return the import block of the models module of the slice."""
-        types = {f.model_type for f in self.fields}
+        types = {f.model_type for f in self.fields} | {c.type for c in self.computed}
         sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
@@ -622,6 +660,8 @@ class PyEntity:
         field_enums = {f.enum.name for f in self.fields if f.enum is not None}
         core |= {"enum_type"} if field_enums else set[str]()
         lines.add(from_import("app.core.db", core))
+        if self.computed:
+            lines.add("from app.core import compute")
         if field_enums:
             lines.add(from_import(f"app.features.{self.slice}.enums", field_enums))
         block = import_block(lines)
@@ -657,7 +697,7 @@ class PyEntity:
     def schema_imports(self) -> str:
         """Return the import block of the schemas module of the slice."""
         types = {f.schema_type for f in [*self.fields, *self.params]}
-        types |= {f.read_type for f in self.fields}
+        types |= {f.read_type for f in self.fields} | {c.type for c in self.computed}
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
@@ -786,6 +826,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         py_entity.app_entities = entities
     for name, entity in definition.entities.items():
         _relations(definition, entities, name, entity)
+    _computed(definition, entities)
     _check_extensions(definition, entities)
     _check_embed_cycles(entities)
     operations: dict[str, PyOperation] = {}
@@ -822,9 +863,79 @@ def _entity(name: str, entity: Entity) -> PyEntity:
         description=entity.description,
         fields=[
             _field(field_name, f, f"{name}{pascal(field_name)}", table)
-            for field_name, f in entity.fields.items()
+            for field_name, f in entity.stored_fields.items()
         ],
     )
+
+
+def _computed(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Add the computed fields to the entities, and load the relations that they read."""
+    for name, entity in definition.entities.items():
+        for field_name, f in entity.computed_fields.items():
+            assert f.computed is not None
+            lines: list[str] = []
+            result = _render_computed(entities, name, parse_expression(f.computed), lines)
+            if f.type == "integer":
+                result, type_ = f"compute.to_int({result})", "int"
+            else:
+                result = f"compute.round_to({result}, {f.scale})" if f.scale is not None else result
+                type_ = "Decimal"
+            entities[name].computed.append(
+                PyComputed(
+                    name=field_name,
+                    attr=attribute(field_name),
+                    id=f.id,
+                    type=type_,
+                    lines=[*lines, f"return {result}"],
+                    source=f.computed,
+                )
+            )
+
+
+def _render_computed(
+    entities: dict[str, PyEntity], entity: str, expression: Expression, lines: list[str]
+) -> str:
+    """Add the statements of an expression to `lines`, and return the name of its value.
+
+    Each statement computes one part of the expression in a local variable,
+    so that the lines stay short.
+    """
+
+    def assign(code: str) -> str:
+        var = f"v{len(lines) + 1}"
+        lines.append(f"{var} = {code}")
+        return var
+
+    match expression:
+        case Number(value):
+            return f'Decimal("{value}")'
+        case FieldRef(path):
+            return assign(f"compute.num({_computed_path(entities, entity, path)})")
+        case Call(function, args):
+            values = [
+                _computed_path(entities, entity, a.path) for a in args if isinstance(a, FieldRef)
+            ]
+            return assign(f"compute.{function}({', '.join(values)})")
+        case Binary(op, left, right):
+            a = _render_computed(entities, entity, left, lines)
+            b = _render_computed(entities, entity, right, lines)
+            return assign(f"compute.{_COMPUTE_OPS[op]}({a}, {b})")
+        case Negate(operand):
+            return assign(f"compute.neg({_render_computed(entities, entity, operand, lines)})")
+
+
+def _computed_path(entities: dict[str, PyEntity], entity: str, path: str) -> str:
+    """Return the Python expression of a field path of a computed field, of `self`."""
+    current = entities[entity]
+    attrs: list[str] = []
+    segments = path.split(".")
+    for segment in segments[:-1]:
+        rel = next(r for r in current.relations if r.name == segment)
+        rel.computed = True
+        attrs.append(rel.attr)
+        current = entities[rel.target]
+    attrs.append(next(x.attr for x in current.fields if x.name == segments[-1]))
+    return "compute.get(self, " + ", ".join(f'"{a}"' for a in attrs) + ")"
 
 
 def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:

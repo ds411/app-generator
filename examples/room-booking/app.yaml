@@ -67,6 +67,13 @@ entities:
       starts_at: { type: datetime, required: true }
       ends_at: { type: datetime, required: true }
       attendees: { type: integer, min: 1, max: 500 }
+      # The apps compute the cost from the hours and the rate of the room.
+      cost:
+        type: decimal
+        scale: 2
+        format: currency
+        currency: EUR
+        computed: hours(starts_at, ends_at) * room.hourly_rate
       status:
         type: enum
         values: [requested, confirmed, cancelled]

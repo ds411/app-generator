@@ -32,6 +32,13 @@ class {{ e.name }}(Record):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% for c in e.computed %}
+
+    {{ trace(c.id) }}
+{% for line in c.property_lines() %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
 {% for r in e.m2m_relations %}
 
     @property

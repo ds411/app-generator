@@ -26,6 +26,9 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if badge_names %}
 import { {{ badge_names | join(", ") }} } from "@/shared/config/badges";
 {% endif %}
+{% if "compute." in plan.code() %}
+import { compute } from "@/shared/lib/compute";
+{% endif %}
 {% if plan.needs("formatValue") %}
 import { formatValue } from "@/shared/lib/format";
 {% endif %}

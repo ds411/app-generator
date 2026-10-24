@@ -272,3 +272,18 @@ def test_the_top_bar_cannot_show_an_action_that_needs_the_record() -> None:
 
     with pytest.raises(GenerationError, match="needs the record of its page"):
         context.action_bar("ui.layouts.shell.topbar")
+
+
+ROOMS = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
+
+
+def test_a_computed_field_computes_its_value_in_the_views() -> None:
+    context = ViewContext(load_definition(ROOMS), forms=True)
+    cost = context.value("Booking", "cost")
+    assert cost.expr == (
+        "compute.round(compute.mul(compute.hours(row.startsAt, row.endsAt), "
+        'compute.num(lookups.room.get(row.roomId ?? "")?.hourlyRate)), 2)'
+    )
+    assert cost.format == "currency"
+    assert context.lookups_of("Booking", ["cost"]) == {"Room"}
+    assert context.computed

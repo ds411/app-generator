@@ -461,3 +461,18 @@ def test_wrong_naming_keys_stop_the_run(fastapi: Binding, old: str, new: str, me
 
     with pytest.raises(Exception, match=message):
         generate(load_definition_text(text), fastapi)
+
+
+def test_a_computed_field_is_a_property_of_the_model_and_a_read_field(fastapi: Binding) -> None:
+    definition = load_definition(EXAMPLES / "room-booking" / "app.yaml")
+    files = _files(generate(definition, fastapi))
+    model = files["app/features/bookings/models.py"]
+    assert "    def cost(self) -> Decimal | None:\n" in model
+    assert '        v2 = compute.num(compute.get(self, "room", "hourly_rate"))\n' in model
+    assert "        return compute.round_to(v3, 2)\n" in model
+    assert 'lazy="selectin"' in model.split("room: Mapped")[1].split(")")[0]
+    schemas = files["app/features/bookings/schemas.py"]
+    assert schemas.count("cost: Decimal | None\n") == 1
+    assert "cost" not in files["migrations/versions/0001_schema.py"]
+    assert "app/core/compute.py" in files
+    assert "app/core/compute.py" not in _files(generate(load_definition(FIXTURE), fastapi))

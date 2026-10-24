@@ -14,6 +14,16 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from appgen.bindings.shared.gaps import gap_spec
 from appgen.bindings.shared.ui import css_class_var, css_var, js
+from appgen.dsl.expressions import (
+    Binary,
+    Call,
+    Expression,
+    FieldRef,
+    Negate,
+    Number,
+    expression_paths,
+    parse_expression,
+)
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.dsl.ui.common import (
     Action,
@@ -46,6 +56,9 @@ if TYPE_CHECKING:
     from appgen.bindings.shared.details import DetailPlan
 
 type ValueKind = Literal["field", "id", "one", "many"]
+
+_COMPUTE_OPS = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
+"""The functions of `src/shared/lib/compute.ts` for the operators of the expressions."""
 
 _DEFAULT_FORMATS = {
     "string": "text",
@@ -382,6 +395,11 @@ class ViewContext:
         )
 
     @property
+    def computed(self) -> bool:
+        """Return True if the views need the runtime of the computed fields."""
+        return self.runtime and any(e.computed_fields for e in self.definition.entities.values())
+
+    @property
     def page_action_bars(self) -> list[str]:
         """Return the pages with actions in the page header that the templates can render."""
         return [
@@ -593,12 +611,16 @@ class ViewContext:
         fmt: str | None = None,
         badge: str | None = None,
         row: str = "row",
+        optional: bool = False,
     ) -> Value:
-        """Return the value of a field path of an entity."""
+        """Return the value of a field path of an entity.
+
+        `optional` is True if the record `row` can be undefined, for example
+        a related record of `lookups`.
+        """
         definition = self.definition
         expr = row
         current = entity
-        optional = False
         segments = path.split(".")
         for segment in segments[:-1]:
             relation = definition.entities[current].relations[segment]
@@ -614,6 +636,8 @@ class ViewContext:
         if isinstance(member, Field):
             member_label = member.label or member_label
             raw = f"{expr}{dot}{camel(last)}"
+            if member.computed is not None:
+                raw = self.computed_expr(target.entity, member, expr, optional)
             if fmt is None and badge is None:
                 fmt = member.format
             if fmt is None or fmt == "badge":
@@ -681,6 +705,34 @@ class ViewContext:
             format=fmt or "text",
             target=target_entity,
         )
+
+    def computed_expr(self, entity: str, member: Field, row: str, optional: bool) -> str:
+        """Return the TypeScript expression of a computed field of a record."""
+        assert member.computed is not None
+
+        def render(expression: Expression) -> str:
+            match expression:
+                case Number(value):
+                    return value
+                case FieldRef(path):
+                    return (
+                        f"compute.num({self.value(entity, path, row=row, optional=optional).expr})"
+                    )
+                case Call(name, args):
+                    values = [render_raw(arg) for arg in args]
+                    return f"compute.{name}({', '.join(values)})"
+                case Binary(op, left, right):
+                    return f"compute.{_COMPUTE_OPS[op]}({render(left)}, {render(right)})"
+                case Negate(operand):
+                    return f"compute.neg({render(operand)})"
+
+        def render_raw(expression: Expression) -> str:
+            assert isinstance(expression, FieldRef)
+            return self.value(entity, expression.path, row=row, optional=optional).expr
+
+        code = render(parse_expression(member.computed))
+        digits = 0 if member.type == "integer" else member.scale
+        return f"compute.round({code}, {digits})" if digits is not None else code
 
     def display_field(self, entity: str) -> str:
         """Return the TypeScript key of the display field of an entity."""
@@ -938,6 +990,10 @@ class ViewContext:
             for segment in path.split("."):
                 relation = self.definition.entities[current].relations.get(segment)
                 if relation is None:
+                    computed = self.definition.entities[current].fields.get(segment)
+                    if computed is not None and computed.computed is not None:
+                        inner = expression_paths(parse_expression(computed.computed))
+                        found |= self._lookups(current, inner)
                     break
                 found.add(relation.target)
                 current = relation.target
@@ -1240,6 +1296,7 @@ def view_rules() -> tuple[Output, ...]:
             Output(template=f"ui/views/{template}", path=path, when=when)
             for template, path, when in (
                 ("lib/format.ts.j2", "src/shared/lib/format.ts", "ui_views.runtime"),
+                ("lib/compute.ts.j2", "src/shared/lib/compute.ts", "ui_views.computed"),
                 ("lib/query.ts.j2", "src/shared/lib/query.ts", "ui_views.runtime"),
                 ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.runtime"),
                 ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.runtime"),
