@@ -45,7 +45,8 @@ Environment variables:
     APPGEN_DOCKER_BUILD_ARGS      More arguments for `docker build`.
     APPGEN_SMOKE_TIMEOUT          Seconds to wait for an app to start (default 180).
     PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the UI tests, instead of the one
-                                  that Playwright installs.
+                                  that Playwright installs. Without both, the tests
+                                  use /opt/pw-browsers/chromium if it exists.
 """
 
 import argparse

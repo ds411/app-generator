@@ -1,9 +1,24 @@
 // The Playwright UI tests of the generated front ends (Next.js and React).
 // scripts/smoke_test.py --ui starts an app, writes expected.json, and runs
 // these tests with APPGEN_BASE_URL.
-import { defineConfig, devices } from "@playwright/test";
+import { existsSync } from "node:fs";
+import { chromium, defineConfig, devices } from "@playwright/test";
 
-const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+// The Chromium of the tests: PLAYWRIGHT_CHROMIUM_EXECUTABLE, else the
+// Chromium that Playwright installs (`playwright install chromium`).
+// If Playwright has not installed its Chromium, use the Chromium of the
+// environment: Claude Code cloud sessions have one at SYSTEM_CHROMIUM,
+// with a version that can differ from the version of Playwright.
+const SYSTEM_CHROMIUM = "/opt/pw-browsers/chromium";
+
+function chromiumExecutable(): string | undefined {
+  const fromEnv = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  if (fromEnv) return fromEnv;
+  if (existsSync(chromium.executablePath())) return undefined;
+  return existsSync(SYSTEM_CHROMIUM) ? SYSTEM_CHROMIUM : undefined;
+}
+
+const executablePath = chromiumExecutable();
 
 export default defineConfig({
   testDir: "./tests",
