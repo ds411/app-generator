@@ -3,3 +3,5 @@
 export function completeTask(): void {
   // @trace:todo operations.list_tasks
 }
+
+export const label = "@trace operations.create_task";

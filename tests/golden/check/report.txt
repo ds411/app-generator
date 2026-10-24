@@ -8,6 +8,11 @@ Invalid traces: 2
     @trace:todo operations.list_tasks
     hint: The kinds are: generated, gap, manual.
 
+Warnings: 1
+  operations.ts:7:23: skipped-trace: The scan does not read this trace: it does not follow a comment opener on the same line.
+    @trace operations.create_task
+    hint: Put the trace in a comment of its own line, for example '// @trace operations.create_task'.
+
 Uncovered elements: 8
   entities.Project.fields.status (field)
   entities.Project.relations.tasks (relation)

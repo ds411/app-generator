@@ -302,7 +302,8 @@ Markdown:
   gaps, but the developer must remember to change the trace.
 - Traces in strings and in the later lines of block comments are not
   found. The generator never writes them there, and developers must
-  put a trace on the line of its comment opener.
+  put a trace on the line of its comment opener. The checker shows a
+  warning for such trace text (#153).
 - Files without comments get their traces from the manifest, so the
   checker of these files depends on the manifest.
 - A rename in the definition makes the traces to the old ID invalid.

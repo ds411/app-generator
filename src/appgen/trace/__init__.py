@@ -23,6 +23,7 @@ from appgen.trace.scanner import (
     Trace,
     TraceProblem,
     comment_openers,
+    find_skipped_traces,
     scan_folder,
     scan_text,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "comment_openers",
     "compute_coverage",
     "find_invalid_traces",
+    "find_skipped_traces",
     "generated_outside_output",
     "render",
     "render_json",

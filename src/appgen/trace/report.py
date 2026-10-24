@@ -31,6 +31,8 @@ class CheckReport:
     excluded_kinds: list[str] = field(default_factory=list[str])
     min_coverage: float | None = None
     """The lowest coverage in percent that passes, or None for no limit."""
+    warnings: list[TraceProblem] = field(default_factory=list[TraceProblem])
+    """The trace text that the scan does not read. Warnings do not change the result."""
 
     @property
     def coverage_too_low(self) -> bool:
@@ -85,6 +87,7 @@ def check_traces(
         coverage=compute_coverage(definition, traces, excluded),
         excluded_kinds=excluded,
         min_coverage=None if min_coverage is None else float(min_coverage),
+        warnings=scan.warnings,
     )
 
 
@@ -121,13 +124,11 @@ def render_text(report: CheckReport) -> str:
     ]
 
     lines += ["", f"Invalid traces: {len(report.invalid)}"]
-    for problem in report.invalid:
-        lines.append(
-            f"  {problem.file}:{problem.line}:{problem.column}: {problem.code}: {problem.message}"
-        )
-        lines.append(f"    {problem.text}")
-        if problem.hint:
-            lines.append(f"    hint: {problem.hint}")
+    lines += _problem_lines(report.invalid)
+
+    if report.warnings:
+        lines += ["", f"Warnings: {len(report.warnings)}"]
+        lines += _problem_lines(report.warnings)
 
     lines += ["", f"Uncovered elements: {len(coverage.uncovered)}"]
     lines += [f"  {e.element_id} ({e.kind})" for e in coverage.uncovered]
@@ -160,19 +161,8 @@ def render_json(report: CheckReport) -> str:
         "passed": report.passed,
         "files": len(report.files),
         "traces": len(report.traces),
-        "invalid": [
-            {
-                "file": p.file,
-                "line": p.line,
-                "column": p.column,
-                "code": p.code,
-                "message": p.message,
-                "text": p.text,
-                "element_id": p.element_id,
-                "hint": p.hint,
-            }
-            for p in report.invalid
-        ],
+        "invalid": [_problem_json(p) for p in report.invalid],
+        "warnings": [_problem_json(p) for p in report.warnings],
         "uncovered": [{"id": e.element_id, "kind": e.kind} for e in coverage.uncovered],
         "gaps": [
             {
@@ -190,6 +180,31 @@ def render_json(report: CheckReport) -> str:
         },
     }
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+
+
+def _problem_lines(problems: Iterable[TraceProblem]) -> list[str]:
+    lines: list[str] = []
+    for problem in problems:
+        lines.append(
+            f"  {problem.file}:{problem.line}:{problem.column}: {problem.code}: {problem.message}"
+        )
+        lines.append(f"    {problem.text}")
+        if problem.hint:
+            lines.append(f"    hint: {problem.hint}")
+    return lines
+
+
+def _problem_json(problem: TraceProblem) -> dict[str, Any]:
+    return {
+        "file": problem.file,
+        "line": problem.line,
+        "column": problem.column,
+        "code": problem.code,
+        "message": problem.message,
+        "text": problem.text,
+        "element_id": problem.element_id,
+        "hint": problem.hint,
+    }
 
 
 def _kind_json(kind: KindCoverage) -> dict[str, Any]:

@@ -66,6 +66,8 @@ _SUFFIX_OPENERS: dict[str, tuple[str, ...]] = {
     ".html": _MARKUP,
 }
 _BLOCK_CLOSERS: dict[str, str] = {"/*": "*/", "<!--": "-->"}
+_ANY_TAG = re.compile(r"(?<![A-Za-z0-9_])@trace(?![A-Za-z0-9_])")
+_CODE_SPAN = re.compile(r"(`+).+?\1")
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -129,6 +131,8 @@ class ScanResult:
 
     traces: list[Trace] = field(default_factory=list[Trace])
     problems: list[TraceProblem] = field(default_factory=list[TraceProblem])
+    warnings: list[TraceProblem] = field(default_factory=list[TraceProblem])
+    """The trace text that the scan does not read (see `find_skipped_traces`)."""
     files: list[str] = field(default_factory=list[str])
     """The scanned files: the files of a known file type that are not ignored."""
 
@@ -165,8 +169,10 @@ def scan_folder(
         result.files.append(path)
         result.traces.extend(traces)
         result.problems.extend(problems)
+        result.warnings.extend(find_skipped_traces(text, path))
     result.traces.sort()
     result.problems.sort()
+    result.warnings.sort()
     return result
 
 
@@ -178,9 +184,7 @@ def scan_text(text: str, path: str) -> tuple[list[Trace], list[TraceProblem]]:
     openers = comment_openers(path)
     if openers is None:
         return [], []
-    tag = re.compile(
-        "(?:" + "|".join(re.escape(o) for o in openers) + r")[ \t]*(?P<tag>@trace)(?![A-Za-z0-9_])"
-    )
+    tag = _tag_pattern(openers)
     lines = [line.removesuffix("\r") for line in text.split("\n")]
     header = _header_lines(lines, openers)
     traces: list[Trace] = []
@@ -228,6 +232,65 @@ def scan_text(text: str, path: str) -> tuple[list[Trace], list[TraceProblem]]:
     traces.sort()
     problems.sort()
     return traces, problems
+
+
+def find_skipped_traces(text: str, path: str) -> list[TraceProblem]:
+    """Find the trace text that the scan does not read, in the text of one file.
+
+    This is `@trace` text with an element ID that does not follow a
+    comment opener on the same line: for example a trace in a string, or
+    in a later line of a block comment. The generator never writes
+    traces there, but a developer can. In Markdown, the text in code
+    spans and fenced code blocks is an example, not a trace. A file of an
+    unknown type has no traces.
+    """
+    openers = comment_openers(path)
+    if openers is None:
+        return []
+    tag = _tag_pattern(openers)
+    markdown = openers == _MARKUP and PurePosixPath(path).suffix == ".md"
+    closer = _BLOCK_CLOSERS.get(openers[0])
+    fenced = False
+    warnings: list[TraceProblem] = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        if markdown and line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if "@trace" not in line or fenced:
+            continue
+        read = {found.start("tag") for found in tag.finditer(line)}
+        spans = [m.span() for m in _CODE_SPAN.finditer(line)] if markdown else []
+        for found in _ANY_TAG.finditer(line):
+            start = found.start()
+            if start in read or any(a <= start < b for a, b in spans):
+                continue
+            match = TRACE_PATTERN.match(line, start)
+            if match is None:
+                continue
+            warnings.append(
+                TraceProblem(
+                    file=path,
+                    line=number,
+                    column=start + 1,
+                    code="skipped-trace",
+                    message="The scan does not read this trace: it does not follow a comment "
+                    "opener on the same line.",
+                    text=match.group(0),
+                    element_id=match.group("id"),
+                    hint="Put the trace in a comment of its own line, for example '"
+                    + f"{openers[0]} {match.group(0)}"
+                    + (f" {closer}" if closer else "")
+                    + "'.",
+                )
+            )
+    return warnings
+
+
+def _tag_pattern(openers: tuple[str, ...]) -> re.Pattern[str]:
+    """Return the pattern of a trace tag that follows a comment opener."""
+    return re.compile(
+        "(?:" + "|".join(re.escape(o) for o in openers) + r")[ \t]*(?P<tag>@trace)(?![A-Za-z0-9_])"
+    )
 
 
 def _parse(

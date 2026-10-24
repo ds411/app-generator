@@ -25,6 +25,18 @@
       "hint": "The kinds are: generated, gap, manual."
     }
   ],
+  "warnings": [
+    {
+      "file": "operations.ts",
+      "line": 7,
+      "column": 23,
+      "code": "skipped-trace",
+      "message": "The scan does not read this trace: it does not follow a comment opener on the same line.",
+      "text": "@trace operations.create_task",
+      "element_id": "operations.create_task",
+      "hint": "Put the trace in a comment of its own line, for example '// @trace operations.create_task'."
+    }
+  ],
   "uncovered": [
     {
       "id": "entities.Project.fields.status",

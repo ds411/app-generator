@@ -21,6 +21,7 @@ design.
 - [The text report](#the-text-report)
 - [The JSON report](#the-json-report)
 - [Invalid traces](#invalid-traces)
+- [Warnings](#warnings)
 - [After a change to the definition](#after-a-change-to-the-definition)
 
 ## Trace format
@@ -86,7 +87,10 @@ come before it. Each generated file starts with a header:
 
 The trace must follow a comment opener on the same line. The checker
 does not read traces in strings, or in the later lines of a multi-line
-comment.
+comment. For such `@trace` text with an element ID, the report shows a
+warning with the file and the line (see [Warnings](#warnings)). In
+Markdown files, the text in code spans and fenced code blocks is an
+example, so it gives no warning.
 
 | File type                | Trace comment                                   |
 | ------------------------ | ----------------------------------------------- |
@@ -208,6 +212,9 @@ Result: passed.
 The report has these parts:
 
 - **Invalid traces**: each one with its file, line, column, and reason.
+- **Warnings**: the trace text that the scan does not read, each one
+  with its file, line, and column. The report shows this part only if
+  there is a warning.
 - **Uncovered elements**: the elements without a trace.
 - **Open gaps**: the elements with a gap trace, and where the gap
   traces are.
@@ -227,6 +234,7 @@ gives the same text. A change that breaks readers changes `version`.
   "files": 108,
   "traces": 376,
   "invalid": [],
+  "warnings": [],
   "uncovered": [],
   "gaps": [
     {
@@ -248,11 +256,12 @@ gives the same text. A change that breaks readers changes `version`.
 }
 ```
 
-An entry of `invalid` has `file`, `line`, `column`, `code`, `message`,
-`text`, `element_id`, and `hint`. An entry of `uncovered` has `id` and
-`kind`. An entry of `gaps` has `id`, `kind`, and `traces`: the `file`
-and `line` of each gap trace. `coverage.gaps` and `gaps` in each entry
-of `by_kind` give the number of open gaps for each element kind.
+An entry of `invalid` or of `warnings` has `file`, `line`, `column`,
+`code`, `message`, `text`, `element_id`, and `hint`. An entry of
+`uncovered` has `id` and `kind`. An entry of `gaps` has `id`, `kind`,
+and `traces`: the `file` and `line` of each gap trace. `coverage.gaps`
+and `gaps` in each entry of `by_kind` give the number of open gaps for
+each element kind.
 
 ## Invalid traces
 
@@ -268,6 +277,22 @@ The checker reports these traces as invalid:
 - A `generated` trace in a file that the manifest does not list as
   generated, for example code that a developer copied into an
   extension file.
+
+## Warnings
+
+The checker shows a warning (code `skipped-trace`) for `@trace` text
+with an element ID that the scan does not read, because it does not
+follow a comment opener on the same line:
+
+```text
+Warnings: 1
+  src/a.ts:3:12: skipped-trace: The scan does not read this trace: it does not follow a comment opener on the same line.
+    @trace entities.Task
+    hint: Put the trace in a comment of its own line, for example '// @trace entities.Task'.
+```
+
+A warning does not change the result or the exit code. The generated
+apps give no warnings.
 
 ## After a change to the definition
 
