@@ -19,6 +19,7 @@ examples. [ADR 0002](https://github.com/ds411/app-generator/blob/main/docs/adr/0
 - [operations](#operations)
 - [pages](#pages)
 - [workflows](#workflows)
+- [apis](#apis)
 - [ui](#ui)
   - [theme](#theme)
   - [tokens](#tokens)
@@ -50,6 +51,7 @@ The file is YAML 1.1. The top level has these keys:
 | `operations` | No       | A mapping from operation name to operation.                   |
 | `pages`      | No       | A mapping from page name to page (the routes of a front end). |
 | `ui`         | No       | The design tokens, layouts, menus, views, forms, and dashboards. |
+| `apis`       | No       | The third-party APIs that the app calls (OpenAPI documents).  |
 
 A minimal definition:
 
@@ -94,7 +96,8 @@ element, never a list. The name rules:
 | ---------------------------------------- | --------------------- | ----------------- |
 | App name                                 | `^[a-z][a-z0-9-]*$`   | `project-tracker` |
 | Entity                                   | `^[A-Z][A-Za-z0-9]*$` | `Task`            |
-| Field, relation, param, operation, page, enum value, UI element | `^[a-z][a-z0-9_]*$` | `due_date` |
+| Field, relation, param, operation, page, enum value, API, UI element | `^[a-z][a-z0-9_]*$` | `due_date` |
+| Operation of an API (its operation ID)   | `^[A-Za-z_][A-Za-z0-9_]*$` | `getPublicHolidays` |
 | Token and token group                    | `^[a-z0-9][a-z0-9_]*$` | `600`, `primary` |
 | Icon (a [Lucide](https://lucide.dev) name) | `^[a-z][a-z0-9-]*$` | `folder-kanban`   |
 
@@ -116,6 +119,8 @@ ID ([traces.md](https://github.com/ds411/app-generator/blob/main/docs/traces.md)
 | Param        | `operations.assign_task.params.note`       |
 | Page         | `pages.task_board`                         |
 | Page action  | `pages.task_detail.actions.delete`         |
+| API          | `apis.holidays`                            |
+| API operation | `apis.holidays.operations.getPublicHolidays` |
 | Token        | `ui.tokens.color.primary`                  |
 | View column  | `ui.views.task_table.columns.title`        |
 | Form field   | `ui.forms.new_task.fields.title`           |
@@ -352,6 +357,7 @@ function in the React app.
 | `description` | Text. A custom operation shows it in its extension file.                 |
 | `params`      | `custom` only. A mapping from parameter name to a field (the field keys). |
 | `returns`     | `custom` only. An entity name, or `none` (the default).                  |
+| `apis`        | `custom` only. The names of the [apis](#apis) that the logic calls.       |
 
 The logic of a `custom` operation is a **generation gap**: the binding
 generates the signature and the endpoint, and an extension file holds
@@ -462,6 +468,56 @@ workflows:
 The FastAPI app gives a 422 error, the Next.js app a `ValidationError`,
 and the React app (mock data) a `TransitionError`. The FastAPI app has a
 test of each workflow.
+
+## apis
+
+The optional `apis` section names the third-party APIs that the app
+calls, for example a payment service or the public holidays. An OpenAPI
+document (3.0 or 3.1, YAML or JSON) describes each API. The bindings
+generate a typed client for the operations in the list, and the
+hand-written code of the app calls the client
+([ADR 0019](https://github.com/ds411/app-generator/blob/main/docs/adr/0019-third-party-apis.md)).
+
+```yaml
+apis:
+  holidays:
+    description: The public holidays of the countries.
+    document: apis/public-holidays.openapi.yaml
+    base_url_env: HOLIDAYS_API_URL
+    operations: [getPublicHolidays, getNextPublicHolidays]
+  exchange_rates:
+    document: apis/exchange-rates.openapi.json
+    base_url_env: EXCHANGE_RATES_API_URL
+    security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    operations:
+      getLatestRates: {}
+      convertAmount: { description: Convert a budget to another currency. }
+```
+
+| Key            | Content                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
+| `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
+| `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the secret. Without it, the requests have no credential. |
+| `title`        | The name of the API. The default is the title of the document.            |
+| `description`  | Text.                                                                     |
+
+- The document must be a local file. appgen reads no URL, and rejects a
+  `$ref` to another file. The output manifest records the hash of each
+  document, so the same files give the same app.
+- Each operation ID must exist in the document, and must be a valid ID
+  segment (letters, digits, and `_`).
+- The clients support an API key in a header or a query parameter, and
+  a bearer token. They send path, query, and header parameters, and
+  JSON bodies, and they read JSON answers.
+- The client has only the selected operations and the schemas that they
+  use. Each answer has an example: the example of the document, or a
+  sample from the schema.
+- A custom operation names the APIs of its logic in `apis`. Its
+  extension file then gets the clients of these APIs.
+- The environment variables of the apps (for example `DATABASE_URL`)
+  are reserved. Two keys cannot use the same variable.
 
 ## ui
 
@@ -1000,7 +1056,8 @@ stay valid.
 `appgen validate <file>` checks the YAML syntax, the keys and values
 against the schema, the names, and the references between elements
 (for example a relation to an entity that does not exist, a token loop,
-or a view field of the wrong type). Each diagnostic has a code, a
+or a view field of the wrong type). It also reads the OpenAPI document of
+each API, and checks its operations and its security scheme. Each diagnostic has a code, a
 message, and the line and the column. `--format json` writes the
 diagnostics as JSON. [`examples/invalid/`](https://github.com/ds411/app-generator/tree/main/examples/invalid/) has one broken definition for
 each diagnostic code. `appgen generate` validates the definition first,

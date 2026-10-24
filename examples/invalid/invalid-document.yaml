@@ -1,0 +1,13 @@
+# expect: invalid-document
+# The document of an API must be an OpenAPI 3.0 or 3.1 document.
+version: 0
+app: { name: shop, title: Shop }
+entities:
+  Order:
+    fields:
+      number: { type: string }
+apis:
+  legacy:
+    document: apis/swagger.yaml
+    base_url_env: LEGACY_API_URL
+    operations: [getStatus]

@@ -1,0 +1,6 @@
+# A Swagger 2.0 document. appgen reads only OpenAPI 3.0 and 3.1.
+swagger: "2.0"
+info:
+  title: Old API
+  version: "1"
+paths: {}

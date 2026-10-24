@@ -55,8 +55,9 @@ def fill_the_gap(folder: Path) -> None:
 @pytest.fixture
 def tracker(tmp_path: Path) -> tuple[Path, Path]:
     """Return the definition and the FastAPI app of the project tracker, with a filled gap."""
+    # The whole folder, with the OpenAPI documents of the `apis` section.
+    shutil.copytree(EXAMPLE.parent, tmp_path, dirs_exist_ok=True)
     definition = tmp_path / "app.yaml"
-    shutil.copy(EXAMPLE, definition)
     folder = tmp_path / "app"
     appgen("generate", definition, "-b", "fastapi", "-o", folder)
     fill_the_gap(folder)

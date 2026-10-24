@@ -40,6 +40,7 @@ next step. One error can cause more errors later in the file.
 | `pages`        | No       | The routes of the front end, with their content.           | The app has a front end (`nextjs` or `react`). |
 | `ui`           | No       | Tokens, badges, layouts, menus, views, forms, dashboards, and defaults. | The pages show views, forms, or dashboards. |
 | `workflows`    | No       | State machines on `enum` fields.                           | A status field allows only some changes.       |
+| `apis`         | No       | Third-party APIs: a local OpenAPI document and the operations that the app calls. | The app calls an outside service. |
 | `auth`         | No       | The sign-in: the user entity and the public parts.         | The users must sign in.                        |
 | `access`       | No       | Roles, and the operations and pages of each role. Needs `auth`. | The users have roles with different rights. |
 | `translations` | No       | The UI text in more than one language.                     | The app has more than one language.            |

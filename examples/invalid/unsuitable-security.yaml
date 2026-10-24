@@ -1,0 +1,15 @@
+# expect: unsuitable-security
+# The clients send an API key or a bearer token, not a user name and a
+# password (HTTP basic authentication).
+version: 0
+app: { name: shop, title: Shop }
+entities:
+  Order:
+    fields:
+      number: { type: string }
+apis:
+  status:
+    document: apis/basic-auth.openapi.yaml
+    base_url_env: STATUS_API_URL
+    security: { scheme: basic, env: STATUS_API_PASSWORD }
+    operations: [getStatus]

@@ -8,6 +8,7 @@ from typing import Annotated, TypeAliasType, cast, get_args, get_origin
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
+from appgen.dsl.apis import expand_operations
 from appgen.dsl.crud import expand_crud
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.ids import element_id, index_elements, walk_elements
@@ -30,16 +31,27 @@ _STRING_ERRORS = frozenset({"string_type", "literal_error", "string_pattern_mism
 
 
 def load_definition(path: Path | str) -> AppDefinition:
-    """Load an app definition file. Raise DefinitionError if it is not valid."""
-    return _load(read_yaml_file(Path(path)))
+    """Load an app definition file. Raise DefinitionError if it is not valid.
+
+    The loader reads the OpenAPI documents of the `apis` from the folder of
+    the file. The validator reports a document that is not valid.
+    """
+    path = Path(path)
+    return _load(read_yaml_file(path), path.parent)
 
 
-def load_definition_text(text: str, file: str = "<string>") -> AppDefinition:
-    """Load an app definition from YAML text. Raise DefinitionError if it is not valid."""
-    return _load(read_yaml(text, file))
+def load_definition_text(
+    text: str, file: str = "<string>", base_dir: Path | None = None
+) -> AppDefinition:
+    """Load an app definition from YAML text. Raise DefinitionError if it is not valid.
+
+    The loader reads the OpenAPI documents of the `apis` from `base_dir`,
+    by default the folder of `file`.
+    """
+    return _load(read_yaml(text, file), base_dir or Path(file).parent)
 
 
-def _load(document: YamlDocument) -> AppDefinition:
+def _load(document: YamlDocument, base_dir: Path) -> AppDefinition:
     source_map = document.source_map
     if document.data is None:
         raise DefinitionError(
@@ -62,6 +74,7 @@ def _load(document: YamlDocument) -> AppDefinition:
         ]
         data = {k: v for k, v in sections.items() if k not in RESERVED_SECTIONS}
     data = expand_crud(data, source_map)
+    diagnostics += expand_operations(data, source_map)
     definition: AppDefinition | None = None
     try:
         definition = AppDefinition.model_validate(data)
@@ -77,6 +90,8 @@ def _load(document: YamlDocument) -> AppDefinition:
         element._location = source_map.element(path)  # pyright: ignore[reportPrivateUsage]
         element._value_locations = value_locations.get(path, {})  # pyright: ignore[reportPrivateUsage]
     definition._index = index_elements(definition)  # pyright: ignore[reportPrivateUsage]
+    for api in definition.apis.values():
+        api.read_document(base_dir)
     return definition
 
 

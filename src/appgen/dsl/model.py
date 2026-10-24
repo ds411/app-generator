@@ -8,6 +8,7 @@ import pydantic
 from pydantic import BeforeValidator, JsonValue, PrivateAttr, StringConstraints
 
 from appgen.dsl.access import Access
+from appgen.dsl.apis import Api
 from appgen.dsl.auth import Auth
 from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
@@ -125,6 +126,8 @@ class Operation(Element):
     params: dict[MemberName, Field] = pydantic.Field(default_factory=dict[str, Field])
     returns: Text = "none"
     """An entity name, or `none`."""
+    apis: list[MemberName] = pydantic.Field(default_factory=list[str])
+    """The third-party APIs that the logic of a custom operation calls (ADR 0019)."""
 
 
 class Page(Element):
@@ -171,6 +174,8 @@ class AppDefinition(Element):
     """The languages of the UI text (the front ends)."""
     workflows: dict[MemberName, Workflow] = pydantic.Field(default_factory=dict[str, Workflow])
     """The state machines of the enum fields of the entities."""
+    apis: dict[MemberName, Api] = pydantic.Field(default_factory=dict[str, Api])
+    """The third-party APIs that OpenAPI documents describe (ADR 0019)."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

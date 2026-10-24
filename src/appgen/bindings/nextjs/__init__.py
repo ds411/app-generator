@@ -273,6 +273,8 @@ BINDING = Binding(
         | {"auth", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
+    # The clients of the third-party APIs come with #264.
+    excludes=frozenset({"api"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

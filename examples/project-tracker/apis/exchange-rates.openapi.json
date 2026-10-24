@@ -1,0 +1,129 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Exchange Rates API",
+    "version": "1.0",
+    "description": "The exchange rates of the currencies. Each request needs an API key."
+  },
+  "servers": [{ "url": "https://rates.example.com/v1" }],
+  "security": [{ "ApiKeyAuth": [] }],
+  "paths": {
+    "/latest": {
+      "get": {
+        "operationId": "getLatestRates",
+        "summary": "Get the latest exchange rates of a base currency.",
+        "parameters": [
+          {
+            "name": "base",
+            "in": "query",
+            "required": true,
+            "description": "The ISO 4217 code of the base currency, for example EUR.",
+            "schema": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          },
+          {
+            "name": "symbols",
+            "in": "query",
+            "description": "The currencies of the rates. Without it, the answer has all currencies.",
+            "schema": { "type": "array", "items": { "type": "string" } }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rates.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Rates" },
+                "example": {
+                  "base": "EUR",
+                  "date": "2026-10-23",
+                  "rates": { "CHF": 0.94, "GBP": 0.87, "USD": 1.16 }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/convert": {
+      "post": {
+        "operationId": "convertAmount",
+        "summary": "Convert an amount from one currency to another currency.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ConversionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The converted amount.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Conversion" },
+                "example": { "from": "EUR", "to": "USD", "amount": 100, "rate": 1.16, "result": 116 }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The API key is missing or not valid.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      }
+    },
+    "schemas": {
+      "Rates": {
+        "type": "object",
+        "required": ["base", "date", "rates"],
+        "properties": {
+          "base": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "rates": {
+            "type": "object",
+            "description": "The rate of each currency, by its code.",
+            "additionalProperties": { "type": "number" }
+          }
+        }
+      },
+      "ConversionRequest": {
+        "type": "object",
+        "required": ["from", "to", "amount"],
+        "properties": {
+          "from": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "to": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "amount": { "type": "number", "minimum": 0 }
+        }
+      },
+      "Conversion": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ConversionRequest" },
+          {
+            "type": "object",
+            "required": ["rate", "result"],
+            "properties": {
+              "rate": { "type": "number" },
+              "result": { "type": "number" }
+            }
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": { "message": { "type": "string" } }
+      }
+    }
+  }
+}
