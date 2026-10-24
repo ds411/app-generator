@@ -16,11 +16,15 @@ test("the sidebar fills the height of a long page", async ({ page }) => {
   // example under load), so wait until the page is longer than the screen.
   const scrollHeight = () => page.evaluate(() => document.documentElement.scrollHeight);
   await expect.poll(scrollHeight, { message: "the page is longer than the screen" }).toBeGreaterThan(400);
-  const pageHeight = await scrollHeight();
 
-  // The column with the background is as high as the page.
-  const columnBox = await column.boundingBox();
-  expect(columnBox?.height ?? 0).toBeGreaterThanOrEqual(pageHeight - 1);
+  // The column with the background is as high as the page. A widget that
+  // loads its data later makes the page longer, so compare the two heights
+  // until the layout is stable.
+  const shortfall = async () => {
+    const columnBox = await column.boundingBox();
+    return (await scrollHeight()) - (columnBox?.height ?? 0);
+  };
+  await expect.poll(shortfall, { message: "the sidebar is as high as the page" }).toBeLessThanOrEqual(1);
   const inner = column.locator('[data-slot="sidebar-inner"]');
   const background = await inner.evaluate((element) => getComputedStyle(element).backgroundColor);
   await expect(column).toHaveCSS("background-color", background);

@@ -108,8 +108,9 @@ The output for the entity `Task`:
 | `extension_keys`       | The `x-` keys that the binding reads, with their schema (see [Extension keys](#extension-keys)). |
 | `extension_prefix`     | A prefix that only the keys of the binding have, for example `x-fastapi-`. |
 | `finish`               | A function of the path, the content, and the definition that changes each rendered file, for example to add an import. |
+| `warnings`             | A function of the definition that returns warnings with hints, for example for a part that the binding generates less code for. `appgen generate` prints them. |
 
-`context`, `filters`, `helpers`, and `finish` must be deterministic: they must not
+`context`, `filters`, `helpers`, `finish`, and `warnings` must be deterministic: they must not
 read a clock, random values, or files. `context` cannot replace a value
 of the generator.
 
@@ -296,6 +297,11 @@ app:
   language. `scripts/check-react-api.sh` opens the page in the second
   language, and checks the header of each request.
 - The FastAPI app must allow the origin of the React app (`CORS_ORIGINS`).
+- The browser calls each third-party API without a secret at the base
+  URL of the build variable `VITE_<base_url_env>`, for example
+  `VITE_HOLIDAYS_API_URL`. The API must allow the origin of the app.
+  With mock data, the client gives the example answers of the OpenAPI
+  document instead.
 
 ## Extension files
 

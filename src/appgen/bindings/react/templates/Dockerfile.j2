@@ -20,6 +20,11 @@ COPY . .
 # The URL of the FastAPI app, as the browser reaches it.
 ARG VITE_API_URL=http://localhost:8000
 ENV VITE_API_URL=${VITE_API_URL}
+{% for api in ts_apis.values() %}
+# The base URL of the API {{ api.name }}, as the browser reaches it.
+ARG {{ api.browser_env }}={{ api.base_url }}
+ENV {{ api.browser_env }}=${ {{- api.browser_env -}} }
+{% endfor %}
 {% endif %}
 RUN pnpm build
 

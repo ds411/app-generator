@@ -6,7 +6,7 @@ helpers are deterministic: they read only the definition.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from appgen.bindings.react import versions
@@ -14,6 +14,7 @@ from appgen.bindings.react.api_client import api_entities, data_source
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
+from appgen.bindings.shared.integrations import ts_apis
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
@@ -26,7 +27,7 @@ from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition
 
-__all__ = ["HELPERS", "Member", "context", "members", "mock_records", "to_json"]
+__all__ = ["HELPERS", "Member", "context", "members", "mock_records", "to_json", "warnings"]
 
 _PARAM = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 
@@ -94,8 +95,13 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}
     endpoints = {name: entity.list_endpoint for name, entity in apis.items()}
+    third_party = ts_apis(definition)
     return {
         "api_entities": apis,
+        # The browser cannot keep a secret: only the APIs without a secret
+        # get a client (ADR 0019).
+        "ts_apis": {name: a for name, a in third_party.items() if a.secret_env is None},
+        "ts_server_apis": {name: a for name, a in third_party.items() if a.secret_env is not None},
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -113,6 +119,19 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "api": api,
         },
     }
+
+
+def warnings(definition: AppDefinition) -> Iterator[str]:
+    """Return a warning for each API with a secret: the React app has no client for it."""
+    for name, api in definition.apis.items():
+        if api.security is None:
+            continue
+        yield (
+            f"The API '{name}' has a secret ({api.security.env}), so the React app has no "
+            "client for it: a browser app cannot keep a secret. Hint: call the API in a "
+            f"custom operation of the FastAPI app (apis: [{name}]), and set "
+            "'x-react-data: api' in the section 'app'."
+        )
 
 
 HELPERS: dict[str, Callable[..., Any]] = {

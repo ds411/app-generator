@@ -5,6 +5,10 @@
 interface ImportMetaEnv {
   /** The URL of the FastAPI app, for example `http://localhost:8000`. */
   readonly VITE_API_URL?: string;
+{% for api in ts_apis.values() %}
+  /** The base URL of the API `{{ api.name }}` (default: `{{ api.base_url }}`). */
+  readonly {{ api.browser_env }}?: string;
+{% endfor %}
 }
 
 interface ImportMeta {

@@ -1,6 +1,6 @@
 """The binding contract: what a binding declares to plug into the generator."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -130,6 +130,14 @@ class Binding:
     """
     extension_keys: tuple[ExtensionKey, ...] = ()
     """The extension keys that the binding reads (the schema of its `x-` keys)."""
+    warnings: Callable[[AppDefinition], Iterable[str]] | None = None
+    """A function that returns the warnings of the binding for a definition.
+
+    A warning tells the developer about a part of the definition that
+    the binding generates less code for, with a hint. `appgen generate`
+    prints the warnings, and they do not stop the generation. The
+    function must be deterministic.
+    """
     extension_prefix: str | None = None
     """A prefix that only the keys of the binding have, for example `x-fastapi-`.
 

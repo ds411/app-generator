@@ -37,6 +37,8 @@ _RESERVED_FOLDERS = frozenset(
 )
 # The names of the members of a client class that a method cannot have.
 _RESERVED_METHODS = frozenset({"constructor", "http", "timeoutMs"})
+# The characters of a path that a regular expression must escape.
+_REGEX_SPECIAL = re.compile(r"[\\^$.|?*+()[\]{}/]")
 _SCALARS = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean"}
 
 
@@ -123,6 +125,25 @@ class TsMethod:
     def params_optional(self) -> bool:
         return not any(p.required for p in self.parameters)
 
+    @property
+    def path_pattern(self) -> str:
+        """A TypeScript regular expression that matches the end of the path of a request."""
+        parts = re.split(r"(\{[^}]+\})", self.path)
+        text = "".join(
+            "[^/]+" if p.startswith("{") else _REGEX_SPECIAL.sub(r"\\\g<0>", p) for p in parts
+        )
+        return f"/{text}$/"
+
+    @property
+    def mock_status(self) -> int:
+        """The status of the example answer, 200 for a `default` answer."""
+        return int(self.status) if self.status.isdigit() else 200
+
+    @property
+    def example_json(self) -> str:
+        """The example answer, as JSON text."""
+        return json.dumps(self.example, indent=2, ensure_ascii=False)
+
     def arguments(self) -> str:
         """Return the parameters of the method."""
         args: list[str] = []
@@ -182,6 +203,11 @@ class TsApi:
     credential_name: str | None
     types: list[TsType] = field(default_factory=list[TsType])
     methods: list[TsMethod] = field(default_factory=list[TsMethod])
+
+    @property
+    def browser_env(self) -> str:
+        """The build variable of the base URL in a Vite app, which the browser code can read."""
+        return "VITE_" + self.url_env
 
     @property
     def type_names(self) -> list[str]:

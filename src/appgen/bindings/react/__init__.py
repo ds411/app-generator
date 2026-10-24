@@ -13,7 +13,7 @@ import pydantic
 from appgen.bindings import shared
 from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.react.gaps import gap_spec
-from appgen.bindings.react.helpers import HELPERS, context, to_json
+from appgen.bindings.react.helpers import HELPERS, context, to_json, warnings
 from appgen.bindings.shared import forms, shadcn, ui, views
 from appgen.bindings.shared.auth import auth_rules
 from appgen.bindings.shared.i18n import finish, i18n_rules
@@ -24,6 +24,7 @@ _PAGE = "src/pages/{{ name | kebab }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _GAP = "{{ gap_spec(definition, element_id, element_kind).base }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 
 # The generation gaps (ADR 0005): a generated file and an extension file
 # for each custom element. See `appgen.bindings.react.gaps`.
@@ -211,6 +212,36 @@ BINDING = Binding(
             when="react.api",
         ),
         Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
+        # The clients of the third-party APIs without a secret (shared
+        # templates, see `appgen.bindings.shared.integrations`).
+        Output(
+            template="integrations/third-party.ts.j2",
+            path="src/shared/api/third-party.ts",
+            when="ts_apis",
+        ),
+        *(
+            Output(
+                template=f"integrations/{template}.j2",
+                path=f"{_INTEGRATION}/{template}",
+                for_each="api",
+                when="name in ts_apis",
+            )
+            for template in ("index.ts", "types.ts", "client.ts")
+        ),
+        Output(
+            template="integrations/mock.ts.j2",
+            path=_INTEGRATION + "/mock.ts",
+            for_each="api",
+            when="name in ts_apis and not react.api",
+        ),
+        # An API with a secret is a gap: the browser cannot keep the secret.
+        Output(
+            template="src/shared/api/server-api.ext.ts.j2",
+            path="src/shared/api/{{ ts_server_apis[name].folder }}/client.ext.ts",
+            for_each="api",
+            when="name in ts_server_apis",
+            extension=True,
+        ),
         Output(
             template="src/entities/entity/index.ts.j2",
             path=_ENTITY + "/index.ts",
@@ -301,16 +332,18 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
+        | {"api", "api_operation"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
     # The React app has no sign-up page (#269), no password reset pages
     # (#270), no owner rules (#273), and no sign-in with a provider (#271)
-    # yet. The clients of the third-party APIs come with #265.
+    # yet.
     excludes=frozenset(
-        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "api"}
+        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"sign_up", "password_reset", "record_rule", "provider"}
     ),
     context=context,
+    warnings=warnings,
     finish=finish,
     filters={"json": to_json},
     helpers=HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},

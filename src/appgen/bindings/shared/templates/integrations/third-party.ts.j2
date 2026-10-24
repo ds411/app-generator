@@ -1,6 +1,12 @@
+{% set server = binding.name == "nextjs" %}
+{% set mock = binding.name == "react" and not react.api %}
 {{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
-{% if binding.name == "nextjs" %}
+{% if server %}
 import "server-only";
+
+{% endif %}
+{% if mock %}
+import { MOCK_LATENCY_MS } from "./mock-store";
 
 {% endif %}
 /** The time limit of a request to a third-party API, in milliseconds. */
@@ -22,7 +28,7 @@ export class ApiError extends Error {
 export interface ClientOptions {
   /** The base URL. The default is the first server of the OpenAPI document. */
   baseUrl?: string;
-{% if binding.name == "nextjs" %}
+{% if server %}
   /** The API key or the bearer token of an API with security. */
   secret?: string;
 {% endif %}
@@ -97,3 +103,35 @@ export class HttpClient {
     return text ? (JSON.parse(text) as unknown) : null;
   }
 }
+{% if mock %}
+
+/** A route of the mock data of a third-party API. */
+export interface MockRoute {
+  method: string;
+  /** Matches the end of the path of a request. */
+  path: RegExp;
+  status: number;
+  /** The example answer of the OpenAPI document. */
+  example: unknown;
+}
+
+/**
+ * Return a `fetch` function that answers each request with the example
+ * of its route, after the latency of the mock data. A request without a
+ * route gets the status 404. The function sends no request to the API.
+ */
+export function mockFetch(routes: readonly MockRoute[]): typeof fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    await new Promise((resolve) => setTimeout(resolve, MOCK_LATENCY_MS));
+    const url = new URL(input instanceof Request ? input.url : input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const route = routes.find((item) => item.method === method && item.path.test(url.pathname));
+    if (route === undefined) return new Response(null, { status: 404 });
+    if ([204, 205, 304].includes(route.status)) return new Response(null, { status: route.status });
+    return new Response(JSON.stringify(route.example), {
+      status: route.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+}
+{% endif %}

@@ -1,0 +1,19 @@
+{% set api = ts_apis[name] %}
+{{ trace_header(element_id) }}
+import type { MockRoute } from "@/shared/api/third-party";
+
+/**
+ * The mock data of the client of the API `{{ api.name }}`: the example answer of the
+ * OpenAPI document for each operation.
+ */
+export const MOCK_ROUTES: readonly MockRoute[] = [
+{% for m in api.methods %}
+  {{ trace(m.id) }}
+  {
+    method: {{ m.method.upper() | tojson }},
+    path: {{ m.path_pattern }},
+    status: {{ m.mock_status }},
+    example: {{ m.example_json | indent(4) }},
+  },
+{% endfor %}
+];

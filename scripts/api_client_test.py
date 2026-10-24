@@ -18,6 +18,11 @@ that the two generated apps work together:
 5. With translations: the API gives an error in the second language of
    `Accept-Language`, and the page in the second language asks the API
    for it (ADR 0010).
+6. Open the dashboard: its custom widget (the hand-written code in
+   examples/project-tracker/extensions/react/) must show the holidays
+   that the browser gets from the mock server of the third-party APIs
+   (scripts/mock_api.py) through the generated client. The build sets
+   the base URLs of the APIs to the mock server.
 
 Run it from the repository root:
 
@@ -49,10 +54,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
+from mock_api import MockApi
+
 from appgen.bindings.react.api_client import DATA_KEY, api_entities
 from appgen.dsl import load_definition
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+EXTENSIONS = DEFINITION.parent / "extensions"
 API_PORT = 8420
 WEB_PORT = 5420
 API_URL = f"http://localhost:{API_PORT}"
@@ -60,6 +68,34 @@ WEB_URL = f"http://localhost:{WEB_PORT}"
 PAGE_SIZE = 20
 """The page size of the project table (`ui.views.project_table.pagination`)."""
 PROJECT_COUNT = PAGE_SIZE + 5
+HOLIDAY_NAME = "Christmas Day"
+"""A holiday of the example answers of the holidays API, which the dashboard widget shows."""
+
+# Open a page, and wait until it shows a text. The arguments are the URL
+# and the text.
+TEXT_CHECK = """
+const { existsSync } = require("node:fs");
+const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+(async () => {
+  const [url, text] = process.argv.slice(1);
+  const system = "/opt/pw-browsers/chromium";
+  let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    executablePath = existsSync(system) ? system : undefined;
+  }
+  const browser = await chromium.launch({ executablePath });
+  try {
+    const page = await browser.newPage();
+    await page.goto(url);
+    await page.getByText(text, { exact: true }).first().waitFor({ timeout: 30000 });
+  } finally {
+    await browser.close();
+  }
+})().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+"""
 
 # Open the project table, and check the requests to the list endpoint of
 # the projects: one for each page, and the search and the sort of the
@@ -291,6 +327,10 @@ def api_client_test(out: Path) -> None:
     api, web = out / "fastapi", out / "react"
     for binding, folder in (("fastapi", api), ("react", web)):
         log(f"generate {definition} with {binding} in {folder}")
+        # The hand-written code of the example: appgen keeps an extension
+        # file that exists.
+        if (EXTENSIONS / binding).is_dir():
+            shutil.copytree(EXTENSIONS / binding, folder, dirs_exist_ok=True)
         run(
             "uv",
             "run",
@@ -309,60 +349,74 @@ def api_client_test(out: Path) -> None:
     log("FastAPI: uv sync and alembic upgrade head")
     run("uv", "sync", "--quiet", cwd=api)
     run("uv", "run", "alembic", "upgrade", "head", cwd=api, env=database)
-    log("React: pnpm install, typecheck, lint, and build")
+    log("React: pnpm install, typecheck, and lint")
     run("pnpm", "install", "--silent", cwd=web)
     run("pnpm", "--silent", "typecheck", cwd=web)
     run("pnpm", "--silent", "lint", cwd=web)
-    run("pnpm", "--silent", "build", cwd=web, env={"VITE_API_URL": API_URL}, quiet=True)
 
     api_env = {**database, "CORS_ORIGINS": json.dumps([WEB_URL])}
     uvicorn = ["uv", "run", "uvicorn", "app.main:app", "--port", str(API_PORT)]
     preview = ["pnpm", "exec", "vite", "preview", "--port", str(WEB_PORT), "--strictPort"]
-    with (
-        started(uvicorn, api, api_env, out / "fastapi.log"),
-        started(preview, web, {}, out / "react.log"),
-    ):
-        wait_for(f"{API_URL}/health")
-        log("check the endpoints of the API client in the OpenAPI document")
-        check_openapi(definition)
-        log(f"add a person, {PROJECT_COUNT} projects, and a task with the API")
-        person = request(
-            "POST", f"{API_URL}/people", {"name": "Ada API", "email": "ada@example.com"}
-        )
-        names = [f"API project {number:02d}" for number in range(1, PROJECT_COUNT + 1)]
-        projects = [
-            request(
-                "POST",
-                f"{API_URL}/projects",
-                {
-                    "name": name,
-                    "key": "AP" + chr(ord("A") + index),
-                    "owner_id": person["id"],
-                    "due_date": f"2027-01-{index + 1:02d}",
-                    "member_ids": [person["id"]] if index == 0 else [],
-                },
-            )
-            for index, name in enumerate(names)
-        ]
-        task = {"title": "API task", "project_id": projects[0]["id"]}
-        request("POST", f"{API_URL}/tasks", task)
-        language = check_language(definition)
-        if language is not None:
-            log(f"the API gives its messages in '{language['locale']}' for Accept-Language")
-        wait_for(WEB_URL)
-        log(f"open {WEB_URL}/projects, and check the requests of the pages")
-        check: dict[str, object] = {
-            "api": API_URL,
-            "web": WEB_URL,
-            "pageSize": str(PAGE_SIZE),
-            "names": names,
-            "project": projects[0]["id"],
-            "task": task["title"],
-            "person": person["name"],
-            "language": language,
-        }
-        run("node", "-e", PAGE_CHECK, json.dumps(check))
+    with MockApi(load_definition(definition)) as mock:
+        # The browser reads the base URLs of the APIs from the build variables.
+        apis = {f"VITE_{name}": url for name, url in mock.env().items()}
+        log("React: pnpm build with the mock server of the third-party APIs")
+        build_env = {"VITE_API_URL": API_URL, **apis}
+        run("pnpm", "--silent", "build", cwd=web, env=build_env, quiet=True)
+        with (
+            started(uvicorn, api, api_env, out / "fastapi.log"),
+            started(preview, web, {}, out / "react.log"),
+        ):
+            check_apps(definition, mock)
     log("passed")
+
+
+def check_apps(definition: Path, mock: MockApi) -> None:
+    """Check the running apps: the API client, and the client of the holidays API."""
+    wait_for(f"{API_URL}/health")
+    log("check the endpoints of the API client in the OpenAPI document")
+    check_openapi(definition)
+    log(f"add a person, {PROJECT_COUNT} projects, and a task with the API")
+    person = request("POST", f"{API_URL}/people", {"name": "Ada API", "email": "ada@example.com"})
+    names = [f"API project {number:02d}" for number in range(1, PROJECT_COUNT + 1)]
+    projects = [
+        request(
+            "POST",
+            f"{API_URL}/projects",
+            {
+                "name": name,
+                "key": "AP" + chr(ord("A") + index),
+                "owner_id": person["id"],
+                "due_date": f"2027-01-{index + 1:02d}",
+                "member_ids": [person["id"]] if index == 0 else [],
+            },
+        )
+        for index, name in enumerate(names)
+    ]
+    task = {"title": "API task", "project_id": projects[0]["id"]}
+    request("POST", f"{API_URL}/tasks", task)
+    language = check_language(definition)
+    if language is not None:
+        log(f"the API gives its messages in '{language['locale']}' for Accept-Language")
+    wait_for(WEB_URL)
+    log(f"open {WEB_URL}/projects, and check the requests of the pages")
+    check: dict[str, object] = {
+        "api": API_URL,
+        "web": WEB_URL,
+        "pageSize": str(PAGE_SIZE),
+        "names": names,
+        "project": projects[0]["id"],
+        "task": task["title"],
+        "person": person["name"],
+        "language": language,
+    }
+    run("node", "-e", PAGE_CHECK, json.dumps(check))
+    log(f"open {WEB_URL}/, and wait for the holiday '{HOLIDAY_NAME}' of the mock server")
+    run("node", "-e", TEXT_CHECK, f"{WEB_URL}/", HOLIDAY_NAME)
+    calls = mock.calls("holidays", "getNextPublicHolidays")
+    if not calls:
+        raise ApiClientError("The dashboard did not call the holidays API.")
+    log(f"the dashboard called the holidays API {len(calls)} times")
 
 
 def main() -> int:

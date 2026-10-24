@@ -43,6 +43,9 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
 fi
 
 step "generate $definition in $out"
+# The hand-written code of the example: appgen keeps an extension file
+# that exists.
+cp -R examples/project-tracker/extensions/react/. "$out"/
 uv run --locked appgen generate "$definition" -b react -o "$out" >/dev/null
 
 cd "$out"

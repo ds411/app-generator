@@ -518,6 +518,12 @@ apis:
   FastAPI app, its extension function then gets the clients of these
   APIs as arguments. The Next.js app has a server-only client for each
   API in `src/shared/api/<api>/`, which the extension file imports.
+- The React app calls the APIs in the browser, and a browser app cannot
+  keep a secret. Thus only an API without `security` gets a client in
+  `src/shared/api/<api>/`. With mock data, the client gives the example
+  answers. For an API with `security`, `appgen generate` gives a
+  warning: call the API in a custom operation of the FastAPI app, and
+  set `x-react-data: api`.
 - The environment variables of the apps (for example `DATABASE_URL`)
   are reserved. Two keys cannot use the same variable.
 
