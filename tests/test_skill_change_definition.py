@@ -242,13 +242,20 @@ def test_the_database_step_uses_the_sqlite_url_of_the_app_readme(tmp_path: Path)
     assert "uv run alembic upgrade head" in readme
 
 
-def test_the_summary_of_generate_lists_the_stubs_as_extension_files(tmp_path: Path) -> None:
-    # SKILL.md and change-definition.md tell to read the open gaps in the
-    # report of the check, not in the summary of generate.
+def test_the_summary_of_generate_lists_only_the_new_gaps(tmp_path: Path) -> None:
+    # The summary lists the gaps of the extension files that the run
+    # creates. SKILL.md and change-definition.md tell to read all open
+    # gaps in the report of the check.
     output = appgen("generate", EXAMPLE, "-b", "fastapi", "-o", tmp_path)
+    again = appgen("generate", EXAMPLE, "-b", "fastapi", "-o", tmp_path)
     report = appgen("check", EXAMPLE, tmp_path, "--format", "json")
 
-    assert "Gaps created: 0\n" in output
-    assert f"  {OPERATION}\n" in output.split("Extension files created:")[1]
+    assert f"  operations.complete_task -> {OPERATION}\n" in output
+    assert OPERATION not in output.partition("Extension files created:")[2]
+    assert "Gaps created: 0\n" in again
     assert "operations.complete_task" in [g["id"] for g in report["gaps"]]
-    assert "Use this list, not the summary" in (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+    steps = " ".join(CHANGE_DEFINITION.read_text(encoding="utf-8").split())
+    assert "Use this list, not the summary" in skill
+    assert "not the open gaps of earlier runs" in skill
+    assert "the gaps created (the new extension files with a gap trace)" in steps

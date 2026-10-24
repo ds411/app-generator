@@ -126,9 +126,9 @@ Do these steps for each change to a definition:
    again.
 6. Read `gaps`: each entry is an element that needs hand-written code,
    and `traces` gives its files. Use this list, not the summary of
-   `appgen generate`: its line `Gaps created` counts only the elements
-   that the binding cannot generate, and the stubs of custom elements
-   are in `Extension files created`.
+   `appgen generate`: its line `Gaps created` lists only the gaps of the
+   extension files that the run created, and not the open gaps of
+   earlier runs.
 7. Build and test the app with the commands of its README.
 
 ### The JSON of `appgen validate`

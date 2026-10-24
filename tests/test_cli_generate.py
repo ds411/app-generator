@@ -1,5 +1,8 @@
+import json
+import re
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from appgen.cli import app
@@ -9,6 +12,7 @@ runner = CliRunner()
 TESTS = Path(__file__).parent
 DEFINITION = TESTS / "fixtures" / "project-tracker.yaml"
 GOLDEN = TESTS / "golden" / "minimal"
+EXAMPLE = TESTS.parent / "examples" / "project-tracker" / "app.yaml"
 
 
 def _files(folder: Path) -> dict[str, bytes]:
@@ -19,9 +23,11 @@ def _files(folder: Path) -> dict[str, bytes]:
     }
 
 
-def _generate(out: Path, *extra: str, definition: Path = DEFINITION) -> tuple[int, str]:
+def _generate(
+    out: Path, *extra: str, definition: Path = DEFINITION, binding: str = "minimal"
+) -> tuple[int, str]:
     result = runner.invoke(
-        app, ["generate", str(definition), "--binding", "minimal", "--out", str(out), *extra]
+        app, ["generate", str(definition), "--binding", binding, "--out", str(out), *extra]
     )
     return result.exit_code, result.output
 
@@ -86,3 +92,50 @@ def test_the_trace_check_passes_on_the_generated_app(tmp_path: Path) -> None:
     result = runner.invoke(app, ["check", str(DEFINITION), str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert "Result: passed." in result.output
+
+
+def _created_gaps(output: str) -> dict[str, str]:
+    """Return the files of each element under `Gaps created` in a summary."""
+    block = output.split("Gaps created: ")[1]
+    count, *lines = block.split("\n")
+    return dict(line.strip().split(" -> ") for line in lines[: int(count)])
+
+
+@pytest.mark.parametrize("binding", ["fastapi", "nextjs", "react"])
+@pytest.mark.parametrize("definition", [DEFINITION, EXAMPLE], ids=["fixture", "example"])
+def test_the_created_gaps_are_the_open_gaps_of_the_check(
+    tmp_path: Path, binding: str, definition: Path
+) -> None:
+    # The stubs of the custom elements are extension files with a gap trace.
+    code, output = _generate(tmp_path, definition=definition, binding=binding)
+    assert code == 0, output
+    created = _created_gaps(output)
+    result = runner.invoke(app, ["check", str(definition), str(tmp_path), "--format", "json"])
+    report = json.loads(result.output)
+
+    assert set(created) == {gap["id"] for gap in report["gaps"]}
+    assert "operations.complete_task" in created
+    other = output.partition("Extension files created:")[2]
+    assert not any(path in other for path in created.values())
+
+    code, output = _generate(tmp_path, definition=definition, binding=binding)
+    assert code == 0, output
+    assert "Gaps created: 0\n" in output
+    kept = re.search(r"Gaps kept \(extension files exist\): (\d+)", output)
+    assert kept and int(kept.group(1)) == len(created)
+    assert "Extension files created" not in output
+
+
+def test_the_summary_lists_each_gap_of_an_extension_file(tmp_path: Path) -> None:
+    # A browser app has no client for an API with a secret: one stub has
+    # a gap for the API and for each of its operations.
+    code, output = _generate(tmp_path, definition=EXAMPLE, binding="react")
+    assert code == 0, output
+    created = _created_gaps(output)
+
+    client = "src/shared/api/exchange-rates/client.ext.ts"
+    assert [e for e, path in created.items() if path == client] == [
+        "apis.exchange_rates",
+        "apis.exchange_rates.operations.getLatestRates",
+        "apis.exchange_rates.operations.convertAmount",
+    ]

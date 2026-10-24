@@ -21,8 +21,9 @@ reports no invalid traces.
    diagnostic. A rename or a removal often leaves references to the old
    name (`unknown-reference`).
 5. Generate into the same folder: `appgen generate app.yaml -b <binding>
-   -o <dir>`. Read the summary: the files written and deleted, the
-   extension files created, and the orphaned extension files. The open
+   -o <dir>`. Read the summary: the files written and deleted, the gaps
+   created (the new extension files with a gap trace), the other
+   extension files created, and the orphaned extension files. All open
    gaps are in the report of the next step.
 6. Check: `appgen check app.yaml <dir> --format json`. Fix each entry of
    `invalid`, as the sections below tell.
