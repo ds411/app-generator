@@ -6,7 +6,7 @@ import pytest
 
 from appgen.bindings.shared.forms import FormContext, form_rules
 from appgen.bindings.shared.views import ViewContext
-from appgen.dsl import load_definition
+from appgen.dsl import load_definition, load_definition_text
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
 FORMS = Path(__file__).parent / "fixtures" / "react-forms.yaml"
@@ -84,3 +84,12 @@ def test_a_number_field_with_a_format_shows_the_formatted_value() -> None:
     assert fields["budget"].format == "currency"
     assert fields["name"].format is None
     assert "number_format" in forms.widgets
+
+
+def test_a_currency_field_gives_its_currency_to_the_number_input() -> None:
+    text = EXAMPLE.read_text().replace(
+        "scale: 2, format: currency }", "scale: 2, format: currency, currency: EUR }"
+    )
+    fields = {f.name: f for f in FormContext(load_definition_text(text)).plan("new_project").fields}
+    assert fields["budget"].currency == "EUR"
+    assert fields["name"].currency is None

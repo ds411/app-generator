@@ -8,10 +8,13 @@ import { cn } from "@/shared/lib/utils";
 export function FormattedValue({
   value,
   format = "text",
+  currency,
   className,
 }: {
   value: unknown;
   format?: Format;
+  /** The ISO 4217 code of the `currency` format. The default is `CURRENCY`. */
+  currency?: string;
   className?: string;
 }) {
   if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
@@ -24,7 +27,7 @@ export function FormattedValue({
       <MinusIcon aria-label="No" className={cn("size-4 text-muted-foreground", className)} />
     );
   }
-  const text = formatValue(value, format);
+  const text = formatValue(value, format, currency);
   if (format === "email") {
     return (
       <a href={`mailto:${text}`} className={cn("underline-offset-4 hover:underline", className)}>

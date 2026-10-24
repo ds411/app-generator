@@ -199,6 +199,12 @@ or a stat widget can set another format. In a form, a number field with
 the format `number`, `currency`, or `percent` shows its value in the
 format next to the input. The front ends use `Intl.NumberFormat`.
 
+`currency` gives the currency of the `currency` format: an ISO 4217
+code, for example `EUR`. It is for `integer` and `decimal` fields. The
+default is `USD`. The views, the forms, and the stat widgets of the
+dashboards use the currency of the field. `appgen validate` rejects a
+code that is not an ISO 4217 code.
+
 ```yaml
 fields:
   key:
@@ -212,6 +218,7 @@ fields:
     values: [planned, active, on_hold, done]
     default: planned
   budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
+  fee: { type: decimal, min: 0, format: currency, currency: EUR }
 ```
 
 ### Relations

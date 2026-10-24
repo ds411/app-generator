@@ -351,3 +351,28 @@ def test_an_operation_action_cannot_run_a_custom_operation_with_params() -> None
     assert diagnostic.hint is not None and "form action" in diagnostic.hint
     # Without params, an action can run the operation.
     assert check(text.replace("    params:\n      reason: { type: text }\n", "")) == []
+
+
+def test_a_currency_field_gives_an_iso_4217_code() -> None:
+    estimate = "estimate: { type: decimal, min: 0, max: 100, precision: 5, scale: 2 }"
+    euro = estimate.replace("scale: 2 }", "scale: 2, format: currency, currency: EUR }")
+    assert codes(BASE.replace(estimate, euro)) == []
+
+    [diagnostic] = check(BASE.replace(estimate, euro.replace("EUR", "EUX")))
+    assert diagnostic.code == "invalid-value"
+    assert diagnostic.element_id == "entities.Task.fields.estimate"
+    assert diagnostic.message == "'EUX' is not an ISO 4217 currency code."
+    assert diagnostic.hint == "Use the code of an active currency, for example 'EUR' or 'USD'."
+
+    text = BASE.replace("title: { type: string }", "title: { type: string, currency: EUR }")
+    assert codes(text) == [("invalid-option", "entities.Task.fields.title")]
+
+
+def test_a_currency_code_has_three_capital_letters() -> None:
+    text = BASE.replace("title: { type: string }", "title: { type: integer, currency: eur }")
+
+    with pytest.raises(DefinitionError) as error:
+        load_definition_text(text, "app.yaml")
+
+    [diagnostic] = error.value.diagnostics
+    assert diagnostic.location.line == 12

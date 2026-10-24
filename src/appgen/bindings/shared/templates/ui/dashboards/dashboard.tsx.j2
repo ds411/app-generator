@@ -154,7 +154,7 @@ export function {{ name | pascal }}Dashboard() {
 {% if w.kind == "stat" %}
       <StatTile
         label={{ jsx_attr(w.label) }}
-        value={formatValue({{ w.function }}(data), {{ js(w.format) }})}
+        value={formatValue({{ w.function }}(data), {{ js(w.format) }}{% if w.currency %}, {{ js(w.currency) }}{% endif %})}
 {% if w.icon %}
         icon={ {{- w.icon | pascal }}Icon}
 {% endif %}

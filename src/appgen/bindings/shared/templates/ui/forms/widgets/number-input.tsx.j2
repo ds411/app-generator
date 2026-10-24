@@ -10,6 +10,7 @@ export function NumberInput({
   value,
   onChange,
   format,
+  currency,
   placeholder,
   step,
   disabled,
@@ -19,6 +20,8 @@ export function NumberInput({
   value: number | null;
   onChange: (value: number | null) => void;
   format: Format;
+  /** The ISO 4217 code of the `currency` format. The default is `CURRENCY`. */
+  currency?: string;
   placeholder?: string;
   step?: number;
   disabled?: boolean;
@@ -39,7 +42,7 @@ export function NumberInput({
       />
       <InputGroupAddon align="inline-end">
         <InputGroupText className="tabular-nums" aria-live="polite">
-          {formatValue(value, format)}
+          {formatValue(value, format, currency)}
         </InputGroupText>
       </InputGroupAddon>
     </InputGroup>

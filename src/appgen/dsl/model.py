@@ -62,6 +62,8 @@ class Field(Element):
     values: list[MemberName] | None = None
     format: Format | None = None
     """The display format in all views. A view column can set another format."""
+    currency: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")] | None = None
+    """The ISO 4217 code of the currency of the `currency` format, for example `EUR`."""
 
 
 class Relation(Element):
