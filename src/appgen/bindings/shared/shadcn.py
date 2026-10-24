@@ -20,6 +20,7 @@ from appgen.dsl.ui.fields import FieldPathError, FieldTarget, default_widget, re
 from appgen.dsl.ui.forms import Form
 from appgen.dsl.ui.views import (
     BoardView,
+    CalendarView,
     CardsView,
     TableView,
     View,
@@ -166,7 +167,7 @@ def _action_components(actions: Iterable[Action]) -> set[str]:
 def _view_components(view: View) -> set[str]:
     """Return the components of a detail view. The list views come from `_list_components`."""
     names = _action_components(view.actions.values())
-    if isinstance(view, TableView | CardsView | BoardView):
+    if isinstance(view, TableView | CardsView | BoardView | CalendarView):
         return names
     names.update(("card", "separator"))
     if view.tabs:
@@ -181,6 +182,7 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "table": ("table", "checkbox", "select"),
     "cards": ("card", "select"),
     "board": ("card", "badge", "scroll-area"),
+    "calendar": ("button",),
     "search": ("input",),
     "boolean": ("switch",),
     "date_range": ("popover", "calendar"),

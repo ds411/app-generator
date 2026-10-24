@@ -51,6 +51,7 @@ from appgen.dsl.ui.views import (
     BadgeSet,
     BoardView,
     BooleanFilter,
+    CalendarView,
     Card,
     CardsView,
     Column,
@@ -251,7 +252,7 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
     entity = view.entity
     if view.states is not None:
         yield from _check_states(view.states, view.actions)
-    if not isinstance(view, DetailView) and view.sort is not None:
+    if not isinstance(view, DetailView | CalendarView) and view.sort is not None:
         yield from _check_paths(definition, view.sort, "field", entity, [view.sort.field])
     match view:
         case TableView():
@@ -276,6 +277,8 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
                 yield from _check_card(definition, entity, view.card)
         case BoardView():
             yield from _check_board(definition, entity, view)
+        case CalendarView():
+            yield from _check_calendar(definition, entity, view)
         case DetailView():
             yield from _check_detail(definition, entity, view)
 
@@ -468,6 +471,38 @@ def _check_states(states: States, actions: Mapping[str, object]) -> Iterator[Dia
             continue
         choices = [*actions, "retry"] if key == "error" else list(actions)
         yield _missing(state, "action", "action", state.action, choices)
+
+
+def _check_calendar(
+    definition: AppDefinition, entity: str, view: CalendarView
+) -> Iterator[Diagnostic]:
+    if view.label is not None:
+        yield from _check_paths(definition, view, "label", entity, [view.label])
+    types: list[str] = []
+    for key in ("start", "end"):
+        path = getattr(view, key)
+        if path is None:
+            continue
+        target = yield from _resolve(definition, view, key, entity, path)
+        if target is None:
+            continue
+        if target.type not in DATE_TYPES:
+            yield _error(
+                "unsuitable-field",
+                f"The {key} of a calendar must be a date or a date-time field, but "
+                f"'{path}' has the type '{target.type}'.",
+                view,
+                at=key,
+            )
+        else:
+            types.append(target.type)
+    if len(types) == 2 and types[0] != types[1]:
+        yield _error(
+            "unsuitable-field",
+            "The start and the end of a calendar must have the same type.",
+            view,
+            at="end",
+        )
 
 
 def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Iterator[Diagnostic]:

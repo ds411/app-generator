@@ -287,3 +287,19 @@ def test_a_computed_field_computes_its_value_in_the_views() -> None:
     assert cost.format == "currency"
     assert context.lookups_of("Booking", ["cost"]) == {"Room"}
     assert context.computed
+
+
+def test_a_calendar_view_shows_the_records_by_their_start_and_end() -> None:
+    context = ViewContext(load_definition(ROOMS))
+    assert context.list_views["booking_calendar"] == "calendar"
+    plan = context.view_plan("booking_calendar")
+    calendar = plan.calendar
+    assert calendar is not None
+    assert (calendar.start.expr, calendar.end.expr if calendar.end else None) == (
+        "row.startsAt",
+        "row.endsAt",
+    )
+    assert calendar.label == 'String(row.title ?? "")'
+    assert calendar.href == 'pageHref("bookingDetail", { id: String(row.id) })'
+    assert (calendar.mode, calendar.date_only) == ("week", False)
+    assert "calendar" in context.features

@@ -681,6 +681,28 @@ breakpoint, `stack` shows the columns one under the other, and `scroll`
 shows each column almost as wide as the screen, with snap scroll.
 Without `responsive`, the columns scroll sideways.
 
+**Calendar** (`kind: calendar`): the records on a calendar, in a week
+or a month. `start` (a `date` or a `datetime` field) gives the day and
+the time of a record, and the optional `end` (a field of the same type)
+gives its end: a record shows on each day from its start to its end.
+`label` is the text of a record (default: the display field), `mode` is
+the first mode (`week` or `month`, default `month`), and `link` is a
+page that a record opens. The user can switch the mode, and go to the
+previous, the next, or the current week or month. The weeks start on
+Monday.
+
+```yaml
+ui:
+  views:
+    booking_calendar:
+      kind: calendar
+      entity: Booking
+      start: starts_at
+      end: ends_at
+      mode: week
+      link: booking_detail
+```
+
 **Detail** (`kind: detail`): one record, from the path parameter of the
 page. `header` (`title`, `subtitle`, `badges`), `sections` (`title`,
 `description`, `fields`, `columns`, or `custom: true`), `tabs`

@@ -236,6 +236,7 @@ BINDING = Binding(
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
         | {"menu", "menu_group", "menu_item", "menu_sub_item"}
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
+        | {"calendar_view"}
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
