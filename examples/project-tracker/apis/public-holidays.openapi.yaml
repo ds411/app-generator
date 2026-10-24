@@ -1,0 +1,158 @@
+# The OpenAPI document of a public holidays API, in the form of the
+# public API of Nager.Date (https://date.nager.at). The project tracker
+# calls two of its operations (see `apis` in ../app.yaml). appgen reads
+# only this local file, and generates a typed client in each app.
+openapi: 3.1.0
+info:
+  title: Public Holidays API
+  version: "3.0"
+  description: The public holidays of the countries of the world.
+servers:
+  - url: https://date.nager.at/api/v3
+paths:
+  /PublicHolidays/{year}/{countryCode}:
+    get:
+      operationId: getPublicHolidays
+      summary: Get the public holidays of a country in a year.
+      tags: [PublicHoliday]
+      parameters:
+        - $ref: "#/components/parameters/year"
+        - $ref: "#/components/parameters/countryCode"
+      responses:
+        "200":
+          description: The public holidays, in the order of their dates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PublicHoliday" }
+              example:
+                - date: "2026-01-01"
+                  localName: Neujahr
+                  name: New Year's Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+                - date: "2026-05-01"
+                  localName: Tag der Arbeit
+                  name: Labour Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+                - date: "2026-10-03"
+                  localName: Tag der Deutschen Einheit
+                  name: German Unity Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+                - date: "2026-12-25"
+                  localName: Erster Weihnachtstag
+                  name: Christmas Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+        "404":
+          description: The country is not known.
+  /NextPublicHolidays/{countryCode}:
+    get:
+      operationId: getNextPublicHolidays
+      summary: Get the public holidays of a country in the next 365 days.
+      tags: [PublicHoliday]
+      parameters:
+        - $ref: "#/components/parameters/countryCode"
+      responses:
+        "200":
+          description: The next public holidays, in the order of their dates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PublicHoliday" }
+              example:
+                - date: "2026-10-31"
+                  localName: Reformationstag
+                  name: Reformation Day
+                  countryCode: DE
+                  global: false
+                  counties: [DE-BB, DE-HB, DE-HH, DE-MV, DE-NI, DE-SN, DE-ST, DE-SH, DE-TH]
+                  types: [Public]
+                - date: "2026-12-25"
+                  localName: Erster Weihnachtstag
+                  name: Christmas Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+                - date: "2026-12-26"
+                  localName: Zweiter Weihnachtstag
+                  name: St. Stephen's Day
+                  countryCode: DE
+                  global: true
+                  counties: null
+                  types: [Public]
+        "404":
+          description: The country is not known.
+  /AvailableCountries:
+    get:
+      operationId: getAvailableCountries
+      summary: Get the countries that the API knows.
+      tags: [Country]
+      responses:
+        "200":
+          description: The countries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Country" }
+components:
+  parameters:
+    year:
+      name: year
+      in: path
+      required: true
+      description: The year, for example 2026.
+      schema: { type: integer, minimum: 1975, maximum: 2075 }
+    countryCode:
+      name: countryCode
+      in: path
+      required: true
+      description: The ISO 3166-1 alpha-2 code of the country, for example DE.
+      schema: { type: string, pattern: "^[A-Z]{2}$" }
+  schemas:
+    PublicHoliday:
+      type: object
+      description: A public holiday of a country.
+      required: [date, localName, name, countryCode, global, types]
+      properties:
+        date: { type: string, format: date }
+        localName:
+          type: string
+          description: The name in the language of the country.
+        name:
+          type: string
+          description: The name in English.
+        countryCode: { type: string }
+        global:
+          type: boolean
+          description: True if the holiday is in all regions of the country.
+        counties:
+          type: [array, "null"]
+          description: The ISO 3166-2 codes of the regions, if the holiday is not global.
+          items: { type: string }
+        types:
+          type: array
+          items: { $ref: "#/components/schemas/HolidayType" }
+    HolidayType:
+      type: string
+      enum: [Public, Bank, School, Authorities, Optional, Observance]
+    Country:
+      type: object
+      required: [countryCode, name]
+      properties:
+        countryCode: { type: string }
+        name: { type: string }

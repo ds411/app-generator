@@ -10,6 +10,7 @@ invalid, until the app developer updates them.
 
 import json
 import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -79,7 +80,7 @@ def hand_written(header: str, prefix: str) -> str:
 
 @pytest.fixture(scope="module")
 def changed() -> AppDefinition:
-    return load_definition_text(change(EXAMPLE.read_text()), "changed.yaml")
+    return load_definition_text(change(EXAMPLE.read_text()), str(EXAMPLE.parent / "changed.yaml"))
 
 
 @pytest.mark.parametrize("binding_name", sorted(EXTENSION_FILES))
@@ -129,6 +130,7 @@ def test_the_orphans_command_lists_the_old_extension_file_and_the_new_element(
     write_result(generate(changed, fastapi), tmp_path, "fastapi")
     changed_file = tmp_path / "changed.yaml"
     changed_file.write_text(change(EXAMPLE.read_text()))
+    shutil.copytree(EXAMPLE.parent / "apis", tmp_path / "apis")
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
     runner = CliRunner()

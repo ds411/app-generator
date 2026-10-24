@@ -8,6 +8,7 @@ from appgen.gen.extensions import check_extensions
 from appgen.gen.generator import generate
 
 ROOT = Path(__file__).parent.parent
+EXAMPLE = ROOT / "examples" / "project-tracker" / "app.yaml"
 
 
 def definition_text(example: str, data: str | None) -> str:
@@ -18,7 +19,9 @@ def definition_text(example: str, data: str | None) -> str:
 
 
 def files(example: str, data: str | None) -> dict[str, str]:
-    definition = load_definition_text(definition_text(example, data), "app.yaml")
+    definition = load_definition_text(
+        definition_text(example, data), str(ROOT / "examples" / example / "app.yaml")
+    )
     return {f.path: f.content for f in generate(definition, react.BINDING).files}
 
 
@@ -47,7 +50,7 @@ def test_with_the_key_the_app_uses_the_api_client() -> None:
 
 
 def test_the_endpoints_are_the_endpoints_of_the_fastapi_app() -> None:
-    definition = load_definition_text(definition_text("project-tracker", "api"), "app.yaml")
+    definition = load_definition_text(definition_text("project-tracker", "api"), str(EXAMPLE))
     assert data_source(definition) == "api"
     endpoints = {
         (e.operation, e.method, e.path) for e in api_entities(definition)["Project"].endpoints
@@ -69,7 +72,7 @@ def test_a_custom_operation_calls_its_endpoint_and_has_no_extension_file() -> No
 
 
 def test_the_key_takes_only_mock_or_api() -> None:
-    definition = load_definition_text(definition_text("project-tracker", "rest"), "app.yaml")
+    definition = load_definition_text(definition_text("project-tracker", "rest"), str(EXAMPLE))
     assert validate_definition(definition) == []
     codes = [d.code for d in check_extensions(definition, [react.BINDING])]
     assert codes == ["invalid-value"]

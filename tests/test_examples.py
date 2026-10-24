@@ -48,6 +48,8 @@ DIAGNOSTIC_CODES = {
     "unsuitable-view",
     "missing-selection",
     "missing-widget",
+    "invalid-document",
+    "unsuitable-security",
 }
 
 

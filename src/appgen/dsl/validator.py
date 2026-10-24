@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from appgen.dsl.access import ALL
+from appgen.dsl.apis import RESERVED_ENV_NAMES
 from appgen.dsl.auth import SIGN_IN_PATH, SIGN_UP_PATH, Auth, SignUp
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
@@ -51,7 +52,7 @@ INVERSE_KINDS = {
     "one_to_one": "one_to_one",
     "many_to_many": "many_to_many",
 }
-CUSTOM_ONLY_KEYS = ("params", "returns")
+CUSTOM_ONLY_KEYS = ("params", "returns", "apis")
 
 
 def validate_definition(definition: AppDefinition) -> list[Diagnostic]:
@@ -608,6 +609,91 @@ def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
                     yield _missing(role, key, what, name, known)
 
 
+def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Each document is valid, and has the operations and the security scheme of its API."""
+    envs: dict[str, str] = {}
+    for api in definition.apis.values():
+        names = [("base_url_env", api.base_url_env)]
+        if api.security is not None:
+            names.append(("security", api.security.env))
+        for key, env in names:
+            if env in RESERVED_ENV_NAMES:
+                yield _error(
+                    "reserved-name",
+                    f"The apps use the environment variable '{env}' for their own settings.",
+                    api,
+                    at=key,
+                    hint="Use a name with the name of the API, for example 'HOLIDAYS_API_URL'.",
+                )
+                continue
+            first = envs.setdefault(env, f"{api.id}.{key}")
+            if first != f"{api.id}.{key}":
+                yield _error(
+                    "duplicate-name",
+                    f"The environment variable '{env}' is also the variable of '{first}'.",
+                    api,
+                    at=key,
+                )
+        document = api.openapi
+        if document is None:
+            yield _error(
+                "invalid-document",
+                f"The OpenAPI document '{api.document}' is not valid: {api.document_error}",
+                api,
+                at="document",
+            )
+            continue
+        known = document.operation_ids
+        for operation_id, operation in api.operations.items():
+            if operation_id not in known:
+                matches = difflib.get_close_matches(operation_id, list(known), n=1)
+                yield _error(
+                    "unknown-reference",
+                    f"The document '{api.document}' has no operation '{operation_id}'.",
+                    operation,
+                    hint=f"Did you mean '{matches[0]}'?" if matches else None,
+                )
+        for operation_id, problem in api.spec.problems:
+            yield _error(
+                "unsuitable-operation",
+                f"The clients cannot call the operation '{operation_id}': {problem}",
+                api.operations[operation_id],
+            )
+        security = api.security
+        if security is None:
+            continue
+        scheme = document.security_schemes.get(security.scheme)
+        if scheme is None:
+            matches = difflib.get_close_matches(
+                security.scheme, list(document.security_schemes), n=1
+            )
+            yield _error(
+                "unknown-reference",
+                f"The document '{api.document}' declares no security scheme '{security.scheme}'.",
+                api,
+                at="security",
+                hint=f"Did you mean '{matches[0]}'?" if matches else None,
+            )
+        elif not scheme.supported:
+            yield _error(
+                "unsuitable-security",
+                f"The security scheme '{security.scheme}' is not an API key in a header or a "
+                "query parameter, or a bearer token.",
+                api,
+                at="security",
+                hint="The clients support only these schemes. Call the API from hand-written "
+                "code to use another scheme.",
+            )
+    for operation in definition.operations.values():
+        if len(set(operation.apis)) != len(operation.apis):
+            yield _error(
+                "duplicate-name", "The names in 'apis' must be unique.", operation, at="apis"
+            )
+        for name in operation.apis:
+            if name not in definition.apis:
+                yield _missing(operation, "apis", "API", name, definition.apis)
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -620,6 +706,7 @@ CHECKS: list[Check] = [
     check_workflows,
     check_auth,
     check_access,
+    check_apis,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

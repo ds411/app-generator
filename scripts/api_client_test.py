@@ -30,6 +30,7 @@ Environment variables:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,8 @@ def api_definition(folder: Path) -> Path:
     text, count = re.subn(r"(?m)^app:\n", f"app:\n  {DATA_KEY}: api\n", text, count=1)
     if count != 1:
         raise ApiClientError(f"{DEFINITION} has no 'app:' line.")
+    # The other files of the example, for example the OpenAPI documents of its APIs.
+    shutil.copytree(DEFINITION.parent, folder, dirs_exist_ok=True)
     path = folder / "app.yaml"
     path.write_text(text)
     return path

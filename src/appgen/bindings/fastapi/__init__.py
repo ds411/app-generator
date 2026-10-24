@@ -201,7 +201,8 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "sign_up", "access", "role"}
     ),
-    excludes=frozenset({"page", "ui", "translations"}),
+    # The clients of the third-party APIs come with #263.
+    excludes=frozenset({"page", "ui", "translations", "api"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),

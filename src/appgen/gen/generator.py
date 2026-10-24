@@ -50,6 +50,8 @@ class GenerationResult:
     """The kind of each element of the definition, by ID, in source order."""
     stub_markers: tuple[str, ...] = ()
     """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
+    documents: dict[str, str] = field(default_factory=dict[str, str])
+    """The hash of each OpenAPI document of the `apis`, by its path in the definition."""
 
 
 def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
@@ -102,6 +104,11 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
         excluded_kinds=tuple(sorted(binding.excludes)),
         elements={e.id: e.kind for e in elements},
         stub_markers=binding.stub_markers,
+        documents={
+            api.document: api.openapi.hash
+            for api in definition.apis.values()
+            if api.openapi is not None
+        },
     )
 
 

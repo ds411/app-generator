@@ -22,10 +22,10 @@ runner = CliRunner()
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI.
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": [],
+    "nextjs": ["api"],
     # The React app has no sign-up page yet (#269).
-    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "sign_up"],
-    "fastapi": ["page", "translations", "ui"],
+    "react": ["api", "entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "sign_up"],
+    "fastapi": ["api", "page", "translations", "ui"],
 }
 
 # The stubs that each app has after a first run: the custom operations,
@@ -34,6 +34,7 @@ CUSTOM_OPERATIONS = {
     "operations.archive_project",
     "operations.assign_task",
     "operations.complete_task",
+    "operations.schedule_task",
 }
 CUSTOM_UI = {
     "ui.views.task_detail.tabs.activity",

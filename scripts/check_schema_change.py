@@ -52,6 +52,8 @@ def changed_definition(folder: Path) -> Path:
     text = DEFINITION.read_text()
     if text.count(PERSON) < 1:
         raise SchemaChangeError(f"{DEFINITION} has no fields of Person in the expected form.")
+    # The other files of the example, for example the OpenAPI documents of its APIs.
+    shutil.copytree(DEFINITION.parent, folder, dirs_exist_ok=True)
     path = folder / "app.yaml"
     path.write_text(text.replace(PERSON, PERSON + NEW_FIELD, 1))
     return path

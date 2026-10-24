@@ -1,0 +1,18 @@
+# An API with HTTP basic authentication, which the clients do not support.
+openapi: 3.0.3
+info:
+  title: Basic API
+  version: "1"
+paths:
+  /status:
+    get:
+      operationId: getStatus
+      responses:
+        "200":
+          description: The status.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+components:
+  securitySchemes:
+    basic: { type: http, scheme: basic }

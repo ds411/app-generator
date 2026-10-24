@@ -41,10 +41,12 @@ same diagnostics if the definition is not valid.
 | `unsuitable-token`     | A style key refers to a token of the wrong group, for example a `color` token as a `padding`. | Refer to a token of the group that the message names. |
 | `unsuitable-field`     | A field of the wrong type or kind for its use, for example a board that groups by a `string` field, a form field `id`, or a rule on a computed field. | Use a field of the type that the message names, or change the field. |
 | `unsuitable-badge`     | A badge set for another field.                                        | Use the badge set of the field, or add one for it.                  |
-| `unsuitable-operation` | An operation of the wrong kind or entity, for example a form with a delete operation. | Use an operation of the kind and the entity that the message names. |
+| `unsuitable-operation` | An operation of the wrong kind or entity, for example a form with a delete operation, or an API operation that a client cannot call (a body that is not JSON, a cookie parameter). | Use an operation of the kind and the entity that the message names. Call such an API operation from hand-written code. |
 | `unsuitable-view`      | A view that does not suit the page, for example a detail view on a page without a path parameter. | Change the page path (for example `/tasks/{id}`), or use another view. |
 | `missing-selection`    | A table view has `bulk_actions` but no `selection: true`.             | Add `selection: true` to the view.                                  |
 | `missing-widget`       | A form field has no default widget, for example a `json` field.       | Set a `widget`, or `widget: custom` and write the widget by hand.   |
+| `invalid-document`     | The OpenAPI document of an API does not exist, is a URL, or is not valid OpenAPI 3.0 or 3.1. The message gives the line in the document. | Give the local path of the document, from the folder of the definition. Fix the document at the line, or copy a remote `$ref` into it. |
+| `unsuitable-security`  | The security scheme of an API is not an API key in a header or a query parameter, or a bearer token. | Use a scheme that the clients support, or call the API from hand-written code. |
 
 ## Problems of a trace check
 

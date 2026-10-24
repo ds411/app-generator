@@ -126,6 +126,36 @@ operations:
     entity: Task
     description: Set the task to done and record the time.
     returns: Task
+  schedule_task:
+    kind: custom
+    entity: Task
+    description: >-
+      Set the due date of the task to a number of working days from today.
+      Weekends and the public holidays of the country are not working days.
+    params:
+      working_days: { type: integer, required: true, min: 1, max: 250 }
+      country_code: { type: string, required: true, pattern: "^[A-Z]{2}$", default: DE }
+    returns: Task
+    # The extension file of the operation gets the client of the API.
+    apis: [holidays]
+
+# Third-party APIs (ADR 0019). Each app gets a typed client for the
+# operations in the list. The OpenAPI documents are local files.
+apis:
+  holidays:
+    description: The public holidays of the countries.
+    document: apis/public-holidays.openapi.yaml
+    base_url_env: HOLIDAYS_API_URL
+    operations: [getPublicHolidays, getNextPublicHolidays]
+  exchange_rates:
+    description: The exchange rates of the currencies, for the budgets.
+    document: apis/exchange-rates.openapi.json
+    base_url_env: EXCHANGE_RATES_API_URL
+    security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    operations:
+      getLatestRates: {}
+      convertAmount:
+        description: Convert a budget to another currency.
 
 pages:
   dashboard:

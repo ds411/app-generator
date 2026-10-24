@@ -57,6 +57,124 @@
       ],
       "type": "string"
     },
+    "Api": {
+      "additionalProperties": false,
+      "description": "A third-party API that an OpenAPI document describes (ADR 0019).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/Text"
+        },
+        "base_url_env": {
+          "$ref": "#/$defs/EnvName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "security": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiSecurity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operations": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/ApiOperation"
+              },
+              "minProperties": 1,
+              "propertyNames": {
+                "$ref": "#/$defs/OperationId"
+              },
+              "type": "object"
+            }
+          ],
+          "title": "Operations"
+        }
+      },
+      "required": [
+        "document",
+        "base_url_env",
+        "operations"
+      ],
+      "title": "Api",
+      "type": "object"
+    },
+    "ApiOperation": {
+      "additionalProperties": false,
+      "description": "An operation of the document that the app calls. Its name is the operation ID.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ApiOperation",
+      "type": "object"
+    },
+    "ApiSecurity": {
+      "additionalProperties": false,
+      "description": "The credential that the client sends with each request.",
+      "properties": {
+        "scheme": {
+          "$ref": "#/$defs/Text"
+        },
+        "env": {
+          "$ref": "#/$defs/EnvName"
+        }
+      },
+      "required": [
+        "scheme",
+        "env"
+      ],
+      "title": "ApiSecurity",
+      "type": "object"
+    },
     "App": {
       "additionalProperties": false,
       "description": "The name and the description of the app.",
@@ -1988,6 +2106,10 @@
       "title": "EntityUniqueRule",
       "type": "object"
     },
+    "EnvName": {
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "type": "string"
+    },
     "Field": {
       "additionalProperties": false,
       "description": "A field of an entity, or a param of a custom operation.",
@@ -3556,6 +3678,13 @@
         "returns": {
           "$ref": "#/$defs/Text",
           "default": "none"
+        },
+        "apis": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Apis",
+          "type": "array"
         }
       },
       "required": [
@@ -3646,6 +3775,10 @@
       ],
       "title": "OperationAction",
       "type": "object"
+    },
+    "OperationId": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "type": "string"
     },
     "OperationKind": {
       "enum": [
@@ -5489,6 +5622,16 @@
         "$ref": "#/$defs/MemberName"
       },
       "title": "Workflows",
+      "type": "object"
+    },
+    "apis": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Api"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Apis",
       "type": "object"
     }
   },
