@@ -207,3 +207,21 @@ def test_entity_needs_one_or_more_fields() -> None:
     [diagnostic] = errors(text)
 
     assert diagnostic.message == "Expected one or more items."
+
+
+def test_a_yaml_1_1_boolean_in_an_enum_asks_for_quotes() -> None:
+    text = VALID.replace("values: [planned, done], default: planned", "values: [planned, on, No]")
+
+    [first, second] = errors(text)
+
+    assert first.code == "invalid-value"
+    assert first.message == "YAML reads 'on' as a boolean (true), but a string must be here."
+    assert first.hint == 'Put the value in quotes: "on".'
+    assert first.location == Location("app.yaml", 10, 47)
+    assert second.message == "YAML reads 'No' as a boolean (false), but a string must be here."
+
+
+def test_a_boolean_in_quotes_or_where_a_boolean_must_be_is_no_error() -> None:
+    text = VALID.replace("values: [planned, done], default: planned", 'values: [planned, "on"]')
+
+    assert load(text).entities["Project"].fields["status"].values == ["planned", "on"]
