@@ -3,3 +3,5 @@ screenshots/
 test-results/
 playwright-report/
 expected.json
+expected/
+.install.lock

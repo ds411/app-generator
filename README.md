@@ -200,6 +200,10 @@ second run follows with no change.
 | `scripts/check-react.sh`   | 63 s      | 53 s       |
 | All three                  | 307 s     | 188 s      |
 
+The pre-push hook runs the three check scripts at the same time. With
+warm caches, `APPGEN_CHECK_ALL=1` (the Python checks and the three app
+checks) takes about 160 s.
+
 ## Bindings
 
 A binding is a `Binding` object (see `src/appgen/gen/binding.py`). It
