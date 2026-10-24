@@ -61,15 +61,20 @@ _DEFAULT_FORMATS = {
     "json": "text",
 }
 DEFAULT_PAGE_SIZE = 20
-_BOARD_CLASSES = "-mx-1 flex gap-4 overflow-x-auto px-1 pb-4"
+_BOARD_AREA_CLASSES = "w-full min-w-0"
+_BOARD_CLASSES = "flex w-max gap-4 px-1 pb-4"
 _COLUMN_CLASSES = (
     "flex w-72 shrink-0 flex-col gap-2 rounded-xl border bg-muted/40 p-2 transition-colors"
 )
+_VIEWPORT = "[&>[data-slot=scroll-area-viewport]]:"
+_SCROLLBAR = "[&>[data-slot=scroll-area-scrollbar]]:"
 _RESPONSIVE_BOARD = {
-    "stack": ("flex-col overflow-x-visible", "w-full"),
-    "scroll": ("snap-x snap-mandatory", "w-[85vw] snap-start"),
+    "stack": (f"{_SCROLLBAR}hidden", "w-full flex-col", "w-full"),
+    "scroll": (f"{_VIEWPORT}snap-x {_VIEWPORT}snap-mandatory", "", "w-[85vw] snap-start"),
 }
-"""The classes of the row and of a column of a board below the breakpoint of its hint."""
+"""The classes of the scroll area, of the row, and of a column of a board below the
+breakpoint of its hint. The scroll area scrolls the row: a stacked board hides its
+scroll bar, and a board with snap sets the snap on the viewport of the area."""
 
 
 def label(name: str) -> str:
@@ -227,6 +232,8 @@ class ViewPlan:
     card: CardPlan | None = None
     group_by: Value | None = None
     board_columns: list[BoardColumnPlan] = field(default_factory=list[BoardColumnPlan])
+    board_area_classes: str = _BOARD_AREA_CLASSES
+    """The Tailwind CSS classes of the scroll area of a board."""
     board_classes: str = _BOARD_CLASSES
     """The Tailwind CSS classes of the row of board columns."""
     column_classes: str = _COLUMN_CLASSES
@@ -762,7 +769,8 @@ class ViewContext:
             )
         if view.responsive is not None:
             below = f"max-{view.responsive.below}:"
-            row, column_extra = _RESPONSIVE_BOARD[view.responsive.layout]
+            area, row, column_extra = _RESPONSIVE_BOARD[view.responsive.layout]
+            plan.board_area_classes += "".join(f" {below}{c}" for c in area.split())
             plan.board_classes += "".join(f" {below}{c}" for c in row.split())
             plan.column_classes += "".join(f" {below}{c}" for c in column_extra.split())
         key = f"{camel(view.group_by)}: value as {plan.type}[{js(camel(view.group_by))}]"

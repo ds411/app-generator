@@ -159,7 +159,8 @@ def test_a_field_format_applies_to_all_views_of_the_field(example: ViewContext) 
 
 def test_a_board_with_a_responsive_hint_stacks_its_columns(example: ViewContext) -> None:
     plan = example.view_plan("task_board")
-    assert plan.board_classes.endswith(" max-md:flex-col max-md:overflow-x-visible")
+    assert plan.board_area_classes.endswith(" max-md:[&>[data-slot=scroll-area-scrollbar]]:hidden")
+    assert plan.board_classes.endswith(" max-md:w-full max-md:flex-col")
     assert plan.column_classes.endswith(" max-md:w-full")
 
 
