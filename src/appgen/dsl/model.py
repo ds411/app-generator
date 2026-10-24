@@ -5,8 +5,9 @@ from types import MappingProxyType
 from typing import Annotated, Literal
 
 import pydantic
-from pydantic import JsonValue, PrivateAttr, StringConstraints
+from pydantic import BeforeValidator, JsonValue, PrivateAttr, StringConstraints
 
+from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.ui.common import Action
@@ -84,6 +85,10 @@ class Entity(Element):
     display_field: MemberName | None = None
     fields: Annotated[dict[MemberName, Field], pydantic.Field(min_length=1)]
     relations: dict[MemberName, Relation] = pydantic.Field(default_factory=dict[str, Relation])
+    crud: Annotated[Crud | None, BeforeValidator(crud_input)] = pydantic.Field(
+        default=None, json_schema_extra=crud_schema
+    )
+    """The CRUD shorthand. The loader expands it to operations, views, and forms."""
 
 
 class Operation(Element):

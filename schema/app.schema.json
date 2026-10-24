@@ -930,6 +930,59 @@
       "title": "ContentOverride",
       "type": "object"
     },
+    "Crud": {
+      "additionalProperties": false,
+      "description": "The parts that the CRUD shorthand of an entity asks for.\n\n`crud: true` asks for all operations. `crud: [create, list]` asks for\nsome operations. The mapping form also asks for views and forms.",
+      "properties": {
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/CrudOperation"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "views": {
+          "items": {
+            "$ref": "#/$defs/CrudView"
+          },
+          "title": "Views",
+          "type": "array"
+        },
+        "forms": {
+          "items": {
+            "$ref": "#/$defs/CrudForm"
+          },
+          "title": "Forms",
+          "type": "array"
+        }
+      },
+      "title": "Crud",
+      "type": "object"
+    },
+    "CrudForm": {
+      "enum": [
+        "create",
+        "update"
+      ],
+      "type": "string"
+    },
+    "CrudOperation": {
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "list"
+      ],
+      "type": "string"
+    },
+    "CrudView": {
+      "enum": [
+        "table",
+        "detail"
+      ],
+      "type": "string"
+    },
     "CustomAction": {
       "additionalProperties": false,
       "description": "An action that hand-written code gives (a generation gap).",
@@ -1550,6 +1603,32 @@
           },
           "title": "Relations",
           "type": "object"
+        },
+        "crud": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "enum": [
+                  "create",
+                  "read",
+                  "update",
+                  "delete",
+                  "list"
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/$defs/Crud"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

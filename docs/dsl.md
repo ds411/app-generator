@@ -138,6 +138,37 @@ the React app.
 | `description`   | No       | Text.                                                      |
 | `label`, `plural_label` | No | Display names. The default comes from the entity name.  |
 | `display_field` | No       | The field that names a record in lists and references.    |
+| `crud`          | No       | The CRUD shorthand: operations, views, and forms (see below). |
+
+### The CRUD shorthand
+
+`crud` asks for the CRUD operations of an entity, and optionally for a
+default table view, detail view, and forms. The loader expands it
+before validation ([ADR 0008](adr/0008-crud-shorthand.md)). The names
+are the same as the names of the explicit form, so the element IDs and
+the traces stay the same.
+
+| Form                       | Gives                                                             |
+| -------------------------- | ----------------------------------------------------------------- |
+| `crud: true`               | `create_<entity>`, `read_<entity>`, `update_<entity>`, `delete_<entity>`, and `list_<plural>`. |
+| `crud: [create, list]`     | Only these operations.                                            |
+| `crud: { operations, views, forms }` | `operations` (default: all five), `views` (`table`: `<entity>_table`, `detail`: `<entity>_detail`), and `forms` (`create`: `new_<entity>`, `update`: `edit_<entity>`). |
+
+`<entity>` is the entity name in snake case, for example `stock_item`.
+`<plural>` comes from `plural_label` (`People` gives `list_people`), or
+else from the entity name (`Category` gives `list_categories`). An
+operation, a view, or a form with the same name in the definition wins
+over the expanded one. The default table shows the fields and the
+single relations, the detail view shows them in one section, and the
+forms have all fields and relations except `one_to_many` relations.
+
+```yaml
+entities:
+  Comment:
+    crud: [create, list, delete]
+    fields:
+      body: { type: text, required: true }
+```
 
 ### Fields
 

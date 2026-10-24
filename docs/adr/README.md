@@ -24,3 +24,4 @@ gives the rules.
 | 0005   | [Generation gaps](0005-generation-gaps.md)                             | Accepted |
 | 0006   | [FastAPI binding](0006-fastapi-binding.md)                             | Accepted |
 | 0007   | [Local database without a Postgres server](0007-local-database.md)     | Accepted |
+| 0008   | [CRUD shorthand](0008-crud-shorthand.md)                               | Accepted |
