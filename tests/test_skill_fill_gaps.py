@@ -7,6 +7,7 @@ examples and a fixture with each kind of custom element, and compare
 the extension files of the output with the patterns.
 """
 
+import json
 import re
 from functools import cache
 from pathlib import Path
@@ -107,3 +108,45 @@ def test_the_fixture_has_each_kind_of_custom_element() -> None:
     }
 
     assert {"content", "tab", "section", "widget", "rule", "action"} <= kinds
+
+
+@cache
+def generated_files(binding: str) -> dict[str, str]:
+    """Return the files of the project tracker with a binding, by path, with their text."""
+    definition = load_definition(ROOT / "examples" / "project-tracker" / "app.yaml")
+    return {f.path: f.content for f in generate(definition, find_binding(binding)).files}
+
+
+@pytest.mark.parametrize("binding", ["nextjs", "react"])
+def test_the_front_ends_have_the_data_api_of_the_reference(binding: str) -> None:
+    files = generated_files(binding)
+    text = section("nextjs")
+
+    # The list result, and all records without a page.
+    types = files["src/shared/api/types.ts"]
+    assert "items: T[];" in types and "total: number;" in types
+    assert "Without it, the result has all records." in types
+    assert "subscribe(listener: () => void): () => void;" in types
+    # The hook and its states.
+    hook = files["src/shared/lib/use-resource.ts"]
+    for state in ('status: "loading"', 'status: "error"', 'status: "success"', "reload"):
+        assert state in hook and state in text
+    # The example of the reference.
+    assert "`src/widgets/<dashboard>/ui/<dashboard>-dashboard.tsx`" in text
+    dashboard = files["src/widgets/overview/ui/overview-dashboard.tsx"]
+    assert "useResource(" in dashboard and ".subscribe(" in dashboard
+    # The components of the view states.
+    states = files["src/shared/ui/view-state.tsx"]
+    for name in ("ViewLoading", "ViewMessage", "RetryButton"):
+        assert f"export function {name}(" in states and f"`{name}`" in text
+    # The example of the reference gives each required property of ViewLoading.
+    assert 'indicator: "skeleton" | "spinner";\n  shape: ViewShape;\n' in states
+    assert '`<ViewLoading indicator="skeleton" shape="widget" />`' in text
+
+
+@pytest.mark.parametrize("binding", ["nextjs", "react"])
+def test_the_front_ends_have_no_test_script(binding: str) -> None:
+    scripts = json.loads(generated_files(binding)["package.json"])["scripts"]
+
+    assert "test" not in scripts
+    assert "no `test` script" in section(binding)

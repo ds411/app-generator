@@ -57,6 +57,7 @@ and change it. The docs:
 | [docs/traces.md](docs/traces.md)     | The trace format, generation gaps, and the checker reports. |
 | [docs/bindings.md](docs/bindings.md) | How to write a binding.                              |
 | [docs/evaluation.md](docs/evaluation.md) | The evaluation of the proof of concept, and the next steps. |
+| [docs/evaluation-skills.md](docs/evaluation-skills.md) | The evaluation of the agent skill with three agent tasks. |
 | [docs/adr/](docs/adr/)               | The architecture decision records.                   |
 
 ## Setup
@@ -180,6 +181,9 @@ after a change to `docs/dsl.md`, run
 `uv run scripts/update_skill_references.py`. Tests fail if the skill does
 not agree with the CLI, the DSL, the diagnostic codes, or the extension
 files of the bindings.
+[docs/evaluation-skills.md](docs/evaluation-skills.md) records three
+tasks that an agent did with only the installed skill, and the fixes of
+the skill that they showed.
 
 ## One definition, three apps
 
