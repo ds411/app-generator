@@ -1,0 +1,12 @@
+{{ trace_header(definition.auth.password_reset.id) }}
+import type { Metadata } from "next";
+
+import { ResetPasswordForm } from "@/features/password-reset";
+
+export const metadata: Metadata = { title: "Set a new password" };
+
+/** The page of a reset link: it sets a new password with the token of the link (ADR 0017). */
+export default async function Route({ searchParams }: PageProps<"/reset-password">) {
+  const { token } = await searchParams;
+  return <ResetPasswordForm token={typeof token === "string" ? token : ""} />;
+}

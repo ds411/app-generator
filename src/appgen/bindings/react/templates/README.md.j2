@@ -56,6 +56,12 @@ endpoint, and loads one page. The related records that a view shows
 {% if definition.auth %}
 The sign-in uses `POST /auth/sign-in` of the API, and each request sends
 the token.{% if definition.auth.sign_up %} The sign-up page (`/sign-up`) uses `POST /auth/sign-up`.{% endif %}
+{% if definition.auth.password_reset %}
+The pages `/forgot-password` and `/reset-password` use `POST
+/auth/password-reset` and `POST /auth/password-reset/confirm`. Set
+`PASSWORD_RESET_URL` of the FastAPI app to the page `/reset-password`
+of this app, for example `http://localhost:5173/reset-password`.
+{% endif %}
 {% endif %}
 
 {% endif %}

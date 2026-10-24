@@ -76,7 +76,8 @@ of the entity in snake case, for example `bookings`.
 | A custom form widget (`widget: custom`)                            | `src/features/<form>-form/ui/<field>-widget.ext.tsx`      | `id`, `value`, `onChange`, and `disabled`.                  |
 | A custom form rule (`kind: custom`)                                | `src/features/<form>-form/model/<rule>-rule.ext.ts`       | The values of the form. Return `true` if they are valid.    |
 | A custom action (`kind: custom`)                                   | `src/features/<owner>-actions/model/<action>-action.ext.ts` | The record of a row action or of a page with a record, the records of a bulk action (`bulk-<action>`), or nothing. A row action has the name `row-<action>`. `<owner>` is the view, the page, or the layout. |
-| An element that the binding does not cover yet, for example `auth.password_reset` | `src/gaps/<element>.ext.ts` | Nothing. Write the code here, or in a better place with the same trace. Then change the kind of the trace from `gap` to `manual`. |
+| The delivery of the password reset links (`auth.password_reset`) | `src/shared/auth/password-reset.ext.ts` | `deliverPasswordReset(user, link)`: send the link to the user, for example by email. The stub writes the link to the log with `ENVIRONMENT=development`, and else throws an error. |
+| An element that the binding does not cover yet, for example an owner rule `access.roles.<role>.records.<Entity>` | `src/gaps/<element>.ext.ts` | Nothing. Write the code here, or in a better place with the same trace. Then change the kind of the trace from `gap` to `manual`. |
 
 - An operation runs on the server (`import "server-only"`). Read and
   change the data with the repositories of

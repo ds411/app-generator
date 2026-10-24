@@ -1,4 +1,4 @@
-"""The reset of a forgotten password: `auth.password_reset` and the FastAPI app (ADR 0017)."""
+"""The reset of a forgotten password: `auth.password_reset`, the apps, and the pages (ADR 0017)."""
 
 import json
 from pathlib import Path
@@ -7,9 +7,10 @@ from textwrap import dedent
 import pytest
 from typer.testing import CliRunner
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs, react
 from appgen.cli import app
 from appgen.dsl import DefinitionError, load_definition, load_definition_text, validate_definition
+from appgen.gen.binding import Binding
 from appgen.gen.generator import generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
@@ -81,11 +82,74 @@ def test_the_fastapi_app_has_the_reset_endpoints_and_a_delivery_hook() -> None:
     assert "async def test_an_expired_reset_token_gives_400(" in files["tests/test_auth.py"].content
 
 
-def test_the_check_reports_the_delivery_as_an_open_gap(tmp_path: Path) -> None:
+@pytest.mark.parametrize("binding", ["fastapi", "nextjs"])
+def test_the_check_reports_the_delivery_as_an_open_gap(tmp_path: Path, binding: str) -> None:
     runner = CliRunner()
-    generated = runner.invoke(app, ["generate", str(EXAMPLE), "-b", "fastapi", "-o", str(tmp_path)])
+    generated = runner.invoke(app, ["generate", str(EXAMPLE), "-b", binding, "-o", str(tmp_path)])
     assert generated.exit_code == 0, generated.output
     result = runner.invoke(app, ["check", str(EXAMPLE), str(tmp_path), "-f", "json"])
     report = json.loads(result.output)
     gaps = [g["id"] for g in report["gaps"]]
     assert "auth.password_reset" in gaps
+
+
+def files(binding: Binding, text: str | None = None) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml") if text else load_definition(EXAMPLE)
+    return {f.path: f.content for f in generate(definition, binding).files}
+
+
+def api_text() -> str:
+    return EXAMPLE.read_text().replace("app:\n", "app:\n  x-react-data: api\n", 1)
+
+
+def test_the_nextjs_app_has_the_reset_pages_with_the_token_rules_of_the_api() -> None:
+    app = files(nextjs.BINDING)
+    assert "<ForgotPasswordForm />" in app["app/forgot-password/page.tsx"]
+    assert "<ResetPasswordForm token=" in app["app/reset-password/page.tsx"]
+    reset = app["src/shared/auth/password-reset.ts"]
+    # The same rules as the FastAPI app: a tag of the password hash, an end time, and a prefix.
+    assert "export const RESET_SECONDS = 1800;" in reset
+    assert "return sign(`password-reset.${body}`);" in reset
+    assert "const payload = { sub: userId, exp: expires, pwd: passwordTag(passwordHash) };" in reset
+    actions = app["src/shared/auth/actions.ts"]
+    assert "await deliverPasswordReset({ id: user.id, username: input.data.username }, link);" in (
+        actions
+    )
+    assert "if (found === null || !(await resetTokenMatches(found))) {" in actions
+    assert "await setPassword(found.userId, input.data.newPassword);" in actions
+    delivery = app["src/shared/auth/password-reset.ext.ts"]
+    assert delivery.startswith("// Created by appgen once.")
+    assert "// @trace:gap auth.password_reset file" in delivery
+    assert 'if (process.env.ENVIRONMENT === "development") {' in delivery
+    assert "PUBLIC_URL=http://localhost:3000" in app[".env.example"]
+    sign_in = app["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert '<Link href="/forgot-password"' in sign_in
+    assert "src/gaps/auth.password_reset.ext.ts" not in app
+
+
+def test_the_react_app_has_the_reset_pages_only_with_the_api() -> None:
+    api = files(react.BINDING, api_text())
+    auth = api["src/shared/auth/index.ts"]
+    assert 'await apiRequest("POST", "/auth/password-reset", { username });' in auth
+    confirm = '"/auth/password-reset/confirm", { token, new_password: newPassword });'
+    assert confirm in auth
+    router = api["src/app/router.tsx"]
+    assert '{ path: "/forgot-password", element: <ForgotPasswordForm /> },' in router
+    assert '{ path: "/reset-password", element: <ResetPasswordRoute /> },' in router
+    assert "src/features/password-reset/ui/reset-password-form.tsx" in api
+    mock = files(react.BINDING)
+    assert not [path for path in mock if "password-reset" in path]
+    assert "forgot-password" not in mock["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert (
+        "so an app with mock data has no reset pages. // @trace auth.password_reset"
+        in (mock["src/shared/auth/index.ts"])
+    )
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
+def test_the_reset_form_checks_the_length_of_the_new_password(binding: Binding) -> None:
+    app = files(binding, api_text() if binding is react.BINDING else None)
+    form = app["src/features/password-reset/ui/reset-password-form.tsx"]
+    assert "const MIN_PASSWORD_LENGTH = 10;" in form
+    assert 'autoComplete="new-password"' in form
+    assert "await confirmPasswordReset(token, password);" in form

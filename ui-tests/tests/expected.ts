@@ -76,6 +76,13 @@ export type ExpectedAuth = {
     /** The labels of the menu items that the role of a new user sees. */
     menu: string[];
   };
+  /** The password reset (ADR 0017), only if the app has the reset pages. */
+  passwordReset?: {
+    /** A user whose password the test changes. */
+    username: string;
+    /** The log of the app, with the reset links. */
+    serverLog: string;
+  };
 };
 
 export type Expected = {

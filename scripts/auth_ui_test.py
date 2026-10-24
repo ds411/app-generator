@@ -15,7 +15,10 @@ test proves it for the room booking example (`examples/room-booking`):
    open ("not found"), and checks the page actions. Without a session,
    the menu of a public page shows only the public pages. Last, it
    compares the sign-up page with an approved screenshot, and signs up a
-   new user (ADR 0016).
+   new user (ADR 0016). In the Next.js app, it compares the password
+   reset pages with approved screenshots, resets the password of a user
+   with the link in the log of the app, and signs in with the new
+   password (ADR 0017).
 
 Run it from the repository root:
 
@@ -174,7 +177,27 @@ def expected_sign_up(definition: AppDefinition) -> dict[str, Any] | None:
     }
 
 
-def expected_auth(binding: str, definition: AppDefinition) -> dict[str, Any]:
+def expected_password_reset(
+    binding: str, definition: AppDefinition, app: Path, roles: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Return the values of the password reset: a user apart from the users of the roles.
+
+    Only the Next.js app has the reset pages: the React app with mock data
+    has no server that sends the links. With `ENVIRONMENT=development`, the
+    Next.js app writes each link to its log, and the test reads it there.
+    """
+    auth = definition.auth
+    assert auth is not None
+    if auth.password_reset is None or binding != "nextjs":
+        return None
+    used = {role["username"] for role in roles}
+    users = [
+        u for u in mock_data(definition)[auth.user_entity] if u[auth.username_field] not in used
+    ]
+    return {"username": users[-1][auth.username_field], "serverLog": str(app / "server.log")}
+
+
+def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any]:
     """Return the values of the UI test: the users, and what each role sees."""
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
@@ -213,6 +236,7 @@ def expected_auth(binding: str, definition: AppDefinition) -> dict[str, Any]:
             "actions": [a for a in page_actions(definition, anonymous) if a["path"] == public.path],
         },
         "signUp": expected_sign_up(definition),
+        "passwordReset": expected_password_reset(binding, definition, app, roles),
     }
 
 
@@ -248,6 +272,9 @@ def started(binding: str, app: Path) -> Generator[None]:
             "DATABASE_SEED": "true",
             "SEED_PASSWORD": PASSWORDS[binding],
             "AUTH_SECRET": "auth-ui-test-secret",
+            # The password reset writes the links to the log (server.log).
+            "ENVIRONMENT": "development",
+            "PUBLIC_URL": f"http://localhost:{port}",
         }
         command = ["pnpm", "--silent", "start"]
     log_file = app / "server.log"
@@ -274,12 +301,15 @@ def started(binding: str, app: Path) -> Generator[None]:
             os.killpg(process.pid, 9)
 
 
-def check_ui(binding: str, definition: AppDefinition) -> None:
+def check_ui(binding: str, definition: AppDefinition, app: Path) -> None:
     """Run the UI test of the sign-in and the permissions on the app that runs."""
     name = f"{binding}-auth"
     expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
     expected_file.parent.mkdir(exist_ok=True)
-    expected = {**expected_ui(binding, definition), "auth": expected_auth(binding, definition)}
+    expected = {
+        **expected_ui(binding, definition),
+        "auth": expected_auth(binding, definition, app),
+    }
     expected_file.write_text(json.dumps(expected, indent=2) + "\n")
     env = {
         "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}",
@@ -319,7 +349,7 @@ def auth_ui_test(binding: str, out: Path) -> None:
     with started(binding, app):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
-        check_ui(binding, definition)
+        check_ui(binding, definition, app)
     log(binding, "passed")
 
 

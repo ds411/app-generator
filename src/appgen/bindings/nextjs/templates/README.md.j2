@@ -68,6 +68,26 @@ seed records when it starts.
 The `Dockerfile` builds a standalone Next.js server that runs as a
 non-root user. If `drizzle/` does not exist, the build writes the first
 migration from the schema.
+{% if definition.auth %}
+
+## Sign-in
+
+The users sign in on `/sign-in` with a user name and a password. Set
+`AUTH_SECRET` to a long random text. With `SEED_PASSWORD`, the seed
+gives each seed user this password.
+{% if definition.auth.sign_up %}
+New users make an account on `/sign-up`.
+{% endif %}
+{% if definition.auth.password_reset %}
+A user who forgets the password asks for a reset link on
+`/forgot-password`. The link opens `/reset-password`, and is valid for
+{{ definition.auth.password_reset.token_minutes }} minutes and one time. Write the delivery of the link (for
+example an email) in `src/shared/auth/password-reset.ext.ts`. Until
+then, with `ENVIRONMENT=development`, the app writes the link to the
+log. Set `PUBLIC_URL` to the URL of the app for the browsers: the links
+use it.
+{% endif %}
+{% endif %}
 
 {% if ts_apis %}
 ## Third-party APIs

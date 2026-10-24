@@ -6,7 +6,7 @@
 import { type FormEvent, useState } from "react";
 
 import { signIn } from "@/shared/auth";
-{% if definition.auth.sign_up %}
+{% if auth_pages.sign_up or auth_pages.password_reset %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
 
@@ -64,7 +64,12 @@ export function SignInForm({ next }: { next: string }) {
         >
           {{ jsx_text("Sign in") }}
         </button>
-{% if definition.auth.sign_up %}
+{% if auth_pages.password_reset %}
+        <Link href="/forgot-password" className="text-sm font-medium underline underline-offset-4"> {{ trace(definition.auth.password_reset.id, jsx=True) }}
+          {{ jsx_text("Did you forget the password?") }}
+        </Link>
+{% endif %}
+{% if auth_pages.sign_up %}
         <p className="text-sm text-muted-foreground"> {{ trace(definition.auth.sign_up.id, jsx=True) }}
           {{ jsx_text("Do you need an account?") }}{" "}
           <Link href={`/sign-up?next=${encodeURIComponent(next)}`} className="font-medium text-foreground underline underline-offset-4">

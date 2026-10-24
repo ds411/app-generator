@@ -12,6 +12,9 @@
 {%- endmacro %}
 import { createBrowserRouter{% if used_layouts %}, Outlet{% endif %} } from "react-router";
 
+{% if auth_pages.password_reset %}
+import { ForgotPasswordForm } from "@/features/password-reset";
+{% endif %}
 {% for page_name in definition.pages %}
 import { {{ page_name | pascal }}Page } from "@/pages/{{ page_name | kebab }}";
 {% endfor %}
@@ -23,7 +26,7 @@ import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{
 
 {% endif %}
 {% if definition.auth %}
-import { RequireAuth, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
+import { RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
@@ -36,6 +39,10 @@ export const router = createBrowserRouter([
 {% endif %}
 {% if definition.auth and definition.auth.sign_up %}
   { path: "/sign-up", element: <SignUpRoute /> }, {{ trace(definition.auth.sign_up.id) }}
+{% endif %}
+{% if auth_pages.password_reset %}
+  { path: "/forgot-password", element: <ForgotPasswordForm /> }, {{ trace(definition.auth.password_reset.id) }}
+  { path: "/reset-password", element: <ResetPasswordRoute /> }, {{ trace(definition.auth.password_reset.id) }}
 {% endif %}
 {% for layout_name in used_layouts %}
   {

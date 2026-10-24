@@ -35,6 +35,20 @@ without new packages and with no table except `credentials`.
   202 with the same answer for an unknown user name. `POST
   /auth/password-reset/confirm` sets the new password with a valid
   token, and gives 400 for a used, an ended, or a changed token.
+- The front ends have the public pages `/forgot-password` and
+  `/reset-password` (the page of the link), and the sign-in page links
+  to the first one.
+  - Next.js: server actions with the same token rules (the tag, the
+    end time, and the prefix in the signed message). The link starts
+    with `PUBLIC_URL`, not with the host of the request, so that a
+    caller cannot send a link to another site. In development, without
+    `PUBLIC_URL`, the link goes to `localhost`. The delivery is the
+    extension file `src/shared/auth/password-reset.ext.ts`, with the
+    same stub.
+  - React with `x-react-data: api`: the pages call the two endpoints of
+    the FastAPI app. `PASSWORD_RESET_URL` is the page `/reset-password`
+    of the React app. With mock data, the app has no reset pages: no
+    server sends the links.
 - The delivery hook is an extension file with a `gap` trace to
   `auth.password_reset` (ADR 0005). Its stub writes the link to the log
   with `ENVIRONMENT=development`, and raises `NotImplementedError`
@@ -51,5 +65,5 @@ without new packages and with no table except `credentials`.
 - With the stub in production, a known user name gives 501 and an
   unknown one gives 202. The app must have a delivery before it goes to
   production.
-- The front ends add the pages in a separate story. The Next.js app
-  uses the same token rules.
+- The reset link of the Next.js app does not work without `PUBLIC_URL`
+  in production.

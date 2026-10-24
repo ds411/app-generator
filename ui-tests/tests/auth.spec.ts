@@ -1,8 +1,11 @@
 // The front ends show only the pages and the operations that the role of
-// the user allows (ADR 0012), and a new user can sign up (ADR 0016).
+// the user allows (ADR 0012), a new user can sign up (ADR 0016), and a
+// user can reset the password (ADR 0017).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
+import { readFileSync } from "node:fs";
+
 import { expect, type Page, test } from "@playwright/test";
 
 import { type ExpectedAction, expected, modeOf } from "./expected";
@@ -109,11 +112,63 @@ test("a new user signs up, and sees the menu of the default role", async ({ page
   await fill(String(Date.now()));
   await page.locator(`#${signUp.usernameId}`).fill(existing);
   await page.getByRole("button", { name: "Sign up" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  // The route announcer of Next.js is an alert too, outside the main element.
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-up");
   await fill(String(Date.now()));
   await page.getByRole("button", { name: "Sign up" }).click();
   await page.waitForURL((url) => url.pathname === "/");
   await page.waitForLoadState("networkidle");
   expect(await menuLabels(page)).toEqual(signUp.menu);
+});
+
+/** Return the last reset link of a user in the log of the app. */
+function resetLink(serverLog: string, username: string): string | undefined {
+  const prefix = `The password reset link of ${username}: `;
+  const lines = readFileSync(serverLog, "utf8").split("\n").filter((line) => line.includes(prefix));
+  return lines.at(-1)?.split(prefix)[1]?.trim();
+}
+
+test("the password reset pages ask for a link, and set a new password", async ({ page }, testInfo) => {
+  const reset = auth?.passwordReset;
+  test.skip(!reset, "The app has no password reset pages.");
+  if (!reset) return;
+  const mode = modeOf(testInfo.project.name);
+  await page.goto("/sign-in");
+  await page.getByRole("link", { name: "Did you forget the password?" }).click();
+  await page.waitForURL((url) => url.pathname === "/forgot-password");
+  await expect(page.getByRole("heading", { name: "Reset the password" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "forgot-password.png"]);
+  await page.goto("/reset-password?token=example");
+  await expect(page.getByRole("heading", { name: "Set a new password" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "reset-password.png"]);
+  if (testInfo.project.name !== "light") return;
+
+  // Ask for a link, and find it in the log of the app.
+  const before = resetLink(reset.serverLog, reset.username);
+  await page.goto("/forgot-password");
+  await page.locator('input[name="username"]').fill(reset.username);
+  await page.getByRole("button", { name: "Send the link" }).click();
+  await expect(page.getByRole("main").getByRole("status")).toBeVisible();
+  let link: string | undefined;
+  await expect
+    .poll(() => {
+      link = resetLink(reset.serverLog, reset.username);
+      return link !== undefined && link !== before;
+    })
+    .toBe(true);
+  // Set a new password with the link. The link is valid only one time.
+  const password = `new-password-${Date.now()}`;
+  for (const [value, result] of [
+    [password, "status"],
+    [`${password}-2`, "alert"],
+  ] as const) {
+    await page.goto(link ?? "");
+    await page.locator('input[name="password"]').fill(value);
+    await page.getByRole("button", { name: "Set the password" }).click();
+    await expect(page.getByRole("main").getByRole(result)).toBeVisible();
+  }
+  await signIn(page, reset.username, password);
 });
