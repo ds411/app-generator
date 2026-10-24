@@ -180,7 +180,7 @@ These details come from the templates, not from the definition:
 | The sidebar background stops at the height of the viewport on a long page. | Next.js, React | Visible in full-page screenshots. |
 | The task board columns go past the right edge of the page with no scroll hint. | Next.js, React | The last column is cut. |
 | "New task" shows in the topbar and on the page. | Next.js, React | Two buttons with the same action. |
-| The FastAPI report shows 0 open gaps, but the custom operations raise `NotImplementedError`. | FastAPI | The coverage hides work that is not done. The same is true for the front ends. |
+| The FastAPI report shows 0 open gaps, but the custom operations raise `NotImplementedError`. | FastAPI | The coverage hides work that is not done. The same is true for the front ends. (Update after #151 and #156: the report shows the open gaps, and a call to a stub gives status 501 with problem details. The generated tests check the 501.) |
 
 ## Problems found in the tools
 

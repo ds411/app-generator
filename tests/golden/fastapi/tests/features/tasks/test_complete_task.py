@@ -6,10 +6,31 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.factories import make_task
 from tests.problems import assert_problem
 
 pytestmark = pytest.mark.anyio
+
+
+async def test_complete_task_gives_501_until_it_has_its_logic(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    # The stub in complete_task_ext.py raises NotImplementedError, and the
+    # API gives 501. With the logic of the operation, it gives no server error.
+    record = await make_task(session)
+    n = 0
+    params = {
+        "note": f"note{n}",
+    }
+
+    response = await client.post(f"/tasks/{record.id}/complete-task", json=params)
+
+    if response.status_code == 501:
+        assert_problem(response, 501)
+    else:
+        assert response.status_code < 500, response.text
 
 
 async def test_complete_task_gives_404_for_a_missing_record(client: AsyncClient) -> None:
