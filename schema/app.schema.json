@@ -262,6 +262,17 @@
             }
           ],
           "default": null
+        },
+        "password_reset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PasswordReset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3998,6 +4009,24 @@
         }
       },
       "title": "Pagination",
+      "type": "object"
+    },
+    "PasswordReset": {
+      "additionalProperties": false,
+      "description": "The reset of a forgotten password (ADR 0017): a message with a one-time link.\n\nThe definition does not know the mail service, so the delivery of the\nmessage is a generation gap.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "token_minutes": {
+          "default": 60,
+          "maximum": 1440,
+          "minimum": 5,
+          "title": "Token Minutes",
+          "type": "integer"
+        }
+      },
+      "title": "PasswordReset",
       "type": "object"
     },
     "PatternRule": {

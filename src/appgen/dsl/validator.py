@@ -15,7 +15,14 @@ from pathlib import Path
 
 from appgen.dsl.access import ALL
 from appgen.dsl.apis import RESERVED_ENV_NAMES
-from appgen.dsl.auth import SIGN_IN_PATH, SIGN_UP_PATH, Auth, SignUp
+from appgen.dsl.auth import (
+    FORGOT_PASSWORD_PATH,
+    RESET_PASSWORD_PATH,
+    SIGN_IN_PATH,
+    SIGN_UP_PATH,
+    Auth,
+    SignUp,
+)
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.expressions import (
@@ -505,6 +512,9 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     reserved = {SIGN_IN_PATH: "sign-in"}
     if auth.sign_up is not None:
         reserved[SIGN_UP_PATH] = "sign-up"
+    if auth.password_reset is not None:
+        reserved[FORGOT_PASSWORD_PATH] = "forgot password"
+        reserved[RESET_PASSWORD_PATH] = "password reset"
     for page in definition.pages.values():
         if page.path in reserved:
             yield _error(

@@ -2,6 +2,7 @@
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
 {% set sign_up = definition.auth.sign_up %}
+{% set reset = definition.auth.password_reset %}
 {% if sign_up and definition.access %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set default_role = sign_up.default_role or (definition.entities[u.name].fields[role.name].default) %}
@@ -37,6 +38,9 @@ from app.core.db import Base, SessionDep, commit, flush
 from app.core.db import Base, SessionDep, commit
 {% endif %}
 from app.core.errors import ProblemError, problem_responses
+{% if reset %}
+from app.core.password_reset_ext import deliver_password_reset
+{% endif %}
 {% if sign_up %}
 from app.features.{{ u.slice }} import repository
 {% endif %}
@@ -47,6 +51,10 @@ SESSION_SECONDS = {{ definition.auth.session_hours * 3600 }}
 """The time after which a token ends: {{ definition.auth.session_hours }} hours."""
 MIN_PASSWORD_LENGTH = {{ definition.auth.min_password_length }}
 """The lowest number of characters of a new password."""
+{% if reset %}
+RESET_SECONDS = {{ reset.token_minutes * 60 }}
+"""The time that a password reset link stays valid: {{ reset.token_minutes }} minutes."""
+{% endif %}
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -111,6 +119,46 @@ def read_token(request: Request, token: str) -> UUID | None:
         return UUID(str(payload["sub"]))
     except ValueError, KeyError, TypeError:
         return None
+{% if reset %}
+
+
+{{ trace(reset.id) }}
+def password_tag(password_hash: str | None) -> str:
+    """Return a short hash of a stored password hash. Each new password gives a new tag."""
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:32]
+
+
+def _reset_signature(key: bytes, body: str) -> str:
+    # Another message than the one of the session tokens, so that one kind
+    # of token is never valid as the other kind.
+    message = f"password-reset.{body}".encode()
+    return _encode(hmac.new(key, message, hashlib.sha256).digest())
+
+
+def make_reset_token(key: bytes, user_id: UUID, password_hash: str | None, expires: int) -> str:
+    """Return a signed one-time token for a password reset, valid until the time `expires`.
+
+    The token holds the tag of the current password hash, so that a new
+    password (also the one of the reset) makes the token invalid.
+    """
+    payload = {"sub": str(user_id), "exp": expires, "pwd": password_tag(password_hash)}
+    body = _encode(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{body}.{_reset_signature(key, body)}"
+
+
+def read_reset_token(key: bytes, token: str) -> tuple[UUID, str] | None:
+    """Return the user ID and the password tag of a valid reset token that has not ended."""
+    body, _, signature = token.partition(".")
+    if not hmac.compare_digest(signature, _reset_signature(key, body)):
+        return None
+    try:
+        payload: dict[str, Any] = json.loads(_decode(body))
+        if int(payload["exp"]) < time.time():
+            return None
+        return UUID(str(payload["sub"])), str(payload["pwd"])
+    except ValueError, KeyError, TypeError:
+        return None
+{% endif %}
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -169,6 +217,27 @@ class PasswordChange(BaseModel):
 
     current_password: str = Field(min_length=1, max_length=200)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+{% if reset %}
+
+
+class PasswordResetRequest(BaseModel):
+    """The user name of a user who forgot the password."""
+
+    username: str = Field(min_length=1, max_length=320)
+
+
+class PasswordResetRequested(BaseModel):
+    """The answer to a reset request. It is the same for each user name."""
+
+    detail: str = "If the user name exists, the user gets a message with a reset link."
+
+
+class PasswordReset(BaseModel):
+    """The token of a reset link, and the new password."""
+
+    token: str = Field(min_length=1, max_length=1000)
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+{% endif %}
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -227,3 +296,47 @@ async def change_password(data: PasswordChange, user: CurrentUser, session: Sess
     if credential is None or not verify_password(data.current_password, credential.password_hash):
         raise ProblemError(422, "The current password is not correct.")
     await set_password(session, user, data.new_password)
+{% if reset %}
+
+
+{{ trace(reset.id) }}
+@router.post(
+    "/password-reset",
+    status_code=202,
+    responses=problem_responses(422, 501),
+    operation_id="request_password_reset",
+)
+async def request_password_reset(
+    data: PasswordResetRequest, request: Request, session: SessionDep
+) -> PasswordResetRequested:
+    """Send a reset link to a user. The answer is the same for an unknown user name."""
+    user = await find_user(session, data.username)
+    if user is not None:
+        credential = await session.get(Credential, user.id)
+        expires = int(time.time()) + RESET_SECONDS
+        password_hash = credential.password_hash if credential else None
+        token = make_reset_token(_key(request), user.id, password_hash, expires)
+        settings = request.app.state.settings
+        await deliver_password_reset(settings, user, f"{settings.password_reset_url}?token={token}")
+    return PasswordResetRequested()
+
+
+{{ trace(reset.id) }}
+@router.post(
+    "/password-reset/confirm",
+    status_code=204,
+    responses=problem_responses(400, 422),
+    operation_id="confirm_password_reset",
+)
+async def confirm_password_reset(
+    data: PasswordReset, request: Request, session: SessionDep
+) -> None:
+    """Set a new password with the token of a reset link. A used or an ended token gives 400."""
+    found = read_reset_token(_key(request), data.token)
+    user = await session.get({{ u.name }}, found[0]) if found else None
+    credential = await session.get(Credential, user.id) if user else None
+    tag = password_tag(credential.password_hash if credential else None)
+    if found is None or user is None or not hmac.compare_digest(found[1], tag):
+        raise ProblemError(400, "The reset link is not valid, was used, or has ended.")
+    await set_password(session, user, data.new_password)
+{% endif %}

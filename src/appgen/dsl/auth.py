@@ -10,6 +10,10 @@ SIGN_IN_PATH = "/sign-in"
 """The path of the sign-in page of the front ends. A page of the definition cannot use it."""
 SIGN_UP_PATH = "/sign-up"
 """The path of the sign-up page of the front ends, with `auth.sign_up`."""
+FORGOT_PASSWORD_PATH = "/forgot-password"
+"""The path of the page that asks for a password reset, with `auth.password_reset`."""
+RESET_PASSWORD_PATH = "/reset-password"
+"""The path of the page that sets a new password with a reset link, with `auth.password_reset`."""
 MIN_PASSWORD_LENGTH = 8
 """The default and the lowest value of `auth.min_password_length`."""
 
@@ -21,6 +25,17 @@ class SignUp(Element):
     """The fields of the user entity that the sign-up form asks for, with the user name."""
     default_role: MemberName | None = None
     """With `access`: the role of a new user. The default is the default of the role field."""
+
+
+class PasswordReset(Element):
+    """The reset of a forgotten password (ADR 0017): a message with a one-time link.
+
+    The definition does not know the mail service, so the delivery of the
+    message is a generation gap.
+    """
+
+    token_minutes: Annotated[int, pydantic.Field(ge=5, le=1440)] = 60
+    """The time that a reset link stays valid."""
 
 
 class Auth(Element):
@@ -46,3 +61,5 @@ class Auth(Element):
     """The lowest number of characters of a new password: a sign-up or a change."""
     sign_up: SignUp | None = None
     """The sign-up of new users. Without it, only an administrator makes users."""
+    password_reset: PasswordReset | None = None
+    """The reset of a forgotten password with a link in a message. Off by default."""

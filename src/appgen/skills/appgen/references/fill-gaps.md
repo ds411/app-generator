@@ -122,13 +122,15 @@ of the entity in snake case, for example `bookings`.
 | Extension file                                  | Kind                     | The generated code gives                                     |
 | ----------------------------------------------- | ------------------------ | ------------------------------------------------------------ |
 | `app/features/<slice>/<operation>_ext.py`       | A gap: a custom operation. | `session` (an `AsyncSession`), `record` (the model of the entity), and `params` (a Pydantic model) if the operation has `params`. Return the record of `returns`. The endpoint commits the session after the function. |
+| `app/core/password_reset_ext.py`                | A gap: the delivery of the password reset links (`auth.password_reset`). | `deliver_password_reset(settings, user, link)`: send the link to the user, for example by email. The stub writes the link to the log with `ENVIRONMENT=development`, and else raises `NotImplementedError` (the endpoint gives 501). |
 | `app/features/<slice>/validation_ext.py`        | An optional hook, not a gap (`@trace:manual`). | `validate(session, record, *, created)`: the create and update endpoints call it. Raise `ProblemError(422, "<reason>")` of `app.core.errors` to reject the record. By default, it accepts all records. |
 | `migrations/versions/0001_schema.py`            | The first migration, not a gap (`@trace:manual app`). | Alembic runs it. appgen writes it once and never changes it. |
 
 - `app/features/<slice>/repository.py` has `get(session, id)`,
-  `create(session, data)`, `update(session, record, data)`, and
-  `delete(session, record)`. The models are in
-  `app/features/<slice>/models.py`, and the schemas in `schemas.py`.
+  `add(session, data)` (without a commit), `create(session, data)`,
+  `update(session, record, data)`, and `delete(session, record)`. The
+  models are in `app/features/<slice>/models.py`, and the schemas in
+  `schemas.py`.
 - Raise `ProblemError` of `app.core.errors` for an error response, for
   example `ProblemError(409, "The booking is cancelled already.")`.
 - The generated test of a custom operation accepts the status 501 of the
