@@ -115,7 +115,7 @@ fi
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/fastapi/*' \
     'examples/project-tracker/*' 'scripts/check-fastapi.sh' 'scripts/smoke_test.py' \
-    'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
+    'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     check_fastapi
 fi
 

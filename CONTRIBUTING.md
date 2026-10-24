@@ -279,9 +279,13 @@ manual steps.
   exist. The Node image trusts the CA of the session proxy, so that
   `pnpm install` in `docker build` works. Its name must start with
   `localhost/`, else BuildKit pulls the image of the same name from
-  Docker Hub. The SessionStart hook `.claude/hooks/session-start.sh`
-  runs the script, and `scripts/check-nextjs.sh` and
-  `scripts/check-react.sh` run it again in cloud sessions.
+  Docker Hub. The script also sets `core.hooksPath`, so that the
+  pre-push hook runs. The SessionStart hook
+  `.claude/hooks/session-start.sh` runs the script, and each check
+  script runs it again in cloud sessions. A session can start without
+  a running daemon, or with stale PID files of an earlier daemon. The
+  script removes the stale files and starts the daemon again. On a
+  machine without `dockerd`, the script skips the Docker steps.
 - Docker Hub gives status 429 and ghcr.io is blocked in the sandbox,
   so the checks use mirror images. `scripts/sandbox.env` gives these
   variables. The SessionStart hook loads the file into the session, and

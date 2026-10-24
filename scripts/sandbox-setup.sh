@@ -5,7 +5,9 @@
 # checks (NODE_IMAGE) if it does not exist.
 #
 # - The daemon of the environment setup script does not continue into
-#   the session, so each session must start it again.
+#   the session, so each session must start it again. Stale PID files
+#   and sockets from an earlier daemon stop dockerd, so the script
+#   removes them first.
 # - The FastAPI tests (testcontainers) cannot pull an image from a
 #   mirror by themselves, so the script pulls it first.
 # - pnpm install in `docker build` must trust the CA of the session
@@ -19,9 +21,10 @@
 #
 #   scripts/sandbox-setup.sh
 #
-# The script does nothing outside cloud sessions (CLAUDE_CODE_REMOTE is
-# not "true"), or when Docker is not installed. A failed step prints a
-# message, and the script continues.
+# The script also enables the pre-push hook (core.hooksPath). It does
+# nothing outside cloud sessions (CLAUDE_CODE_REMOTE is not "true"). It
+# skips the Docker steps when Docker or dockerd is not installed. A
+# failed step prints a message, and the script continues.
 #
 # Environment variables (scripts/sandbox.env gives the defaults):
 #   POSTGRES_IMAGE  The Postgres image to pull.
@@ -35,22 +38,34 @@ set -u
 # shellcheck source=scripts/sandbox.env
 . "$(dirname "$0")/sandbox.env"
 
+say() {
+    echo "sandbox-setup: $*" >&2
+}
+
+# Enable the pre-push hook (see CONTRIBUTING.md, section "Pre-push hook").
+git -C "$(dirname "$0")/.." config core.hooksPath .githooks || say "cannot set core.hooksPath"
+
 command -v docker >/dev/null 2>&1 || exit 0
 
 image=$NODE_IMAGE
 ca_file=${APPGEN_CA_FILE:-/root/.ccr/ca-bundle.crt}
 
-say() {
-    echo "sandbox-setup: $*" >&2
-}
-
 if ! docker info >/dev/null 2>&1; then
+    if ! command -v dockerd >/dev/null 2>&1; then
+        say "no dockerd; skip the Docker steps"
+        exit 0
+    fi
+    # The file system of a session can keep the PID files and the
+    # sockets of a daemon that does not run any more. dockerd then waits
+    # for a containerd that does not run, and does not start.
+    if ! pgrep -x dockerd >/dev/null 2>&1 && ! pgrep -x containerd >/dev/null 2>&1; then
+        rm -f /var/run/docker.pid /var/run/docker.sock \
+            /var/run/docker/containerd/containerd.pid /var/run/docker/containerd/*.sock*
+    fi
     say "start dockerd"
     # Start the daemon in a new session, so that it continues after the
     # script ends.
-    if command -v dockerd >/dev/null 2>&1; then
-        setsid dockerd >"${TMPDIR:-/tmp}/dockerd.log" 2>&1 </dev/null &
-    fi
+    setsid dockerd >"${TMPDIR:-/tmp}/dockerd.log" 2>&1 </dev/null &
     for _ in $(seq 1 30); do
         docker info >/dev/null 2>&1 && break
         sleep 1
