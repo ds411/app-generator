@@ -31,3 +31,4 @@ gives the rules.
 | 0012   | [Roles and permissions](0012-access.md)                                | Accepted |
 | 0013   | [Production settings of the FastAPI app](0013-fastapi-production.md)   | Accepted |
 | 0014   | [API client of the React app](0014-react-api-client.md)               | Accepted |
+| 0015   | [Agent skills](0015-agent-skills.md)                                   | Accepted |

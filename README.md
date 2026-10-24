@@ -109,6 +109,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
 | `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, `nextjs` writes a Next.js 16 app, `react` writes a React 19 app, and `fastapi` writes a FastAPI REST API. |
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
+| `src/appgen/skills/`   | The agent skill of appgen (ADR 0015).                       |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
 | `docs/`                | The user docs: the DSL, traces, and bindings.               |
@@ -132,6 +133,16 @@ line at the top of the file:
 ```
 
 A relative path to `schema/app.schema.json` also works.
+
+## Agent skill
+
+`src/appgen/skills/appgen/` is an agent skill in the Agent Skills
+format, for Claude Code, Codex, and other agents. It tells an agent how
+to use the CLI: validate a definition, fix the diagnostics, generate an
+app, and check its traces. The skill is a part of the package, so each
+version of appgen has its own skill. Tests fail if the skill and the CLI
+do not agree. [ADR 0015](docs/adr/0015-agent-skills.md) describes the
+design.
 
 ## One definition, three apps
 
