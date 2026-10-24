@@ -33,6 +33,7 @@ export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_val
   },
   numbers: {{ api.numbers | tojson }},
   filters: {{ api.filters | tojson }},
+  sorts: {{ api.sorts | tojson }},
 });
 {% else %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";

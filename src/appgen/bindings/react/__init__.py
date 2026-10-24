@@ -192,7 +192,11 @@ BINDING = Binding(
         *_SHADCN,
         *_HOOKS,
         Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
-        Output(template="src/shared/api/query.ts.j2", path="src/shared/api/query.ts"),
+        Output(
+            template="src/shared/api/query.ts.j2",
+            path="src/shared/api/query.ts",
+            when="not react.api",
+        ),
         Output(
             template="src/shared/api/mock-store.ts.j2",
             path="src/shared/api/mock-store.ts",

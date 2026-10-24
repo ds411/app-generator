@@ -17,6 +17,7 @@ from appgen.bindings.shared.views import (
     definition_display,
     label,
     state_ids,
+    ts_key,
 )
 from appgen.dsl.ui.common import States
 from appgen.dsl.ui.states import effective_states
@@ -54,6 +55,8 @@ class TabPlan:
     """The list view of the related records."""
     where: str | None = None
     """The TypeScript test of the related records, of `row` and `record`."""
+    params: str | None = None
+    """The query parameters of the related records, of `record`, for a view that sends its query."""
     gap: GapSpec | None = None
 
 
@@ -204,10 +207,30 @@ def _tab(
         result.gap = component_gap(ctx.definition, tab.id)
     elif tab.relation and tab.view:
         result.view = tab.view
-        result.where = related_test(ctx, plan.entity, tab.relation)
+        if ctx.view_plan(tab.view).server is not None:
+            result.params = related_params(ctx, plan.entity, tab)
+        else:
+            result.where = related_test(ctx, plan.entity, tab.relation)
     for section_name, section in tab.sections.items():
         result.sections.append(_section(ctx, plan, section_name, section, paths))
     return result
+
+
+def related_params(ctx: ViewContext, entity: str, tab: DetailTab) -> str:
+    """Return the query parameters of the records of a tab of `record`, as TypeScript.
+
+    A `one_to_many` relation gives the foreign key of the inverse relation,
+    and a `many_to_many` relation gives `id`, the list of IDs of the record.
+    """
+    relation = ctx.definition.entities[entity].relations[tab.relation or ""]
+    endpoint = ctx.endpoints[relation.target]
+    if relation.kind == "many_to_many":
+        element_id, value = tab.id, f"{_ROW}.{camel(tab.relation or '')}"
+    else:
+        inverse = ctx.definition.entities[relation.target].relations[relation.inverse or ""]
+        element_id, value = inverse.id, f"{_ROW}.id"
+    name = endpoint.params[element_id][0]
+    return f"{{ {ts_key(name)}: {value} }}"
 
 
 def related_test(ctx: ViewContext, entity: str, relation_name: str) -> str:

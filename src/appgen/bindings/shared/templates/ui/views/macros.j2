@@ -7,7 +7,7 @@
 {% if ns.icons %}
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
-{% set react_names = react + (["useState"] if shape not in ("table", "calendar") or plan.filters or plan.forms else []) %}
+{% set react_names = react + (["useState"] if shape not in ("table", "calendar") or plan.filters or plan.forms or plan.server else []) %}
 {% if react_names %}
 import { {{ react_names | unique | sort | join(", ") }} } from "react";
 {% endif %}
@@ -15,6 +15,9 @@ import { {{ react_names | unique | sort | join(", ") }} } from "react";
 import { toast } from "sonner";
 {% endif %}
 
+{% if plan.server %}
+import type { ApiParams, ApiQuery } from "@/shared/api";
+{% endif %}
 {% for entity in ([plan.entity] + plan.lookups) | unique %}
 import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
@@ -35,18 +38,20 @@ import { formatValue } from "@/shared/lib/format";
 {% if plan.needs("pageHref") %}
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
-{% set query = ["sortBy"] %}
+{% set query = [] if plan.server else ["sortBy"] %}
 {% if plan.lookups %}{% set query = query + ["byId"] %}{% endif %}
 {% if plan.needs("matchesSearch") %}{% set query = query + ["matchesSearch"] %}{% endif %}
 {% if plan.needs("inDateRange") %}{% set query = query + ["inDateRange"] %}{% endif %}
-{% if shape == "cards" %}{% set query = query + ["pageCount", "pageOf"] %}{% endif %}
+{% if shape == "cards" %}{% set query = query + (["pageCount"] if plan.server else ["pageCount", "pageOf"]) %}{% endif %}
 {% if plan.filters | selectattr("kind", "eq", "date_range") | list %}{% set query = query + ["type DateRange"] %}{% endif %}
 {% if plan.filters | selectattr("kind", "eq", "select") | list %}{% set query = query + ["type Option"] %}{% endif %}
+{% if query %}
 import { {{ query | join(", ") }} } from "@/shared/lib/query";
+{% endif %}
 {% if "link" in plan.uses %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
-import { useResource } from "@/shared/lib/use-resource";
+import { {{ "combine, " if plan.server }}useResource } from "@/shared/lib/use-resource";
 {% set actions = [] %}
 {% if plan.actions or plan.bulk_actions %}{% set actions = actions + ["ActionButton"] %}{% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}{% set actions = actions + ["type ActionSpec"] %}{% endif %}
@@ -104,6 +109,9 @@ import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
 
 {% macro data(plan) -%}
 {% set entities = ([plan.entity] + plan.lookups) | unique | list %}
+{% if plan.server %}
+{{ server_data(plan, entities) }}
+{%- else %}
 {% if plan.lookups %}
 type Lookups = {
 {% for entity in plan.lookups %}
@@ -134,6 +142,46 @@ function subscribe(listener: () => void): () => void {
   const stops = [{% for entity in entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
   return () => stops.forEach((stop) => stop());
 }
+{%- endif %}
+{%- endmacro %}
+
+{% macro server_data(plan, entities) -%}
+{% if plan.lookups %}
+type Lookups = {
+{% for entity in plan.lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+
+/** Read the related records that the fields and the filters of the view show. */
+async function loadLookups(): Promise<Lookups> {
+  const [{% for entity in plan.lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for entity in plan.lookups %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} };
+}
+{% else %}
+type Lookups = Record<string, never>;
+
+/** The view shows no related records. */
+function loadLookups(): Promise<Lookups> {
+  return Promise.resolve({});
+}
+{% endif %}
+
+/** Load the page and the related records again after a change of the records. */
+function subscribe(listener: () => void): () => void {
+  const stops = [{% for entity in entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{%- endmacro %}
+
+{% macro server_resource(plan) -%}
+const listPage = useResource(JSON.stringify(query), () => {{ plan.var }}Api.page(query), subscribe, { keep: true });
+  const related = useResource({{ js(plan.name) }}, loadLookups, subscribe);
+  const resource = combine(listPage, related);
 {%- endmacro %}
 
 {% macro filters(plan) -%}
@@ -150,6 +198,16 @@ const INITIAL_FILTERS: Filters = {
 {% endfor %}
 };
 
+{% if plan.server %}
+/** Return the query parameters of the list endpoint for the filters. */
+function filterParams(filters: Filters): ApiParams {
+  return {
+{% for p in plan.server.params %}
+    {{ p.key }}: {{ p.value }},
+{% endfor %}
+  };
+}
+{% else %}
 {% set code = plan.filters | map(attribute="match") | join(" ") %}
 /** Return true if a record passes all filters. */
 function matches(row: {{ plan.type }}, filters: Filters, {{ lookups_param(code) }}: Lookups): boolean {
@@ -159,6 +217,7 @@ function matches(row: {{ plan.type }}, filters: Filters, {{ lookups_param(code) 
 {% endfor %}
   );
 }
+{% endif %}
 {% set options = plan.filters | selectattr("kind", "eq", "select") | list %}
 {% if options %}
 
@@ -176,7 +235,19 @@ function filterOptions({{ lookups_param(options_code) }}: Lookups): Record<strin
 {%- endmacro %}
 
 {% macro sort_function(plan) -%}
-{% if plan.sort %}
+{% if plan.server %}
+
+{% if plan.view.sort %}
+{% if plan.server.sort %}
+/** The sort of the view: {{ plan.view.sort.field }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
+{% else %}
+/** The sort of the view: the list endpoint cannot sort by {{ plan.view.sort.field }}. */
+{% endif %}
+const VIEW_SORT: string[] = {{ js(plan.server.sort) }}; {{ trace(plan.view.sort.id) }}
+{% else %}
+const VIEW_SORT: string[] = [];
+{% endif %}
+{% elif plan.sort %}
 
 /** Sort the records as the view defines: {{ plan.sort.path }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
 function sortRecords(rows: {{ plan.type }}[], {{ lookups_param(plan.sort.sort_expr) }}: Lookups): {{ plan.type }}[] { {{ trace(plan.view.sort.id) }}

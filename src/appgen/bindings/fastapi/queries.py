@@ -12,6 +12,10 @@ A field path of a view can go through relations, for example
 subquery), and a sort key reads the related value with a correlated
 subquery. A computed field and a relation to many records have no sort
 key, because their values are not columns.
+
+A tab of a detail view that lists the records of a `many_to_many`
+relation adds `id`, a list of record IDs, to the list endpoint of the
+target. The React app sends it to load one page of the related records.
 """
 
 from dataclasses import dataclass, field
@@ -25,6 +29,8 @@ from appgen.dsl.ui.views import (
     BooleanFilter,
     CardsView,
     DateRangeFilter,
+    DetailTab,
+    DetailView,
     SearchFilter,
     SelectFilter,
     TableView,
@@ -327,6 +333,9 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
         builder.keys[f.name] = PySortKey(f.name, PyPath(f.name, (), entity, field=f))
     views: list[View] = list(definition.ui.views.values()) if definition.ui is not None else []
     for view in views:
+        if isinstance(view, DetailView):
+            for tab in view.tabs.values():
+                builder.tab(view.entity, tab)
         if view.entity != entity.name:
             continue
         if isinstance(view, TableView | CardsView):
@@ -396,6 +405,23 @@ class _Builder:
             return
         self.add(PyParam(name, attr, type_, kind, path, [filter_.id], test=_test(path)))
 
+    def tab(self, owner: str, tab: DetailTab) -> None:
+        """Add `id` for a tab that lists the records of a `many_to_many` relation."""
+        relation = self.definition.entities[owner].relations.get(tab.relation or "")
+        if relation is None or relation.kind != "many_to_many":
+            return
+        if relation.target != self.entity.name:
+            return
+        existing = self.params.get("id")
+        if existing is not None and existing.path.path == "id":
+            existing.ids.append(tab.id)
+            return
+        path = PyPath("id", (), self.entity)
+        description = "The IDs of the records."
+        self.add(
+            PyParam("id", "id", "list[UUID]", "in", path, [tab.id], description, test=_ID_TEST)
+        )
+
     def sort_key(self, path_text: str, element_id: str) -> None:
         path = self.resolve(path_text)
         relation = path.relation
@@ -457,6 +483,10 @@ class _Builder:
                     "or remove a filter of a view."
                 )
         return PyListQuery(params, list(self.keys.values()))
+
+
+_ID_TEST = TestPlan(attr="id")
+"""A test of `id` makes records, and reads their IDs."""
 
 
 def _names(path: PyPath) -> tuple[str, str]:

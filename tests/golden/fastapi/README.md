@@ -176,6 +176,8 @@ parameters:
 | `search`         | `q`: each word is in one of the fields of the search filters. | `q=alpha` |
 
 A field path of a view keeps its dots, for example `project.status=active`.
+A tab of a detail view that lists the records of a many-to-many relation
+adds `id`, a list of record IDs, to the list endpoint of the target.
 An unknown parameter, value, or sort key gives 422. The response has the
 `items` and the `total` number of records.
 

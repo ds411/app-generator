@@ -1,7 +1,8 @@
 #!/bin/sh
 # Check the API client of the React app: generate the project tracker
 # with `x-react-data: api` for FastAPI and React, start both apps, and
-# load a page with data from the API (scripts/api_client_test.py).
+# open the project table: each page of the table must load with one
+# request to the API (scripts/api_client_test.py).
 # The pre-push hook runs this script when a push changes the React or
 # the FastAPI binding. Run it by hand from the repository root:
 #

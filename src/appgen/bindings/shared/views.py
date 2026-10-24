@@ -6,9 +6,15 @@ its field paths go through, and filters, sorts, and pages the records in
 the browser. The values of a field path are TypeScript expressions over a
 record (`row`) and the related records (`lookups`), for example
 `lookups.person.get(row.ownerId ?? "")?.name`.
+
+The React app with the FastAPI app (`x-react-data: api`) gives the names
+of the list endpoints (`ListEndpoint`). Then a table or a card list sends
+its filters, its sort, and its page to the API, and loads one page
+(`ServerPlan`). The related records still come from the browser.
 """
 
-from collections.abc import Callable, Iterable
+import re
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -240,6 +246,38 @@ class CalendarPlan:
     mode: str
 
 
+@dataclass(frozen=True, slots=True)
+class ListEndpoint:
+    """The names of the list endpoint of an entity, for the views that send their query to it."""
+
+    params: dict[str, list[str]]
+    """The names of the query parameters of each element ID: a filter, a relation, or a tab."""
+    sort_keys: frozenset[str]
+    """The field paths that the endpoint can sort by. A sort key has the name of its path."""
+
+
+@dataclass(frozen=True, slots=True)
+class ServerParam:
+    """A query parameter that a list view sends: its name and its TypeScript value of `filters`."""
+
+    name: str
+    value: str
+    key: str
+    """The name as a key of a TypeScript object: quoted if it has a dot."""
+
+
+@dataclass(slots=True)
+class ServerPlan:
+    """The query that a list view sends to the list endpoint of the API."""
+
+    params: list[ServerParam] = field(default_factory=list[ServerParam])
+    """The parameters of the filters of the view."""
+    sort: list[str] = field(default_factory=list[str])
+    """The sort keys of the sort of the view, with `-` for descending order."""
+    columns: dict[str, str] = field(default_factory=dict[str, str])
+    """The sort key of each sortable column, by the ID of the column."""
+
+
 @dataclass(slots=True)
 class ViewPlan:
     """The values of a list view that its template needs."""
@@ -285,6 +323,8 @@ class ViewPlan:
     """The value components and helpers that the view uses, for its imports."""
     icons: set[str] = field(default_factory=set[str])
     """The Lucide icons that the view uses."""
+    server: ServerPlan | None = None
+    """The query that the view sends to the API, or None if the view reads all records."""
 
     @property
     def type(self) -> str:
@@ -295,10 +335,14 @@ class ViewPlan:
         return camel(self.entity)
 
     def code(self) -> str:
-        """Return the TypeScript expressions of the view, to find the helpers that they call."""
-        parts = [f.match + (f.options or "") for f in self.filters]
+        """Return the TypeScript expressions of the view, to find the helpers that they call.
+
+        A view that sends its query to the API does not match or sort the records.
+        """
+        server = self.server is not None
+        parts = [("" if server else f.match) + (f.options or "") for f in self.filters]
         parts += [c.cell + c.value.sort_expr for c in self.columns]
-        parts += [self.sort.sort_expr] if self.sort else []
+        parts += [self.sort.sort_expr] if self.sort and not server else []
         card = self.card
         if card is not None:
             parts += [card.title, card.href or "", card.subtitle or "", card.badge or ""]
@@ -383,10 +427,21 @@ class UsesParts(Protocol):
 class ViewContext:
     """The values that the view templates read: badges, values, and view plans."""
 
-    def __init__(self, definition: AppDefinition, *, forms: bool = False) -> None:
-        """Make the context; `forms` is True if the binding generates the forms (`form_rules`)."""
+    def __init__(
+        self,
+        definition: AppDefinition,
+        *,
+        forms: bool = False,
+        endpoints: Mapping[str, ListEndpoint] | None = None,
+    ) -> None:
+        """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
+
+        With `endpoints` (the list endpoints by entity name), the tables and
+        the card lists send their query to the API.
+        """
         self.definition = definition
         self.with_forms = forms
+        self.endpoints: dict[str, ListEndpoint] = dict(endpoints or {})
         ui = definition.ui
         self.badge_sets: dict[str, BadgeSet] = dict(ui.badges) if ui else {}
         self.list_views: dict[str, str] = {
@@ -414,6 +469,11 @@ class ViewContext:
         return bool(
             self.list_views or self.detail_views or self.dashboards or self.page_action_bars
         )
+
+    @property
+    def server(self) -> bool:
+        """Return True if the tables and the card lists send their query to the API."""
+        return bool(self.endpoints)
 
     @property
     def computed(self) -> bool:
@@ -827,7 +887,60 @@ class ViewContext:
             plan.calendar = self._calendar(plan, view)
         if plan.filters:
             plan.uses.add("filters")
+        endpoint = self.endpoints.get(view.entity)
+        if endpoint is not None and isinstance(view, TableView | CardsView):
+            plan.server = self._server(plan, view, endpoint)
         return plan
+
+    def _server(
+        self, plan: ViewPlan, view: TableView | CardsView, endpoint: ListEndpoint
+    ) -> ServerPlan:
+        """Return the query that a view sends to the list endpoint of its entity.
+
+        A column without a sort key on the server cannot sort, and a sort of
+        the view without a sort key (a computed field) does not apply.
+        """
+        values: dict[str, list[str]] = {}
+        for f in plan.filters:
+            names = endpoint.params.get(f.element_id)
+            if not names:
+                raise GenerationError(
+                    f"The list endpoint of {plan.entity} has no parameter for {f.element_id}."
+                )
+            state = f"filters.{f.key}"
+            for name in names:
+                if f.kind == "date_range":
+                    value = f"{state}.{'from' if name.endswith('_from') else 'to'}"
+                elif f.kind == "boolean":
+                    value = f"{state} || null"
+                elif f.multiple:
+                    # An empty list matches no records: no selection is no filter.
+                    value = f"{state}.length > 0 ? {state} : null"
+                else:
+                    value = state
+                values.setdefault(name, []).append(value)
+        server = ServerPlan()
+        for name, items in values.items():
+            if len(items) > 1 and name != "q":
+                raise GenerationError(
+                    f"The view '{plan.name}' has two filters of the query parameter '{name}'. "
+                    "Remove one of them."
+                )
+            # The words of all search filters must be in the record.
+            value = items[0] if len(items) == 1 else "[" + ", ".join(items) + '].join(" ")'
+            server.params.append(ServerParam(name, value, ts_key(name)))
+        if view.sort is not None and view.sort.field in endpoint.sort_keys:
+            server.sort.append(("-" if view.sort.direction == "desc" else "") + view.sort.field)
+        if isinstance(view, TableView):
+            for name, column in view.columns.items():
+                path = column.field or name
+                if column.sortable and path in endpoint.sort_keys:
+                    server.columns[camel(name)] = path
+            plan.columns = [
+                c if camel(c.name) in server.columns else replace(c, sortable=False)
+                for c in plan.columns
+            ]
+        return server
 
     def jsx(self, value: Value, plan: UsesParts, avatar: bool = False) -> str:
         """Return the JSX that shows a value of `row`, and note the components it needs."""
@@ -1304,6 +1417,11 @@ def grid_classes(grid: Grid | None, columns: int = 1) -> str:
         if override.gap:
             classes.append(f"max-{breakpoint}:gap-{css_class_var(override.gap)}")
     return " ".join(classes)
+
+
+def ts_key(name: str) -> str:
+    """Return a name as a key of a TypeScript object: in quotes if it is not an identifier."""
+    return name if re.fullmatch(r"[A-Za-z_$][\w$]*", name) else js(name)
 
 
 def lookups_param(code: str) -> str:

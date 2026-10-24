@@ -275,11 +275,16 @@ app:
 - The paths, the methods, and the JSON names come from the model of the
   FastAPI binding, which also makes the OpenAPI document of the API.
   `scripts/check-react-api.sh` starts both apps, checks each endpoint of
-  the client in the OpenAPI document, and loads a page with data from
+  the client in the OpenAPI document, and opens the project table with
+  more projects than one page: each page must load with one request,
+  and the search, the sort, and the tabs of a project must load from
   the API. The pre-push hook runs it.
-- The client sends the equality filters of the list endpoints to the
-  API, loads all pages, and searches, sorts, and pages the records in
-  the browser.
+- A table or a card list sends its filters, its search, its sort, and
+  its page to the list endpoint (`HttpStore.page`), and loads one page.
+  A tab of a detail view adds the foreign key of its relation, or `id`
+  (the IDs of a `many_to_many` relation). The related records that a
+  view shows, the boards, the forms, and the dashboards load all pages.
+  `applyQuery` runs only with mock data.
 - A custom operation calls its endpoint: the FastAPI app runs the
   logic, so the React app has no extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request
