@@ -4,6 +4,7 @@
 import {
   type ColumnDef,
   flexRender,
+  functionalUpdate,
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
@@ -31,9 +32,18 @@ function metaOf(meta: unknown): DataColumnMeta | undefined {
   return meta as DataColumnMeta | undefined;
 }
 
+/** The page and the sort of a table whose server sorts and pages the records. */
+export type ServerPages = {
+  page: number;
+  pageSize: number;
+  sorting: SortingState;
+};
+
 /**
  * A table of records with sorting, pages, and selection: the data table of
- * shadcn/ui on TanStack Table. The view filters the records first.
+ * shadcn/ui on TanStack Table. The view filters the records first. With
+ * `server`, `data` is one page, and the view loads the page and the sort
+ * that `server.onChange` gives.
  */
 export function DataTable<T extends { id: string }>({
   columns,
@@ -46,6 +56,7 @@ export function DataTable<T extends { id: string }>({
   bulkActions,
   rowActions,
   onRowClick,
+  server,
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -60,6 +71,8 @@ export function DataTable<T extends { id: string }>({
   /** The menu of one record, in the last column. */
   rowActions?: (record: T) => ReactNode;
   onRowClick?: (record: T) => void;
+  /** The pages and the sort on the server, with the count of all records. */
+  server?: ServerPages & { total: number; onChange: (pages: ServerPages) => void };
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -109,16 +122,29 @@ export function DataTable<T extends { id: string }>({
       : []),
   ];
 
+  const state = server
+    ? { sorting: server.sorting, pagination: { pageIndex: server.page - 1, pageSize: server.pageSize } }
+    : { sorting, pagination };
   const table = useReactTable({
     data,
     columns: allColumns,
-    state: { sorting, rowSelection, pagination },
+    state: { ...state, rowSelection },
     getRowId: (row) => row.id,
-    onSortingChange: setSorting,
+    onSortingChange: server
+      ? (update) => server.onChange({ page: 1, pageSize: server.pageSize, sorting: functionalUpdate(update, server.sorting) })
+      : setSorting,
     onRowSelectionChange: setRowSelection,
-    onPaginationChange: setPagination,
+    onPaginationChange: server
+      ? (update) => {
+          const next = functionalUpdate(update, state.pagination);
+          server.onChange({ page: next.pageIndex + 1, pageSize: next.pageSize, sorting: server.sorting });
+        }
+      : setPagination,
     enableRowSelection: selection,
     autoResetPageIndex: false,
+    manualSorting: server !== undefined,
+    manualPagination: server !== undefined,
+    rowCount: server?.total,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -194,13 +220,13 @@ export function DataTable<T extends { id: string }>({
         </Table>
       </div>
       <ListPagination
-        page={pagination.pageIndex + 1}
+        page={state.pagination.pageIndex + 1}
         pageCount={Math.max(1, table.getPageCount())}
-        pageSize={pagination.pageSize}
+        pageSize={state.pagination.pageSize}
         pageSizes={pageSizes}
-        total={data.length}
-        onPageChange={(page) => setPagination((value) => ({ ...value, pageIndex: page - 1 }))}
-        onPageSizeChange={(size) => setPagination({ pageIndex: 0, pageSize: size })}
+        total={server?.total ?? data.length}
+        onPageChange={(page) => table.setPageIndex(page - 1)}
+        onPageSizeChange={(size) => table.setPagination({ pageIndex: 0, pageSize: size })}
       />
     </div>
   );

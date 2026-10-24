@@ -110,7 +110,10 @@ of the entity in snake case, for example `bookings`.
   a component with `useResource` of `@/shared/lib/use-resource`.
 - With `x-react-data: api` in `app`, the app uses the FastAPI app of the
   same definition. Then a custom operation calls its endpoint, and has
-  no extension file: fill the gap in the FastAPI app.
+  no extension file: fill the gap in the FastAPI app. `<entity>Api.list`
+  takes only the filters `eq` and `in` and the sort that the list
+  endpoint takes, and no search. `<entity>Api.page({ params, sort,
+  page, pageSize })` loads one page with the parameters of the API.
 - Test: `pnpm install`, `pnpm lint`, `pnpm typecheck`, and
   `pnpm build`. Run it with `pnpm dev`.
 

@@ -213,7 +213,11 @@ export function {{ name | pascal }}View({ id }: {{ name | pascal }}ViewProps) {
 {% if tab.gap %}
           <{{ tab.gap.name }} record={record} />
 {% elif tab.view %}
+{% if tab.params %}
+          <{{ tab.view | pascal }}View params={ {{- tab.params -}} } />
+{% else %}
           <{{ tab.view | pascal }}View where={(row) => {{ tab.where }}} />
+{% endif %}
 {% endif %}
 {% for s in tab.sections %}
 {{ section(s, 10) }}

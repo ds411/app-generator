@@ -466,7 +466,10 @@ template global `ui_views`, with the output rules of
 form from `appgen.bindings.shared.forms` (the template global
 `ui_forms`, with the output rules of `forms.form_rules()`). A binding
 that generates the forms makes `ViewContext(definition, forms=True)`, so
-that the form actions of the views open the forms.
+that the form actions of the views open the forms. With `endpoints` (the
+names of the list endpoints of the FastAPI app), the tables and the card
+lists send their filters, their sort, and their page to the API
+(`ServerPlan`), and load one page.
 The detail view templates in `ui/details/`
 render a `DetailPlan` from `appgen.bindings.shared.details`: a header
 with the title, subtitle, badges, and actions, the sections as cards with

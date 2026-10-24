@@ -1,7 +1,6 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-import { applyQuery } from "./query";
-import { type EntityApi, type EntityRecord, type ListQuery, type ListResult, NotFoundError } from "./types";
+import { type EntityApi, type EntityRecord, type Filter, type ListQuery, type ListResult, NotFoundError } from "./types";
 
 /** The JSON names of an entity in the API. */
 export type ApiShape = {
@@ -9,18 +8,39 @@ export type ApiShape = {
   keys: Readonly<Record<string, string>>;
   /** The keys of the decimal fields: the API sends them as text. */
   numbers: readonly string[];
-  /** The keys that the list endpoint can filter by equality. */
-  filters: readonly string[];
+  /** The keys that the list endpoint can filter by: `one` value, or a `list` of values. */
+  filters: Readonly<Record<string, "one" | "list">>;
+  /** The keys that the list endpoint can sort by. */
+  sorts: readonly string[];
+};
+
+/**
+ * A value of a query parameter. A query leaves out null, undefined, and an
+ * empty text. An empty list matches no records, for example the related
+ * records of a record without relations.
+ */
+export type ApiParam = string | number | boolean | null | undefined | readonly string[];
+
+/** The query parameters of a list endpoint, for example `{ status: ["open"], q: "text" }`. */
+export type ApiParams = Readonly<Record<string, ApiParam>>;
+
+/** A query of a list endpoint in the names of the API: the parameters, the sort keys, and the page. */
+export type ApiQuery = {
+  params?: ApiParams;
+  /** The sort keys, for example `["-due_date", "owner"]`. A `-` sorts in descending order. */
+  sort?: readonly string[];
+  /** The page number, from 1. */
+  page: number;
+  pageSize: number;
 };
 
 /** The largest page of the list endpoints. */
 const PAGE_LIMIT = 200;
 
 /**
- * The records of one entity in the FastAPI app. The list endpoint filters
- * by equality, and gives pages. The other filters, the search, the order,
- * and the pages of the UI apply in the browser to all records that the
- * endpoint returns.
+ * The records of one entity in the FastAPI app. The list endpoint filters,
+ * searches, sorts, and pages the records: a view sends its query with
+ * `page`, and loads one page.
  */
 export class HttpStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
@@ -33,38 +53,37 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     private readonly path: string,
     private readonly shape: ApiShape,
   ) {
-    this.jsonNames = Object.fromEntries(Object.entries(shape.keys).map(([json, key]) => [key, json]));
+    this.jsonNames = { id: "id", ...Object.fromEntries(Object.entries(shape.keys).map(([json, key]) => [key, json])) };
   }
 
+  /** Load one page of the list endpoint. */
+  async page(query: ApiQuery): Promise<ListResult<T>> {
+    const offset = (query.page - 1) * query.pageSize;
+    const { items, total } = await this.load(query.params ?? {}, query.sort ?? [], offset, query.pageSize);
+    return { items, total, page: query.page, pageSize: query.pageSize };
+  }
+
+  /**
+   * Load the records of a query: one page with `page`, else all pages. The
+   * API takes the filters `eq` and `in` and the sort of the keys of its shape,
+   * and no search: other queries throw an error.
+   */
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
-    const params = new URLSearchParams();
-    const local = [];
-    for (const filter of query.filters ?? []) {
-      const json = this.jsonNames[filter.field];
-      const value = filter.value;
-      if (
-        filter.op === "eq" &&
-        json !== undefined &&
-        this.shape.filters.includes(filter.field) &&
-        (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
-      ) {
-        params.set(json, String(value));
-      } else {
-        local.push(filter);
+    if (query.search?.text.trim()) {
+      throw new Error(`list() of ${this.entity} cannot search. Send the search of a view with page().`);
+    }
+    const params = Object.fromEntries((query.filters ?? []).map((filter) => this.param(filter)));
+    const sort = (query.sort ?? []).map(({ field, direction }) => {
+      if (!this.shape.sorts.includes(field)) {
+        throw new Error(`The list of ${this.entity} cannot sort by ${field}.`);
       }
+      return `${direction === "desc" ? "-" : ""}${this.jsonNames[field] ?? field}`;
+    });
+    if (query.page !== undefined) {
+      return this.page({ params, sort, page: query.page, pageSize: query.pageSize ?? PAGE_LIMIT });
     }
-    const records: T[] = [];
-    for (let offset = 0; ; offset += PAGE_LIMIT) {
-      params.set("limit", String(PAGE_LIMIT));
-      params.set("offset", String(offset));
-      const page = (await apiRequest("GET", `${this.path}?${params.toString()}`)) as {
-        items: Record<string, unknown>[];
-        total: number;
-      };
-      records.push(...page.items.map((item) => this.fromJson(item)));
-      if (page.items.length === 0 || records.length >= page.total) break;
-    }
-    return applyQuery(records, { ...query, filters: local });
+    const { items, total } = await this.load(params, sort, 0, Infinity);
+    return { items, total, page: 1, pageSize: total || 1 };
   }
 
   async get(id: string): Promise<T> {
@@ -111,6 +130,56 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
       record[key] = this.shape.numbers.includes(key) && typeof value === "string" ? Number(value) : value;
     }
     return record as T;
+  }
+
+  /** Return the query parameter of a filter. */
+  private param(filter: Filter<T>): [string, ApiParam] {
+    const kind = this.shape.filters[filter.field];
+    const name = this.jsonNames[filter.field];
+    const value = filter.value;
+    const one = typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+    const list = Array.isArray(value) && value.every((item) => typeof item === "string");
+    if (name && ((filter.op === "eq" && kind && one) || (filter.op === "in" && kind === "list" && list))) {
+      return [name, value as ApiParam];
+    }
+    throw new Error(`The list of ${this.entity} cannot filter ${filter.field} with ${filter.op}.`);
+  }
+
+  /** Load `count` records from `offset`, with requests of at most PAGE_LIMIT records. */
+  private async load(
+    params: ApiParams,
+    sort: readonly string[],
+    offset: number,
+    count: number,
+  ): Promise<{ items: T[]; total: number }> {
+    if (Object.values(params).some((value) => typeof value === "object" && value?.length === 0)) {
+      return { items: [], total: 0 };
+    }
+    const search = new URLSearchParams();
+    for (const [name, value] of Object.entries(params)) {
+      for (const item of typeof value === "object" && value !== null ? value : [value]) {
+        if (item !== null && item !== undefined && item !== "") {
+          search.append(name, String(item));
+        }
+      }
+    }
+    if (sort.length > 0) {
+      search.set("sort", sort.join(","));
+    }
+    const items: T[] = [];
+    let total = 0;
+    while (items.length < count) {
+      search.set("limit", String(Math.min(PAGE_LIMIT, count - items.length)));
+      search.set("offset", String(offset + items.length));
+      const page = (await apiRequest("GET", `${this.path}?${search.toString()}`)) as {
+        items: Record<string, unknown>[];
+        total: number;
+      };
+      items.push(...page.items.map((item) => this.fromJson(item)));
+      total = page.total;
+      if (page.items.length === 0 || offset + items.length >= total) break;
+    }
+    return { items, total };
   }
 
   private toJson(values: object): Record<string, unknown> {

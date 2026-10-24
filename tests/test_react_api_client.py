@@ -76,3 +76,60 @@ def test_the_key_takes_only_mock_or_api() -> None:
     assert validate_definition(definition) == []
     codes = [d.code for d in check_extensions(definition, [react.BINDING])]
     assert codes == ["invalid-value"]
+
+
+def test_a_table_sends_its_filters_its_sort_and_its_page_to_the_api() -> None:
+    output = files("project-tracker", "api")
+    view = output["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert (
+        "const listPage = useResource(JSON.stringify(query), () => projectApi.page(query)" in view
+    )
+    assert "    q: filters.search,\n" in view
+    assert "    status: filters.status.length > 0 ? filters.status : null,\n" in view
+    assert "    owner_id: filters.owner,\n" in view
+    assert "    due_date_from: filters.due.from,\n" in view
+    assert 'const VIEW_SORT: string[] = ["due_date"]; // @trace ui.views.project_table.sort' in view
+    assert '  owner: "owner",\n' in view
+    assert "server={{ ...pages, total, onChange: setPages }}" in view
+    # The view does not filter or sort in the browser.
+    assert "matches(" not in view
+    assert "sortBy" not in view
+    assert "src/shared/api/query.ts" not in output
+
+
+def test_a_card_list_loads_one_page_and_a_boolean_filter_sends_only_true() -> None:
+    view = files("project-tracker", "api")["src/widgets/person-cards/ui/person-cards-view.tsx"]
+    assert "() => personApi.page(query)" in view
+    assert "    active: filters.active || null,\n" in view
+    assert "{rows.map((row) => (" in view
+    assert "pageOf(" not in view
+
+
+def test_a_tab_of_a_detail_view_sends_the_parameter_of_its_relation() -> None:
+    output = files("project-tracker", "api")
+    detail = output["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert "<TaskTableView params={{ project_id: record.id }} />" in detail
+    assert "<PersonCardsView params={{ id: record.members }} />" in detail
+    api = output["src/entities/person/api/person-api.ts"]
+    assert '"id": "list"' in api
+    assert 'sorts: ["name", "email", "role", "active"],' in api
+
+
+def test_with_mock_data_the_views_filter_and_sort_in_the_browser() -> None:
+    output = files("project-tracker", None)
+    view = output["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert "all.filter((row) => matches(row, filters, lookups))" in view
+    assert "where?: (record: Project) => boolean;" in view
+    assert "src/shared/api/query.ts" in output
+    detail = output["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert "<TaskTableView where={(row) => row.projectId === record.id} />" in detail
+
+
+def test_a_field_path_is_a_quoted_parameter_name() -> None:
+    text = (ROOT / "tests" / "fixtures" / "react-views.yaml").read_text()
+    text = text.replace("title: Views }", "title: Views, x-react-data: api }", 1)
+    definition = load_definition_text(text, "app.yaml")
+    output = {f.path: f.content for f in generate(definition, react.BINDING).files}
+    view = next(content for path, content in output.items() if path.endswith("item-table-view.tsx"))
+    assert re.search(r'\n    "owner\.team_id": filters\.\w+', view)
+    assert '"owner.team.lead.name"' in view

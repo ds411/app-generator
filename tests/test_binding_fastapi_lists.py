@@ -149,6 +149,18 @@ def test_an_entity_without_views_has_no_tests_of_a_query(fastapi: Binding) -> No
     assert "tests/ordering.py" not in paths
 
 
+def test_a_tab_of_a_many_to_many_relation_adds_the_ids_to_its_target(fastapi: Binding) -> None:
+    result = generate(load_definition(TRACKER), fastapi)
+    code = _file(result, "app/features/people/list_people.py")
+    tests = _file(result, "tests/features/people/test_list_people_query.py")
+
+    assert "    # @trace ui.views.project_detail.tabs.members\n    id: list[UUID] | None" in code
+    assert "statement = statement.where(Person.id.in_(query.id))" in code
+    assert "async def test_list_people_filters_by_id(" in tests
+    # A tab of a one_to_many relation uses the foreign key of the inverse relation.
+    assert "    id: list[UUID]" not in _file(result, "app/features/tasks/list_tasks.py")
+
+
 def test_the_generated_python_compiles(result: GenerationResult) -> None:
     for f in result.files:
         if f.path.endswith(".py"):

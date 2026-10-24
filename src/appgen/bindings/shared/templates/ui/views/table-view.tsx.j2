@@ -4,7 +4,7 @@
 {{ trace_header(element_id) }}
 "use client";
 
-{% set ui_lines = ['import { DataTable } from "@/shared/ui/data-table";'] %}
+{% set ui_lines = ['import { DataTable' ~ (', type ServerPages' if plan.server else '') ~ ' } from "@/shared/ui/data-table";'] %}
 import type { ColumnDef } from "@tanstack/react-table";
 {{ m.imports(plan, "table", ui=ui_lines) }}
 
@@ -43,15 +43,71 @@ const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
 const PAGE_SIZE = {{ plan.page_size }};
 {% endif %}
 const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+{% if plan.server %}
+
+/** The sort key of the list endpoint for each column that can sort. */
+const SORT_KEYS: Record<string, string> = {
+{% for column_id, key in plan.server.columns.items() %}
+  {{ column_id }}: {{ js(key) }},
+{% endfor %}
+};
+
+/** Return the sort keys of the list endpoint: the sort of a column first, then the sort of the view. */
+function sortKeys(sorting: ServerPages["sorting"]): string[] {
+  const keys = sorting.flatMap(({ id, desc }) => (SORT_KEYS[id] ? [`${desc ? "-" : ""}${SORT_KEYS[id]}`] : []));
+  return [...keys, ...VIEW_SORT];
+}
+
+export type {{ name | pascal }}ViewProps = {
+  /** Query parameters of the list endpoint that the view adds, for example the records of one parent. */
+  params?: ApiParams;
+};
+{% else %}
 
 export type {{ name | pascal }}ViewProps = {
   /** Show only the records that pass this test, for example the records of one parent. */
   where?: (record: {{ plan.type }}) => boolean;
 };
+{% endif %}
 
 {% if view.title %}
 /** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
 {% endif %}
+{% if plan.server %}
+export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps) {
+{% if plan.filters %}
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+{% endif %}
+  const [pages, setPages] = useState<ServerPages>({ page: 1, pageSize: PAGE_SIZE, sorting: [] });
+  const query: ApiQuery = {
+    params: { ...params{% if plan.filters %}, ...filterParams(filters){% endif %} },
+    sort: sortKeys(pages.sorting),
+    page: pages.page,
+    pageSize: pages.pageSize,
+  };
+  {{ m.server_resource(plan) }}
+{% if plan.actions or plan.row_actions or plan.bulk_actions %}
+{{ m.runner(plan) }}
+{% endif %}
+{% if plan.filters %}
+
+  const updateFilters = (next: Filters) => {
+    setFilters(next);
+    setPages((value) => ({ ...value, page: 1 }));
+  };
+{% endif %}
+
+{{ m.states(plan, "table") }}
+
+  const [{ items: rows, total }, lookups] = resource.data;
+{{ m.action_lookups(plan) -}}
+{% if plan.filters %}
+  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+{% if plan.filters | selectattr("kind", "eq", "select") | list %}
+  const options = filterOptions(lookups);
+{% endif %}
+{% endif %}
+{% else %}
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
 {% if plan.filters %}
@@ -76,15 +132,20 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% else %}
   const rows = sortRecords(all, lookups);
 {% endif %}
+{% endif %}
 {% set click = plan.row_action(view.row_click) %}
 
   return (
     <div className="space-y-4">
 {{ m.toolbar(plan) }}
+{% if plan.server %}
+      {total === 0{{ " && !filtered" if plan.filters }} ? (
+{% else %}
       {all.length === 0 ? (
+{% endif %}
 {{ m.empty_state(plan) | indent(2, true) }}
 {% if plan.filters %}
-      ) : rows.length === 0 ? (
+      ) : {{ "total" if plan.server else "rows.length" }} === 0 ? (
         <ViewMessage
           title={{ jsx_attr("No matching records") }}
           text={{ jsx_attr("Change or reset the filters.") }}
@@ -101,7 +162,9 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
           data={rows}
           pageSize={PAGE_SIZE}
           pageSizes={PAGE_SIZES}
-{% if plan.filters %}
+{% if plan.server %}
+          server={{ '{{' }} ...pages, total, onChange: setPages {{ '}}' }}
+{% elif plan.filters %}
           resetKey={JSON.stringify(filters)}
 {% endif %}
 {% if view.selection %}

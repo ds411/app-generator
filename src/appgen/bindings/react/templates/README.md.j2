@@ -49,9 +49,10 @@ VITE_API_URL=http://localhost:8000 pnpm dev
 ```
 
 The API must allow the origin of the app: set `CORS_ORIGINS` of the
-FastAPI app, for example `["http://localhost:5173"]`. The list endpoints
-filter only by equality, so the app loads all records of a list, and
-searches, sorts, and pages them in the browser.
+FastAPI app, for example `["http://localhost:5173"]`. A table or a card
+list sends its filters, its search, its sort, and its page to the list
+endpoint, and loads one page. The related records that a view shows
+(for example the owner of a project) and the boards load all pages.
 {% if definition.auth %}
 The sign-in uses `POST /auth/sign-in` of the API, and each request sends
 the token.

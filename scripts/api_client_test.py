@@ -8,9 +8,13 @@ that the two generated apps work together:
    FastAPI binding and the React binding.
 2. Start the FastAPI app with SQLite (`uv run uvicorn`), and check that
    each endpoint of the API client is in its OpenAPI document.
-3. Add a person and a project with the API.
-4. Build the React app with `VITE_API_URL`, start it (`pnpm preview`),
-   and open the page `/projects` in Chromium: it must show the project.
+3. Add a person, and more projects than one page of the project table,
+   with the API.
+4. Type check, lint, and build the React app with `VITE_API_URL`, start
+   it (`pnpm preview`), and open the page `/projects` in Chromium. The
+   table must load each page with one request to the list endpoint, and
+   send its search and its sort to the API. The tabs of a project must
+   load the tasks and the members of the project from the API.
 
 Run it from the repository root:
 
@@ -50,15 +54,23 @@ API_PORT = 8420
 WEB_PORT = 5420
 API_URL = f"http://localhost:{API_PORT}"
 WEB_URL = f"http://localhost:{WEB_PORT}"
-PROJECT_NAME = "Apollo API test"
+PAGE_SIZE = 20
+"""The page size of the project table (`ui.views.project_table.pagination`)."""
+PROJECT_COUNT = PAGE_SIZE + 5
 
-# Open a page, and wait until it shows a text. The arguments are the URL
-# and the text.
+# Open the project table, and check the requests to the list endpoint of
+# the projects: one for each page, and the search and the sort of the
+# view. Then open the first project, and check its tabs. The argument is
+# a JSON object with the URLs and the names of the records.
 PAGE_CHECK = """
 const { existsSync } = require("node:fs");
 const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+const timeout = 30000;
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
 (async () => {
-  const [url, text] = process.argv.slice(1);
+  const test = JSON.parse(process.argv[1]);
   const system = "/opt/pw-browsers/chromium";
   let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
   if (!executablePath && !existsSync(chromium.executablePath())) {
@@ -67,8 +79,52 @@ const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-t
   const browser = await chromium.launch({ executablePath });
   try {
     const page = await browser.newPage();
-    await page.goto(url);
-    await page.getByText(text, { exact: true }).first().waitFor({ timeout: 30000 });
+    const lists = [];
+    const failed = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.origin === test.api && url.pathname === "/projects") {
+        lists.push(url.searchParams);
+      }
+    });
+    page.on("response", (response) => {
+      if (response.url().startsWith(test.api) && response.status() >= 400) {
+        failed.push(`${response.status()} ${response.url()}`);
+      }
+    });
+    const shows = (text) => page.getByText(text, { exact: true }).first().waitFor({ timeout });
+
+    await page.goto(`${test.web}/projects`);
+    await shows(test.names[0]);
+    const first = lists[0];
+    check(lists.length === 1, `The first page sent ${lists.length} list requests, not 1.`);
+    check(first.get("limit") === test.pageSize, `The limit is ${first.get("limit")}.`);
+    check(first.get("offset") === "0", `The offset is ${first.get("offset")}.`);
+    check(first.get("sort") === "due_date", `The sort is '${first.get("sort")}', not 'due_date'.`);
+
+    await page.getByRole("button", { name: "Next page" }).click();
+    await shows(test.names[Number(test.pageSize)]);
+    check(lists.length === 2, `The next page sent ${lists.length - 1} list requests, not 1.`);
+    check(lists[1].get("offset") === test.pageSize, `The offset is ${lists[1].get("offset")}.`);
+
+    const last = test.names[test.names.length - 1];
+    await page.getByRole("searchbox", { name: "Search projects" }).fill(last);
+    await shows("1\\u20131 of 1");
+    check(lists.at(-1).get("q") === last, "The search is not in the request.");
+
+    await page.getByRole("button", { name: "Reset", exact: true }).click();
+    const byName = (response) => response.url().includes("sort=name%2Cdue_date");
+    const sorted = page.waitForResponse(byName, { timeout });
+    await page.getByRole("button", { name: "Project", exact: true }).click();
+    await sorted;
+    await shows(test.names[0]);
+
+    await page.goto(`${test.web}/projects/${test.project}`);
+    await page.getByRole("tab", { name: "Tasks" }).click();
+    await shows(test.task);
+    await page.getByRole("tab", { name: "Members" }).click();
+    await shows(test.person);
+    check(failed.length === 0, `The API gave errors: ${failed.join(", ")}`);
   } finally {
     await browser.close();
   }
@@ -193,8 +249,10 @@ def api_client_test(out: Path) -> None:
     log("FastAPI: uv sync and alembic upgrade head")
     run("uv", "sync", "--quiet", cwd=api)
     run("uv", "run", "alembic", "upgrade", "head", cwd=api, env=database)
-    log("React: pnpm install and pnpm build")
+    log("React: pnpm install, typecheck, lint, and build")
     run("pnpm", "install", "--silent", cwd=web)
+    run("pnpm", "--silent", "typecheck", cwd=web)
+    run("pnpm", "--silent", "lint", cwd=web)
     run("pnpm", "--silent", "build", cwd=web, env={"VITE_API_URL": API_URL}, quiet=True)
 
     api_env = {**database, "CORS_ORIGINS": json.dumps([WEB_URL])}
@@ -207,18 +265,39 @@ def api_client_test(out: Path) -> None:
         wait_for(f"{API_URL}/health")
         log("check the endpoints of the API client in the OpenAPI document")
         check_openapi(definition)
-        log("add a person and a project with the API")
+        log(f"add a person, {PROJECT_COUNT} projects, and a task with the API")
         person = request(
             "POST", f"{API_URL}/people", {"name": "Ada API", "email": "ada@example.com"}
         )
-        request(
-            "POST",
-            f"{API_URL}/projects",
-            {"name": PROJECT_NAME, "key": "APT", "owner_id": person["id"]},
-        )
+        names = [f"API project {number:02d}" for number in range(1, PROJECT_COUNT + 1)]
+        projects = [
+            request(
+                "POST",
+                f"{API_URL}/projects",
+                {
+                    "name": name,
+                    "key": "AP" + chr(ord("A") + index),
+                    "owner_id": person["id"],
+                    "due_date": f"2027-01-{index + 1:02d}",
+                    "member_ids": [person["id"]] if index == 0 else [],
+                },
+            )
+            for index, name in enumerate(names)
+        ]
+        task = {"title": "API task", "project_id": projects[0]["id"]}
+        request("POST", f"{API_URL}/tasks", task)
         wait_for(WEB_URL)
-        log(f"open {WEB_URL}/projects, and wait for '{PROJECT_NAME}'")
-        run("node", "-e", PAGE_CHECK, f"{WEB_URL}/projects", PROJECT_NAME)
+        log(f"open {WEB_URL}/projects, and check the requests of the pages")
+        check = {
+            "api": API_URL,
+            "web": WEB_URL,
+            "pageSize": str(PAGE_SIZE),
+            "names": names,
+            "project": projects[0]["id"],
+            "task": task["title"],
+            "person": person["name"],
+        }
+        run("node", "-e", PAGE_CHECK, json.dumps(check))
     log("passed")
 
 

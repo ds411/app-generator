@@ -129,7 +129,9 @@ generator stops with an error.
   `owner` (the display field of the target) or `project.name`. A field
   path through relations uses `has()` in a filter, and a correlated
   subquery in a sort key. Computed fields and relations to many records
-  have no sort key.
+  have no sort key. A tab of a detail view that lists the records of a
+  `many_to_many` relation adds `id` (a list of IDs) to the list
+  endpoint of the target, for the React client.
 - All errors use the problem details format of RFC 9457
   (`application/problem+json`).
 - Input schemas give a relation as the ID of the target (`project_id`),

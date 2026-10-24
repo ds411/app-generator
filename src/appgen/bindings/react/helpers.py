@@ -92,13 +92,15 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     components = shadcn.used_components(definition)
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
+    apis = api_entities(definition) if api else {}
+    endpoints = {name: entity.list_endpoint for name, entity in apis.items()}
     return {
-        "api_entities": api_entities(definition) if api else {},
+        "api_entities": apis,
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": ui_plan(definition),
-        "ui_views": ViewContext(definition, forms=True),
+        "ui_views": ViewContext(definition, forms=True, endpoints=endpoints),
         "ui_forms": FormContext(definition),
         **text_helpers(definition),
         "react": {
