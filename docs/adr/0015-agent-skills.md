@@ -50,7 +50,10 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
 - `references/` has one file for each task (a new definition, a change
   to a definition, and generation gaps), and the reference of the DSL
   and of the diagnostic codes. The skill uses `--format json` wherever
-  the CLI has it.
+  the CLI has it. `references/dsl.md` is a copy of `docs/dsl.md` that a
+  script makes: it changes the links to other files of the repository
+  into links to GitHub, because the installed skill has only its own
+  files.
 - The skill files are package data. `appgen.skills` reads them with
   `importlib.resources`, so that they are available after
   `uv tool install`.

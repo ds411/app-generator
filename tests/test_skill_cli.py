@@ -30,6 +30,9 @@ _INVOCATION = re.compile(r"(?:^|&&|;|\||\$\(|\buv run|\buvx)\s*appgen(?=\s|$)")
 _END = {"|", "||", "&&", ";", ">", "2>", ")"}
 _LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
+MADE_FROM_DOCS = {"references/dsl.md"}
+"""The files of the skill that a script makes from the docs of the repository."""
+
 type Command = typer.core.TyperCommand | typer.core.TyperGroup
 
 
@@ -71,13 +74,17 @@ class Usage:
 
 
 def usage(texts: dict[str, str]) -> Usage:
-    """Read the invocations of `appgen` in the code of Markdown texts."""
+    """Read the invocations of `appgen` in the code of Markdown texts.
+
+    The DSL reference is made from docs/dsl.md. Its code spans that start
+    with `-` are CSS variables, not options.
+    """
     commands = cli_commands()
     all_options = set[str]().union(*(option_names(c) for c in commands.values()))
     found = Usage()
     for name, text in texts.items():
         for code in code_texts(text):
-            if code.startswith("-"):
+            if code.startswith("-") and name not in MADE_FROM_DOCS:
                 option = code.split()[0].split("=")[0]
                 found.loose_options.add(option)
                 if option not in all_options:
