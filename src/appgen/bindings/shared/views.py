@@ -108,6 +108,8 @@ class Value:
     enum_values: tuple[str, ...] = ()
     target: str | None = None
     """The target entity of a relation."""
+    currency: str | None = None
+    """The ISO 4217 code of a `currency` value, or None for the default currency."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -618,10 +620,13 @@ class ViewContext:
                 badge = badge or (self.badge_for(entity, path) if member.type == "enum" else None)
             enum_values = tuple(member.values or ()) if member.type == "enum" else ()
             fmt = fmt or ("badge" if badge else _DEFAULT_FORMATS[member.type])
+            currency = member.currency if fmt == "currency" else None
+            currency_arg = f", {js(currency)}" if currency else ""
             text = (
                 f'String({raw} ?? "")'
                 if member.type in ("string", "text", "email", "url", "enum")
-                else f'formatValue({raw}, "{fmt if fmt not in ("badge", "avatar") else "text"}")'
+                else f'formatValue({raw}, "{fmt if fmt not in ("badge", "avatar") else "text"}"'
+                f"{currency_arg})"
             )
             return Value(
                 path=path,
@@ -635,6 +640,7 @@ class ViewContext:
                 format=fmt,
                 badge=camel(badge) if badge else None,
                 enum_values=enum_values,
+                currency=currency,
             )
         if member is None:
             raw = f"{expr}{dot}id"
@@ -758,7 +764,8 @@ class ViewContext:
         if value.kind in ("one", "many"):
             return f"<FormattedValue value={{{value.text_expr}}} />"
         fmt = value.format if value.format != "avatar" else "text"
-        return f'<FormattedValue value={{{value.expr}}} format="{fmt}" />'
+        currency = f" currency={js(value.currency)}" if value.currency else ""
+        return f'<FormattedValue value={{{value.expr}}} format="{fmt}"{currency} />'
 
     def href(self, entity: str, page_name: str, params: dict[str, str], row: str) -> str:
         """Return the TypeScript path of a page for a record, with the page parameters.

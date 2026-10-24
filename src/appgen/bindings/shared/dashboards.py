@@ -59,6 +59,8 @@ class WidgetPlan:
     """The lines of the function body."""
     returns: str = "number | null"
     format: str = "number"
+    currency: str | None = None
+    """The ISO 4217 code of a `currency` stat, or None for the default currency."""
     icon: str | None = None
     color: str | None = None
     href: str | None = None
@@ -256,6 +258,8 @@ def _stat(
         f"return {_aggregate(ctx, widget.entity, widget.aggregate, widget.field, 'rows')};"
     )
     result.format = widget.format or _field_format(ctx, widget) or "number"
+    if result.format == "currency":
+        result.currency = _field_currency(ctx, widget)
     result.icon = widget.icon
     result.color = css_var(widget.color) if widget.color else None
     if widget.icon:
@@ -272,6 +276,14 @@ def _field_format(ctx: ViewContext, widget: StatWidget) -> str | None:
     member = resolve_path(ctx.definition, widget.entity, widget.field).member
     fmt = member.format if isinstance(member, Field) else None
     return fmt if fmt in ("number", "currency", "percent") else None
+
+
+def _field_currency(ctx: ViewContext, widget: StatWidget) -> str | None:
+    """Return the currency of the field of an aggregate, or None."""
+    if widget.aggregate == "count" or widget.field is None:
+        return None
+    member = resolve_path(ctx.definition, widget.entity, widget.field).member
+    return member.currency if isinstance(member, Field) else None
 
 
 def _chart(

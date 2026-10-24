@@ -22,7 +22,7 @@ entities:
       name: { type: string, required: true, unique: true, max_length: 80 }
       floor: { type: integer, required: true, min: -2, max: 40 }
       capacity: { type: integer, required: true, min: 1, max: 500 }
-      hourly_rate: { type: decimal, min: 0, precision: 8, scale: 2, format: currency }
+      hourly_rate: { type: decimal, min: 0, precision: 8, scale: 2, format: currency, currency: EUR }
       bookable: { type: boolean, default: true }
     relations:
       amenities:

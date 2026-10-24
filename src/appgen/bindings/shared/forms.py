@@ -83,6 +83,8 @@ class FieldPlan:
     step: float | None = None
     format: str | None = None
     """For a number: the display format of the field (`number`, `currency`, or `percent`)."""
+    currency: str | None = None
+    """For a `currency` number: the ISO 4217 code, or None for the default currency."""
     input_type: str = "text"
     required: bool = False
     required_message: str = "Enter a value."
@@ -423,6 +425,7 @@ def _value_field(
         plan.step = 1
     if widget == "number" and value.format in NUMBER_FORMATS:
         plan.format = value.format
+        plan.currency = value.currency if value.format == "currency" else None
     return plan
 
 

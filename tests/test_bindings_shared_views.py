@@ -158,6 +158,21 @@ def test_a_field_format_applies_to_all_views_of_the_field(example: ViewContext) 
     assert count.format == "number"
 
 
+def test_a_currency_field_shows_its_values_in_its_currency() -> None:
+    text = EXAMPLE.read_text().replace(
+        "scale: 2, format: currency }", "scale: 2, format: currency, currency: EUR }"
+    )
+    context = ViewContext(load_definition_text(text), forms=True)
+    budget = context.value("Project", "budget")
+    assert budget.currency == "EUR"
+    assert budget.text_expr == 'formatValue(row.budget, "currency", "EUR")'
+    assert context.value("Project", "budget", "number").currency is None
+    column = next(c for c in context.view_plan("project_table").columns if c.name == "budget")
+    assert column.cell.endswith('format="currency" currency="EUR" />')
+    widgets = context.dashboard_plan("overview").widgets
+    assert next(w for w in widgets if w.name == "total_budget").currency == "EUR"
+
+
 def test_a_board_with_a_responsive_hint_stacks_its_columns(example: ViewContext) -> None:
     plan = example.view_plan("task_board")
     assert plan.board_area_classes.endswith(" max-md:[&>[data-slot=scroll-area-scrollbar]]:hidden")

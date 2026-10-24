@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
+from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Field
@@ -231,6 +232,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "precision": {"decimal"},
         "scale": {"decimal"},
         "values": {"enum"},
+        "currency": NUMBER_TYPES,
     }
     for key, types in allowed.items():
         if key in field.model_fields_set and field.type not in types:
@@ -250,6 +252,14 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
             f"It is for {names}.",
             field,
             at="format",
+        )
+    if field.currency is not None and field.currency not in CURRENCY_CODES:
+        yield _error(
+            "invalid-value",
+            f"'{field.currency}' is not an ISO 4217 currency code.",
+            field,
+            at="currency",
+            hint="Use the code of an active currency, for example 'EUR' or 'USD'.",
         )
     if field.type == "enum":
         if not field.values:

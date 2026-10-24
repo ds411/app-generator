@@ -15,11 +15,11 @@ export type Format =
   | "url"
   | "avatar";
 
-/** The currency of the `currency` format. */
+/** The default currency of the `currency` format. A field can give another currency. */
 export const CURRENCY = "USD";
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-const currencyFormat = new Intl.NumberFormat(undefined, { style: "currency", currency: CURRENCY });
+const currencyFormats = new Map<string, Intl.NumberFormat>();
 const percentFormat = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -34,6 +34,16 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["minute", 60],
   ["second", 1],
 ];
+
+/** Return the number format of a currency (an ISO 4217 code). */
+function currencyFormat(currency: string): Intl.NumberFormat {
+  let format = currencyFormats.get(currency);
+  if (format === undefined) {
+    format = new Intl.NumberFormat(undefined, { style: "currency", currency });
+    currencyFormats.set(currency, format);
+  }
+  return format;
+}
 
 /** Return a date (`YYYY-MM-DD`) or a date and time (ISO 8601) as a Date. */
 export function toDate(value: string): Date {
@@ -51,14 +61,17 @@ export function formatRelative(date: Date, now: Date = new Date()): string {
   return "";
 }
 
-/** Return a value as text in a format. An empty value gives an empty text. */
-export function formatValue(value: unknown, format: Format = "text"): string {
+/**
+ * Return a value as text in a format. An empty value gives an empty text.
+ * The `currency` format uses `currency` (an ISO 4217 code), else `CURRENCY`.
+ */
+export function formatValue(value: unknown, format: Format = "text", currency: string = CURRENCY): string {
   if (value === null || value === undefined || value === "") return "";
   switch (format) {
     case "number":
       return numberFormat.format(Number(value));
     case "currency":
-      return currencyFormat.format(Number(value));
+      return currencyFormat(currency).format(Number(value));
     case "percent":
       return percentFormat.format(Number(value));
     case "date":
