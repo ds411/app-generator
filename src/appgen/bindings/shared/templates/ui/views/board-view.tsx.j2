@@ -98,7 +98,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
               return (
                 <section
                   key={column.value}
-                  aria-label={column.label}
+                  aria-label={{ '{' ~ tr('column.label') ~ '}' }}
                   style={column.color ? ({ "--column-color": column.color } as CSSProperties) : undefined}
                   className={cn(
                     {{ js(plan.column_classes) }},
@@ -116,7 +116,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                 >
                   <header className="flex items-center gap-2 px-1.5 py-1">
                     <span className="size-2.5 shrink-0 rounded-full bg-(--column-color,var(--muted-foreground))" />
-                    <h3 className="truncate text-sm font-medium">{column.label}</h3>
+                    <h3 className="truncate text-sm font-medium">{{ '{' ~ tr('column.label') ~ '}' }}</h3>
                     <Badge variant={over ? "destructive" : "secondary"} className="ml-auto tabular-nums">
                       {column.limit === undefined ? cards.length : `${cards.length} / ${column.limit}`}
                     </Badge>
@@ -156,7 +156,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                               <DropdownMenuLabel>Move to</DropdownMenuLabel>
                               {COLUMNS.filter((other) => other.value !== column.value).map((other) => (
                                 <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
-                                  {other.label}
+                                  {{ '{' ~ tr('other.label') ~ '}' }}
                                 </DropdownMenuItem>
                               ))}
                             </RowActionsMenu>

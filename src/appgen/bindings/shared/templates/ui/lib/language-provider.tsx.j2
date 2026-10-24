@@ -1,0 +1,20 @@
+{{ trace_header(i18n.element_id) }}
+"use client";
+
+import { Fragment, type ReactNode, useEffect, useSyncExternalStore } from "react";
+
+import { defaultLanguage, getLanguage, setLanguage, storedLanguage, subscribeLanguage } from "@/shared/lib/i18n";
+
+/**
+ * Shows the UI in the selected language. When the language changes, the
+ * pages render again with the new text.
+ */
+export function LanguageProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const language = useSyncExternalStore(subscribeLanguage, getLanguage, () => defaultLanguage);
+  useEffect(() => {
+    const stored = storedLanguage();
+    if (stored !== getLanguage()) setLanguage(stored);
+    else document.documentElement.lang = stored;
+  }, []);
+  return <Fragment key={language}>{children}</Fragment>;
+}

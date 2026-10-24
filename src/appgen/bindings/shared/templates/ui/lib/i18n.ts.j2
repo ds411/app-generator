@@ -1,0 +1,71 @@
+{{ trace_header(i18n.element_id) }}
+// The UI text in more than one language. `t` gives the translation of a
+// text of the definition in the selected language, or the text itself.
+
+/** The languages of the app. The first language is the language of the definition. */
+export const languages = [
+{% for language in i18n.languages %}
+  { code: {{ js(language.code) }}, label: {{ js(language.label) }} }, {{ trace(language.element_id) }}
+{% endfor %}
+] as const;
+
+export type Language = (typeof languages)[number]["code"];
+
+export const defaultLanguage: Language = {{ js(i18n.default) }};
+
+const messages: Partial<Record<Language, Record<string, string>>> = {
+{% for language in i18n.languages if language.text %}
+  {{ js(language.code) }}: { {{ trace(language.element_id) }}
+{% for key, value in language.text.items() %}
+    {{ js(key) }}: {{ js(value) }},
+{% endfor %}
+  },
+{% endfor %}
+};
+
+const STORAGE_KEY = {{ js(app.name ~ "-language") }};
+
+let current: Language = {{ "storedLanguage()" if binding.name == "react" else "defaultLanguage" }};
+const listeners = new Set<() => void>();
+
+/** The translation of a text in the selected language. */
+export function t(text: string): string {
+  return messages[current]?.[text] ?? text;
+}
+
+/** The selected language. */
+export function getLanguage(): Language {
+  return current;
+}
+
+/** The language that the user selected before, or the default language. */
+export function storedLanguage(): Language {
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const found = languages.find((language) => language.code === stored);
+    if (found) return found.code;
+  } catch {
+    // No storage, for example on the server: use the default language.
+  }
+  return defaultLanguage;
+}
+
+/** Select a language, keep it for the next visit, and show the UI in it. */
+export function setLanguage(language: Language): void {
+  current = language;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, language);
+  } catch {
+    // No storage: the language applies until the page loads again.
+  }
+  document.documentElement.lang = language;
+  for (const listener of listeners) listener();
+}
+
+/** Call a function when the language changes. Return a function that stops the calls. */
+export function subscribeLanguage(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}

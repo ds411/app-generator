@@ -2758,6 +2758,33 @@
       ]
     },
     "JsonValue": {},
+    "Language": {
+      "additionalProperties": false,
+      "description": "A language of the UI, with the translation of each text.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "text": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Text"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Text"
+          },
+          "title": "Text",
+          "type": "object"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "Language",
+      "type": "object"
+    },
     "Layout": {
       "additionalProperties": false,
       "description": "An app shell: a sidebar, a top bar, the content, and an optional footer.",
@@ -4881,6 +4908,35 @@
       "title": "TopbarOverride",
       "type": "object"
     },
+    "Translations": {
+      "additionalProperties": false,
+      "description": "The languages of the UI. The text of the definition is in the default language.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "languages": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Language"
+          },
+          "minProperties": 2,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Languages",
+          "type": "object"
+        }
+      },
+      "required": [
+        "default",
+        "languages"
+      ],
+      "title": "Translations",
+      "type": "object"
+    },
     "UI": {
       "additionalProperties": false,
       "description": "The `ui` section: the design tokens and the UI elements of the app.",
@@ -5122,6 +5178,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/UI"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "translations": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Translations"
         },
         {
           "type": "null"

@@ -11,6 +11,7 @@ from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.rules import EntityRule
+from appgen.dsl.translations import Translations
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
@@ -18,8 +19,11 @@ from appgen.dsl.ui.views import Format
 
 DSL_VERSION = 0
 """The DSL version that this loader reads."""
-RESERVED_SECTIONS: tuple[str, ...] = ("auth", "access", "workflows", "translations")
-"""Top-level sections that a later DSL version adds (ADR 0002). ADR 0003 adds `ui`."""
+RESERVED_SECTIONS: tuple[str, ...] = ("auth", "access", "workflows")
+"""Top-level sections that a later DSL version adds (ADR 0002).
+
+ADR 0003 adds `ui`. The section `translations` is now part of the DSL.
+"""
 
 type FieldType = Literal[
     "string",
@@ -155,6 +159,8 @@ class AppDefinition(Element):
     operations: dict[MemberName, Operation] = pydantic.Field(default_factory=dict[str, Operation])
     pages: dict[MemberName, Page] = pydantic.Field(default_factory=dict[str, Page])
     ui: UI | None = None
+    translations: Translations | None = None
+    """The languages of the UI text (the front ends)."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

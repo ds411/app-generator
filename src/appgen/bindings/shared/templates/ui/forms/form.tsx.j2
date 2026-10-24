@@ -150,13 +150,13 @@ function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; er
 {% for f in plan.fields %}
 {% if f.required and f.kind != "boolean" %}
 {% if f.kind in ("text", "json") %}
-  if (values.{{ f.key }}.trim() === "") errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+  if (values.{{ f.key }}.trim() === "") errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
 
 {% elif f.kind == "many" %}
-  if (values.{{ f.key }}.length === 0) errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+  if (values.{{ f.key }}.length === 0) errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
 
 {% else %}
-  if (values.{{ f.key }} === null) errors.{{ f.key }} ??= {{ js(f.required_message) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
+  if (values.{{ f.key }} === null) errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
 
 {% endif %}
 {% endif %}
@@ -164,23 +164,23 @@ function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; er
   {{ trace(f.rules_id) }}
 {% endif %}
 {% for check in f.checks %}
-  if ({{ check.condition }}) errors.{{ f.key }} ??= {{ js(check.message) }}; {{ trace(check.element_id) }}
+  if ({{ check.condition }}) errors.{{ f.key }} ??= {{ tr(js(check.message)) }}; {{ trace(check.element_id) }}
 {% endfor %}
 {% endfor %}
   const result = SCHEMA.safeParse(toInput(values));
   if (!result.success) schemaErrors(result.error, errors);
 {% for rule in plan.rules if rule.condition %}
-  if ({{ rule.condition }}) errors.{{ rule.fields[0] }} ??= {{ js(rule.message) }}; {{ trace(rule.element_id) }}
+  if ({{ rule.condition }}) errors.{{ rule.fields[0] }} ??= {{ tr(js(rule.message)) }}; {{ trace(rule.element_id) }}
 {% endfor %}
   if (!result.success || Object.keys(errors).length > 0) return { errors };
 {% for rule in plan.rules if rule.gap_name %}
   if (!{{ rule.gap_name }}(result.data as {{ plan.rule_values }})) { {{ trace(rule.element_id) }}
 {% if rule.fields %}
 {% for key in rule.fields %}
-    errors.{{ key }} ??= {{ js(rule.message) }};
+    errors.{{ key }} ??= {{ tr(js(rule.message)) }};
 {% endfor %}
 {% else %}
-    errors._form ??= {{ js(rule.message) }};
+    errors._form ??= {{ tr(js(rule.message)) }};
 {% endif %}
   }
 {% endfor %}

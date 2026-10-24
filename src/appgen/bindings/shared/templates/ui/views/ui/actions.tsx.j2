@@ -97,8 +97,8 @@ export function useActionRunner<T>(options: { openForm?: (form: string, records:
     <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
-          {confirm?.message && <AlertDialogDescription>{confirm.message}</AlertDialogDescription>}
+          <AlertDialogTitle>{{ '{' ~ tr('confirm?.title ?? ""') ~ '}' }}</AlertDialogTitle>
+          {confirm?.message && <AlertDialogDescription>{{ '{' ~ tr('confirm.message') ~ '}' }}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -109,7 +109,7 @@ export function useActionRunner<T>(options: { openForm?: (form: string, records:
               setPending(null);
             }}
           >
-            {confirm?.confirmLabel ?? pending?.action.label ?? "Continue"}
+            {{ "{" ~ tr('confirm?.confirmLabel ?? pending?.action.label ?? "Continue"') ~ "}" }}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -137,7 +137,7 @@ export function ActionButton<T>({
   return (
     <Button variant={action.variant ?? "default"} size={size} disabled={disabled} onClick={() => onRun(action, records)}>
       {Icon && <Icon />}
-      {action.label}
+      {{ '{' ~ tr('action.label') ~ '}' }}
     </Button>
   );
 }
@@ -179,7 +179,7 @@ export function RowActionsMenu<T>({
               {destructive && index > 0 && <DropdownMenuSeparator />}
               <DropdownMenuItem variant={destructive ? "destructive" : "default"} onSelect={() => onRun(action, [record])}>
                 {Icon && <Icon />}
-                {action.label}
+                {{ '{' ~ tr('action.label') ~ '}' }}
               </DropdownMenuItem>
             </Fragment>
           );

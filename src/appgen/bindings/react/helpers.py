@@ -12,6 +12,7 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
@@ -96,6 +97,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_plan": ui_plan(definition),
         "ui_views": ViewContext(definition, forms=True),
         "ui_forms": FormContext(definition),
+        **text_helpers(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",
             "mode_toggle": shadcn.has_mode_toggle(definition),

@@ -20,7 +20,7 @@ function columnsFor({{ lookups_param(code) }}: Lookups): ColumnDef<{{ plan.type 
 {% for c in plan.columns %}
     { {{ trace(c.element_id) }}
       id: {{ js(c.name | camel) }},
-      header: {{ js(c.header) }},
+      header: {{ tr(js(c.header)) }},
       accessorFn: (row) => {{ c.value.sort_expr }},
       cell: ({ row: { original: row } }) => {{ c.cell }},
 {% if not c.sortable %}
