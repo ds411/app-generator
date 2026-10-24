@@ -59,6 +59,48 @@ the token.
 {% endif %}
 
 {% endif %}
+{% if ts_apis or ts_server_apis %}
+## Third-party APIs
+
+{% if ts_apis %}
+Each API of the definition without a secret has a client in
+`src/shared/api/<api>/`: the TypeScript types of its schemas and a class
+with one method for each operation that the app uses. An answer with an
+error status throws `ApiError` of `@/shared/api/third-party`, and each
+request stops after 10 seconds.
+{% if react.api %}
+The browser calls the API, so the API must allow the origin of the app
+(CORS). A build variable sets the base URL of each API.
+{% else %}
+The app has mock data, so the clients send no requests: each call gives
+the example answer of the OpenAPI document (`mock.ts`), after the latency
+of the mock data.
+{% endif %}
+
+| API | Client | {{ "Base URL" if react.api else "Mock data" }} |
+| --- | ------ | {{ "--------" if react.api else "---------" }} |
+{% for api in ts_apis.values() %}
+| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | {{ ("`" ~ api.browser_env ~ "`") if react.api else ("`src/shared/api/" ~ api.folder ~ "/mock.ts`") }} |
+{% endfor %}
+
+For example:
+
+```ts
+import { {{ (ts_apis.values() | first).factory }} } from "@/shared/api/{{ (ts_apis.values() | first).folder }}";
+
+const client = {{ (ts_apis.values() | first).factory }}();
+```
+
+{% endif %}
+{% if ts_server_apis %}
+A browser app cannot keep a secret, so the APIs with a secret have no
+client in this app: {% for api in ts_server_apis.values() %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %}. Call such an API in a
+custom operation of the FastAPI app of the same definition, and set
+`x-react-data: api`, so that this app calls the operation. The file
+`src/shared/api/<api>/client.ext.ts` of each API marks the gap.
+
+{% endif %}
+{% endif %}
 ## Layout
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

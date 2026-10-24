@@ -1,14 +1,20 @@
 {% set api = ts_apis[name] %}
 {% set server = binding.name == "nextjs" %}
+{% set mock = binding.name == "react" and not react.api %}
 {{ trace_header(element_id) }}
 {% if server %}
 import "server-only";
 
 {% endif %}
-import { HttpClient, type ClientOptions } from "@/shared/api/third-party";
+import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
 {% set types = api.used_types() %}
-{% if types %}
+{% if mock or types %}
 
+{% endif %}
+{% if mock %}
+import { MOCK_ROUTES } from "./mock";
+{% endif %}
+{% if types %}
 import type { {{ types | join(", ") }} } from "./types";
 {% endif %}
 
@@ -76,18 +82,30 @@ export class {{ api.client }} {
   }
 {% endfor %}
 }
-{% if server %}
 
 /**
+{% if server %}
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`{% if api.secret_env %}, and the secret in `{{ api.secret_env }}`{% endif %}.
+{% elif mock %}
+ * Return a client with the mock data of the app: it answers each call with
+ * the example of the OpenAPI document, and sends no request to the API.
+{% else %}
+ * Return a client with the settings of the build: the base URL in
+ * `{{ api.browser_env }}`.
+{% endif %}
  */
 export function {{ api.factory }}(): {{ api.client }} {
   return new {{ api.client }}({
+{% if server %}
     baseUrl: process.env.{{ api.url_env }} || undefined,
 {% if api.secret_env %}
     secret: process.env.{{ api.secret_env }},
 {% endif %}
+{% elif mock %}
+    fetch: mockFetch(MOCK_ROUTES),
+{% else %}
+    baseUrl: import.meta.env.{{ api.browser_env }} || undefined,
+{% endif %}
   });
 }
-{% endif %}

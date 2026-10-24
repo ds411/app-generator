@@ -300,6 +300,10 @@ def generate(
     unfilled = [gap.element_id for gap in result.gaps if not gap.path]
     typer.echo(f"Generated '{definition.app.name}' with the binding '{binding.name}' in {out}.")
     _echo_summary(report, gap_files, unfilled)
+    if result.warnings:
+        typer.echo(f"Warnings: {len(result.warnings)}")
+        for warning in result.warnings:
+            typer.echo(f"  {warning}")
 
 
 def _echo_summary(report: WriteReport, gap_files: dict[str, str], unfilled: list[str]) -> None:

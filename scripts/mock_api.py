@@ -9,6 +9,8 @@ status 404.
 
 `GET /_requests` gives the recorded requests as JSON: the API, the
 operation ID, the method, the path under the base URL, and the query.
+The answers allow all origins (CORS), so that a browser app can call
+the server.
 
 Run it from the repository root:
 
@@ -141,6 +143,18 @@ class _Handler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:
         self._answer()
 
+    def do_OPTIONS(self) -> None:
+        """Answer the CORS preflight request of a browser."""
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+
+    def _cors(self) -> None:
+        """Allow all origins, so that a browser app can call the mock server."""
+        self.send_header("Access-Control-Allow-Origin", "*")
+
     def log_message(self, format: str, *args: object) -> None:
         """Write no log line for each request."""
 
@@ -180,10 +194,12 @@ class _Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, data: object) -> None:
         if status == 204:
             self.send_response(status)
+            self._cors()
             self.end_headers()
             return
         body = json.dumps(data).encode()
         self.send_response(status)
+        self._cors()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

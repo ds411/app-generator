@@ -55,8 +55,9 @@ done
 gaps. `appgen check` prints the trace coverage of the definition and
 the invalid traces. For each app, the result is `Result: passed.` with
 no uncovered elements and no invalid traces. The stubs of the custom
-elements are open gaps until you write them: 10 for Next.js and React,
-4 for FastAPI. The FastAPI app has no pages, so
+elements are open gaps until you write them: 10 for Next.js, 13 for
+React, and 4 for FastAPI. The React app also marks the API with a secret
+as a gap, because a browser app cannot keep a secret. The FastAPI app has no pages, so
 its report shows the kinds `page` and `ui` as excluded. See
 [traces.md](traces.md) for the report format.
 
@@ -175,6 +176,21 @@ holidays API. The example also has the code of the custom operation
 
 3. Start the dev server, and open <http://localhost:3000>. The widget
    shows the holidays of the example of the OpenAPI document.
+
+The React app has the same widget, in
+`examples/project-tracker/extensions/react/`. Its code calls the client
+of the holidays API in the browser. With mock data, the client gives the
+example answers of the OpenAPI document, so the app needs no mock
+server:
+
+```sh
+cp -R examples/project-tracker/extensions/react/. /tmp/tracker-react/
+uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracker-react
+cd /tmp/tracker-react && pnpm install && pnpm dev
+```
+
+`appgen generate` gives a warning for the API `exchange_rates`: it has a
+secret, so the React app has no client for it.
 
 ### Run in Docker
 
@@ -403,6 +419,9 @@ runs the custom operation `schedule_task` through it. With `--ui`, the
 dashboard of the Next.js app calls the holidays API through it. These
 checks need the hand-written code of the example (see
 [Call a third-party API](#call-a-third-party-api)).
+`scripts/check-react-api.sh` builds the React app with
+`x-react-data: api` and the base URL of the mock server, and its
+dashboard calls the holidays API from the browser.
 
 ## Clean up
 

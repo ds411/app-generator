@@ -123,6 +123,7 @@ of the entity in snake case, for example `bookings`.
 | A custom form widget (`widget: custom`)                            | `src/features/<form>-form/ui/<field>-widget.ext.tsx`      | `id`, `value`, `onChange`, and `disabled`.                  |
 | A custom form rule (`kind: custom`)                                | `src/features/<form>-form/model/<rule>-rule.ext.ts`       | The values of the form. Return `true` if they are valid.    |
 | A custom action (`kind: custom`)                                   | `src/features/<owner>-actions/model/<action>-action.ext.ts` | As in the Next.js app.                                    |
+| A third-party API with a secret (`security`)                       | `src/shared/api/<api>/client.ext.ts`                      | Nothing: a browser app cannot keep the secret. Call the API in a custom operation of the FastAPI app (`apis: [<api>]`), and set `x-react-data: api`. Then change the kind of the traces from `gap` to `manual`. |
 
 - The app uses mock data in the browser. Read and change the data with
   `<entity>Api` of `@/entities/<entity>`, for example
@@ -130,6 +131,12 @@ of the entity in snake case, for example `bookings`.
   a component with `useResource` of `@/shared/lib/use-resource`.
 - `list`, `subscribe`, `useResource`, and the view states work as in
   the Next.js app.
+- A third-party API without a secret has a client in `@/shared/api/<api>`,
+  for example `holidaysClient()`. With mock data, it gives the example
+  answers of the OpenAPI document and sends no request. With
+  `x-react-data: api`, the browser calls the API at the base URL of the
+  build variable `VITE_<base_url_env>`. An error status throws `ApiError`
+  of `@/shared/api/third-party`.
 - With `x-react-data: api` in `app`, the app uses the FastAPI app of the
   same definition. Then a custom operation calls its endpoint, and has
   no extension file: fill the gap in the FastAPI app. `<entity>Api.list`

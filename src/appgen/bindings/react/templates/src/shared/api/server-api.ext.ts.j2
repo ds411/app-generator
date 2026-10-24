@@ -1,0 +1,14 @@
+{% set api = ts_server_apis[name] %}
+{{ trace_header(element_id, *(api.methods | map(attribute="id"))) }}
+/*
+ * The API `{{ api.name }}` ({{ api.title }}) has a secret:
+ * `{{ api.secret_env }}`. A browser app cannot keep a secret, so appgen
+ * generates no client for this API in the React app.
+ *
+ * TODO(appgen): call the API in a custom operation of the FastAPI app of
+ * the same definition, with `apis: [{{ api.name }}]`. Then set
+ * `x-react-data: api` in the section `app`, so that this app calls the
+ * operation of the FastAPI app. Or remove the API from the definition.
+ * When it is done, change the kind of the traces in the header from gap to manual.
+ */
+export {};

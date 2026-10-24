@@ -52,6 +52,8 @@ class GenerationResult:
     """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
     documents: dict[str, str] = field(default_factory=dict[str, str])
     """The hash of each OpenAPI document of the `apis`, by its path in the definition."""
+    warnings: list[str] = field(default_factory=list[str])
+    """The warnings of the binding (`Binding.warnings`)."""
 
 
 def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
@@ -109,6 +111,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
             for api in definition.apis.values()
             if api.openapi is not None
         },
+        warnings=list(binding.warnings(definition)) if binding.warnings else [],
     )
 
 

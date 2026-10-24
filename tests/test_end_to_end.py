@@ -26,7 +26,6 @@ BY_DESIGN: dict[str, list[str]] = {
     # The React app has no sign-up page (#269), no password reset pages (#270), no
     # owner rules (#273), and no sign-in with a provider (#271) yet.
     "react": [
-        "api",
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
@@ -54,9 +53,16 @@ CUSTOM_UI = {
     "ui.dashboards.overview.widgets.workload",
     "ui.dashboards.overview.widgets.holidays",
 }
+# A browser app cannot keep a secret: the React app has no client for an
+# API with a secret, and marks it as a gap.
+SECRET_API = {
+    "apis.exchange_rates",
+    "apis.exchange_rates.operations.getLatestRates",
+    "apis.exchange_rates.operations.convertAmount",
+}
 OPEN_GAPS: dict[str, set[str]] = {
     "nextjs": CUSTOM_OPERATIONS | CUSTOM_UI,
-    "react": CUSTOM_OPERATIONS | CUSTOM_UI,
+    "react": CUSTOM_OPERATIONS | CUSTOM_UI | SECRET_API,
     "fastapi": CUSTOM_OPERATIONS,
 }
 

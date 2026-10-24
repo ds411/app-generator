@@ -96,6 +96,21 @@ We looked at two ways to read the documents:
   a sample from the schema. The mock data and the generated tests use
   it, so that the checks do not call the real API.
 
+### The clients
+
+- The FastAPI app and the Next.js app call the APIs on the server. The
+  Next.js clients import `server-only`, so that a secret cannot get
+  into the code of the browser.
+- The React app has no server, and a browser app cannot keep a secret.
+  Thus only an API without a secret gets a client. An API with a secret
+  is a gap: an extension file `src/shared/api/<api>/client.ext.ts` with
+  gap traces. `appgen generate` also gives a warning with a hint: call
+  the API in a custom operation of the FastAPI app, and set
+  `x-react-data: api`. The new field `warnings` of the binding contract
+  gives such warnings.
+- With mock data, the React client answers each call with the example
+  answer of the operation, and sends no request.
+
 ## Consequences
 
 - A definition with `apis` gives the same output on each run, without a
