@@ -33,6 +33,7 @@ services:
     image: {{ app.name }}-api
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}

@@ -1,0 +1,13 @@
+{{ trace_header("app") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ app.name }}-api
+spec:
+  # Only the pods of the API, not the pod of the migration Job.
+  selector:
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

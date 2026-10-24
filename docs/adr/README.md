@@ -29,3 +29,4 @@ gives the rules.
 | 0010   | [Translations of the UI text](0010-translations.md)                    | Accepted |
 | 0011   | [Sign-in of the generated apps](0011-auth.md)                          | Accepted |
 | 0012   | [Roles and permissions](0012-access.md)                                | Accepted |
+| 0013   | [Production settings of the FastAPI app](0013-fastapi-production.md)   | Accepted |

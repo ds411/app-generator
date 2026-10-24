@@ -105,6 +105,26 @@ non-root user. To use other images, for example from a mirror, set the
 build arguments `UV_IMAGE` and `PYTHON_IMAGE`, and the environment
 variable `POSTGRES_IMAGE` for Compose.
 
+## Production
+
+- Logs: the API writes one log line for each request, with the method,
+  the path, the status, the duration, and a request ID (the
+  `X-Request-ID` header, or a new ID). `LOG_JSON=true` (the default)
+  writes each line as a JSON object, and `LOG_LEVEL` sets the lowest
+  level.
+- Rate limits: `RATE_LIMIT_PER_MINUTE` sets the number of requests that
+  each client address can send in each minute (0, the default, sets no
+  limit). Over the limit, the API gives 429 with `Retry-After`. The
+  counts are in the memory of each process, so each replica has its own
+  limit. `/health` has no limit.
+- Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
+  Deployment (2 replicas, a non-root user, a read-only file system), a
+  Service, and a Job that runs the migrations. The database is outside
+  the cluster. Push the image, set its name in `kustomization.yaml`,
+  copy `secret.example.env` to `secret.env`, and set the values. Then
+  run `kubectl delete job {{ app.name }}-migrate --ignore-not-found` and
+  `kubectl apply -k deploy/kubernetes`.
+
 ## Layout
 
 Each entity of the definition is a vertical slice: one folder with all

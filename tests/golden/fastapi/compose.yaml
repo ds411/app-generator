@@ -34,6 +34,7 @@ services:
     image: project-tracker-api
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/project_tracker
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
     ports:
       - "8000:8000"
     depends_on:

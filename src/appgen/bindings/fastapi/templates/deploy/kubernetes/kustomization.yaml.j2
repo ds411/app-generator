@@ -1,0 +1,36 @@
+{{ trace_header("app") }}
+# Deploy the API to Kubernetes with Kustomize:
+#   cp secret.example.env secret.env    (and set the values)
+#   kubectl delete job {{ app.name }}-migrate --ignore-not-found
+#   kubectl apply -k deploy/kubernetes
+# The Job runs the migrations. A Job cannot change, so delete the last
+# Job before each deployment of a new image.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: {{ app.name }}-api
+    includeSelectors: true
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - migrate-job.yaml
+
+# Set the registry and the tag of the image that you push.
+images:
+  - name: {{ app.name }}-api
+    newName: registry.example.com/{{ app.name }}-api
+    newTag: "0.1.0"
+
+configMapGenerator:
+  - name: {{ app.name }}-config
+    envs:
+      - config.env
+
+secretGenerator:
+  - name: {{ app.name }}-secret
+    envs:
+      - secret.env

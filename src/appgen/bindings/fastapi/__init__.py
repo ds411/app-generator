@@ -42,6 +42,17 @@ BINDING = Binding(
         Output(template="README.md.j2", path="README.md"),
         Output(template="Dockerfile.j2", path="Dockerfile"),
         Output(template="compose.yaml.j2", path="compose.yaml"),
+        *(
+            Output(template=f"deploy/kubernetes/{name}.j2", path=f"deploy/kubernetes/{name}")
+            for name in (
+                "kustomization.yaml",
+                "deployment.yaml",
+                "service.yaml",
+                "migrate-job.yaml",
+                "config.env",
+                "secret.example.env",
+            )
+        ),
         Output(template="dockerignore.j2", path=".dockerignore"),
         Output(template="package.py.j2", path="app/__init__.py"),
         Output(template="app/main.py.j2", path="app/main.py"),
@@ -62,6 +73,8 @@ BINDING = Binding(
         Output(template="app/core/errors.py.j2", path="app/core/errors.py"),
         Output(template="app/core/pagination.py.j2", path="app/core/pagination.py"),
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
+        Output(template="app/core/logging.py.j2", path="app/core/logging.py"),
+        Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
@@ -168,6 +181,8 @@ BINDING = Binding(
         Output(template="tests/problems.py.j2", path="tests/problems.py"),
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
+        Output(template="tests/test_logging.py.j2", path="tests/test_logging.py"),
+        Output(template="tests/test_rate_limit.py.j2", path="tests/test_rate_limit.py"),
     ),
     covers=frozenset(
         {"app", "entity", "field", "relation", "operation", "param"}
