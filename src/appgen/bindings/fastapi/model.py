@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from appgen.bindings.fastapi.integrations import mocks_imports, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
@@ -45,6 +45,10 @@ COLUMN_KEY = "x-fastapi-column"
 """The extension key of a relation that sets the name of its foreign key column."""
 RATE_LIMIT_STORE_KEY = "x-fastapi-rate-limit-store"
 """The extension key of the app that selects the store of the rate limit: `memory` or `redis`."""
+DEPLOY_KEY = "x-fastapi-deploy"
+"""The extension key of the app that selects the deployment targets: one target or a list."""
+DEPLOY_TARGETS = ("kubernetes", "knative")
+"""The deployment targets, in the order of the README. `kubernetes` is the default."""
 
 _INT32 = 2**31 - 1
 _ON_DELETE = {"restrict": "RESTRICT", "cascade": "CASCADE", "set_null": "SET NULL"}
@@ -942,6 +946,8 @@ class PyApp:
     operations: dict[str, PyOperation]
     redis: bool = False
     """True if the rate limit can count in Redis (`RATE_LIMIT_STORE_URL`), for all replicas."""
+    deploy: tuple[str, ...] = ("kubernetes",)
+    """The deployment targets, each with its folder `deploy/<target>/`."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1056,6 +1062,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         entities=entities,
         operations=operations,
         redis=definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis",
+        deploy=_deploy_targets(definition.app.extensions.get(DEPLOY_KEY)),
     )
 
 
@@ -1073,6 +1080,14 @@ def _owner_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> No
         for op in entity.operations:
             if op.protected:
                 op.owner_action = "read" if op.kind in ("list", "read") else "change"
+
+
+def _deploy_targets(value: object) -> tuple[str, ...]:
+    """Return the targets of the deploy key in a fixed order (the key schema checks the names)."""
+    if value is None:
+        return ("kubernetes",)
+    names = {value} if isinstance(value, str) else set(cast(list[str], value))
+    return tuple(target for target in DEPLOY_TARGETS if target in names)
 
 
 def _entity(name: str, entity: Entity) -> PyEntity:
