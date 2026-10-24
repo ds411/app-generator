@@ -24,9 +24,9 @@ async def get(session: AsyncSession, id: UUID) -> {{ e.name }}:
     return record
 
 
-async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
-    """Validate and store a new record, and return it."""
-    record = {{ e.name }}()
+async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
+    """Validate a new record, and add it to the session without a commit. Return the record."""
+    record = {{ e.name }}(id=uuid4())
     await _apply(session, record, data.model_dump(by_alias=False))
 {% if e.workflows %}
     check_workflows(record, None)
@@ -36,6 +36,12 @@ async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }
 {% endif %}
     await validate(session, record, created=True)
     session.add(record)
+    return record
+
+
+async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
+    """Validate and store a new record, and return it."""
+    record = await add(session, data)
     await commit(session)
     return await get(session, record.id)
 

@@ -126,6 +126,24 @@
           "minimum": 1,
           "title": "Session Hours",
           "type": "integer"
+        },
+        "min_password_length": {
+          "default": 8,
+          "maximum": 128,
+          "minimum": 8,
+          "title": "Min Password Length",
+          "type": "integer"
+        },
+        "sign_up": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignUp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -4257,6 +4275,39 @@
         }
       },
       "title": "SidebarOverride",
+      "type": "object"
+    },
+    "SignUp": {
+      "additionalProperties": false,
+      "description": "The sign-up of new users (ADR 0016): the fields of the form, and the role of a new user.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        },
+        "default_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "SignUp",
       "type": "object"
     },
     "Sort": {

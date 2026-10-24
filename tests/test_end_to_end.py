@@ -23,7 +23,8 @@ runner = CliRunner()
 # app has no pages and no UI.
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": [],
-    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule"],
+    # The React app has no sign-up page yet (#269).
+    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "sign_up"],
     "fastapi": ["page", "translations", "ui"],
 }
 

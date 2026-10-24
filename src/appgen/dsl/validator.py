@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from appgen.dsl.access import ALL
-from appgen.dsl.auth import SIGN_IN_PATH
+from appgen.dsl.auth import SIGN_IN_PATH, SIGN_UP_PATH, Auth, SignUp
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.expressions import (
@@ -27,7 +27,7 @@ from appgen.dsl.expressions import (
     parse_expression,
 )
 from appgen.dsl.loader import load_definition
-from appgen.dsl.model import AppDefinition, Element, Field
+from appgen.dsl.model import AppDefinition, Element, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
@@ -478,20 +478,92 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
                 auth,
                 at="username_field",
             )
+    if entity is not None and auth.sign_up is not None:
+        yield from _check_sign_up(definition, auth, auth.sign_up, entity)
     for name in auth.public_pages:
         if name not in definition.pages:
             yield _missing(auth, "public_pages", "page", name, definition.pages)
     for name in auth.public_operations:
         if name not in definition.operations:
             yield _missing(auth, "public_operations", "operation", name, definition.operations)
+    reserved = {SIGN_IN_PATH: "sign-in"}
+    if auth.sign_up is not None:
+        reserved[SIGN_UP_PATH] = "sign-up"
     for page in definition.pages.values():
-        if page.path == SIGN_IN_PATH:
+        if page.path in reserved:
             yield _error(
                 "duplicate-name",
-                f"The path '{SIGN_IN_PATH}' is the sign-in page of the apps.",
+                f"The path '{page.path}' is the {reserved[page.path]} page of the apps.",
                 page,
                 at="path",
                 hint="Give the page another path.",
+            )
+
+
+def _check_sign_up(
+    definition: AppDefinition, auth: Auth, sign_up: SignUp, entity: Entity
+) -> Iterator[Diagnostic]:
+    """The sign-up asks for each required field, and gives a new user a role that exists."""
+    access = definition.access
+    role_field = access.role_field if access is not None else None
+    if len(set(sign_up.fields)) != len(sign_up.fields):
+        yield _error(
+            "duplicate-name", "The names in 'fields' must be unique.", sign_up, at="fields"
+        )
+    for name in sign_up.fields:
+        found = entity.fields.get(name)
+        if found is None:
+            yield _missing(sign_up, "fields", "field", name, entity.stored_fields)
+        elif found.computed is not None or name == role_field:
+            yield _error(
+                "unsuitable-field",
+                f"The sign-up cannot ask for the field '{name}': "
+                + ("the app computes it." if found.computed is not None else "it is the role."),
+                sign_up,
+                at="fields",
+                hint="A new user gets the role 'default_role'." if name == role_field else None,
+            )
+    for name, field in entity.stored_fields.items():
+        if (
+            field.required
+            and field.default is None
+            and name not in sign_up.fields
+            and name != role_field
+        ):
+            yield _error(
+                "missing-key",
+                f"The sign-up must ask for the required field '{name}' of '{auth.user_entity}'.",
+                sign_up,
+                at="fields",
+                hint=f"Add '{name}' to 'fields'.",
+            )
+    for name, relation in entity.relations.items():
+        if relation.required and relation.kind == "many_to_one":
+            yield _error(
+                "unsuitable-field",
+                f"The sign-up cannot set the required relation '{name}' of '{auth.user_entity}'.",
+                sign_up,
+                hint="Make the relation optional, or turn off the sign-up.",
+            )
+    if access is None:
+        if sign_up.default_role is not None:
+            yield _error(
+                "invalid-option",
+                "'default_role' needs the section 'access'.",
+                sign_up,
+                at="default_role",
+            )
+    elif sign_up.default_role is not None:
+        if sign_up.default_role not in access.roles:
+            yield _missing(sign_up, "default_role", "role", sign_up.default_role, access.roles)
+    else:
+        role = entity.fields.get(access.role_field)
+        if role is not None and role.default is None:
+            yield _error(
+                "missing-key",
+                "The sign-up needs 'default_role': the role field has no default.",
+                sign_up,
+                hint=f"Add for example 'default_role: {next(iter(access.roles))}'.",
             )
 
 

@@ -123,17 +123,31 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 """The type of an endpoint parameter that gets the session of the request."""
 
 
+CONFLICT = (
+    "The change breaks a rule of the data: a value must be unique, "
+    "or other records refer to this record."
+)
+
+
 async def commit(session: AsyncSession) -> None:
     """Commit the session. A broken constraint gives a 409 Conflict error."""
     try:
         await session.commit()
     except IntegrityError as error:
         await session.rollback()
-        raise ProblemError(
-            409,
-            "The change breaks a rule of the data: a value must be unique, "
-            "or other records refer to this record.",
-        ) from error
+        raise ProblemError(409, CONFLICT) from error
+
+
+async def flush(session: AsyncSession) -> None:
+    """Write the changes to the database in the open transaction, without a commit.
+
+    A broken constraint gives a 409 Conflict error.
+    """
+    try:
+        await session.flush()
+    except IntegrityError as error:
+        await session.rollback()
+        raise ProblemError(409, CONFLICT) from error
 
 
 async def ensure_exists[M: Record](

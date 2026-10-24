@@ -299,7 +299,10 @@ BINDING = Binding(
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
-    excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
+    # The React app has no sign-up page yet (#269).
+    excludes=frozenset(
+        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "sign_up"}
+    ),
     context=context,
     finish=finish,
     filters={"json": to_json},

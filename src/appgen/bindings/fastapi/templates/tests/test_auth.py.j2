@@ -1,20 +1,35 @@
 {{ trace_header(definition.auth.id) }}
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
-{% set ns = namespace(op=none, entity=none) %}
+{% set sign_up = definition.auth.sign_up %}
+{% set access = definition.access %}
+{% if sign_up and access %}
+{% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
+{% set default_role = sign_up.default_role or definition.entities[u.name].fields[role.name].default %}
+{% endif %}
+{% set ns = namespace(op=none, entity=none, new_op=none, new_entity=none) %}
 {% for e in py.entity_order() %}
-{% for op in e.operations if op.protected and op.kind == "list" and ns.op is none %}
+{% for op in e.operations if op.protected and op.kind == "list" %}
+{% if ns.op is none %}
 {% set ns.op, ns.entity = op, e %}
+{% endif %}
+{% if ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
+{% set ns.new_op, ns.new_entity = op, e %}
+{% endif %}
 {% endfor %}
 {% endfor %}
 """The tests of the sign-in: tokens, the auth endpoints, and the protected endpoints."""
 
+{% if sign_up %}
+from typing import Any
+
+{% endif %}
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import set_password
-from tests.factories import make_{{ u.snake }}
+{{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([u.snake ~ "_input"] if sign_up else [])) }}
 from tests.problems import assert_problem
 
 pytestmark = pytest.mark.anyio
@@ -91,4 +106,64 @@ async def test_a_protected_endpoint_needs_a_signed_in_user(
         "{{ ns.entity.path }}{{ ns.op.path }}", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
+{% endif %}
+{% if sign_up %}
+
+
+{{ trace(sign_up.id) }}
+async def _sign_up_body(session: AsyncSession) -> dict[str, Any]:
+    """Return valid input of a sign-up: the fields of a new user, and the password."""
+    data = await {{ u.snake }}_input(session)
+    names = {{ u.sign_up_fields | map(attribute="name") | list | tojson }}
+    return {name: data[name] for name in names if name in data} | {"password": PASSWORD}
+
+
+{{ trace(sign_up.id) }}
+async def test_a_new_user_signs_up_and_signs_in(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    body = await _sign_up_body(session)
+
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+
+    assert response.status_code == 201, response.text
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    me = await anonymous_client.get("/auth/me", headers=headers)
+    assert me.status_code == 200, me.text
+    assert me.json()["{{ username.name }}"] == body["{{ username.name }}"]
+{% if default_role %}
+    assert me.json()["{{ role.name }}"] == "{{ default_role }}"
+{% endif %}
+    credentials = {"username": body["{{ username.name }}"], "password": PASSWORD}
+    sign_in = await anonymous_client.post("/auth/sign-in", json=credentials)
+    assert sign_in.status_code == 200, sign_in.text
+{% if ns.new_op %}
+    {{ trace(ns.new_op.id) }}
+    response = await anonymous_client.get("{{ ns.new_entity.path }}{{ ns.new_op.path }}", headers=headers)
+    assert response.status_code == 200, response.text
+{% endif %}
+
+
+{{ trace(sign_up.id) }}
+async def test_a_sign_up_with_a_user_name_that_exists_gives_409(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    body = await _sign_up_body(session)
+    first = await anonymous_client.post("/auth/sign-up", json=body)
+    assert first.status_code == 201, first.text
+
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+
+    assert_problem(response, 409)
+
+
+{{ trace(sign_up.id) }}
+async def test_a_sign_up_needs_a_long_password(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    body = await _sign_up_body(session) | {"password": "x" * {{ definition.auth.min_password_length - 1 }}}
+
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+
+    assert_problem(response, 422)
 {% endif %}

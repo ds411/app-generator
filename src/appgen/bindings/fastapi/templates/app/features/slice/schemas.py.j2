@@ -59,6 +59,19 @@ class {{ e.name }}Read(ReadModel):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% if e.sign_up_fields is not none %}
+
+
+{{ trace(definition.auth.sign_up.id) }}
+class {{ e.name }}SignUp(InputModel):
+    """The input of a sign-up: the fields of a new user, and the password."""
+
+{% for f in e.sign_up_fields %}
+    {{ trace(f.id) }}
+    {{ f.declaration("create") }}
+{% endfor %}
+    password: str = Field(min_length={{ definition.auth.min_password_length }}, max_length=200)
+{% endif %}
 {% for op in e.custom_operations if op.params %}
 
 

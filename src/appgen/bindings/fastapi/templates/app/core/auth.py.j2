@@ -1,6 +1,11 @@
 {{ trace_header(definition.auth.id) }}
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set sign_up = definition.auth.sign_up %}
+{% if sign_up and definition.access %}
+{% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+{% set default_role = sign_up.default_role or (definition.entities[u.name].fields[role.name].default) %}
+{% endif %}
 """The sign-in of the users (ADR 0011): password hashes, tokens, and the auth endpoints.
 
 The users are the records of {{ u.name }}. The table `credentials` holds
@@ -26,14 +31,22 @@ from sqlalchemy import ForeignKey, String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+{% if sign_up %}
+from app.core.db import Base, SessionDep, commit, flush
+{% else %}
 from app.core.db import Base, SessionDep, commit
+{% endif %}
 from app.core.errors import ProblemError, problem_responses
+{% if sign_up %}
+from app.features.{{ u.slice }} import repository
+{% endif %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
-from app.features.{{ u.slice }}.schemas import {{ u.name }}Read
+{{ py.from_import("app.features." ~ u.slice ~ ".schemas", [u.name ~ "Read"] + ([u.name ~ "Create", u.name ~ "SignUp"] if sign_up else [])) }}
 
 SESSION_SECONDS = {{ definition.auth.session_hours * 3600 }}
 """The time after which a token ends: {{ definition.auth.session_hours }} hours."""
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = {{ definition.auth.min_password_length }}
+"""The lowest number of characters of a new password."""
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -173,6 +186,27 @@ async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
     ):
         raise ProblemError(401, "The user name or the password is not correct.")
     return Token(access_token=make_token(request, user.id))
+{% if sign_up %}
+
+
+{{ trace(sign_up.id) }}
+@router.post(
+    "/sign-up", status_code=201, responses=problem_responses(409, 422), operation_id="sign_up"
+)
+async def sign_up(data: {{ u.name }}SignUp, request: Request, session: SessionDep) -> Token:
+    """Make a new user with a password, and return a token. A user name that exists gives 409."""
+    values = data.model_dump(by_alias=False, exclude={"password"})
+{% if default_role %}
+    values["{{ role.attr }}"] = "{{ default_role }}"
+{% endif %}
+    user = await repository.add(session, {{ u.name }}Create.model_validate(values))
+    # The record and its credential are in one transaction. The record
+    # must be in the database before its credential.
+    await flush(session)
+    session.add(Credential(user_id=user.id, password_hash=hash_password(data.password)))
+    await commit(session)
+    return Token(access_token=make_token(request, user.id))
+{% endif %}
 
 
 @router.get("/me", responses=problem_responses(401), operation_id="read_me")
