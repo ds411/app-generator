@@ -353,6 +353,20 @@ def test_each_operation_has_a_test_module(result: GenerationResult) -> None:
     assert "assert_problem(response, 404)" in complete
 
 
+def test_the_tests_of_a_custom_operation_check_the_501_of_the_stub(
+    result: GenerationResult,
+) -> None:
+    complete = _files(result)["tests/features/tasks/test_complete_task.py"]
+    assert "async def test_complete_task_gives_501_until_it_has_its_logic(" in complete
+    assert "    record = await make_task(session)\n" in complete
+    assert 'await client.post(f"/tasks/{record.id}/complete-task"' in complete
+    assert "        assert_problem(response, 501)\n" in complete
+    # After the developer writes the logic, the test still passes.
+    assert "        assert response.status_code < 500, response.text\n" in complete
+    errors = _files(result)["app/core/errors.py"]
+    assert "app.add_exception_handler(NotImplementedError, _not_implemented)" in errors
+
+
 def test_the_factories_store_the_records_that_a_record_needs(result: GenerationResult) -> None:
     factories = _files(result)["tests/factories.py"]
     assert "async def make_task(session: AsyncSession, **values: Any) -> Task:" in factories

@@ -125,6 +125,8 @@ generator stops with an error.
 
 - A custom operation has a generated endpoint in `<operation>_gen.py`,
   which calls a function with a fixed name in `<operation>_ext.py`.
+  The stub raises `NotImplementedError`, and the API gives status 501
+  with problem details for it.
 - Each entity has an extension file `validation_ext.py` with a function
   that the create and update operations call before they store a
   record. By default, it accepts all records.
@@ -147,7 +149,10 @@ reference to a missing record (422), and a duplicate unique value
 (409). Factories store the records for a test through the repository
 of each slice, with the records that a required relation needs. The
 generated tests of a custom operation check only its errors, because
-the generator does not know its logic.
+the generator does not know its logic. One test calls the operation on
+a stored record: while the stub raises `NotImplementedError`, the API
+gives 501 with problem details, and after the developer writes the
+logic, the test checks that the API gives no server error (#156).
 
 ## Consequences
 

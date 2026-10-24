@@ -64,7 +64,11 @@ async def {{ fn }}(
 {% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read"] %}
 {% endif %}
 {% else %}
-{% set ns.lines = ns.lines + ["from uuid import uuid4"] %}
+{% set ns.lines = ns.lines + [
+    "from uuid import uuid4",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from tests.factories import make_" ~ e.snake,
+] %}
 {% endif %}
 {{ py.imports(ns.lines) }}
 
@@ -232,6 +236,29 @@ pytestmark = pytest.mark.anyio
     assert_problem(response, 422)
 {% else %}
 {% set required_params = op.params | selectattr("required") | rejectattr("has_default") | list %}
+
+
+{{ sig("test_" ~ op.name ~ "_gives_501_until_it_has_its_logic", "client: AsyncClient, session: AsyncSession") }}    # The stub in {{ op.name }}_ext.py raises NotImplementedError, and the
+    # API gives 501. With the logic of the operation, it gives no server error.
+    record = await make_{{ e.snake }}(session)
+{% if op.params %}
+    n = 0
+    params = {
+{% for p in op.params %}
+        "{{ p.name }}": {{ p.sample }},
+{% endfor %}
+    }
+
+    response = await client.post({{ id_url }}, json=params)
+{% else %}
+
+    response = await client.post({{ id_url }})
+{% endif %}
+
+    if response.status_code == 501:
+        assert_problem(response, 501)
+    else:
+        assert response.status_code < 500, response.text
 
 
 {{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}{% if op.params %}
