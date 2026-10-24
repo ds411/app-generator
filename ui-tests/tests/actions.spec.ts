@@ -5,6 +5,7 @@
 import { expect, test } from "@playwright/test";
 
 import { expected, pathPattern } from "./expected";
+import { firstRecordLink } from "./links";
 
 for (const name of ["task_board", "project_detail"]) {
   const target = expected.pages.find((p) => p.name === name);
@@ -14,11 +15,9 @@ for (const name of ["task_board", "project_detail"]) {
     let path = target?.path ?? "/";
     if (target?.params.length) {
       const parent = path.slice(0, path.indexOf("/{")) || "/";
-      await page.goto(parent);
-      await page.waitForLoadState("networkidle");
-      const pattern = pathPattern(path);
-      const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((a) => a.getAttribute("href") ?? ""));
-      path = hrefs.find((href) => pattern.test(href)) ?? path;
+      const href = await firstRecordLink(page, parent, pathPattern(path));
+      expect(href, `a link to ${path} on ${parent}`).toBeDefined();
+      path = href ?? path;
     }
     await page.goto(path);
     await page.waitForLoadState("networkidle");

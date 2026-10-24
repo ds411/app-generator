@@ -4,16 +4,14 @@
 import { expect, test } from "@playwright/test";
 
 import { expected, pathPattern } from "./expected";
+import { firstRecordLink } from "./links";
 
 const detail = expected.pages.find((p) => p.name === "project_detail");
 
 test("the breadcrumb shows the new name of a record after an edit", async ({ page }, testInfo) => {
   test.skip(detail === undefined, "The definition has no page project_detail.");
   const pattern = pathPattern(detail?.path ?? "");
-  await page.goto("/projects");
-  await page.waitForLoadState("networkidle");
-  const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((a) => a.getAttribute("href") ?? ""));
-  const href = hrefs.find((h) => pattern.test(h));
+  const href = await firstRecordLink(page, "/projects", pattern);
   expect(href, "a link to a project").toBeDefined();
   await page.goto(href ?? "");
   await page.waitForLoadState("networkidle");
