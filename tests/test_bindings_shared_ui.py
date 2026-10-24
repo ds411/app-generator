@@ -11,11 +11,12 @@ from appgen.bindings.shared.ui import (
     jsx_attr,
     jsx_text,
     menu_icons,
+    menu_labels,
     page_grid,
     page_regions,
     ui_plan,
 )
-from appgen.dsl import load_definition
+from appgen.dsl import load_definition, load_definition_text
 from appgen.gen import find_binding, generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
@@ -135,3 +136,41 @@ def test_a_stub_widget_shows_its_element_id_only_in_development(
         assert line.strip() == (
             f'{{{development} ? "Not implemented yet: {element_id}" : "Not available yet."}}'
         ), path
+
+
+def test_a_breadcrumb_uses_the_label_of_the_menu_item_of_its_page() -> None:
+    plan = ui_plan(load_definition(EXAMPLE))
+    # The menu item of the page task_board has the label "Task board"; the page title is "Tasks".
+    assert plan.pages["task_board"].crumbs[-1] == ("task_board", "Task board", False)
+    assert plan.pages["task_detail"].crumbs[1] == ("task_board", "Task board", False)
+    # A menu item without a label keeps the page title, and a record keeps its label source.
+    assert plan.pages["projects"].crumbs[-1] == ("projects", "Projects", False)
+    assert plan.pages["task_detail"].crumbs[-1] == ("task_detail", "Task", True)
+
+
+def test_a_page_that_is_not_in_the_menu_keeps_its_title() -> None:
+    definition = load_definition_text(
+        "version: 0\napp: { name: a, title: A }\n"
+        "entities:\n  Note:\n    fields: { text: { type: text } }\n"
+        "pages:\n"
+        "  home: { path: /, title: Home }\n"
+        "  notes: { path: /notes, title: Notes, entity: Note }\n"
+        "  archive: { path: /notes/archive, title: Archive }\n"
+        "  tags: { path: /tags, title: Tags, breadcrumb: Labels }\n"
+        "ui:\n"
+        "  defaults: { layout: shell }\n"
+        "  layouts:\n"
+        "    shell:\n"
+        "      sidebar: { navigation: main }\n"
+        "      topbar: { breadcrumbs: true }\n"
+        "  navigation:\n"
+        "    main:\n"
+        "      items:\n"
+        "        notes: { page: notes, label: All notes }\n"
+        "        tags: { page: tags, label: All tags }\n"
+    )
+    assert menu_labels(definition, "shell") == {"notes": "All notes", "tags": "All tags"}
+    # The breadcrumb key of a page wins over the menu label.
+    assert ui_plan(definition).pages["tags"].crumbs[-1] == ("tags", "Labels", False)
+    crumbs = ui_plan(definition).pages["archive"].crumbs
+    assert [label for _, label, _ in crumbs] == ["Home", "All notes", "Archive"]

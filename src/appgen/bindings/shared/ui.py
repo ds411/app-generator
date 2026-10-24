@@ -198,6 +198,40 @@ class UiPlan:
         return [info for info in self.pages.values() if info.layout == layout]
 
 
+def menu_labels(definition: AppDefinition, layout: str | None) -> dict[str, str]:
+    """Return the labels of the menu items of a layout, by page, for the breadcrumbs.
+
+    The breadcrumbs use the label of the menu item of a page, so that the
+    breadcrumb and the menu use the same name. A page that is not in the
+    menu, or a menu item without a label, keeps the page title. If two
+    items open the same page, the first one wins.
+    """
+    ui = definition.ui
+    if ui is None or layout is None or layout not in ui.layouts:
+        return {}
+    sidebar = ui.layouts[layout].sidebar
+    name = sidebar.navigation if sidebar is not None else None
+    menu = ui.navigation.get(name) if name is not None else None
+    if menu is None:
+        return {}
+    labels: dict[str, str] = {}
+    items = [*menu.items.values(), *(i for g in menu.groups.values() for i in g.items.values())]
+    for item in items:
+        for entry in (item, *item.items.values()):
+            if entry.label and entry.page not in labels:
+                labels[entry.page] = str(entry.label)
+    return labels
+
+
+def _crumb_label(
+    definition: AppDefinition, page: str, label: str, from_record: bool, labels: dict[str, str]
+) -> str:
+    """Return the label of a breadcrumb: the `breadcrumb` of the page, else its menu label."""
+    if from_record or definition.pages[page].breadcrumb is not None:
+        return label
+    return labels.get(page, label)
+
+
 def ui_plan(definition: AppDefinition) -> UiPlan:
     """Return the app shell of a definition."""
     plan = UiPlan(
@@ -207,8 +241,14 @@ def ui_plan(definition: AppDefinition) -> UiPlan:
     ui = definition.ui
     default_layout = ui.defaults.layout if ui and ui.defaults else None
     for name, page in definition.pages.items():
+        labels = menu_labels(definition, page.layout or default_layout)
         crumbs = tuple(
-            (c.page, c.label, c.from_record) for c in breadcrumbs(definition.pages, name)
+            (
+                c.page,
+                _crumb_label(definition, c.page, c.label, c.from_record, labels),
+                c.from_record,
+            )
+            for c in breadcrumbs(definition.pages, name)
         )
         plan.pages[name] = PageInfo(
             name=name,

@@ -116,7 +116,7 @@ class Page(Element):
     actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
     """The actions in the page header."""
     breadcrumb: Text | None = None
-    """The label of the page in the breadcrumbs. The default is the title."""
+    """The label of the page in the breadcrumbs. The default is the menu label, else the title."""
     arrangement: PageArrangement | None = None
     """Layout hints: the order and the place of the title, the actions, and the content."""
 
