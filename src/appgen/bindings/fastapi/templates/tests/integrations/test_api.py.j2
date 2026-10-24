@@ -1,0 +1,77 @@
+{{ trace_header(element_id) }}
+{% set api = py_apis[name] %}
+{% set first = api.methods[0] %}
+"""The tests of the client of the API `{{ api.name }}`, without the network.
+
+The mock transport answers each operation with the example of the OpenAPI
+document (`tests/integrations/{{ api.module }}_examples.json`).
+"""
+
+{{ py.imports(api.test_imports()) }}
+
+pytestmark = pytest.mark.anyio
+
+
+def make_client(
+    requests: list[httpx.Request] | None = None, status: int | None = None
+) -> {{ api.client }}:
+    """Return a client with the mock transport."""
+    transport = mock_transport({{ api.name | tojson }}, requests, status)
+    {{ api.test_construction() }}
+{% for m in api.methods %}
+
+
+{{ trace(m.id) }}
+async def test_{{ m.name }}_sends_the_request_and_reads_the_answer() -> None:
+{% for line in m.sample_lines() %}
+    {{ line }}
+{% endfor %}
+    requests: list[httpx.Request] = []
+    async with make_client(requests) as client:
+        {{ m.test_call("result = await " if m.result_type else "await ") }}
+
+    assert [request.method for request in requests] == [{{ m.method.upper() | tojson }}]
+    {{ m.path_check() }}
+{% if m.result_type %}
+    expected = EXAMPLES[{{ api.name | tojson }}][{{ m.operation_id | tojson }}]
+    adapter = pydantic.TypeAdapter({{ m.result_type }})
+    assert result == adapter.validate_python(expected)
+{% endif %}
+{% endfor %}
+
+
+async def test_an_error_status_raises_an_api_error_with_the_status_and_the_body() -> None:
+{% for line in first.sample_lines() %}
+    {{ line }}
+{% endfor %}
+    async with make_client(status=503) as client:
+        with pytest.raises(ApiError) as error:
+            {{ first.test_call("await ", 12) }}
+
+    assert error.value.api == {{ api.name | tojson }}
+    assert error.value.status == 503
+    assert error.value.body == "mock error"
+
+
+async def test_each_request_has_a_default_timeout() -> None:
+    async with make_client() as client:
+        assert client.timeout == httpx.Timeout(DEFAULT_TIMEOUT)
+{% if api.credential %}
+
+
+async def test_each_request_sends_the_credential() -> None:
+{% for line in first.sample_lines() %}
+    {{ line }}
+{% endfor %}
+    requests: list[httpx.Request] = []
+    async with make_client(requests) as client:
+        {{ first.test_call("await ") }}
+
+{% if api.credential == "bearer" %}
+    assert requests[0].headers["Authorization"] == "Bearer secret"
+{% elif api.credential == "header" %}
+    assert requests[0].headers[{{ api.credential_name | tojson }}] == "secret"
+{% else %}
+    assert requests[0].url.params[{{ api.credential_name | tojson }}] == "secret"
+{% endif %}
+{% endif %}

@@ -38,6 +38,13 @@ services:
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
 {% endif %}
+{% for api in py_apis.values() %}
+      {{ trace(api.id) }}
+      {{ api.url_env }}: ${{ "{" }}{{ api.url_env }}:-{{ api.base_url }}{{ "}" }}
+{% if api.secret_env %}
+      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
+{% endif %}
+{% endfor %}
     ports:
       - "8000:8000"
     depends_on:

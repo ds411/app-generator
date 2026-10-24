@@ -2,7 +2,8 @@
 # Generate the project tracker with the FastAPI binding, and check the
 # output: install, lint, format, type check, tests, Docker image,
 # traces, and the smoke test (scripts/smoke_test.py: start the app and
-# request it), in Docker and with SQLite (--local), and the schema change
+# request it), in Docker and with SQLite (--local, with the mock server of
+# the third-party APIs, scripts/mock_api.py), and the schema change
 # on a database with data (scripts/check_schema_change.py). Then generate
 # the room booking example, which has the sign-in, the sign-up, and the
 # roles, and check its code and run its tests. The pre-push hook
@@ -49,6 +50,9 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
 fi
 
 step "generate $definition in $out"
+# The hand-written code of the example: appgen keeps an extension file
+# that exists.
+cp -R examples/project-tracker/extensions/fastapi/. "$out"/
 uv run --locked appgen generate "$definition" -b fastapi -o "$out" >/dev/null
 
 cd "$out"

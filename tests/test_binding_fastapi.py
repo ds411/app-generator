@@ -94,7 +94,7 @@ def test_the_check_finds_no_invalid_traces(tmp_path: Path, fastapi: Binding, exa
 
 
 def test_pages_and_the_ui_are_out_of_scope(result: GenerationResult) -> None:
-    assert result.excluded_kinds == ("api", "page", "translations", "ui")
+    assert result.excluded_kinds == ("page", "translations", "ui")
     assert not [g for g in result.gaps if g.element_id.startswith("pages.")]
 
 

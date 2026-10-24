@@ -1,0 +1,111 @@
+{{ trace_header("app") }}
+"""The HTTP client that the clients of the third-party APIs share.
+
+Each client in `app/integrations/<api>/client.py` sends its requests with
+`ApiClient.request`. An answer with an error status raises `ApiError`, and
+each request stops after a timeout.
+"""
+
+import re
+from collections.abc import Mapping
+from types import TracebackType
+from typing import Self, cast
+from urllib.parse import quote
+
+import httpx
+
+DEFAULT_TIMEOUT = 10.0
+"""The time in seconds after which a request stops, if the client gets no other time."""
+
+
+class ApiError(Exception):
+    """A third-party API answered with an error status."""
+
+    def __init__(self, api: str, status: int, body: str) -> None:
+        super().__init__(f"The API {api} answered with the status {status}: {body[:500]}")
+        self.api = api
+        """The name of the API in the app definition."""
+        self.status = status
+        self.body = body
+        """The body of the answer, as text."""
+
+
+class ApiClient:
+    """The base class of the clients. Close a client after use (`async with`)."""
+
+    api = ""
+    """The name of the API in the app definition."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        headers: Mapping[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._params = dict(params or {})
+        self._http = httpx.AsyncClient(
+            base_url=base_url, timeout=timeout, headers=headers, transport=transport
+        )
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close the connections of the client."""
+        await self._http.aclose()
+
+    @property
+    def timeout(self) -> httpx.Timeout:
+        """The timeout of each request."""
+        return self._http.timeout
+
+    async def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        path: Mapping[str, object] | None = None,
+        query: Mapping[str, object] | None = None,
+        headers: Mapping[str, object] | None = None,
+        body: object = None,
+    ) -> object:
+        """Send a request, and return the JSON body of the answer, or None if it has none.
+
+        `url` is the path of the operation, for example `/pets/{id}`. `path`
+        gives the values of its parameters. A parameter of `query` or
+        `headers` with the value None is not sent. Raise ApiError if the
+        answer has an error status.
+        """
+        values = {name: quote(str(value), safe="") for name, value in (path or {}).items()}
+        url = re.sub(r"\{([^}]+)\}", lambda m: values[m.group(1)], url).lstrip("/")
+        params: dict[str, str | list[str]] = dict(self._params)
+        for name, value in (query or {}).items():
+            if isinstance(value, list):
+                params[name] = [_text(item) for item in cast(list[object], value)]
+            elif value is not None:
+                params[name] = _text(value)
+        sent = {name: _text(value) for name, value in (headers or {}).items() if value is not None}
+        response = await self._http.request(method, url, params=params, headers=sent, json=body)
+        if response.is_error:
+            raise ApiError(self.api, response.status_code, response.text)
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
+
+
+def _text(value: object) -> str:
+    """Return a value as the text of a query parameter or a header."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)

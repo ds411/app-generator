@@ -21,7 +21,13 @@ from app.core.auth import current_user
 {% endif %}
 from app.core.config import Settings
 from app.core.db import Base
+{% for api in py_apis.values() | sort(attribute="module") %}
+from app.integrations.{{ api.module }}.client import {{ api.dependency }}
+{% endfor %}
 from app.main import create_app
+{% if py_apis %}
+{{ py.from_import("tests.integrations.mocks", py_apis.values() | map(attribute="mock_dependency") | list) }}
+{% endif %}
 
 
 @pytest.fixture
@@ -111,6 +117,9 @@ async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[Asyn
 {% if definition.access %}
     app.dependency_overrides[check_access] = lambda: None
 {% endif %}
+{% for api in py_apis.values() %}
+    app.dependency_overrides[{{ api.dependency }}] = {{ api.mock_dependency }}
+{% endfor %}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await app.state.engine.dispose()
@@ -119,6 +128,9 @@ async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[Asyn
 async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """An HTTP client that calls the app in the same process, with the test database."""
     app = create_app(Settings(database_url=migrated_url))
+{% for api in py_apis.values() %}
+    app.dependency_overrides[{{ api.dependency }}] = {{ api.mock_dependency }}
+{% endfor %}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await app.state.engine.dispose()

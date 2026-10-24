@@ -313,6 +313,12 @@ element ID only in a development build (`process.env.NODE_ENV` in
 Next.js, `import.meta.env.DEV` in React). A production build shows the
 neutral text "Not available yet.".
 
+The examples keep their hand-written code in
+`examples/<example>/extensions/<binding>/`, with the paths of the app.
+The check scripts copy these files into the app before they generate
+it, so that the checks run the real code, for example a custom
+operation that calls a third-party API.
+
 A rule with `extension=True` can also write a file that is not a stub
 but that belongs to the app after the first run. Give it a manual trace
 (`trace("app", scope="file", kind="manual")`), not a gap trace. The

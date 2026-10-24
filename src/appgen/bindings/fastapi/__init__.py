@@ -29,6 +29,7 @@ _URL_PREFIX = Annotated[str, StringConstraints(pattern=r"^(/[a-z0-9][a-z0-9._~-]
 _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
 _OPERATION = "app/features/{{ py.operations[name].slice }}/{{ name }}"
+_INTEGRATION = "app/integrations/{{ py_apis[name].module }}"
 
 BINDING = Binding(
     name="fastapi",
@@ -189,6 +190,40 @@ BINDING = Binding(
             for_each="operation",
             when="element.kind == 'list' and py.entity(element.entity).query.from_views",
         ),
+        Output(template="package.py.j2", path="app/integrations/__init__.py", when="py_apis"),
+        Output(
+            template="app/integrations/http.py.j2",
+            path="app/integrations/http.py",
+            when="py_apis",
+        ),
+        Output(template="package.py.j2", path=_INTEGRATION + "/__init__.py", for_each="api"),
+        Output(
+            template="app/integrations/api/models.py.j2",
+            path=_INTEGRATION + "/models.py",
+            for_each="api",
+        ),
+        Output(
+            template="app/integrations/api/client.py.j2",
+            path=_INTEGRATION + "/client.py",
+            for_each="api",
+        ),
+        Output(template="package.py.j2", path="tests/integrations/__init__.py", when="py_apis"),
+        Output(
+            template="tests/integrations/mocks.py.j2",
+            path="tests/integrations/mocks.py",
+            when="py_apis",
+        ),
+        Output(
+            template="tests/integrations/examples.json.j2",
+            path="tests/integrations/{{ py_apis[name].module }}_examples.json",
+            for_each="api",
+        ),
+        Output(
+            template="tests/integrations/test_api.py.j2",
+            path="tests/integrations/test_{{ py_apis[name].module }}.py",
+            for_each="api",
+            when="py_apis[name].methods",
+        ),
         Output(template="tests/factories.py.j2", path="tests/factories.py"),
         Output(
             template="tests/ordering.py.j2",
@@ -206,9 +241,9 @@ BINDING = Binding(
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "access", "role"}
+        | {"api", "api_operation"}
     ),
-    # The clients of the third-party APIs come with #263.
-    excludes=frozenset({"page", "ui", "translations", "api"}),
+    excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),

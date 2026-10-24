@@ -3,6 +3,7 @@
 | Path                       | Content                                                                    |
 | -------------------------- | -------------------------------------------------------------------------- |
 | `project-tracker/app.yaml` | The main example: projects, tasks, people, and comments, with CRUD and custom operations. It calls two third-party APIs, whose OpenAPI documents are in `project-tracker/apis/`. |
+| `project-tracker/extensions/` | The hand-written code of the project tracker, one folder for each binding, with the paths of the app. The check scripts copy it into the apps before they generate them. |
 | `room-booking/app.yaml`    | The second example: rooms, amenities, members, and bookings. It uses the CRUD shorthand with the default views and forms. |
 | `edge-cases/app.yaml`      | Each field type, field option, relation kind, and operation kind, and extension keys. |
 | `invalid/`                 | Broken definitions. Each one starts with `# expect: <code>`, the diagnostic that it causes. `invalid/apis/` has their broken OpenAPI documents. |

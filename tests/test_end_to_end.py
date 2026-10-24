@@ -32,7 +32,7 @@ BY_DESIGN: dict[str, list[str]] = {
         "password_reset",
         "sign_up",
     ],
-    "fastapi": ["api", "page", "translations", "ui"],
+    "fastapi": ["page", "translations", "ui"],
 }
 
 # The stubs that each app has after a first run: the custom operations,

@@ -55,8 +55,8 @@ done
 gaps. `appgen check` prints the trace coverage of the definition and
 the invalid traces. For each app, the result is `Result: passed.` with
 no uncovered elements and no invalid traces. The stubs of the custom
-elements are open gaps until you write them: 8 for Next.js and React,
-3 for FastAPI. The FastAPI app has no pages, so
+elements are open gaps until you write them: 9 for Next.js and React,
+4 for FastAPI. The FastAPI app has no pages, so
 its report shows the kinds `page` and `ui` as excluded. See
 [traces.md](traces.md) for the report format.
 
@@ -214,6 +214,58 @@ TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest
 
 To delete all data of the local database, delete `local.db`.
 
+### Call a third-party API
+
+The project tracker calls a public holidays API. The custom operation
+`schedule_task` sets the due date of a task to a number of working
+days from today, without weekends and public holidays. The example has
+its hand-written code in `examples/project-tracker/extensions/fastapi/`.
+A mock server answers with the examples of the OpenAPI documents, so
+the demo does not call the real API.
+
+1. Copy the hand-written code into the app, and generate it again.
+   appgen keeps an extension file that exists:
+
+   ```sh
+   cp -R examples/project-tracker/extensions/fastapi/. /tmp/tracker-fastapi/
+   uv run appgen generate examples/project-tracker/app.yaml -b fastapi -o /tmp/tracker-fastapi
+   ```
+
+2. Start the mock server from the repository root. It prints the base
+   URL of each API:
+
+   ```sh
+   uv run scripts/mock_api.py
+   ```
+
+3. In a second terminal, add the base URL to the settings of the app,
+   and start the API as in the steps above:
+
+   ```sh
+   cd /tmp/tracker-fastapi
+   printf 'HOLIDAYS_API_URL=http://localhost:8430/holidays\n' >> .env
+   uv run fastapi dev app/main.py
+   ```
+
+4. Add a person, a project, and a task, and run the operation. Use the
+   IDs of the answers:
+
+   ```sh
+   curl -s -X POST localhost:8000/people -H 'Content-Type: application/json' \
+     -d '{"name": "Ada", "email": "ada@example.com"}'
+   curl -s -X POST localhost:8000/projects -H 'Content-Type: application/json' \
+     -d '{"name": "Demo", "key": "DEMO", "owner_id": "<person ID>"}'
+   curl -s -X POST localhost:8000/tasks -H 'Content-Type: application/json' \
+     -d '{"title": "Demo task", "project_id": "<project ID>"}'
+   curl -s -X POST localhost:8000/tasks/<task ID>/schedule-task \
+     -H 'Content-Type: application/json' -d '{"working_days": 5, "country_code": "DE"}'
+   ```
+
+   The answer has the new `due_date`. The mock server records the
+   request of the operation: open <http://localhost:8430/_requests>.
+
+The smoke test with `--local` does these steps (see below).
+
 ### Run in Docker
 
 ```sh
@@ -314,6 +366,11 @@ with PGlite or SQLite, without Docker. Build the Next.js app first with
 uv run scripts/smoke_test.py nextjs --app /tmp/tracker-nextjs --local
 uv run scripts/smoke_test.py fastapi --app /tmp/tracker-fastapi --local
 ```
+
+With `--local`, the third-party APIs of the app point to the mock
+server of `scripts/mock_api.py`. The FastAPI check also runs the custom
+operation `schedule_task` through it, so the app needs the hand-written
+code of the example (see [Call a third-party API](#call-a-third-party-api)).
 
 ## Clean up
 

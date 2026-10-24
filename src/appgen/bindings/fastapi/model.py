@@ -14,6 +14,7 @@ from dataclasses import field as dataclass_field
 from decimal import Decimal
 from typing import Any
 
+from appgen.bindings.fastapi.integrations import mocks_imports, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import call, from_import, import_block
 from appgen.bindings.fastapi.queries import PyListQuery, list_query
@@ -545,6 +546,8 @@ class PyOperation:
     """The slice of the entity of the operation."""
     protected: bool = False
     """True if the operation needs a signed-in user (the `auth` section)."""
+    apis: list[str] = dataclass_field(default_factory=list[str])
+    """The names of the third-party APIs that a custom operation calls."""
 
     @property
     def custom(self) -> bool:
@@ -956,6 +959,10 @@ class PyApp:
     def from_import(self, module: str, names: list[str]) -> str:
         """Return a `from` import with the names in the order of the Ruff import sorter."""
         return from_import(module, set(names))
+
+    def call(self, prefix: str, func: str, args: list[str], indent: int = 4) -> str:
+        """Return a call on one line if it fits, else with one argument on each line."""
+        return call(prefix, func, args, indent)
 
     def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
@@ -1613,6 +1620,7 @@ def _operation(name: str, operation: Operation, entities: dict[str, PyEntity]) -
         description=operation.description,
         module=f"{name}_gen" if operation.kind == "custom" else name,
         slice=entity.slice,
+        apis=list(operation.apis),
     )
 
 
@@ -1665,4 +1673,9 @@ def _check_names(entity: PyEntity) -> None:
 
 def binding_context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
-    return {"py": python_app(definition)}
+    apis = python_apis(definition)
+    return {
+        "py": python_app(definition),
+        "py_apis": apis,
+        "py_api_mocks_imports": mocks_imports(apis),
+    }
