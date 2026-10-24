@@ -65,6 +65,11 @@ BINDING = Binding(
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(
+            template="app/core/workflows.py.j2",
+            path="app/core/workflows.py",
+            when="definition.workflows",
+        ),
+        Output(
             template="app/core/rules.py.j2",
             path="app/core/rules.py",
             when="py.entities.values() | selectattr('check_rules') | list",
@@ -134,6 +139,11 @@ BINDING = Binding(
         Output(template="package.py.j2", path="tests/features/__init__.py"),
         Output(template="package.py.j2", path=_TESTS + "/__init__.py", for_each="entity"),
         Output(
+            template="tests/features/slice/test_workflow.py.j2",
+            path="tests/features/{{ py.entity(element.entity).slice }}/test_{{ name }}_workflow.py",
+            for_each="workflow",
+        ),
+        Output(
             template="tests/features/slice/test_schemas.py.j2",
             path=_TESTS + "/test_schemas.py",
             for_each="entity",
@@ -151,6 +161,7 @@ BINDING = Binding(
     covers=frozenset(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
+        | {"workflow", "transition"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),

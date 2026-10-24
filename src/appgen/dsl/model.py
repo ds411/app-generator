@@ -16,13 +16,14 @@ from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
 from appgen.dsl.ui.views import Format
+from appgen.dsl.workflows import Workflow
 
 DSL_VERSION = 0
 """The DSL version that this loader reads."""
-RESERVED_SECTIONS: tuple[str, ...] = ("auth", "access", "workflows")
+RESERVED_SECTIONS: tuple[str, ...] = ("auth", "access")
 """Top-level sections that a later DSL version adds (ADR 0002).
 
-ADR 0003 adds `ui`. The section `translations` is now part of the DSL.
+ADR 0003 adds `ui`. The sections `translations` and `workflows` are now part of the DSL.
 """
 
 type FieldType = Literal[
@@ -161,6 +162,8 @@ class AppDefinition(Element):
     ui: UI | None = None
     translations: Translations | None = None
     """The languages of the UI text (the front ends)."""
+    workflows: dict[MemberName, Workflow] = pydantic.Field(default_factory=dict[str, Workflow])
+    """The state machines of the enum fields of the entities."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

@@ -9,6 +9,24 @@ import {
   type Sort,
 } from "./types";
 
+/** A workflow on an enum field: the allowed changes of the field. */
+export type Workflow = {
+  field: string;
+  /** The state of a new record. */
+  initial?: string;
+  /** The allowed changes: the value before and the value after. */
+  transitions: [string, string][];
+  message?: string;
+};
+
+/** A change of state that no transition of a workflow allows. */
+export class TransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TransitionError";
+  }
+}
+
 /** The time that each call waits, so that the UI shows its loading states. */
 export const MOCK_LATENCY_MS = 250;
 
@@ -76,6 +94,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     private readonly entity: string,
     data: readonly T[],
     private readonly defaults: Partial<Omit<T, "id">>,
+    private readonly workflows: readonly Workflow[] = [],
   ) {
     this.records = data.map((record) => ({ ...record }));
   }
@@ -113,6 +132,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   async create(input: TInput): Promise<T> {
     await wait();
     const record = { ...this.defaults, ...input, id: crypto.randomUUID() } as unknown as T;
+    this.checkWorkflows(undefined, record);
     this.records = [...this.records, record];
     this.notify();
     return { ...record };
@@ -120,7 +140,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     await wait();
-    const record = { ...this.find(id), ...patch, id } as T;
+    const before = this.find(id);
+    const record = { ...before, ...patch, id } as T;
+    this.checkWorkflows(before, record);
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
     return { ...record };
@@ -138,6 +160,33 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  /**
+   * Check the workflows of the entity. `before` is undefined for a new
+   * record, which must start in the initial state. A change to the same
+   * state, and a change from or to no state, pass.
+   */
+  private checkWorkflows(before: T | undefined, after: T): void {
+    for (const workflow of this.workflows) {
+      const to: unknown = (after as Record<string, unknown>)[workflow.field];
+      if (to === null || to === undefined) continue;
+      if (before === undefined) {
+        if (workflow.initial !== undefined && to !== workflow.initial) {
+          throw new TransitionError(
+            workflow.message ?? `A new ${this.entity} starts with the state ${workflow.initial}, not ${String(to)}.`,
+          );
+        }
+        continue;
+      }
+      const from: unknown = (before as Record<string, unknown>)[workflow.field];
+      if (from === null || from === undefined || from === to) continue;
+      if (!workflow.transitions.some(([a, b]) => a === from && b === to)) {
+        throw new TransitionError(
+          workflow.message ?? `The state of ${this.entity} cannot change from ${String(from)} to ${String(to)}.`,
+        );
+      }
+    }
   }
 
   private find(id: string): T {
