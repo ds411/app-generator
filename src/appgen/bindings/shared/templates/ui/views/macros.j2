@@ -7,7 +7,7 @@
 {% if ns.icons %}
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
-{% set react_names = react + (["useState"] if shape != "table" or plan.filters or plan.forms else []) %}
+{% set react_names = react + (["useState"] if shape not in ("table", "calendar") or plan.filters or plan.forms else []) %}
 {% if react_names %}
 import { {{ react_names | unique | sort | join(", ") }} } from "react";
 {% endif %}

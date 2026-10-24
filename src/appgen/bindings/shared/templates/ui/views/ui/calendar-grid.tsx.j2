@@ -1,0 +1,166 @@
+{{ trace_header("app") }}
+"use client";
+
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { useState } from "react";
+
+import { cn } from "@/shared/lib/utils";
+import { Link } from "@/shared/lib/router";
+import { Button } from "@/shared/ui/button";
+
+/** A record on the calendar: its time range, its text, and the page that it opens. */
+export type CalendarEvent = {
+  id: string;
+  start: Date;
+  /** The end. A record without an end has the start as its end. */
+  end: Date;
+  label: string;
+  href?: string;
+};
+
+export type CalendarMode = "week" | "month";
+
+const DAY_COUNT = { week: 7, month: 42 };
+const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const monthFormat = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+const rangeFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
+const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+
+function startOfDay(date: Date): Date {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+/** Return the Monday of the week of a date. */
+function startOfWeek(date: Date): Date {
+  const day = startOfDay(date);
+  return addDays(day, -((day.getDay() + 6) % 7));
+}
+
+/** Return the first day of the grid: the Monday of the week, or of the first week of the month. */
+function firstDay(anchor: Date, mode: CalendarMode): Date {
+  return mode === "week" ? startOfWeek(anchor) : startOfWeek(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
+}
+
+/** Return true if an event is on a day: it starts before the day ends, and ends on or after the day. */
+function onDay(event: CalendarEvent, day: Date): boolean {
+  return event.start < addDays(day, 1) && event.end >= day;
+}
+
+/**
+ * The records of a view on a calendar, in a week or a month. Each day
+ * shows the records that start, last, or end on it, with their times.
+ */
+export function CalendarGrid({
+  events,
+  initialMode,
+  dateOnly,
+}: {
+  events: CalendarEvent[];
+  initialMode: CalendarMode;
+  /** True if the records have dates without a time of day. */
+  dateOnly: boolean;
+}) {
+  const [mode, setMode] = useState<CalendarMode>(initialMode);
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+  const first = firstDay(anchor, mode);
+  const days = Array.from({ length: DAY_COUNT[mode] }, (_, index) => addDays(first, index));
+  const today = startOfDay(new Date()).getTime();
+  const title =
+    mode === "month"
+      ? monthFormat.format(anchor)
+      : `${rangeFormat.format(first)} – ${rangeFormat.format(addDays(first, 6))}`;
+  const move = (step: number) =>
+    setAnchor((date) =>
+      mode === "month" ? new Date(date.getFullYear(), date.getMonth() + step, 1) : addDays(date, 7 * step),
+    );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="icon" aria-label={`Previous ${mode}`} onClick={() => move(-1)}>
+          <ChevronLeftIcon />
+        </Button>
+        <Button variant="outline" size="icon" aria-label={`Next ${mode}`} onClick={() => move(1)}>
+          <ChevronRightIcon />
+        </Button>
+        <Button variant="outline" onClick={() => setAnchor(startOfDay(new Date()))}>
+          Today
+        </Button>
+        <h3 className="text-base font-medium" aria-live="polite">
+          {title}
+        </h3>
+        <div className="ml-auto flex gap-1" role="group" aria-label="Calendar mode">
+          {(["week", "month"] as const).map((value) => (
+            <Button
+              key={value}
+              variant={mode === value ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
+            >
+              {value === "week" ? "Week" : "Month"}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-7 overflow-hidden rounded-lg border text-sm">
+        {days.slice(0, 7).map((day) => (
+          <div key={`head-${day.getTime()}`} className="border-b bg-muted/50 px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            {weekdayFormat.format(day)}
+          </div>
+        ))}
+        {days.map((day) => {
+          const items = events.filter((event) => onDay(event, day));
+          const outside = mode === "month" && day.getMonth() !== anchor.getMonth();
+          return (
+            <section
+              key={day.getTime()}
+              aria-label={rangeFormat.format(day)}
+              className={cn(
+                "flex flex-col gap-1 border-b border-r p-1.5 [&:nth-child(7n)]:border-r-0",
+                mode === "week" ? "min-h-48" : "min-h-24",
+                outside && "bg-muted/30 text-muted-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex size-6 items-center justify-center rounded-full text-xs tabular-nums",
+                  day.getTime() === today && "bg-primary text-primary-foreground",
+                )}
+              >
+                {day.getDate()}
+              </span>
+              {items.map((event) => {
+                const time = dateOnly || event.start < day ? null : timeFormat.format(event.start);
+                const content = (
+                  <>
+                    {time && <span className="mr-1 tabular-nums text-muted-foreground">{time}</span>}
+                    {event.label}
+                  </>
+                );
+                const classes = "block truncate rounded-md bg-primary/10 px-1.5 py-0.5 text-xs text-foreground";
+                return event.href ? (
+                  <Link key={event.id} href={event.href} className={cn(classes, "hover:bg-primary/20")}>
+                    {content}
+                  </Link>
+                ) : (
+                  <span key={event.id} className={classes}>
+                    {content}
+                  </span>
+                );
+              })}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

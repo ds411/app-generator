@@ -149,15 +149,29 @@ def _fit_rules(entity: Entity, records: list[Record]) -> None:
     """Change the mock records so that they keep the compare and the unique rules of the entity.
 
     A record that breaks an order rule (`lt`, `lte`, `gt`, `gte`) gets the
-    two values swapped. A record that repeats the values of a unique rule
-    gets a number at the end of a string field of the rule. The mock data
-    does not keep the `no_overlap` rules.
+    two values swapped. For two date-times, the later value becomes 30 to
+    120 minutes after the earlier value, so that a booking takes hours,
+    not weeks. A record that repeats the values of a unique rule gets a
+    number at the end of a string field of the rule. The mock data does
+    not keep the `no_overlap` rules.
     """
     for rule in entity.rules.values():
         if isinstance(rule, EntityCompareRule) and rule.op in _SWAPS:
-            for record in records:
+            later, earlier = (
+                (rule.field, rule.other) if rule.op in ("gt", "gte") else (rule.other, rule.field)
+            )
+            times = all(
+                n in entity.fields and entity.fields[n].type == "datetime" for n in (later, earlier)
+            )
+            for index, record in enumerate(records):
                 a, b = record.get(rule.field), record.get(rule.other)
-                if a is not None and b is not None and not _SWAPS[rule.op](a, b):
+                if a is None or b is None:
+                    continue
+                if times:
+                    start = datetime.strptime(str(record[earlier]), "%Y-%m-%dT%H:%M:%SZ")
+                    end = start + timedelta(minutes=30 * (1 + index % 4))
+                    record[later] = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+                elif not _SWAPS[rule.op](a, b):
                     record[rule.field], record[rule.other] = b, a
         elif isinstance(rule, EntityUniqueRule):
             texts = [

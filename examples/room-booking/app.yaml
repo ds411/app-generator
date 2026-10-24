@@ -153,6 +153,11 @@ pages:
         icon: calendar-plus
         # Only the top bar of this page shows the action.
         placement: topbar
+  booking_calendar:
+    path: /calendar
+    title: Calendar
+    entity: Booking
+    content: { view: booking_calendar }
   booking_detail:
     path: "/bookings/{id}"
     title: Booking
@@ -234,11 +239,20 @@ ui:
       items:
         dashboard: { page: dashboard, icon: layout-dashboard }
         bookings: { page: bookings, icon: calendar-days }
+        calendar: { page: booking_calendar, icon: calendar-range }
         rooms: { page: rooms, icon: door-open }
         members: { page: members, icon: users }
         amenities: { page: amenities, icon: projector }
 
   views:
+    booking_calendar:
+      kind: calendar
+      entity: Booking
+      title: Booking calendar
+      start: starts_at
+      end: ends_at
+      mode: week
+      link: booking_detail
     booking_board:
       kind: board
       entity: Booking

@@ -39,6 +39,7 @@ from appgen.dsl.ui.views import (
     BadgeSet,
     BoardView,
     BooleanFilter,
+    CalendarView,
     CardsView,
     DateRangeFilter,
     Filter,
@@ -224,6 +225,21 @@ class BoardColumnPlan:
     element_id: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class CalendarPlan:
+    """The values of a calendar view: the start, the end, and the label of a record."""
+
+    start: Value
+    end: Value | None
+    label: str
+    """The TypeScript text of a record, of `row`."""
+    date_only: bool
+    """True if the start is a `date` field: the records have no time of day."""
+    href: str | None
+    """The TypeScript path of the page that a record opens, of `row`, or None."""
+    mode: str
+
+
 @dataclass(slots=True)
 class ViewPlan:
     """The values of a list view that its template needs."""
@@ -262,6 +278,7 @@ class ViewPlan:
     """The Tailwind CSS classes of a board column."""
     move: str | None = None
     """The TypeScript that moves `record` to the column `value` of a board."""
+    calendar: CalendarPlan | None = None
     forms: list[FormRef] = field(default_factory=lambda: list[FormRef]())
     """The forms that the actions of the view open in a dialog or a sheet."""
     uses: set[str] = field(default_factory=set[str])
@@ -289,6 +306,10 @@ class ViewPlan:
         actions = [*self.actions, *self.row_actions, *self.bulk_actions]
         parts += [(a.href or "") + (a.run or "") + (a.navigate_to or "") for a in actions]
         parts += [self.move or ""]
+        calendar = self.calendar
+        if calendar is not None:
+            parts += [calendar.start.expr, calendar.end.expr if calendar.end else ""]
+            parts += [calendar.label, calendar.href or ""]
         return " ".join(parts)
 
     def needs(self, name: str) -> bool:
@@ -371,9 +392,9 @@ class ViewContext:
         self.list_views: dict[str, str] = {
             name: view.kind
             for name, view in (ui.views.items() if ui else ())
-            if isinstance(view, TableView | CardsView | BoardView)
+            if isinstance(view, TableView | CardsView | BoardView | CalendarView)
         }
-        """The kind of each list view (`table`, `cards`, or `board`), by name."""
+        """The kind of each list view (`table`, `cards`, `board`, or `calendar`), by name."""
         self.detail_views: list[str] = [
             name for name, view in (ui.views.items() if ui else ()) if view.kind == "detail"
         ]
@@ -754,6 +775,9 @@ class ViewContext:
             paths += [column.field or column_name for column_name, column in view.columns.items()]
         if isinstance(view, CardsView | BoardView):
             paths += self.card_paths(view)
+        if isinstance(view, CalendarView):
+            paths += [view.start, *([view.end] if view.end else [])]
+            paths.append(view.label or definition_display(definition.entities[view.entity]))
         if isinstance(view, TableView | CardsView):
             for filter_name, filter_ in view.filters.items():
                 plan.filters.append(self._filter(view.entity, filter_name, filter_))
@@ -799,6 +823,8 @@ class ViewContext:
             plan.card = self._card(plan, view)
         if isinstance(view, BoardView):
             self._board(plan, view)
+        if isinstance(view, CalendarView):
+            plan.calendar = self._calendar(plan, view)
         if plan.filters:
             plan.uses.add("filters")
         return plan
@@ -940,6 +966,22 @@ class ViewContext:
             )
         else:
             plan.move = f"{plan.var}Api.update(record.id, {{ {key} }})"
+
+    def _calendar(self, plan: ViewPlan, view: CalendarView) -> CalendarPlan:
+        start = self.value(view.entity, view.start)
+        end = self.value(view.entity, view.end) if view.end else None
+        label_path = view.label or definition_display(self.definition.entities[view.entity])
+        href = None
+        if view.link:
+            href = self.href(view.entity, view.link, {}, "row")
+        return CalendarPlan(
+            start=start,
+            end=end,
+            label=self.value(view.entity, label_path).text_expr,
+            date_only=start.type == "date",
+            href=href,
+            mode=view.mode,
+        )
 
     def card_paths(self, view: CardsView | BoardView) -> list[str]:
         """Return the field paths that the cards of a view show."""
@@ -1311,6 +1353,11 @@ def view_rules() -> tuple[Output, ...]:
                     "src/shared/ui/data-table.tsx",
                     "'table' in ui_views.features",
                 ),
+                (
+                    "ui/calendar-grid.tsx.j2",
+                    "src/shared/ui/calendar-grid.tsx",
+                    "'calendar' in ui_views.features",
+                ),
                 *(
                     (f"{folder}/{part}.tsx.j2", f"src/shared/ui/{folder}/{part}.tsx", when)
                     for folder, part, when in (
@@ -1332,13 +1379,13 @@ def view_rules() -> tuple[Output, ...]:
                 path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
                 for_each=f"{kind}_view",
             )
-            for kind in ("table", "cards", "board")
+            for kind in ("table", "cards", "board", "calendar")
         ),
         *(
             Output(
                 template="ui/views/index.ts.j2", path=_VIEW + "/index.ts", for_each=f"{kind}_view"
             )
-            for kind in ("table", "cards", "board", "detail")
+            for kind in ("table", "cards", "board", "calendar", "detail")
         ),
         Output(
             template="ui/details/detail-view.tsx.j2",

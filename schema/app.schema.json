@@ -396,6 +396,118 @@
       "pattern": "^[a-z0-9][a-z0-9_]*$",
       "type": "string"
     },
+    "CalendarView": {
+      "additionalProperties": false,
+      "description": "The records on a calendar, by a date or a date-time field, in a week or a month.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "calendar",
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "default": "month",
+          "enum": [
+            "week",
+            "month"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "entity",
+        "kind",
+        "start"
+      ],
+      "title": "CalendarView",
+      "type": "object"
+    },
     "Card": {
       "additionalProperties": false,
       "description": "The content of a card in a card list or a board.",
@@ -4893,6 +5005,9 @@
         },
         {
           "$ref": "#/$defs/BoardView"
+        },
+        {
+          "$ref": "#/$defs/CalendarView"
         },
         {
           "$ref": "#/$defs/DetailView"

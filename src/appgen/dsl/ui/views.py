@@ -235,6 +235,22 @@ class BoardView(ViewBase):
     row_actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
 
 
+class CalendarView(ViewBase):
+    """The records on a calendar, by a date or a date-time field, in a week or a month."""
+
+    kind: Literal["calendar"]
+    start: FieldPath
+    """A date or a date-time field: the day and the start time of each record."""
+    end: FieldPath | None = None
+    """A field of the same type as `start`: the end. Without it, a record has no length."""
+    label: FieldPath | None = None
+    """The text of a record. The default is the display field of the entity."""
+    mode: Literal["week", "month"] = "month"
+    """The first mode. The user can switch between the week and the month."""
+    link: MemberName | None = None
+    """A page that a record opens, with the ID of the record."""
+
+
 class DetailHeader(Element):
     """The header of a detail view."""
 
@@ -298,6 +314,7 @@ type View = Annotated[
     Annotated[TableView, Tag("tag-table")]
     | Annotated[CardsView, Tag("tag-cards")]
     | Annotated[BoardView, Tag("tag-board")]
+    | Annotated[CalendarView, Tag("tag-calendar")]
     | Annotated[DetailView, Tag("tag-detail")],
     Discriminator(kind_tag),
 ]

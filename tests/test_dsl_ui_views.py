@@ -396,7 +396,7 @@ def test_unknown_view_kind_gets_a_hint() -> None:
 
     assert (
         diagnostic.message
-        == "The kind 'card' is not valid. Expected 'table', 'cards', 'board', 'detail'."
+        == "The kind 'card' is not valid. Expected 'table', 'cards', 'board', 'calendar', 'detail'."
     )
     assert diagnostic.hint == "Did you mean 'cards'?"
 
@@ -413,3 +413,45 @@ def test_grid_columns_are_limited() -> None:
 
     assert diagnostic.code == "invalid-value"
     assert diagnostic.element_id == "ui.views.project_cards.grid"
+
+
+def test_a_calendar_needs_a_date_start_and_an_end_of_the_same_type() -> None:
+    board = "    task_board:\n"
+    calendar = (
+        "    task_calendar:\n"
+        "      kind: calendar\n"
+        "      entity: Task\n"
+        "      start: due_date\n"
+        "      end: project.due_date\n"
+        "      label: project.name\n"
+        "      link: project_detail\n"
+    )
+    text = VALID.replace(board, calendar + board)
+    assert "task_calendar" in text
+    assert problems(text) == []
+
+    for old, new, message in (
+        ("start: due_date", "start: title", "The start of a calendar must be a date"),
+        ("end: project.due_date", "end: project.budget", "The end of a calendar must be a date"),
+        ("label: project.name", "label: project.missing", "The entity 'Project' has no field"),
+        ("      link: project_detail\n", "      link: missing\n", "The page 'missing' does"),
+    ):
+        found = problems(text.replace(old, new))
+        assert len(found) == 1, found
+        assert found[0][1] == "ui.views.task_calendar"
+        assert found[0][2].startswith(message), found
+
+
+def test_the_start_and_the_end_of_a_calendar_have_the_same_type() -> None:
+    task = "      due_date: { type: date }\n    relations:\n      project:"
+    text = VALID.replace(task, task.replace("\n", "\n      done_at: { type: datetime }\n", 1))
+    text = text.replace(
+        "    task_board:\n",
+        "    task_calendar: { kind: calendar, entity: Task, start: due_date, end: done_at }\n"
+        "    task_board:\n",
+    )
+    assert "done_at" in text
+    assert "task_calendar" in text
+    assert [p[2] for p in problems(text)] == [
+        "The start and the end of a calendar must have the same type."
+    ]
