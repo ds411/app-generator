@@ -696,10 +696,13 @@ ui:
 ## Extension keys
 
 A key that starts with `x-` is an extension key, as in OpenAPI. The
-root and each element can have them. The validator keeps them and does
-not check them. A binding can read them, for example the React binding
-reads `x-mock-count` on an entity (the number of mock records). Any
-other unknown key is an error.
+root and each element can have them. The DSL keeps them and does not
+check them. A binding can read them, for example the React binding
+reads `x-mock-count` on an entity (the number of mock records). A
+binding declares a schema for the keys that it reads, so `appgen
+validate` and `appgen generate` report a wrong key or value of a binding
+in use ([bindings.md](bindings.md#extension-keys)). Any other unknown key
+is an error.
 
 ## Reserved sections
 

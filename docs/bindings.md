@@ -16,6 +16,7 @@ maintainer how to write a new binding. The binding contract is in
 - [Templates](#templates)
 - [Traces in templates](#traces-in-templates)
 - [Coverage, gaps, and scope](#coverage-gaps-and-scope)
+- [Extension keys](#extension-keys)
 - [Extension files](#extension-files)
 - [Shared templates](#shared-templates)
 - [Register the binding](#register-the-binding)
@@ -104,6 +105,8 @@ The output for the entity `Task`:
 | `context`              | A function of the definition that returns more template values.        |
 | `filters`              | More Jinja2 filters.                                                   |
 | `helpers`              | Python functions that the templates call, for example `ts_type(field)`. |
+| `extension_keys`       | The `x-` keys that the binding reads, with their schema (see [Extension keys](#extension-keys)). |
+| `extension_prefix`     | A prefix that only the keys of the binding have, for example `x-fastapi-`. |
 
 `context`, `filters`, and `helpers` must be deterministic: they must not
 read a clock, random values, or files. `context` cannot replace a value
@@ -200,6 +203,50 @@ already has. `tests/test_end_to_end.py` checks that each app of the
 project tracker has no uncovered elements, and that its open gaps are
 the stubs of the custom elements.
 
+## Extension keys
+
+An app author gives a binding more data with extension keys (`x-...`,
+ADR 0002). The DSL does not check them, so a binding declares the keys
+that it reads in `extension_keys`. Each `ExtensionKey` has:
+
+| Field         | Content                                                              |
+| ------------- | -------------------------------------------------------------------- |
+| `name`        | The key, for example `x-fastapi-embed`.                              |
+| `kinds`       | The element kinds that can have the key, for example `relation`.     |
+| `type`        | The type of the value, as a Pydantic type, for example `bool` or `Annotated[int, Field(ge=1)]`. |
+| `description` | What the key does. The error messages show it as the hint.           |
+
+`appgen validate` checks the keys of all bindings, or of the bindings
+that `--binding` gives. `appgen generate` checks the keys of its
+binding, and writes no file if a key is wrong. The check reports, with
+the file and the line:
+
+- A declared key on an element of another kind (`invalid-option`).
+- A value that does not match the type (`invalid-value`).
+- An unknown key with the `extension_prefix` of a binding in use, or an
+  unknown key that is close to a declared key, for example
+  `x-mock-cont` (`unknown-key`).
+
+The keys of a binding that is not in use give no error. Other unknown
+`x-` keys give no error either, so an app author can keep notes in them.
+
+```python
+ExtensionKey(
+    name="x-fastapi-embed",
+    kinds=frozenset({"relation"}),
+    type=bool,
+    description="True: the read schema embeds the related record as an object.",
+)
+```
+
+The keys of the bindings of this repository:
+
+| Binding   | Key               | Element kinds    | Value                         |
+| --------- | ----------------- | ---------------- | ----------------------------- |
+| `fastapi` | `x-fastapi-embed` | `relation`       | A boolean.                    |
+| `fastapi` | `x-example`       | `field`, `param` | A JSON value: a valid sample for the tests. |
+| `react`   | `x-mock-count`    | `entity`         | An integer, 1 or more.        |
+
 ## Extension files
 
 Where the definition asks for hand-written code (a custom operation,
@@ -267,6 +314,7 @@ mybinding = "appgen.bindings.mybinding:BINDING"
 - [ ] `covers` lists all kinds that the templates render, and `excludes`
       lists the kinds out of scope.
 - [ ] Hand-written code goes in extension files only.
+- [ ] `extension_keys` declares each `x-` key that the binding reads.
 - [ ] Two runs give the same output.
 - [ ] The generated app builds with the stubs of the extension files.
 - [ ] `appgen check` reports no invalid traces, and the expected

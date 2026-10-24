@@ -16,11 +16,13 @@ from appgen.gen import (
     ManualEditsError,
     UnknownBindingError,
     WriteReport,
+    available_bindings,
     find_binding,
     read_manifest,
     write_result,
 )
 from appgen.gen import generate as generate_files
+from appgen.gen.extensions import check_extensions
 from appgen.trace import DEFAULT_IGNORE, check_traces, find_orphans, render, render_orphans
 
 
@@ -81,9 +83,27 @@ def validate(
         OutputFormat,
         typer.Option("--format", "-f", help="The output format."),
     ] = OutputFormat.TEXT,
+    binding_names: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--binding",
+            "-b",
+            help="A binding whose extension keys to check. Repeat it for more. "
+            "Default: all bindings.",
+        ),
+    ] = None,
 ) -> None:
     """Validate an app definition. The exit code is 0 if it is valid, else 1."""
-    _, diagnostics = check_file(file)
+    definition, diagnostics = check_file(file)
+    if definition is not None:
+        try:
+            bindings = [find_binding(n) for n in binding_names or available_bindings()]
+        except UnknownBindingError as error:
+            typer.echo(f"error: {error}", err=True)
+            raise typer.Exit(code=1) from None
+        diagnostics = sorted(
+            [*diagnostics, *check_extensions(definition, bindings)], key=lambda d: d.location
+        )
     if output_format is OutputFormat.JSON:
         report = {
             "file": str(file),
@@ -240,6 +260,16 @@ def generate(
         raise typer.Exit(code=1)
     try:
         binding = find_binding(binding_name)
+    except UnknownBindingError as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=1) from None
+    diagnostics = check_extensions(definition, [binding])
+    if diagnostics:
+        for diagnostic in diagnostics:
+            typer.echo(str(diagnostic), err=True)
+        typer.echo(f"{file}: the definition is not valid, so no file is written.", err=True)
+        raise typer.Exit(code=1)
+    try:
         result = generate_files(definition, binding)
         report = write_result(result, out, binding.name, force=force)
     except (UnknownBindingError, GenerationError, ManifestError, ManualEditsError) as error:
