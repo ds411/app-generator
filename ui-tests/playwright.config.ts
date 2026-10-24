@@ -33,6 +33,9 @@ export default defineConfig({
   // page fails when more than 0.1 % of its pixels differ.
   snapshotPathTemplate: "{testDir}/../approved/{arg}{ext}",
   expect: {
+    // The pre-push hook runs the checks of the three apps at the same
+    // time, and under this load a page can render after the default 5 s.
+    timeout: 10_000,
     toHaveScreenshot: { maxDiffPixelRatio: 0.001, animations: "disabled", caret: "hide" },
   },
   use: {

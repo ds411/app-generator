@@ -6,12 +6,11 @@ import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 
 import { type ExpectedPage, expected, modeOf, pathPattern, UNKNOWN_ID } from "./expected";
+import { firstRecordLink } from "./links";
 
 const SCREENSHOTS = fileURLToPath(new URL(`../screenshots/${expected.binding}/`, import.meta.url));
 /** The today of the browser: the center of the mock and seed dates (BASE_DATE). */
 const TODAY = new Date("2026-01-05T12:00:00Z");
-/** Milliseconds to wait for a link to a detail page. */
-const LINK_TIMEOUT = 5000;
 
 /**
  * Return a path of a page with path parameters: the first link to the
@@ -19,19 +18,8 @@ const LINK_TIMEOUT = 5000;
  */
 async function samplePath(page: Page, target: ExpectedPage): Promise<string> {
   const parent = target.path.slice(0, target.path.indexOf("/{")) || "/";
-  await page.goto(parent);
-  await page.waitForLoadState("networkidle");
-  const pattern = pathPattern(target.path);
-  // The list can render its links after the network is idle (for example
-  // under load), so look for a link for a few seconds.
-  const deadline = Date.now() + LINK_TIMEOUT;
-  for (;;) {
-    const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((a) => a.getAttribute("href") ?? ""));
-    const href = hrefs.find((candidate) => pattern.test(candidate));
-    if (href) return href;
-    if (Date.now() > deadline) return target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
-    await page.waitForTimeout(200);
-  }
+  const href = await firstRecordLink(page, parent, pathPattern(target.path));
+  return href ?? target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
 }
 
 for (const target of expected.pages) {
