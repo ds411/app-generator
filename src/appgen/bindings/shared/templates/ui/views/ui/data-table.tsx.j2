@@ -77,14 +77,14 @@ export function DataTable<T extends { id: string }>({
             id: "select",
             header: ({ table }) => (
               <Checkbox
-                aria-label="Select all"
+                aria-label={{ jsx_attr("Select all") }}
                 checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
                 onCheckedChange={(value) => table.toggleAllPageRowsSelected(Boolean(value))}
               />
             ),
             cell: ({ row }) => (
               <Checkbox
-                aria-label="Select the row"
+                aria-label={{ jsx_attr("Select the row") }}
                 checked={row.getIsSelected()}
                 onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
                 onClick={(event) => event.stopPropagation()}
@@ -100,7 +100,7 @@ export function DataTable<T extends { id: string }>({
       ? [
           {
             id: "actions",
-            header: () => <span className="sr-only">Actions</span>,
+            header: () => <span className="sr-only">{{ jsx_text("Actions") }}</span>,
             cell: ({ row }) => <div className="flex justify-end">{rowActions(row.original)}</div>,
             enableSorting: false,
             meta: { className: "w-12" },
@@ -131,11 +131,11 @@ export function DataTable<T extends { id: string }>({
     <div className="space-y-3">
       {selection && selected.length > 0 && bulkActions && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
-          <span className="font-medium tabular-nums">{selected.length} selected</span>
+          <span className="font-medium tabular-nums">{{ jsx_format("{count} selected", count="selected.length") }}</span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {bulkActions(selected, () => setRowSelection({}))}
             <Button variant="ghost" size="sm" onClick={() => setRowSelection({})}>
-              Clear the selection
+              {{ jsx_text("Clear the selection") }}
             </Button>
           </div>
         </div>

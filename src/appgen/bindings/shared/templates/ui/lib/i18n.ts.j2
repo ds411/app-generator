@@ -1,6 +1,7 @@
 {{ trace_header(i18n.element_id) }}
 // The UI text in more than one language. `t` gives the translation of a
-// text of the definition in the selected language, or the text itself.
+// text of the definition or of a component in the selected language, or
+// the text itself.
 
 /** The languages of the app. The first language is the language of the definition. */
 export const languages = [
@@ -28,9 +29,14 @@ const STORAGE_KEY = {{ js(app.name ~ "-language") }};
 let current: Language = {{ "storedLanguage()" if binding.name == "react" else "defaultLanguage" }};
 const listeners = new Set<() => void>();
 
-/** The translation of a text in the selected language. */
-export function t(text: string): string {
-  return messages[current]?.[text] ?? text;
+/**
+ * The translation of a text in the selected language. `values` give the
+ * parts of the text in braces, for example `{count}` in `{count} selected`.
+ */
+export function t(text: string, values?: Record<string, string | number | undefined>): string {
+  const translation = messages[current]?.[text] ?? text;
+  if (values === undefined) return translation;
+  return translation.replace(/\{(\w+)\}/g, (part, name: string) => (name in values ? String(values[name] ?? "") : part));
 }
 
 /** The selected language. */

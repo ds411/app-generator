@@ -25,7 +25,7 @@ type BoardColumn = {
 /** The columns of the board: one for each value of {{ group.path }}. */
 const COLUMNS: BoardColumn[] = [
 {% for c in plan.board_columns %}
-  { value: {{ js(c.value) }}, label: {{ js(c.label) }}{% if c.color %}, color: {{ js(c.color) }}{% endif %}{% if c.limit %}, limit: {{ c.limit }}{% endif %} },{% if c.element_id %} {{ trace(c.element_id) }}{% endif %}
+  { value: {{ js(c.value) }}, label: {{ text(c.label) }}{% if c.color %}, color: {{ js(c.color) }}{% endif %}{% if c.limit %}, limit: {{ c.limit }}{% endif %} },{% if c.element_id %} {{ trace(c.element_id) }}{% endif %}
 
 {% endfor %}
 ];
@@ -66,7 +66,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
       await moveRecord(record, value);
       resource.reload();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The card did not move.");
+      toast.error(error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The card did not move.")) }});
     }
   };
 
@@ -124,7 +124,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                   {over && (
                     <p className="flex items-center gap-1.5 px-1.5 text-xs text-destructive">
                       <TriangleAlertIcon className="size-3.5" />
-                      The column has more than {column.limit} cards.
+                      {{ jsx_format("The column has more than {limit} cards.", limit="column.limit") }}
                     </p>
                   )}
                   <div className="flex min-h-24 flex-col gap-2">
@@ -153,7 +153,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% if plan.row_actions %}
                               <DropdownMenuSeparator />
 {% endif %}
-                              <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                              <DropdownMenuLabel>{{ jsx_text("Move to") }}</DropdownMenuLabel>
                               {COLUMNS.filter((other) => other.value !== column.value).map((other) => (
                                 <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
                                   {{ '{' ~ tr('other.label') ~ '}' }}
@@ -166,7 +166,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                     ))}
                     {cards.length === 0 && (
                       <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                        Drop a card here
+                        {{ jsx_text("Drop a card here") }}
                       </p>
                     )}
                   </div>

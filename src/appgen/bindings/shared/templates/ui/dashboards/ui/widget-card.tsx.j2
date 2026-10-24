@@ -13,7 +13,7 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/shared/u
 export function WidgetCard({
   title,
   href,
-  linkLabel = "View all",
+  linkLabel = {% endraw %}{{ tr(js("View all")) }}{% raw %},
   className,
   children,
 }: {

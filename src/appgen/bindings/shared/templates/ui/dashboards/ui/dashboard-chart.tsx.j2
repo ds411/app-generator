@@ -36,9 +36,9 @@ export function DashboardChart({
 }) {
   const animation = animate ? "auto" : false;
   if (data.length === 0 || data.every((datum) => datum.value === 0)) {
-    return <p className="py-10 text-center text-sm text-muted-foreground">No data yet</p>;
+    return <p className="py-10 text-center text-sm text-muted-foreground">{% endraw %}{{ jsx_text("No data yet") }}{% raw %}</p>;
   }
-  const rows = data.map((datum, index) => ({ ...datum, fill: colorOf(datum, index) }));
+  const rows = data.map((datum, index) => ({ ...datum, {% endraw %}{{ "label: " ~ tr("datum.label") ~ ", " if i18n }}{% raw %}fill: colorOf(datum, index) }));
   const config: ChartConfig = {
     value: { label: valueLabel, color: "var(--chart-1)" },
     ...Object.fromEntries(rows.map((row) => [row.key, { label: row.label, color: row.fill }])),

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from appgen.bindings.shared.gaps import form_values, gap_spec
+from appgen.bindings.shared.i18n import text_js
 from appgen.bindings.shared.typescript import Member, members
 from appgen.bindings.shared.ui import css_class_var, js
 from appgen.bindings.shared.views import definition_display, label
@@ -418,7 +419,9 @@ def _value_field(
         plan.value_type = "(" + " | ".join(js(v) for v in value.values or []) + ") | null"
         plan.options = (
             "["
-            + ", ".join(f"{{ value: {js(v)}, label: {js(label(v))} }}" for v in value.values or [])
+            + ", ".join(
+                f"{{ value: {js(v)}, label: {text_js(label(v))} }}" for v in value.values or []
+            )
             + "]"
         )
     if value.type == "integer":

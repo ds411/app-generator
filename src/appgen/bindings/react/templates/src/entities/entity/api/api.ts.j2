@@ -60,7 +60,7 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
 {% endfor %}
       ],
 {% if w.message %}
-      message: {{ ts_value(w.message) }},
+      message: {{ text(w.message) }},
 {% endif %}
     }, {{ trace(w.id, scope="end") }}
 {% endfor %}

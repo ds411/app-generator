@@ -38,6 +38,22 @@ and data in modules, for example the badge sets and the page titles.
   expression of a text that a module holds, where the component shows it.
 - A binding can now change each rendered file (`Binding.finish`). The
   front ends use it to import `t` in each file that calls it.
+- The fixed texts of the components (the shadcn/ui components, the app
+  shell, the views, the forms, and the messages of the React app) go
+  through the same helpers, so a language can translate them too.
+  `scripts/vendor_shadcn.py` changes the fixed texts of the shadcn/ui
+  components to calls of the helpers. `docs/dsl.md` lists the fixed
+  texts.
+- A text can hold values in braces, for example `Page {page} of
+  {count}`. `t(text, values)` fills them in after the translation, so a
+  language can change their order. The template helpers `jsx_format`
+  and `js_format` write such a text. The validator reports a
+  translation that does not have the values of its key
+  (`translation-values`).
+- `app_texts` renders an app in memory and returns each text that it
+  translates. `scripts/translation_test.py` uses it to make a test
+  language that changes each text, and the UI tests find no text of the
+  default language on the pages of the React and the Next.js apps.
 - The selected language is in the browser storage. A change renders the
   pages again. Next.js renders the default language on the server, and
   the client changes to the stored language after the hydration.
@@ -51,6 +67,9 @@ and data in modules, for example the badge sets and the page titles.
 - The validator cannot report a text of the app that a language does not
   translate, because some texts come from the templates. Such a text
   shows in the default language.
-- The fixed text of the components and the format of dates and numbers
-  stay in the default language. A later change can add them.
+- The format of dates and numbers stays in the default language. A
+  later change can add it.
+- A new fixed text in a template must use a text helper, else it shows
+  in the default language. `scripts/untranslated_text.mjs` finds such a
+  text in the code, and the test language finds it on the pages.
 - An app without translations has the same code as before.

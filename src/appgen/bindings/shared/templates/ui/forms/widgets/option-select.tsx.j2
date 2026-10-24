@@ -13,7 +13,7 @@ export function OptionSelect({
   options,
   value,
   onChange,
-  placeholder = "Select a value",
+  placeholder = {{ tr(js("Select a value")) }},
   clearable = false,
   disabled,
   invalid,
@@ -33,10 +33,10 @@ export function OptionSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {clearable && <SelectItem value={NONE}>None</SelectItem>}
+        {clearable && <SelectItem value={NONE}>{{ jsx_text("None") }}</SelectItem>}
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
-            {option.label}
+            {{ '{' ~ tr('option.label') ~ '}' }}
           </SelectItem>
         ))}
       </SelectContent>

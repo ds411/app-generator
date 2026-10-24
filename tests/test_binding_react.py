@@ -291,7 +291,7 @@ def test_a_board_view_has_its_columns_and_moves_its_cards(result: GenerationResu
         "limit: 8 }, // @trace ui.views.task_board.columns.in_progress"
     ) in board
     assert 'return updateTask(record.id, { status: value as Task["status"] });' in board
-    assert "<DropdownMenuLabel>Move to</DropdownMenuLabel>" in board
+    assert '<DropdownMenuLabel>{t("Move to")}</DropdownMenuLabel>' in board
     assert (
         '<ViewLoading indicator="skeleton" shape="board" text={t("Loading the board")} />' in board
     )

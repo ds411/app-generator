@@ -50,7 +50,7 @@ const PAGES: Record<string, readonly string[]> = {
 /** An operation that the role of the user may not call. */
 export class ForbiddenError extends Error {
   constructor() {
-    super("Your role may not do this operation.");
+    super({{ tr(js("Your role may not do this operation.")) }});
     this.name = "ForbiddenError";
   }
 }
@@ -107,7 +107,7 @@ export async function signIn(username: string, password: string): Promise<string
 {% endif %}
   } catch (error) {
     setAccessToken(null);
-    return error instanceof Error ? error.message : "The sign-in failed.";
+    return error instanceof Error ? error.message : {{ tr(js("The sign-in failed.")) }};
   }
   return null;
 }
@@ -129,12 +129,12 @@ export async function signOut(): Promise<void> {
 export async function signIn(username: string, password: string): Promise<string | null> {
   const user = users.find((item) => item.username === username);
   if (!user || password !== MOCK_PASSWORD) {
-    return "The user name or the password is not correct.";
+    return {{ tr(js("The user name or the password is not correct.")) }};
   }
   try {
     window.sessionStorage.setItem(STORAGE_KEY, user.id);
   } catch {
-    return "The browser does not keep the session.";
+    return {{ tr(js("The browser does not keep the session.")) }};
   }
   return null;
 }

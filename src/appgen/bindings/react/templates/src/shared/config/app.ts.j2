@@ -2,6 +2,6 @@
 
 export const appConfig = {
   name: {{ app.name | tojson }},
-  title: {{ app.title | tojson }},
+  title: {{ text(app.title) if i18n else app.title | tojson }},
   description: {{ (app.description or "") | tojson }},
 } as const;

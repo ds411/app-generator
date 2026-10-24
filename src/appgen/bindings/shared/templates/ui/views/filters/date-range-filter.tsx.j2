@@ -47,7 +47,7 @@ export function DateRangeFilter({
         </PopoverContent>
       </Popover>
       {active && (
-        <Button variant="ghost" size="icon" className="size-8" aria-label={`Clear ${label}`} onClick={() => onChange({})}>
+        <Button variant="ghost" size="icon" className="size-8" aria-label={{ "{" ~ js_format("Clear {label}", label="label") ~ "}" }} onClick={() => onChange({})}>
           <XIcon />
         </Button>
       )}

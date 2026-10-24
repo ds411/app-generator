@@ -1021,16 +1021,69 @@ translations:
 - Each language translates the same keys. `appgen validate` reports a
   key that one language has and another language does not have
   (`missing-translation`).
+- A text can hold values that the app fills in, in braces, for example
+  `Page {page} of {count}`. The translation keeps each value, and can
+  change their order: `Page {page} of {count}: Seite {page} von {count}`.
+  `appgen validate` reports a translation that does not have the values
+  of its key (`translation-values`).
 
 The React and Next.js apps have a language switch in the top bar (and
 in the frame of the pages without a layout). The app keeps the selected
 language in the browser. A text without a translation shows in the
-default language. The front ends translate the text of the definition:
+default language. The front ends translate each text that they show:
 the titles, labels, and descriptions of pages, menus, views, forms, and
-dashboards, the badge labels, the actions, and the messages of the form
-rules. The fixed text of the components (for example "Search pages")
-and the format of dates and numbers stay as they are. The back ends do
-not use the section.
+dashboards, the badge labels, the option labels, the actions, the
+messages of the form rules, the default texts of the generator, and the
+fixed texts of the components (see the list below). The format of dates
+and numbers stays as it is. The back ends do not use the section.
+
+### Fixed texts
+
+The components of the front ends show these texts in the default
+language. Add a key to translate one. A text that a component does not
+use in the app does not show.
+
+- App shell: `Search pages`, `Ctrl K`, `Find a page by its title.`,
+  `Type a page title`, `No page has this title.`, `Pages`, `Suggestions`,
+  `Language`, `Switch the color mode`, `Light`, `Dark`, `System`,
+  `Toggle Sidebar`, `Sidebar`, `Displays the mobile sidebar.`,
+  `breadcrumb`, `More`, `Notifications`, `Close toast`, `Sign in`,
+  `Password`, `Sign out`.
+- The page of an unknown path and the stubs of the generation gaps:
+  `This page does not exist`, `Make sure that the address is correct.`,
+  `Go to the start page`, `Not available yet.`,
+  `Not implemented yet: {element}`.
+- Lists: `Rows per page`, `{first}–{last} of {total}`,
+  `Page {page} of {count}`, `First page`, `Previous page`, `Next page`,
+  `Last page`, `pagination`, `Go to previous page`, `Go to next page`,
+  `Previous`, `Next`, `More pages`, `Select all`, `Select the row`,
+  `Actions`, `{count} selected`, `Clear the selection`, `Loading`,
+  `Try again`, `Yes`, `No`.
+- Filters: `No matching records`, `Change or reset the filters.`,
+  `Reset the filters`, `Reset`, `{label}: all`, `{count} chosen`,
+  `No value has this name.`, `Clear the filter`, `Clear {label}`.
+- Boards and calendars: `Move to`, `Drop a card here`,
+  `The column has more than {limit} cards.`, `The card did not move.`,
+  `Previous week`, `Next week`, `Previous month`, `Next month`, `Today`,
+  `Calendar mode`, `Week`, `Month`.
+- Dashboards: `View all`, `No data yet`, `Other`, `None`.
+- Actions and forms: `Cancel`, `Close`, `Saved.`,
+  `The action did not succeed.`, `The form did not save.`,
+  `Select a value`, `Search`, `No results.`, `Select a record`,
+  `Select records`, `Clear`, `Remove {label}`, `Pick a date`, `Time`,
+  `Command Palette`, `Search for a command to run...`.
+- The messages of the form fields: `Enter a value.`, `Select a value.`,
+  `Enter a whole number.`, `Enter a valid email address.`,
+  `Enter a valid URL.`, `Use the correct format.`,
+  `Use {count} or more characters.`, `Use {count} or fewer characters.`,
+  `Use {count} or more.`, `Use {count} or less.`.
+- The messages of the React app (mock data and API client):
+  `The state of {entity} cannot change from {before} to {after}.`,
+  `A new {entity} starts with the state {initial}, not {state}.`,
+  `The API gave the status {status}.`,
+  `Your role may not do this operation.`, `The sign-in failed.`,
+  `The user name or the password is not correct.`,
+  `The browser does not keep the session.`.
 
 ## Extension keys
 

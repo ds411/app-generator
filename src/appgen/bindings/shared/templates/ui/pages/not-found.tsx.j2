@@ -9,10 +9,10 @@ export function NotFoundPage() {
   return (
     <div className="flex flex-col items-center gap-4 py-24 text-center">
       <p className="text-sm font-medium text-muted-foreground">404</p>
-      <h1 className="{{ ui_plan.text_class('heading', 'text-2xl font-semibold tracking-tight') }}">This page does not exist</h1>
-      <p className="text-muted-foreground">Make sure that the address is correct.</p>
+      <h1 className="{{ ui_plan.text_class('heading', 'text-2xl font-semibold tracking-tight') }}">{{ jsx_text("This page does not exist") }}</h1>
+      <p className="text-muted-foreground">{{ jsx_text("Make sure that the address is correct.") }}</p>
       <Button asChild>
-        <Link href="/">Go to the start page</Link>
+        <Link href="/">{{ jsx_text("Go to the start page") }}</Link>
       </Button>
     </div>
   );

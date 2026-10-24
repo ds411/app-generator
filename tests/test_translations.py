@@ -1,11 +1,13 @@
+import re
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from appgen.bindings import nextjs, react
-from appgen.bindings.shared.i18n import finish
+from appgen.bindings.shared.i18n import app_texts, finish, text_helpers
 from appgen.dsl import AppDefinition, load_definition, load_definition_text, validate_definition
+from appgen.gen.binding import Binding
 from appgen.gen.generator import generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
@@ -118,3 +120,137 @@ def test_finish_imports_t_after_the_directive(example: AppDefinition) -> None:
         "export const a = b.closest(1);\n"
     )
     assert finish("README.md", 't("A")\n', example) == 't("A")\n'
+
+
+def plain_example() -> AppDefinition:
+    text = EXAMPLE.read_text()
+    return load_definition_text(text[: text.index("\ntranslations:")], str(EXAMPLE))
+
+
+def test_a_text_with_values_is_as_before_without_translations() -> None:
+    helpers = text_helpers(plain_example())
+    assert helpers["jsx_format"]("Page {page} of {count}", page="page", count="pageCount") == (
+        "Page {page} of {pageCount}"
+    )
+    assert helpers["js_format"]("{count} chosen", count="names.length") == (
+        "`${names.length} chosen`"
+    )
+    assert (
+        helpers["js_format"]("Use `a`, ${ x: {count}", count="n") == "`Use \\`a\\`, \\${ x: ${n}`"
+    )
+    assert helpers["text"]("Done") == '"Done"'
+    with pytest.raises(ValueError, match="do not agree"):
+        helpers["jsx_format"]("Page {page} of {count}", page="page")
+
+
+def test_a_text_with_values_is_a_call_of_t_with_translations(example: AppDefinition) -> None:
+    helpers = text_helpers(example)
+    assert helpers["jsx_format"]("Page {page} of {count}", page="page", count="pageCount") == (
+        '{t("Page {page} of {count}", { count: pageCount, page })}'
+    )
+    assert helpers["js_format"]("{count} chosen", count="names.length") == (
+        't("{count} chosen", { count: names.length })'
+    )
+    assert helpers["text"]("Done") == '"Done"'
+
+
+@pytest.mark.parametrize("binding", [react.BINDING, nextjs.BINDING], ids=["react", "nextjs"])
+def test_the_texts_of_an_app_are_the_keys_that_it_translates(
+    example: AppDefinition, binding: Binding
+) -> None:
+    texts = app_texts(example, binding)
+    # The texts of the definition, the defaults of the generator, and the fixed texts.
+    assert {"Projects", "Due date", "To do", "Todo", "Cancel", "No projects yet"} <= set(texts)
+    assert {"Rows per page", "Page {page} of {count}", "Close", "Toggle Sidebar", "Other"} <= set(
+        texts
+    )
+    assert texts == sorted(texts)
+    assert app_texts(plain_example(), binding) == []
+
+
+def test_the_example_translates_each_text_of_its_apps(example: AppDefinition) -> None:
+    assert example.translations is not None
+    german = example.translations.languages["de"].text
+    for binding in (react.BINDING, nextjs.BINDING):
+        assert [text for text in app_texts(example, binding) if text not in german] == []
+
+
+def test_a_translation_keeps_the_values_of_its_key() -> None:
+    text = TRANSLATIONS.replace(
+        "text: { Tasks: Aufgaben, Title: Titel }",
+        'text: { Tasks: Aufgaben, Title: Titel, "Page {page} of {count}": "Seite {page}" }',
+    ).replace(
+        "      text: { Tasks: Tâches }",
+        '      text: { Tasks: Tâches, Title: Titre, "Page {page} of {count}": "{count} {pages}" }',
+    )
+    assert [c for c in codes(BASE + text) if c[0] == "translation-values"] == [
+        (
+            "translation-values",
+            "translations.languages.de",
+            "The translation of 'Page {page} of {count}' in 'de' must have the values "
+            "{count}, {page}.",
+        ),
+        (
+            "translation-values",
+            "translations.languages.fr",
+            "The translation of 'Page {page} of {count}' in 'fr' must have the values "
+            "{count}, {page}.",
+        ),
+    ]
+    text = TRANSLATIONS.replace(
+        "text: { Tasks: Aufgaben, Title: Titel }", 'text: { Tasks: "{n} Aufgaben", Title: Titel }'
+    ).replace("      text: { Tasks: Tâches }", "      text: { Tasks: Tâches, Title: Titre }")
+    assert [c[2] for c in codes(BASE + text)] == [
+        "The translation of 'Tasks' in 'de' must have no values in braces."
+    ]
+
+
+@pytest.mark.parametrize("binding", [react.BINDING, nextjs.BINDING], ids=["react", "nextjs"])
+def test_the_components_translate_their_fixed_text(
+    example: AppDefinition, binding: Binding
+) -> None:
+    files = {f.path: f.content for f in generate(example, binding).files}
+    assert '<span className="sr-only">{t("Close")}</span>' in files["src/shared/ui/dialog.tsx"]
+    pagination = files["src/shared/ui/list-pagination.tsx"]
+    assert 'aria-label={t("Next page")}' in pagination
+    assert '{t("{first}\u2013{last} of {total}", { first, last, total })}' in pagination
+    i18n = files["src/shared/lib/i18n.ts"]
+    assert "export function t(text: string, values?: Record<string" in i18n
+    plain = {f.path: f.content for f in generate(plain_example(), binding).files}
+    assert '<span className="sr-only">Close</span>' in plain["src/shared/ui/dialog.tsx"]
+    assert "{first}\u2013{last} of {total}\n" in plain["src/shared/ui/list-pagination.tsx"]
+    stub = plain["src/widgets/overview/ui/workload-widget.ext.tsx"]
+    assert (
+        '"Not implemented yet: ui.dashboards.overview.widgets.workload" : "Not available yet."'
+        in (stub)
+    )
+
+
+def test_finish_imports_t_after_the_header_of_a_file_without_imports(
+    example: AppDefinition,
+) -> None:
+    content = '// @trace:gap a file\nexport const a = t("A");\n'
+    assert finish("src/a.tsx", content, example) == (
+        '// @trace:gap a file\nimport { t } from "@/shared/lib/i18n";\n\nexport const a = t("A");\n'
+    )
+
+
+_HELPER_TEXT = re.compile(
+    r'(?<![\w.])(?:jsx_text|jsx_attr|text|jsx_format|js_format|tr\(js)\(\s*"((?:[^"\\]|\\.)*)"'
+)
+
+
+def test_the_docs_list_the_fixed_texts_of_the_templates() -> None:
+    bindings = Path(__file__).parent.parent / "src" / "appgen" / "bindings"
+    templates = {
+        match
+        for name in ("shared", "react", "nextjs")
+        for path in (bindings / name).rglob("*.j2")
+        for match in _HELPER_TEXT.findall(path.read_text(encoding="utf-8"))
+    }
+    docs = (Path(__file__).parent.parent / "docs" / "dsl.md").read_text(encoding="utf-8")
+    section = docs[docs.index("### Fixed texts") :]
+    section = section[: section.index("\n## ")]
+    listed = set(re.findall(r"`([^`]+)`", section.split("\n\n", 2)[2]))
+    assert sorted(templates - listed) == []
+    assert sorted(listed - templates) == []

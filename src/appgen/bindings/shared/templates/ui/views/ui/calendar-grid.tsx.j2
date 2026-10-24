@@ -85,19 +85,19 @@ export function CalendarGrid({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="icon" aria-label={`Previous ${mode}`} onClick={() => move(-1)}>
+        <Button variant="outline" size="icon" aria-label={{ "{" ~ ("mode === \"month\" ? " ~ tr(js("Previous month")) ~ " : " ~ tr(js("Previous week")) if i18n else "`Previous ${mode}`") ~ "}" }} onClick={() => move(-1)}>
           <ChevronLeftIcon />
         </Button>
-        <Button variant="outline" size="icon" aria-label={`Next ${mode}`} onClick={() => move(1)}>
+        <Button variant="outline" size="icon" aria-label={{ "{" ~ ("mode === \"month\" ? " ~ tr(js("Next month")) ~ " : " ~ tr(js("Next week")) if i18n else "`Next ${mode}`") ~ "}" }} onClick={() => move(1)}>
           <ChevronRightIcon />
         </Button>
         <Button variant="outline" onClick={() => setAnchor(startOfDay(new Date()))}>
-          Today
+          {{ jsx_text("Today") }}
         </Button>
         <h3 className="text-base font-medium" aria-live="polite">
           {title}
         </h3>
-        <div className="ml-auto flex gap-1" role="group" aria-label="Calendar mode">
+        <div className="ml-auto flex gap-1" role="group" aria-label={{ jsx_attr("Calendar mode") }}>
           {(["week", "month"] as const).map((value) => (
             <Button
               key={value}
@@ -106,7 +106,7 @@ export function CalendarGrid({
               aria-pressed={mode === value}
               onClick={() => setMode(value)}
             >
-              {value === "week" ? "Week" : "Month"}
+              {value === "week" ? {{ tr(js("Week")) }} : {{ tr(js("Month")) }}}
             </Button>
           ))}
         </div>

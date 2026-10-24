@@ -52,7 +52,7 @@ export type ActionSpec<T> = {
 type Pending<T> = { action: ActionSpec<T>; records: T[] };
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : "The action did not succeed.";
+  return error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The action did not succeed.")) }};
 }
 
 /**
@@ -78,7 +78,7 @@ export function useActionRunner<T>(options: { openForm?: (form: string, records:
     setBusy(true);
     try {
       await action.run?.(records);
-      if (action.toast) toast.success(action.toast);
+      if (action.toast) toast.success({{ tr("action.toast") }});
       if (action.navigateTo) navigate(action.navigateTo);
     } catch (error) {
       toast.error(errorText(error));
@@ -101,7 +101,7 @@ export function useActionRunner<T>(options: { openForm?: (form: string, records:
           {confirm?.message && <AlertDialogDescription>{{ '{' ~ tr('confirm.message') ~ '}' }}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{{ jsx_text("Cancel") }}</AlertDialogCancel>
           <AlertDialogAction
             variant={pending?.action.variant === "destructive" ? "destructive" : "default"}
             onClick={() => {
@@ -163,14 +163,14 @@ export function RowActionsMenu<T>({
           variant="ghost"
           size="icon"
           className="size-8 data-[state=open]:bg-muted"
-          aria-label="Actions"
+          aria-label={{ jsx_attr("Actions") }}
           onClick={(event) => event.stopPropagation()}
         >
           <MoreHorizontalIcon />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44" onClick={(event) => event.stopPropagation()}>
-        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+        <DropdownMenuLabel>{{ jsx_text("Actions") }}</DropdownMenuLabel>
         {actions.map((action, index) => {
           const Icon = action.icon;
           const destructive = action.variant === "destructive";

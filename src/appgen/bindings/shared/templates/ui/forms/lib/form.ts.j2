@@ -38,23 +38,23 @@ export function issueMessage(issue: z.core.$ZodIssue): string {
   switch (issue.code) {
     case "too_small":
       return issue.origin === "string"
-        ? `Use ${String(issue.minimum)} or more characters.`
-        : `Use ${String(issue.minimum)} or more.`;
+        ? {{ js_format("Use {count} or more characters.", count="String(issue.minimum)") }}
+        : {{ js_format("Use {count} or more.", count="String(issue.minimum)") }};
     case "too_big":
       return issue.origin === "string"
-        ? `Use ${String(issue.maximum)} or fewer characters.`
-        : `Use ${String(issue.maximum)} or less.`;
+        ? {{ js_format("Use {count} or fewer characters.", count="String(issue.maximum)") }}
+        : {{ js_format("Use {count} or less.", count="String(issue.maximum)") }};
     case "invalid_format":
-      if (issue.format === "email") return "Enter a valid email address.";
-      if (issue.format === "url") return "Enter a valid URL.";
-      if (issue.format === "uuid") return "Select a value.";
-      return "Use the correct format.";
+      if (issue.format === "email") return {{ tr(js("Enter a valid email address.")) }};
+      if (issue.format === "url") return {{ tr(js("Enter a valid URL.")) }};
+      if (issue.format === "uuid") return {{ tr(js("Select a value.")) }};
+      return {{ tr(js("Use the correct format.")) }};
     case "invalid_value":
-      return "Select a value.";
+      return {{ tr(js("Select a value.")) }};
     case "invalid_type":
-      return issue.expected === "int" ? "Enter a whole number." : "Enter a value.";
+      return issue.expected === "int" ? {{ tr(js("Enter a whole number.")) }} : {{ tr(js("Enter a value.")) }};
     default:
-      return issue.message;
+      return {{ tr("issue.message") }};
   }
 }
 
@@ -72,14 +72,14 @@ export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
  * message on its field.
  */
 export function submitErrors(error: unknown): FormErrors {
-  const message = error instanceof Error ? error.message : "The form did not save.";
+  const message = error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The form did not save.")) }};
   const errors: FormErrors = { _form: message };
   const issues: unknown = error instanceof Error && "issues" in error ? error.issues : undefined;
   if (Array.isArray(issues)) {
     for (const issue of issues as { path?: unknown; message?: unknown }[]) {
       if (typeof issue.path !== "string" || typeof issue.message !== "string") continue;
       const key = issue.path.split(".")[0] || "_form";
-      if (key !== "_form") errors[key] ??= issue.message;
+      if (key !== "_form") errors[key] ??= {{ tr("issue.message") }};
     }
   }
   return errors;
