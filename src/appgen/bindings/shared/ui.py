@@ -335,7 +335,63 @@ def menu_has_sub_items(menu: Menu) -> bool:
     return any(item.items for item in items)
 
 
+_GRID_COLUMNS = {1: "", 2: "md:grid-cols-2", 3: "md:grid-cols-3", 4: "md:grid-cols-4"}
+_FULL_ROW = {1: "", 2: "md:col-span-2", 3: "md:col-span-3", 4: "md:col-span-4"}
+
+
+@dataclass(frozen=True, slots=True)
+class RegionPlan:
+    """A region of a page with layout hints, and the Tailwind CSS classes of its grid cell."""
+
+    name: str
+    classes: str
+
+
+def page_grid(page: Page) -> str:
+    """Return the Tailwind CSS classes of the region grid of a page with layout hints."""
+    arrangement = page.arrangement
+    columns = arrangement.columns if arrangement else 1
+    return " ".join(c for c in ("grid gap-4", _GRID_COLUMNS[columns]) if c)
+
+
+def page_regions(page: Page, has_actions: bool) -> list[RegionPlan]:
+    """Return the regions of a page with layout hints, in order, without empty regions.
+
+    The regions fill a grid row by row. The content takes a full row. In a
+    row with more than one column, the last region of the row moves to
+    the end of its cell, as the actions of the default page header do.
+    """
+    arrangement = page.arrangement
+    if arrangement is None:
+        return []
+    columns = arrangement.columns
+    names = [r for r in arrangement.regions if r != "actions" or has_actions]
+    rows: list[list[str]] = [[]]
+    for name in names:
+        if name == "content":
+            rows += [[name], []]
+        elif len(rows[-1]) == columns:
+            rows.append([name])
+        else:
+            rows[-1].append(name)
+    result: list[RegionPlan] = []
+    for row in rows:
+        for index, name in enumerate(row):
+            if name == "content":
+                classes = " ".join(c for c in ("min-w-0", _FULL_ROW[columns]) if c)
+            elif name == "actions":
+                classes = "flex flex-wrap items-start gap-2"
+                if columns > 1 and index == len(row) - 1 and index > 0:
+                    classes += " md:justify-end"
+            else:
+                classes = "min-w-0"
+            result.append(RegionPlan(name, classes))
+    return result
+
+
 HELPERS: dict[str, Callable[..., Any]] = {
+    "page_grid": page_grid,
+    "page_regions": page_regions,
     "menu_icons": menu_icons,
     "menu_has_sub_items": menu_has_sub_items,
     "css_var": css_var,

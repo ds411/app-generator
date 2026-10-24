@@ -290,3 +290,16 @@ def test_an_unknown_field_format_is_an_error() -> None:
     [diagnostic] = error.value.diagnostics
     assert diagnostic.code == "invalid-value"
     assert diagnostic.location.line == 12
+
+
+def test_the_regions_of_a_page_are_unique_and_have_the_content() -> None:
+    page = "tasks: { path: /tasks, title: Tasks, entity: Task }"
+    for regions, message in (
+        ("[title, title, content]", "Give each region one time only."),
+        ("[title, actions]", "The regions must have 'content'."),
+    ):
+        hint = page.replace(" }", f", arrangement: {{ regions: {regions} }} }}")
+        with pytest.raises(DefinitionError) as error:
+            load_definition_text(BASE.replace(page, hint), "app.yaml")
+        [diagnostic] = error.value.diagnostics
+        assert (diagnostic.message, diagnostic.element_id) == (message, "pages.tasks.arrangement")

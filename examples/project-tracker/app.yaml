@@ -158,6 +158,7 @@ pages:
     title: Project
     entity: Project
     content: { view: project_detail }
+    arrangement: { regions: [title, actions, content], columns: 2 }
     actions:
       new_task: { kind: form, form: new_task, label: New task, icon: plus }
   task_board:

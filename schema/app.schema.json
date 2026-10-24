@@ -3182,6 +3182,17 @@
             }
           ],
           "default": null
+        },
+        "arrangement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PageArrangement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3189,6 +3200,35 @@
         "title"
       ],
       "title": "Page",
+      "type": "object"
+    },
+    "PageArrangement": {
+      "additionalProperties": false,
+      "description": "Layout hints of a page: the order of its regions in a grid of columns.\n\nThe regions fill the grid in their order. Each region takes one cell,\nand `content` takes a full row. A region that the list does not have\ndoes not show, but each page shows its content.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "regions": {
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "minItems": 1,
+          "title": "Regions",
+          "type": "array"
+        },
+        "columns": {
+          "default": 2,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Columns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "regions"
+      ],
+      "title": "PageArrangement",
       "type": "object"
     },
     "PageContent": {
@@ -3308,6 +3348,14 @@
         "$ref": "#/$defs/FieldPath"
       },
       "type": "object"
+    },
+    "Region": {
+      "enum": [
+        "title",
+        "actions",
+        "content"
+      ],
+      "type": "string"
     },
     "Relation": {
       "additionalProperties": false,

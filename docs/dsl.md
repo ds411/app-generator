@@ -264,9 +264,33 @@ ignores the pages.
 | `content`     | One of `view: <view>`, `form: <form>`, `dashboard: <dashboard>`, or `custom: true` (a generation gap). |
 | `actions`     | Actions in the page header (see [Actions](#actions)).                   |
 | `breadcrumb`  | The label in the breadcrumbs. Default: the title, or the display field of the record for a page with an entity and a path parameter. |
+| `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
 longest prefix of the page path. Two pages cannot have the same path.
+
+Without `arrangement`, a page shows a header with the title and the
+description on the left and the actions on the right, and the content
+under the header. `arrangement` changes this layout. It has `regions`,
+a list of `title` (the title and the description), `actions`, and
+`content`, and `columns` (1 to 4, default 2). The regions fill a grid
+of `columns` columns in their order, row by row. Each region takes one
+cell, and `content` takes a full row. In a row with more than one
+region, the last region moves to the end of its cell. Screens narrower
+than the `md` breakpoint of Tailwind CSS have one column. A region that
+the list does not have does not show, but `content` must be in the
+list.
+
+```yaml
+pages:
+  project_detail:
+    path: "/projects/{id}"
+    title: Project
+    entity: Project
+    content: { view: project_detail }
+    # The actions above the title, and the content under them.
+    arrangement: { regions: [actions, title, content], columns: 1 }
+```
 
 ```yaml
 pages:

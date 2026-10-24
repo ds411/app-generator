@@ -36,7 +36,47 @@ export function {{ name | pascal }}Page() {
 {% elif params and not view and not dashboard %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
+{% set regions = page_regions(element, page_actions | length > 0) %}
+{% set content %}
+{% if custom %}
+<{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
+{% elif view %}
+<{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
+{% elif detail %}
+<{{ detail | pascal }}View id={ {{- id_param | camel }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
+{% elif dashboard %}
+<{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
+{% elif form %}
+<{{ form | pascal }}FormPage routeParams={params} /> {{ trace(element.content.id, jsx=True) }}
+{% else %}
+{% for param in params %}
+<p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>
+{% endfor %}
+{% endif %}
+{% endset %}
   return (
+{% if regions %}
+    <div className="{{ page_grid(element) }}"> {{ trace(element.arrangement.id, jsx=True) }}
+{% for region in regions %}
+{% if region.name == "title" %}
+      <PageHeader
+        title={{ jsx_attr(element.title) }}
+{% if element.description %}
+        description={{ jsx_attr(element.description) }}
+{% endif %}
+        className={{ js("mb-0 " ~ region.classes) }}
+      />
+{% elif region.name == "actions" %}
+      <div className={{ js(region.classes) }}>
+        <{{ name | pascal }}PageActions />
+      </div>
+{% else %}
+      <div className={{ js(region.classes) }}>
+{{ content | indent(8, true) }}      </div>
+{% endif %}
+{% endfor %}
+    </div>
+{% else %}
     <>
       <PageHeader
         title={{ jsx_attr(element.title) }}
@@ -47,21 +87,7 @@ export function {{ name | pascal }}Page() {
         actions={<{{ name | pascal }}PageActions />}
 {% endif %}
       />
-{% if custom %}
-      <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
-{% elif view %}
-      <{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
-{% elif detail %}
-      <{{ detail | pascal }}View id={ {{- id_param | camel }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
-{% elif dashboard %}
-      <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
-{% elif form %}
-      <{{ form | pascal }}FormPage routeParams={params} /> {{ trace(element.content.id, jsx=True) }}
-{% else %}
-{% for param in params %}
-      <p>{{ param }}: {{ "{" }}{{ param | camel }}{{ "}" }}</p>
-{% endfor %}
+{{ content | indent(6, true) }}    </>
 {% endif %}
-    </>
   );
 }

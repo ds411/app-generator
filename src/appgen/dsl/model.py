@@ -11,7 +11,7 @@ from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
-from appgen.dsl.ui.page import PageContent
+from appgen.dsl.ui.page import PageArrangement, PageContent
 from appgen.dsl.ui.views import Format
 
 DSL_VERSION = 0
@@ -112,6 +112,8 @@ class Page(Element):
     """The actions in the page header."""
     breadcrumb: Text | None = None
     """The label of the page in the breadcrumbs. The default is the title."""
+    arrangement: PageArrangement | None = None
+    """Layout hints: the order and the place of the title, the actions, and the content."""
 
 
 class App(Element):
