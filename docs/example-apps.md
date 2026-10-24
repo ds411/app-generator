@@ -110,11 +110,12 @@ docker exec tracker-db createdb -U postgres project_tracker_api
 2. Write the settings file `.env.local` for PGlite:
 
    ```sh
-   printf 'DATABASE_URL=pglite:./.pglite\nDATABASE_MIGRATE=true\n' > .env.local
+   printf 'DATABASE_URL=pglite:./.pglite\nDATABASE_MIGRATE=true\nDATABASE_SEED=true\n' > .env.local
    ```
 
    With `DATABASE_MIGRATE=true`, the server applies the migrations when
-   it starts. PGlite keeps the data in the folder `.pglite/`.
+   it starts. With `DATABASE_SEED=true`, it then adds the seed records
+   to the empty tables. PGlite keeps the data in the folder `.pglite/`.
 
 3. Write the first migration from the schema. The command writes the
    SQL files into `drizzle/`:
@@ -132,8 +133,10 @@ docker exec tracker-db createdb -U postgres project_tracker_api
 5. Open <http://localhost:3000>.
 
 To apply the migrations without the server, stop the server and run
-`pnpm db:migrate`. Only one process can open the PGlite folder. To
-delete all data, stop the server and delete `.pglite/`.
+`pnpm db:migrate`. To add the seed records without the server, run
+`DATABASE_URL=pglite:./.pglite pnpm db:seed`. The seed adds records
+only if all tables are empty. Only one process can open the PGlite
+folder. To delete all data, stop the server and delete `.pglite/`.
 
 To use the Postgres container instead, copy the settings file in step 2
 (`cp .env.example .env.local`), and set `DATABASE_MIGRATE=true` in it.

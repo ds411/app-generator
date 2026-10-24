@@ -1,0 +1,52 @@
+{{ trace_header("app") }}
+{% set any_links = nextjs.seed | selectattr("links") | list %}
+{% if any_links %}
+import { eq } from "drizzle-orm";
+
+{% endif %}
+import type { Database } from "./connect";
+import {
+{% for seed in nextjs.seed %}
+  {{ seed.table.const }},
+{% for seed_join in seed.joins %}
+  {{ seed_join.join.const }},
+{% endfor %}
+{% endfor %}
+} from "./schema";
+import * as seed from "./seed-data";
+
+/**
+ * Fill each table with the seed records, if all tables are empty, and
+ * return true. Return false if a table has records. The seed inserts the
+ * tables in the order of their required foreign keys, and sets the
+ * optional foreign keys after all inserts.
+ */
+export async function seedDatabase(db: Database): Promise<boolean> {
+  const counts = await Promise.all([
+{% for seed in nextjs.seed %}
+    db.$count({{ seed.table.const }}),
+{% for seed_join in seed.joins %}
+    db.$count({{ seed_join.join.const }}),
+{% endfor %}
+{% endfor %}
+  ]);
+  if (counts.some((count) => count > 0)) {
+    return false;
+  }
+  await db.transaction(async (tx) => {
+{% for seed in nextjs.seed if seed.rows %}
+    await tx.insert({{ seed.table.const }}).values(seed.{{ seed.const }}); {{ trace(seed.table.element_id) }}
+{% endfor %}
+{% for seed in any_links %}
+    for (const { id, ...values } of seed.{{ seed.links_const }}) { {{ trace(seed.table.element_id) }}
+      await tx.update({{ seed.table.const }}).set(values).where(eq({{ seed.table.const }}.id, id));
+    }
+{% endfor %}
+{% for seed in nextjs.seed %}
+{% for seed_join in seed.joins if seed_join.rows %}
+    await tx.insert({{ seed_join.join.const }}).values(seed.{{ seed_join.join.const | replace("Table", "Seed") }}); {{ trace(seed_join.join.element_id) }}
+{% endfor %}
+{% endfor %}
+  });
+  return true;
+}

@@ -24,6 +24,7 @@ so put hand-written code there.
 | Run the build | `pnpm start`     |
 | Write the migrations | `pnpm db:generate` |
 | Apply the migrations | `pnpm db:migrate`  |
+| Add the seed records | `pnpm db:seed`     |
 
 ## Database
 
@@ -32,6 +33,16 @@ The app uses Postgres with Drizzle ORM. Copy `.env.example` to
 `src/shared/db/schema/`. `pnpm db:generate` writes the SQL migrations
 into `drizzle/`: keep them in version control. With
 `DATABASE_MIGRATE=true`, the server applies them when it starts.
+
+### Seed data
+
+`pnpm db:seed` fills the tables of `DATABASE_URL` with seed records,
+for example `DATABASE_URL=pglite:./.pglite pnpm db:seed`. The records
+come from the app definition, and are the same on each run. The seed
+adds records only if all tables are empty. Apply the migrations first.
+With `DATABASE_SEED=true`, the server adds the seed records when it
+starts, after the migrations. `src/shared/db/seed-data.ts` holds the
+records.
 
 ### Local database
 
@@ -52,7 +63,8 @@ in production.
 ## Docker
 
 `docker compose up --build` starts Postgres and the app on
-<http://localhost:3000>. The app applies the migrations when it starts.
+<http://localhost:3000>. The app applies the migrations and adds the
+seed records when it starts.
 The `Dockerfile` builds a standalone Next.js server that runs as a
 non-root user. If `drizzle/` does not exist, the build writes the first
 migration from the schema.

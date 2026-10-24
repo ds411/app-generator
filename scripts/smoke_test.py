@@ -3,7 +3,10 @@
 The smoke test proves that the apps start, not only that they build. For
 each binding, it generates the project tracker, builds the Docker image,
 and starts the app: the Next.js app and the FastAPI app with Postgres
-(Docker Compose), and the React app with nginx. Then it checks the app:
+(Docker Compose), and the React app with nginx. The Next.js app adds its
+seed records when it starts (`DATABASE_SEED=true`), so its pages show
+data, as the pages of the React app with its mock data do. Then it
+checks the app:
 
 - Next.js and React: open one page for each entity that has a page.
 - FastAPI: call the health check, and the list endpoint of each entity.
@@ -16,7 +19,7 @@ built (`pnpm build`). Then the script does the same checks.
 
 With `--ui`, the script also runs the Playwright UI tests in `ui-tests/`
 on a front-end app, while the app runs: each page in the light and the
-dark mode, and the design tokens. The screenshots go to
+dark mode, the design tokens, and the list and detail pages with records. The screenshots go to
 `ui-tests/screenshots/` (git ignores it). Install the browser once with
 `pnpm --dir ui-tests install && pnpm --dir ui-tests exec playwright
 install chromium`.
@@ -188,7 +191,11 @@ def started_local(binding: str, app: Path, temp: Path) -> Generator[None]:
             subprocess.run(
                 ["pnpm", "--silent", "db:generate"], cwd=app, check=True, stdout=subprocess.DEVNULL
             )
-        env |= {"DATABASE_URL": f"pglite:{temp / 'pglite'}", "DATABASE_MIGRATE": "true"}
+        env |= {
+            "DATABASE_URL": f"pglite:{temp / 'pglite'}",
+            "DATABASE_MIGRATE": "true",
+            "DATABASE_SEED": "true",
+        }
         command = ["pnpm", "--silent", "start"]
     else:
         # The generated app has its own virtual environment.

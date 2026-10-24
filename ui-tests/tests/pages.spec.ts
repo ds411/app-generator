@@ -4,19 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { expect, type Page, test } from "@playwright/test";
 
-import { type ExpectedPage, expected, modeOf } from "./expected";
+import { type ExpectedPage, expected, modeOf, pathPattern } from "./expected";
 
 const SCREENSHOTS = fileURLToPath(new URL(`../screenshots/${expected.binding}/`, import.meta.url));
 const UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
-
-/** A regular expression for the paths of a page, for example `^/projects/[^/]+$`. */
-function pathPattern(path: string): RegExp {
-  const source = path
-    .split("/")
-    .map((part) => (part.startsWith("{") ? "[^/?#]+" : part.replace(/[.*+?^$()|[\]\\]/g, "\\$&")))
-    .join("/");
-  return new RegExp(`^${source}$`);
-}
 
 /**
  * Return a path of a page with path parameters: the first link to the

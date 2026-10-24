@@ -2,11 +2,21 @@
 /**
  * Next.js calls `register()` once when the server starts. With
  * `DATABASE_MIGRATE=true` (as in `compose.yaml`), the server applies the
- * database migrations before it serves requests.
+ * database migrations before it serves requests. With
+ * `DATABASE_SEED=true`, it then fills the empty tables with the seed
+ * records (as `pnpm db:seed` does).
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.DATABASE_MIGRATE === "true") {
+  if (process.env.NEXT_RUNTIME !== "nodejs") {
+    return;
+  }
+  if (process.env.DATABASE_MIGRATE === "true") {
     const { migrateDatabase } = await import("@/shared/db/migrate");
     await migrateDatabase();
+  }
+  if (process.env.DATABASE_SEED === "true") {
+    const { getDb } = await import("@/shared/db/client");
+    const { seedDatabase } = await import("@/shared/db/seed");
+    await seedDatabase(getDb());
   }
 }

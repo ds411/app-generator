@@ -30,9 +30,10 @@ DEV_DEPENDENCIES: dict[str, str] = {
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
 }
-"""The development packages that each generated app needs."""
+"""The development packages that each generated app needs. `tsx` runs `pnpm db:seed`."""
 
 UI_DEPENDENCIES: dict[str, str] = {
     "class-variance-authority": "0.7.1",
