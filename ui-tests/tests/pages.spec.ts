@@ -1,4 +1,5 @@
-// Each page of the definition opens in both color modes, without errors.
+// Each page of the definition opens in both color modes, without errors,
+// and looks like its approved screenshot.
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { type ExpectedPage, expected, modeOf, pathPattern, UNKNOWN_ID } from "./expected";
 
 const SCREENSHOTS = fileURLToPath(new URL(`../screenshots/${expected.binding}/`, import.meta.url));
+/** The today of the browser: the center of the mock and seed dates (BASE_DATE). */
+const TODAY = new Date("2026-01-05T12:00:00Z");
+/** Milliseconds to wait for a link to a detail page. */
+const LINK_TIMEOUT = 5000;
 
 /**
  * Return a path of a page with path parameters: the first link to the
@@ -17,14 +22,25 @@ async function samplePath(page: Page, target: ExpectedPage): Promise<string> {
   await page.goto(parent);
   await page.waitForLoadState("networkidle");
   const pattern = pathPattern(target.path);
-  const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((a) => a.getAttribute("href") ?? ""));
-  return hrefs.find((href) => pattern.test(href)) ?? target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
+  // The list can render its links after the network is idle (for example
+  // under load), so look for a link for a few seconds.
+  const deadline = Date.now() + LINK_TIMEOUT;
+  for (;;) {
+    const hrefs = await page.locator("a[href]").evaluateAll((links) => links.map((a) => a.getAttribute("href") ?? ""));
+    const href = hrefs.find((candidate) => pattern.test(candidate));
+    if (href) return href;
+    if (Date.now() > deadline) return target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
+    await page.waitForTimeout(200);
+  }
 }
 
 for (const target of expected.pages) {
   test(`the page ${target.name} opens`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    // The pages show dates relative to today. A fixed today near the
+    // mock and seed dates keeps the screenshots the same on each day.
+    await page.clock.setFixedTime(TODAY);
     const path = target.params.length ? await samplePath(page, target) : target.path;
 
     const response = await page.goto(path);
@@ -44,5 +60,8 @@ for (const target of expected.pages) {
     mkdirSync(`${SCREENSHOTS}${mode}`, { recursive: true });
     await page.screenshot({ path: `${SCREENSHOTS}${mode}/${target.name}.png`, fullPage: true });
     expect(errors).toEqual([]);
+    // Compare the page with its approved screenshot in
+    // ui-tests/approved/<binding>/<mode>/ (see CONTRIBUTING.md).
+    await expect(page).toHaveScreenshot([expected.binding, mode, `${target.name}.png`], { fullPage: true });
   });
 }

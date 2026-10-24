@@ -29,6 +29,12 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["list"]],
+  // The approved screenshots: approved/<binding>/<mode>/<page>.png. A
+  // page fails when more than 0.1 % of its pixels differ.
+  snapshotPathTemplate: "{testDir}/../approved/{arg}{ext}",
+  expect: {
+    toHaveScreenshot: { maxDiffPixelRatio: 0.001, animations: "disabled", caret: "hide" },
+  },
   use: {
     baseURL: process.env.APPGEN_BASE_URL ?? "http://localhost:3000",
     launchOptions: { executablePath },
@@ -36,6 +42,9 @@ export default defineConfig({
     // reduced motion, so the screenshots show the charts at their end
     // state. The apps keep the animation for other users.
     contextOptions: { reducedMotion: "reduce" },
+    // A fixed locale and time zone keep the screenshots the same on each machine.
+    locale: "en-US",
+    timezoneId: "UTC",
   },
   // One project for each color mode. The apps follow the mode of the
   // system (`ui.theme.default_mode: system`).
