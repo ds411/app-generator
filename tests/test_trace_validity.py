@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from appgen.dsl import AppDefinition, load_definition
-from appgen.trace import ScanResult, find_invalid_traces, scan_folder, valid_traces
+from appgen.gen.manifest import Manifest
+from appgen.trace import (
+    ScanResult,
+    find_invalid_traces,
+    scan_folder,
+    suggest_element,
+    valid_traces,
+)
 
 TESTS = Path(__file__).parent
 
@@ -92,3 +99,48 @@ def test_valid_traces_leave_out_invalid_traces(definition: AppDefinition, tmp_pa
     problems = find_invalid_traces(definition, scan)
 
     assert [t.element_id for t in valid_traces(scan, problems)] == ["app"]
+
+
+def _manifest(removed: dict[str, str], added: tuple[str, ...]) -> Manifest:
+    return Manifest(binding="b", removed=removed, added=added)
+
+
+def test_the_hint_suggests_the_new_element_after_a_rename(definition: AppDefinition) -> None:
+    # Before the rename, the entity Task was called Project2. By the
+    # spelling alone, the hint is the entity Project.
+    manifest = _manifest({"entities.Project2": "entity"}, ("entities.Task",))
+
+    assert suggest_element(definition, "entities.Project2", manifest) == "entities.Task"
+    assert suggest_element(definition, "entities.Project2") == "entities.Project"
+
+
+def test_the_hint_suggests_only_elements_of_the_same_kind(definition: AppDefinition) -> None:
+    # The new elements are a field and an operation. The removed element
+    # is a field, so the hint never names the operation.
+    manifest = _manifest(
+        {"entities.Task.fields.heading": "field"},
+        ("entities.Task.fields.due_date", "operations.complete_task"),
+    )
+
+    hint = suggest_element(definition, "entities.Task.fields.heading", manifest)
+
+    assert hint == "entities.Task.fields.due_date"
+
+
+def test_without_a_new_element_the_hint_uses_the_spelling_in_the_same_kind(
+    definition: AppDefinition,
+) -> None:
+    manifest = _manifest({"pages.project": "page", "operations.list_task": "operation"}, ())
+
+    assert suggest_element(definition, "pages.project", manifest) == "pages.projects"
+    assert suggest_element(definition, "operations.list_task", manifest) == "operations.list_tasks"
+
+
+def test_without_data_from_an_earlier_run_the_hint_uses_the_spelling(
+    definition: AppDefinition,
+) -> None:
+    manifest = _manifest({}, ("entities.Project",))
+
+    hint = suggest_element(definition, "entities.Task.fields.titel", manifest)
+
+    assert hint == "entities.Task.fields.title"

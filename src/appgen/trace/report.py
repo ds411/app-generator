@@ -77,7 +77,7 @@ def check_traces(
         scan.traces.extend(manifest_traces(manifest))
         scan.traces.sort()
         exclude_kinds = [*exclude_kinds, *manifest.excluded_kinds]
-    invalid = find_invalid_traces(definition, scan, generated_files)
+    invalid = find_invalid_traces(definition, scan, generated_files, manifest)
     traces = valid_traces(scan, invalid)
     excluded = sorted(set(exclude_kinds))
     return CheckReport(

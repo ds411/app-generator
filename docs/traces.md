@@ -148,8 +148,12 @@ folder. It lists each generated file with its SHA-256 hash and its
 traces, each extension file, and the element kinds that the binding
 excludes. The generator uses it to find generated files with manual
 edits (it stops, unless `--force`), and the files to delete. The checker
-uses it for the traces of files without comments, and to find
-`generated` traces in files that appgen did not generate.
+uses it for the traces of files without comments, to find `generated`
+traces in files that appgen did not generate, and for the "did you
+mean" hint after a rename. For the hint, the manifest also lists the
+kind of each element of the definition (`elements`), the elements of
+earlier runs that the definition does not have any more (`removed`),
+and the elements that are new since the first run (`added`).
 
 ## The checker
 
@@ -268,8 +272,8 @@ each element kind.
 The checker reports these traces as invalid:
 
 - A trace to an element ID that the definition does not have, for
-  example after a rename. The report adds a "did you mean" hint for a
-  similar ID.
+  example after a rename. The report adds a "did you mean" hint: the
+  new element after a rename, or else an ID with a similar spelling.
 - A trace with an unknown kind or scope.
 - A file trace outside the header.
 - A `begin` without its `end`, an `end` without its `begin`, or an
@@ -308,10 +312,10 @@ Trace check: 109 files, 383 traces.
 Invalid traces: 3
   app/features/comments/validation_ext.py:2:3: unknown-element: The definition has no element 'entities.Comment'.
     @trace:manual entities.Comment file
-    hint: Did you mean 'entities.Project'?
+    hint: Did you mean 'entities.Remark'?
   app/features/tasks/complete_task_ext.py:4:3: unknown-element: The definition has no element 'entities.Comment'.
     @trace:manual entities.Comment
-    hint: Did you mean 'entities.Project'?
+    hint: Did you mean 'entities.Remark'?
   app/features/tasks/complete_task_ext.py:5:3: unknown-element: The definition has no element 'pages.people'.
     @trace:manual pages.people
     hint: Did you mean 'pages.projects'?
@@ -320,8 +324,15 @@ Invalid traces: 3
 Result: failed: 3 invalid traces.
 ```
 
-The hint compares the spelling of the IDs, so after a rename it can
-name a wrong element, as above. The first file is the validation
+The hint uses the manifest: it lists the elements of the last run, the
+elements that left the definition since the earlier runs (with their
+kinds), and the elements that are new. For an element that left the
+definition, the hint suggests an element of the same kind that is new,
+for example `entities.Remark` after the rename of `entities.Comment`.
+If no element of the same kind is new (as for the removed page
+`pages.people`), the hint suggests the element of the same kind with
+the most similar spelling. Without data from an earlier run, the hint
+uses the spelling only. The first file is the validation
 extension file of the old entity: the generator keeps it, but no
 generated code uses it any more. The developer moves the code to the new
 element (after a rename) and changes its traces, or deletes the code. `tests/test_definition_change.py`
