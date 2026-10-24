@@ -1,5 +1,5 @@
 // The values that the tests expect, from the app definition.
-// scripts/smoke_test.py writes expected.json before it runs the tests.
+// scripts/smoke_test.py writes the file before it runs the tests.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,10 @@ export type Expected = {
   bodyFontSize: Record<Mode, string>;
 };
 
-const file = fileURLToPath(new URL("../expected.json", import.meta.url));
+// APPGEN_UI_EXPECTED names another file, so that the checks of two apps
+// can run at the same time.
+const file =
+  process.env.APPGEN_UI_EXPECTED || fileURLToPath(new URL("../expected.json", import.meta.url));
 
 export const expected: Expected = JSON.parse(readFileSync(file, "utf8")) as Expected;
 

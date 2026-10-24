@@ -229,6 +229,11 @@ git config core.hooksPath .githooks
   (`tests/golden/`). The trace check fails on an invalid trace. A
   change to a Markdown file also runs these checks, because
   `tests/test_docs.py` checks the docs.
+- The hook runs the app checks below (`scripts/check-<app>.sh`) at the
+  same time, after the Python checks. Each output line of an app check
+  starts with the name of the app, for example `[nextjs]`. At the end,
+  the hook tells which app checks passed and which failed. To run them
+  one after the other, push with `APPGEN_CHECK_SERIAL=1 git push`.
 - When a push changes the generator core or the FastAPI binding, the
   hook also runs `scripts/check-fastapi.sh`. The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,

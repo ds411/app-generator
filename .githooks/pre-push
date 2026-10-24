@@ -88,22 +88,49 @@ check_traces() {
     run uv run --locked appgen check tests/fixtures/project-tracker.yaml tests/golden/fastapi
 }
 
-# Generate the project tracker with the FastAPI binding, and build,
-# test, and check the output.
-check_fastapi() {
-    run scripts/check-fastapi.sh
-}
+# The app checks to run, for example " fastapi react". Each app has a
+# check script scripts/check-<app>.sh: it generates the project tracker
+# with the binding of the app, and builds, tests, and checks the output.
+apps=""
 
-# Generate the project tracker with the Next.js binding, and install,
-# lint, type check, build, and check the output.
-check_nextjs() {
-    run scripts/check-nextjs.sh
-}
-
-# Generate the project tracker with the React binding, and install,
-# lint, type check, build, and check the output.
-check_react() {
-    run scripts/check-react.sh
+# Run the app checks at the same time. The apps use different ports,
+# image tags, and container names. Each output line of a check starts
+# with the name of its app. APPGEN_CHECK_SERIAL=1 runs one check after
+# the other, without the prefix.
+run_apps() {
+    [ -n "$apps" ] || return 0
+    if [ "${APPGEN_CHECK_SERIAL:-0}" = 1 ]; then
+        for app in $apps; do
+            run scripts/check-"$app".sh
+        done
+        return 0
+    fi
+    # Start Docker and prepare the images once, before the checks start.
+    if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+        scripts/sandbox-setup.sh
+    fi
+    status_dir=$(mktemp -d "${TMPDIR:-/tmp}/appgen-pre-push.XXXXXX")
+    for app in $apps; do
+        echo "pre-push: scripts/check-$app.sh (in parallel)"
+        (
+            {
+                scripts/check-"$app".sh 2>&1
+                echo $? >"$status_dir/$app"
+            } | while IFS= read -r line; do
+                printf '[%s] %s\n' "$app" "$line"
+            done
+        ) &
+    done
+    wait
+    for app in $apps; do
+        if [ "$(cat "$status_dir/$app" 2>/dev/null)" = 0 ]; then
+            echo "pre-push: scripts/check-$app.sh passed"
+        else
+            echo "pre-push: scripts/check-$app.sh failed (see the lines that start with [$app])"
+            failed=1
+        fi
+    done
+    rm -rf "$status_dir"
 }
 
 # Parts
@@ -116,22 +143,24 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/fastapi/*' \
     'examples/project-tracker/*' 'scripts/check-fastapi.sh' 'scripts/smoke_test.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    check_fastapi
+    apps="$apps fastapi"
 fi
 
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/nextjs/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'scripts/check-nextjs.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    check_nextjs
+    apps="$apps nextjs"
 fi
 
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    check_react
+    apps="$apps react"
 fi
+
+run_apps
 
 if [ "$failed" -ne 0 ]; then
     echo "pre-push: a check failed. Fix it, or push with --no-verify to skip the hook."

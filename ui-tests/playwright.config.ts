@@ -1,5 +1,5 @@
 // The Playwright UI tests of the generated front ends (Next.js and React).
-// scripts/smoke_test.py --ui starts an app, writes expected.json, and runs
+// scripts/smoke_test.py --ui starts an app, writes expected/<binding>.json, and runs
 // these tests with APPGEN_BASE_URL.
 import { existsSync } from "node:fs";
 import { chromium, defineConfig, devices } from "@playwright/test";
@@ -22,6 +22,9 @@ const executablePath = chromiumExecutable();
 
 export default defineConfig({
   testDir: "./tests",
+  // APPGEN_UI_OUTPUT names another folder, so that the checks of two apps
+  // can run at the same time. Playwright empties the folder first.
+  outputDir: process.env.APPGEN_UI_OUTPUT || "test-results",
   fullyParallel: false,
   workers: 1,
   retries: 0,

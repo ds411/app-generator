@@ -50,6 +50,7 @@ Environment variables:
 """
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -357,11 +358,25 @@ def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
 def check_ui(binding: str, definition: AppDefinition) -> None:
     """Run the Playwright UI tests on the app that runs."""
     log(binding, "UI tests (Playwright)")
+    # One file and one output folder for each binding, so that the checks
+    # of the front ends can run at the same time (the pre-push hook).
+    expected_file = (UI_TESTS / "expected" / f"{binding}.json").resolve()
+    expected_file.parent.mkdir(exist_ok=True)
     expected = json.dumps(expected_ui(binding, definition), indent=2)
-    (UI_TESTS / "expected.json").write_text(expected + "\n")
-    subprocess.run(["pnpm", "install", "--silent", "--frozen-lockfile"], cwd=UI_TESTS, check=True)
-    subprocess.run(["pnpm", "--silent", "typecheck"], cwd=UI_TESTS, check=True)
-    env = {**os.environ, "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}"}
+    expected_file.write_text(expected + "\n")
+    with (UI_TESTS / ".install.lock").open("w") as lock:
+        # Only one check at a time installs the packages of the UI tests.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        subprocess.run(
+            ["pnpm", "install", "--silent", "--frozen-lockfile"], cwd=UI_TESTS, check=True
+        )
+        subprocess.run(["pnpm", "--silent", "typecheck"], cwd=UI_TESTS, check=True)
+    env = {
+        **os.environ,
+        "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}",
+        "APPGEN_UI_EXPECTED": str(expected_file),
+        "APPGEN_UI_OUTPUT": str((UI_TESTS / "test-results" / binding).resolve()),
+    }
     subprocess.run(["pnpm", "exec", "playwright", "test"], cwd=UI_TESTS, env=env, check=True)
 
 
