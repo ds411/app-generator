@@ -336,3 +336,18 @@ def test_only_a_page_action_has_a_placement_and_the_top_bar_must_exist() -> None
         "invalid-option",
         "Only a page action has 'placement'.",
     )
+
+
+def test_an_operation_action_cannot_run_a_custom_operation_with_params() -> None:
+    page = "tasks: { path: /tasks, title: Tasks, entity: Task }"
+    action = "{ kind: operation, operation: close_task }"
+    text = BASE.replace(page, page.replace(" }", f", actions: {{ close: {action} }} }}"))
+
+    [diagnostic] = check(text)
+    assert (diagnostic.code, diagnostic.element_id) == (
+        "unsuitable-operation",
+        "pages.tasks.actions.close",
+    )
+    assert diagnostic.hint is not None and "form action" in diagnostic.hint
+    # Without params, an action can run the operation.
+    assert check(text.replace("    params:\n      reason: { type: text }\n", "")) == []

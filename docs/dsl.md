@@ -504,7 +504,7 @@ action. Each action has `kind`, and `label`, `icon`, `variant`
 | ----------- | ----------------------------------------------------------------------- |
 | `navigate`  | `page`, and `params`: a mapping from a path parameter to a field path.  |
 | `form`      | `form`. In a row or on a record page, an edit form gets the record.     |
-| `operation` | `operation`: runs the operation on the record, for example a delete.    |
+| `operation` | `operation`: runs the operation on the record, for example a delete. A custom operation with `params` needs a form action. |
 | `custom`    | A generation gap.                                                       |
 
 `form` and `operation` actions take `on_success`: `toast` and
