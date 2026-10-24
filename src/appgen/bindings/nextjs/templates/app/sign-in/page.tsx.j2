@@ -14,8 +14,19 @@ export async function generateMetadata(): Promise<Metadata> {
 export const metadata: Metadata = { title: "Sign in" };
 {% endif %}
 
+{% if definition.auth.providers %}
+/**
+ * The sign-in page. After the sign-in, the app opens the page in `next`.
+ * After a failed sign-in with a provider, `error` gives the message.
+ */
+export default async function Route({ searchParams }: PageProps<"/sign-in">) {
+  const { next, error } = await searchParams;
+  return <SignInForm next={typeof next === "string" && next.startsWith("/") ? next : "/"} error={typeof error === "string" ? error : undefined} />;
+}
+{% else %}
 /** The sign-in page. After the sign-in, the app opens the page in `next`. */
 export default async function Route({ searchParams }: PageProps<"/sign-in">) {
   const { next } = await searchParams;
   return <SignInForm next={typeof next === "string" && next.startsWith("/") ? next : "/"} />;
 }
+{% endif %}

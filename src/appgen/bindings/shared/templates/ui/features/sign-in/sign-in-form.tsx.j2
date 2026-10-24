@@ -1,19 +1,44 @@
 {% set u = definition.entities[definition.auth.user_entity] %}
 {% set f = u.fields[definition.auth.username_field] %}
+{% set password = definition.auth.password %}
+{% set providers = definition.auth.providers %}
+{% set card = "form onSubmit={submit}" if password else "div" %}
 {{ trace_header(definition.auth.id) }}
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { {{ "type FormEvent, " if password }}useState } from "react";
 
-import { signIn } from "@/shared/auth";
+import { {{ (["signIn"] if password else []) | join(", ") }}{{ ", " if password and providers }}{{ "signInWithProvider" if providers }} } from "@/shared/auth";
 {% if auth_pages.sign_up or auth_pages.password_reset %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
+{% if providers %}
 
+/** Return the message of a failed sign-in with a provider: the code in `?error=` of the page. */
+function providerError(code: string | undefined): string | null {
+  if (code === undefined) return null;
+  return code === "unknown-user" ? {{ tr(js("No user has this user name. Ask an administrator.")) }} : {{ tr(js("The sign-in with the provider failed.")) }};
+}
+{% endif %}
+
+{% if password and providers %}
+/**
+ * The sign-in form: a user name and a password, and a button for each
+ * provider (ADR 0020). After the sign-in, it opens the page `next`.
+ */
+export function SignInForm({ next, error: code }: { next: string; error?: string }) {
+  const [error, setError] = useState<string | null>(providerError(code));
+{% elif providers %}
+/** The sign-in page: a button for each provider (ADR 0020). After the sign-in, it opens the page `next`. */
+export function SignInForm({ next, error: code }: { next: string; error?: string }) {
+  const [error, setError] = useState<string | null>(providerError(code));
+{% else %}
 /** The sign-in form: a user name and a password. After the sign-in, it opens the page `next`. */
 export function SignInForm({ next }: { next: string }) {
   const [error, setError] = useState<string | null>(null);
+{% endif %}
   const [pending, setPending] = useState(false);
+{% if password %}
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,11 +52,24 @@ export function SignInForm({ next }: { next: string }) {
       setError(message);
     }
   }
+{% endif %}
+{% if providers %}
+
+  async function signInWith(provider: string) {
+    setPending(true);
+    const message = await signInWithProvider(provider, next);
+    if (message !== null) {
+      setPending(false);
+      setError(message);
+    }
+  }
+{% endif %}
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
-      <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+      <{{ card }} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
         <h1 className="text-xl font-semibold">{{ jsx_text(definition.app.title) }}</h1>
+{% if password %}
         <label className="flex flex-col gap-1.5 text-sm font-medium">
           {{ jsx_text(f.label or (definition.auth.username_field | replace("_", " ") | capitalize)) }}
           <input
@@ -52,11 +90,13 @@ export function SignInForm({ next }: { next: string }) {
             className="h-9 rounded-md border bg-background px-3 text-sm font-normal"
           />
         </label>
+{% endif %}
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
+{% if password %}
         <button
           type="submit"
           disabled={pending}
@@ -64,6 +104,20 @@ export function SignInForm({ next }: { next: string }) {
         >
           {{ jsx_text("Sign in") }}
         </button>
+{% endif %}
+{% if password and providers %}
+        <p className="text-center text-xs text-muted-foreground">{{ jsx_text("or") }}</p>
+{% endif %}
+{% for name, p in providers.items() %}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => signInWith({{ name | tojson }})}
+          className="h-9 rounded-md border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
+        > {{ trace(p.id, jsx=True) }}
+          {{ jsx_text(p.title or name) }}
+        </button>
+{% endfor %}
 {% if auth_pages.password_reset %}
         <Link href="/forgot-password" className="text-sm font-medium underline underline-offset-4"> {{ trace(definition.auth.password_reset.id, jsx=True) }}
           {{ jsx_text("Did you forget the password?") }}
@@ -77,7 +131,7 @@ export function SignInForm({ next }: { next: string }) {
           </Link>
         </p>
 {% endif %}
-      </form>
+      </{{ card.split(" ")[0] }}>
     </main>
   );
 }

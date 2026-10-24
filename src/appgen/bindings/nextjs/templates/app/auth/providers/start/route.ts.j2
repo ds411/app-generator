@@ -1,0 +1,37 @@
+{{ trace_header(*(definition.auth.providers.values() | map(attribute="id") | list)) }}
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
+
+import {
+  FLOW_SECONDS,
+  flowCookie,
+  flowPath,
+  isProviderName,
+  pageAfterSignIn,
+  signInPageWithError,
+  startProviderSignIn,
+} from "@/shared/auth/providers";
+
+/** Send the browser to the sign-in page of a provider (ADR 0020). After the sign-in, the app opens the page `next`. */
+export async function GET(request: NextRequest, { params }: RouteContext<"/auth/providers/[name]/start">) {
+  const { name } = await params;
+  if (!isProviderName(name)) notFound();
+  const next = pageAfterSignIn(request.nextUrl.searchParams.get("next"));
+  let target: string;
+  try {
+    const { url, flow } = await startProviderSignIn(name, next);
+    (await cookies()).set(flowCookie(name), flow, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: flowPath(name),
+      maxAge: FLOW_SECONDS,
+    });
+    target = url;
+  } catch (error) {
+    console.error(error);
+    target = signInPageWithError(error, next);
+  }
+  redirect(target);
+}

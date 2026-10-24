@@ -4,13 +4,13 @@
 import { eq } from "drizzle-orm";
 
 {% endif %}
-{% if definition.auth %}
+{% if definition.auth and definition.auth.password %}
 import { hashPassword } from "@/shared/auth/password";
 
 {% endif %}
 import type { Database } from "./connect";
 import {
-{% if definition.auth %}
+{% if definition.auth and definition.auth.password %}
   credentialsTable,
 {% endif %}
 {% for seed in nextjs.seed %}
@@ -54,7 +54,7 @@ export async function seedDatabase(db: Database): Promise<boolean> {
     await tx.insert({{ seed_join.join.const }}).values(seed.{{ seed_join.join.const | replace("Table", "Seed") }}); {{ trace(seed_join.join.element_id) }}
 {% endfor %}
 {% endfor %}
-{% if definition.auth %}
+{% if definition.auth and definition.auth.password %}
 {% set user_seed = nextjs.seed | selectattr("table.entity", "eq", definition.auth.user_entity) | first %}
     // With SEED_PASSWORD, each seed user can sign in with this password.
     const password = process.env.SEED_PASSWORD; {{ trace(definition.auth.id) }}

@@ -102,7 +102,8 @@ def page_info(name: str, page: Page, layout: str | None = None) -> PageInfo:
 def package_json(definition: AppDefinition) -> dict[str, Any]:
     """Return the content of `package.json`, with the packages sorted by name.
 
-    The app gets the npm packages of the shadcn/ui components that it uses.
+    The app gets the npm packages of the shadcn/ui components that it uses,
+    and with providers `jose` (ADR 0020).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -112,6 +113,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     }
     if "table" in ViewContext(definition).features:
         dependencies |= versions.TABLE_PACKAGES
+    if definition.auth is not None and definition.auth.providers:
+        dependencies |= versions.PROVIDER_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,

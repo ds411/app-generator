@@ -62,6 +62,21 @@ its own until now.
 - All signed texts of the sign-in (the session tokens, the reset tokens,
   and the flow cookies) use one function with a purpose in the signed
   message, so that a text of one purpose is not valid for another.
+- The front ends (update for #271): the sign-in page has a button for
+  each provider, and no password form with `password: false`. The
+  Next.js app has its own flow, with the same steps and checks as the
+  FastAPI app: the route handlers `/auth/providers/<name>/start` and
+  `/callback`, a signed flow cookie, and the session cookie of ADR 0011.
+  It checks the ID token with `jose`: the usual JOSE package of
+  JavaScript, with no dependencies. The React app with
+  `x-react-data: api` uses the flow of the FastAPI app with `return_to`
+  set to its page `/auth/callback`, which reads the token from the
+  fragment. The React app with mock data signs in a mock user at once,
+  as a demonstration. A failed sign-in opens the sign-in page with a
+  fixed message for a code (`?error=unknown-user` or `?error=provider`),
+  so that a link cannot put another text on the page.
+- No page can use a path under `/auth/` with providers: the routes of
+  the front ends use them.
 
 ## Consequences
 
@@ -75,6 +90,7 @@ its own until now.
 - The purpose in the signature of the session tokens is new, so the
   tokens of an earlier version of a generated app are not valid after
   the change. The users sign in again.
-- The front ends add the buttons and the callback in a separate story.
-  Until then, Next.js has a gap file for each provider, and React
-  excludes the kind `provider`.
+- The Next.js apps with providers have the dependency `jose`.
+- The checks of the repository sign in through the mock provider in the
+  front ends too: `scripts/auth_ui_test.py` with Next.js, and with React
+  and the FastAPI app.

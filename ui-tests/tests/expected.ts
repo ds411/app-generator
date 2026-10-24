@@ -105,6 +105,8 @@ export type ExpectedAuth = {
     /** The form of a new record on the list page: the label of its button, and the IDs of two widgets. */
     form: { label: string; firstId: string; ownerId: string } | null;
   }[];
+  /** The sign-in with each provider that makes users (ADR 0020): the button, and the menu of the user. */
+  providers?: { name: string; title: string; menu: string[] }[];
 };
 
 export type Expected = {

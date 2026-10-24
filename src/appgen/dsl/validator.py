@@ -17,6 +17,7 @@ from appgen.dsl.access import ALL, RecordRule
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES
 from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
+    PROVIDER_PATHS,
     RESET_PASSWORD_PATH,
     SIGN_IN_PATH,
     SIGN_UP_PATH,
@@ -571,6 +572,14 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
             yield _error(
                 "duplicate-name",
                 f"The path '{page.path}' is the {reserved[page.path]} page of the apps.",
+                page,
+                at="path",
+                hint="Give the page another path.",
+            )
+        elif auth.providers and page.path.startswith(PROVIDER_PATHS):
+            yield _error(
+                "duplicate-name",
+                f"The paths under '{PROVIDER_PATHS}' are the provider sign-in of the apps.",
                 page,
                 at="path",
                 hint="Give the page another path.",
