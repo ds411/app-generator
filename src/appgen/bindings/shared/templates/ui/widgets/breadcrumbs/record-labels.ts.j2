@@ -3,12 +3,22 @@
 import { {{ entity | camel }}Api, {{ entity | camel }}Meta } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
 
-/** Load the label of a record for the breadcrumbs: the value of its display field. */
-export const recordLabels: Record<string, (id: string) => Promise<string>> = {
+export type RecordLabelSource = {
+  /** Load the label of a record: the value of its display field. */
+  load: (id: string) => Promise<string>;
+  /** Call the listener when a record of the entity changes, so that the label loads again. */
+  subscribe: (listener: () => void) => () => void;
+};
+
+/** The labels of the records for the breadcrumbs, by entity. */
+export const recordLabels: Record<string, RecordLabelSource> = {
 {% for entity in ui_plan.record_entities %}
-  {{ js(entity) }}: async (id) => {
-    const record = await {{ entity | camel }}Api.get(id);
-    return String(record[{{ entity | camel }}Meta.displayField] ?? id);
+  {{ js(entity) }}: {
+    load: async (id) => {
+      const record = await {{ entity | camel }}Api.get(id);
+      return String(record[{{ entity | camel }}Meta.displayField] ?? id);
+    },
+    subscribe: (listener) => {{ entity | camel }}Api.subscribe(listener),
   },
 {% endfor %}
 };
