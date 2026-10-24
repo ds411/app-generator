@@ -516,3 +516,14 @@ def test_the_detail_and_dashboard_features_have_traces_for_each_element(
     for element in iter_elements(definition):
         if element.id.startswith(("ui.views.", "ui.dashboards.")):
             assert status.get(element.id) in ("covered", "gap"), element.id
+
+
+def test_a_detail_page_has_one_main_heading(result: GenerationResult) -> None:
+    files = _files(result)
+    page = files["src/pages/project-detail/ui/project-detail-page.tsx"]
+    assert '<PageHeader\n        title="Project"\n        label\n' in page
+    assert "        label\n" not in files["src/pages/projects/ui/projects-page.tsx"]
+    view = files["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert '<h1 className="typography-heading">{String(record.name ?? "")}</h1>' in view
+    header = files["src/widgets/page-header/ui/page-header.tsx"]
+    assert '<p className="text-sm font-medium text-muted-foreground">{title}</p>' in header

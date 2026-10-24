@@ -66,6 +66,9 @@ export function {{ name | pascal }}Page() {
 {% if region.name == "title" %}
       <PageHeader
         title={{ jsx_attr(element.title) }}
+{% if detail %}
+        label
+{% endif %}
 {% if element.description %}
         description={{ jsx_attr(element.description) }}
 {% endif %}
@@ -85,6 +88,9 @@ export function {{ name | pascal }}Page() {
     <>
       <PageHeader
         title={{ jsx_attr(element.title) }}
+{% if detail %}
+        label
+{% endif %}
 {% if element.description %}
         description={{ jsx_attr(element.description) }}
 {% endif %}
