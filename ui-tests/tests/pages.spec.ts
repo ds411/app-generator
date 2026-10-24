@@ -29,7 +29,15 @@ for (const target of expected.pages) {
 
     const response = await page.goto(path);
     expect(response?.status()).toBeLessThan(400);
-    await expect(page.locator("h1").first()).toHaveText(target.title);
+    if (target.detail) {
+      // The name of the record is the only main heading. The page title is a small label.
+      await page.waitForLoadState("networkidle");
+      await expect(page.locator("h1")).toHaveCount(1);
+      await expect(page.locator("h1")).not.toHaveText(target.title);
+      await expect(page.locator("main").getByText(target.title, { exact: true }).first()).toBeVisible();
+    } else {
+      await expect(page.locator("h1").first()).toHaveText(target.title);
+    }
     await page.waitForLoadState("networkidle");
 
     const mode = modeOf(testInfo.project.name);
