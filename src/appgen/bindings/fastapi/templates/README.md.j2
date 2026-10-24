@@ -126,6 +126,7 @@ variable `POSTGRES_IMAGE` for Compose.
   counts are in the memory of each process, so each replica has its own
   limit. `/health` has no limit.
 {% endif %}
+{% if "kubernetes" in py.deploy %}
 - Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
   Deployment (2 replicas, a non-root user, a read-only file system), a
   Service, and a Job that runs the migrations. The database is outside
@@ -133,6 +134,49 @@ variable `POSTGRES_IMAGE` for Compose.
   copy `secret.example.env` to `secret.env`, and set the values. Then
   run `kubectl delete job {{ app.name }}-migrate --ignore-not-found` and
   `kubectl apply -k deploy/kubernetes`.
+{% endif %}
+{% if "knative" in py.deploy %}
+{% set image = "registry.example.com/" ~ app.name ~ "-api:0.1.0" %}
+{# The secrets of deploy/knative/service.yaml: each one is a secret of its own. #}
+{% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if py.redis else [])
+    + (["AUTH_SECRET"] if definition.auth else [])
+    + (py_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
+- Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
+  Knative Service (0 to 10 instances, the probes, and the resource
+  limits), and Cloud Run accepts the same file. Push the image, and set
+  its name in `service.yaml` and `migrate-job.yaml`. Each secret is a
+  secret of its own, with the key (Knative) or the version (Cloud Run)
+  `latest`. Run the migrations before each deployment of a new image.
+  On a cluster with Knative Serving:
+
+  ```sh
+{% for env in secrets %}
+  kubectl create secret generic {{ app.name }}-{{ env | lower | replace("_", "-") }} --from-literal=latest='<{{ env }}>'
+{% endfor %}
+  kubectl delete job {{ app.name }}-migrate --ignore-not-found
+  kubectl apply -f deploy/knative/migrate-job.yaml
+  kubectl wait --for=condition=complete job/{{ app.name }}-migrate --timeout=10m
+  kubectl apply -f deploy/knative/service.yaml
+  ```
+
+  On Cloud Run, a Cloud Run job runs the migrations. The database must
+  accept connections from Cloud Run, and the service account of the
+  service and of the job must have access to the secrets:
+
+  ```sh
+{% for env in secrets %}
+  printf %s '<{{ env }}>' | gcloud secrets create {{ app.name }}-{{ env | lower | replace("_", "-") }} --data-file=-
+{% endfor %}
+  gcloud run jobs deploy {{ app.name }}-migrate --image {{ image }} \
+    --command alembic --args upgrade,head \
+    --set-secrets DATABASE_URL={{ app.name }}-database-url:latest --execute-now --wait
+  gcloud run services replace deploy/knative/service.yaml
+  ```
+
+  A new Cloud Run service accepts only requests with a Google sign-in.
+  For a public API, run `gcloud run services add-iam-policy-binding
+  {{ app.name }}-api --member=allUsers --role=roles/run.invoker`.
+{% endif %}
 
 {% if definition.auth %}
 ## Sign-in

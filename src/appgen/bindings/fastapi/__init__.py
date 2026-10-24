@@ -9,10 +9,11 @@ Pages and the UI are out of the scope of the binding.
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import JsonValue, StringConstraints
+from pydantic import Field, JsonValue, StringConstraints
 
 from appgen.bindings.fastapi.model import (
     COLUMN_KEY,
+    DEPLOY_KEY,
     EMBED_KEY,
     EXAMPLE_KEY,
     PATH_KEY,
@@ -26,6 +27,8 @@ _SQL_NAME = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
 """A lower case SQL name that PostgreSQL does not cut (63 bytes at most)."""
 _URL_PREFIX = Annotated[str, StringConstraints(pattern=r"^(/[a-z0-9][a-z0-9._~-]*)+$")]
 """A URL prefix with one or more segments, for example `/meeting-rooms`."""
+_DEPLOY_TARGET = Literal["kubernetes", "knative"]
+"""A deployment target (`DEPLOY_TARGETS`)."""
 
 _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
@@ -45,7 +48,11 @@ BINDING = Binding(
         Output(template="Dockerfile.j2", path="Dockerfile"),
         Output(template="compose.yaml.j2", path="compose.yaml"),
         *(
-            Output(template=f"deploy/kubernetes/{name}.j2", path=f"deploy/kubernetes/{name}")
+            Output(
+                template=f"deploy/kubernetes/{name}.j2",
+                path=f"deploy/kubernetes/{name}",
+                when="'kubernetes' in py.deploy",
+            )
             for name in (
                 "kustomization.yaml",
                 "deployment.yaml",
@@ -54,6 +61,14 @@ BINDING = Binding(
                 "config.env",
                 "secret.example.env",
             )
+        ),
+        *(
+            Output(
+                template=f"deploy/knative/{name}.j2",
+                path=f"deploy/knative/{name}",
+                when="'knative' in py.deploy",
+            )
+            for name in ("service.yaml", "migrate-job.yaml")
         ),
         Output(template="dockerignore.j2", path=".dockerignore"),
         Output(template="package.py.j2", path="app/__init__.py"),
@@ -289,6 +304,15 @@ BINDING = Binding(
             description=(
                 "The store of the rate limit: `memory` (default) or `redis`, which adds "
                 "the setting `RATE_LIMIT_STORE_URL`: all replicas share one limit."
+            ),
+        ),
+        ExtensionKey(
+            name=DEPLOY_KEY,
+            kinds=frozenset({"app"}),
+            type=_DEPLOY_TARGET | Annotated[list[_DEPLOY_TARGET], Field(min_length=1)],
+            description=(
+                "The deployment targets: `kubernetes` (default, Kustomize) or `knative` "
+                "(a Knative Service that Google Cloud Run accepts too), or a list of both."
             ),
         ),
     ),

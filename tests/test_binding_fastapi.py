@@ -468,6 +468,67 @@ def test_the_rate_limit_store_is_memory_or_redis(fastapi: Binding) -> None:
     assert codes == ["invalid-value"]
 
 
+def _with_app_keys(path: Path, keys: str) -> AppDefinition:
+    text = re.sub(r"(?m)^app:\n", f"app:\n{keys}", path.read_text(), count=1)
+    return load_definition_text(text, str(path))
+
+
+def test_the_knative_target_replaces_the_kubernetes_files(fastapi: Binding) -> None:
+    definition = _with_app_keys(FIXTURE, "  x-fastapi-deploy: knative\n")
+    files = _files(generate(definition, fastapi))
+
+    deploy = {path for path in files if path.startswith("deploy/")}
+    assert deploy == {"deploy/knative/service.yaml", "deploy/knative/migrate-job.yaml"}
+    assert "deploy/kubernetes" not in files[".gitignore"]
+    readme = files["README.md"]
+    assert "- Knative and Google Cloud Run:" in readme and "- Kubernetes:" not in readme
+    assert "gcloud run jobs deploy project-tracker-migrate" in readme
+    assert "kubectl apply -f deploy/knative/migrate-job.yaml" in readme
+
+
+def test_the_knative_service_uses_only_fields_that_cloud_run_takes(fastapi: Binding) -> None:
+    keys = "  x-fastapi-deploy: [knative, kubernetes]\n  x-fastapi-rate-limit-store: redis\n"
+    definition = _with_app_keys(EXAMPLES / "room-booking" / "app.yaml", keys)
+    files = _files(generate(definition, fastapi))
+
+    assert "deploy/kubernetes/deployment.yaml" in files
+    service = files["deploy/knative/service.yaml"]
+    assert "apiVersion: serving.knative.dev/v1\nkind: Service\n" in service
+    assert "envFrom:" not in service and "securityContext:" not in service
+    assert "- name: http1\n              containerPort: 8000\n" in service
+    assert "startupProbe:\n            httpGet:\n              path: /health\n" in service
+    for secret in ("database-url", "rate-limit-store-url", "auth-secret"):
+        assert f"name: room-booking-{secret}\n                  key: latest\n" in service
+    assert "- name: RATE_LIMIT_FAIL_CLOSED\n" in service
+    assert "- name: PASSWORD_RESET_URL\n" in service
+    job = files["deploy/knative/migrate-job.yaml"]
+    assert 'command: ["alembic", "upgrade", "head"]' in job
+    assert "name: room-booking-database-url" in job
+
+
+def test_the_knative_service_has_the_settings_of_the_apis(fastapi: Binding) -> None:
+    definition = _with_app_keys(
+        EXAMPLES / "project-tracker" / "app.yaml", "  x-fastapi-deploy: knative\n"
+    )
+    files = _files(generate(definition, fastapi))
+
+    service = files["deploy/knative/service.yaml"]
+    assert (
+        '- name: HOLIDAYS_API_URL\n              value: "https://date.nager.at/api/v3"\n' in service
+    )
+    assert "- name: EXCHANGE_RATES_API_KEY\n" in service
+    assert "name: project-tracker-exchange-rates-api-key\n" in service
+    assert "gcloud secrets create project-tracker-exchange-rates-api-key" in files["README.md"]
+
+
+@pytest.mark.parametrize("value", ["lambda", "[]", "[kubernetes, swarm]"])
+def test_the_deploy_targets_are_kubernetes_or_knative(fastapi: Binding, value: str) -> None:
+    definition = _with_app_keys(FIXTURE, f"  x-fastapi-deploy: {value}\n")
+    assert validate_definition(definition) == []
+    codes = [d.code for d in check_extensions(definition, [fastapi])]
+    assert codes == ["invalid-value"]
+
+
 NAMING = (
     "version: 0\n"
     "app: { name: rooms, title: Rooms }\n"

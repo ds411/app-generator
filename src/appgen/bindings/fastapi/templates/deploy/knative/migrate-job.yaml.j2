@@ -1,0 +1,45 @@
+{{ trace_header("app") }}
+# Run the migrations of the database (alembic upgrade head) once, on a
+# cluster with Knative, before each deployment of a new image:
+#   kubectl delete job {{ app.name }}-migrate --ignore-not-found
+#   kubectl apply -f deploy/knative/migrate-job.yaml
+#   kubectl wait --for=condition=complete job/{{ app.name }}-migrate --timeout=10m
+# Cloud Run runs the migrations as a Cloud Run job (README.md).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ app.name }}-migrate
+  labels:
+    app.kubernetes.io/name: {{ app.name }}-api
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ app.name }}-api
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # The image of service.yaml.
+          image: registry.example.com/{{ app.name }}-api:0.1.0
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ app.name }}-database-url
+                  key: latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
