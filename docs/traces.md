@@ -134,6 +134,25 @@ function. The app builds with the stub. To fill the gap:
 While the header has `@trace:gap`, the checker reports the element as an
 open gap, also when generated code calls the stub.
 
+If you write the code but forget step 2, the report shows the element
+as open work. Thus the checker looks for the **stub markers** in each
+file with a `gap` file trace. When none of them is in the file any
+more, the report lists the file under "Gaps to close", with a hint to
+change the trace to `manual`. A gap file that still has a stub marker is
+an open gap with no extra message. A gap to close does not change the
+result.
+
+Each binding declares its stub markers (`Binding.stub_markers`), and
+the manifest records them:
+
+| Binding          | Stub markers                                  |
+| ---------------- | --------------------------------------------- |
+| `fastapi`        | `TODO(appgen)`, `NotImplementedError`         |
+| `nextjs`, `react` | `TODO(appgen)`, `Not implemented yet`        |
+| `minimal`        | `TODO(appgen)`                                |
+
+Without a manifest, the checker uses all these markers.
+
 An extension file can also be an optional hook that works as it is, for
 example the `validation_ext.py` of an entity in the FastAPI binding (by
 default it accepts all records). The definition does not ask for a
@@ -223,6 +242,9 @@ The report has these parts:
 - **Uncovered elements**: the elements without a trace.
 - **Open gaps**: the elements with a gap trace, and where the gap
   traces are.
+- **Gaps to close**: the gap files without stub markers, with a hint to
+  change the trace to `manual`. The report shows this part only if
+  there is a gap to close.
 - **Coverage**: the counts and the percentage for each element kind,
   and in total, and the excluded kinds.
 - **Result**: `passed` or `failed`.
@@ -248,6 +270,7 @@ gives the same text. A change that breaks readers changes `version`.
       "traces": [{ "file": "app/features/projects/archive_project_ext.py", "line": 2 }]
     }
   ],
+  "gaps_to_close": [],
   "coverage": {
     "percent": 94.83,
     "total": 58,
@@ -266,7 +289,8 @@ An entry of `invalid` or of `warnings` has `file`, `line`, `column`,
 `uncovered` has `id` and `kind`. An entry of `gaps` has `id`, `kind`,
 and `traces`: the `file` and `line` of each gap trace. `coverage.gaps`
 and `gaps` in each entry of `by_kind` give the number of open gaps for
-each element kind.
+each element kind. An entry of `gaps_to_close` has `file`, `line`,
+`element_id`, `message`, and `hint`.
 
 ## Invalid traces
 

@@ -1,7 +1,7 @@
 """Find the invalid traces of a code folder (ADR 0004)."""
 
 import difflib
-from collections.abc import Collection, Iterable
+from collections.abc import Callable, Collection, Iterable
 
 from appgen.dsl.model import AppDefinition
 from appgen.gen.elements import iter_elements
@@ -96,3 +96,42 @@ def generated_outside_output(
         for trace in traces
         if trace.kind == "generated" and trace.file not in generated_files
     ]
+
+
+DEFAULT_STUB_MARKERS: tuple[str, ...] = (
+    "TODO(appgen)",
+    "NotImplementedError",
+    "Not implemented yet",
+)
+"""The stub markers of the bindings of appgen, for a code folder without a manifest."""
+
+
+def written_gaps(
+    traces: Iterable[Trace], read: Callable[[str], str], markers: Collection[str]
+) -> list[TraceProblem]:
+    """Return a problem for each gap file that has none of the stub markers any more.
+
+    A gap file is a file with a `gap` trace in its header. When its stub
+    markers are gone, the developer most likely wrote its code, but did
+    not change the trace to `manual`. `read` gives the text of a file by
+    its path.
+    """
+    problems: list[TraceProblem] = []
+    for trace in traces:
+        if trace.kind != "gap" or trace.scope != "file":
+            continue
+        text = read(trace.file)
+        if any(marker in text for marker in markers):
+            continue
+        problems.append(
+            TraceProblem.of(
+                trace,
+                "gap-to-close",
+                "The gap file has no stub markers any more ("
+                + ", ".join(markers)
+                + "), but its trace is still a gap trace.",
+                hint=f"If the code is done, change '@trace:gap {trace.element_id}' to "
+                f"'@trace:manual {trace.element_id}'.",
+            )
+        )
+    return sorted(problems)

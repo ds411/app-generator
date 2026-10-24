@@ -29,15 +29,18 @@ from appgen.trace.scanner import (
     scan_text,
 )
 from appgen.trace.validity import (
+    DEFAULT_STUB_MARKERS,
     find_invalid_traces,
     generated_outside_output,
     suggest_element,
     unknown_elements,
     valid_traces,
+    written_gaps,
 )
 
 __all__ = [
     "DEFAULT_IGNORE",
+    "DEFAULT_STUB_MARKERS",
     "ORPHANS_VERSION",
     "REPORT_VERSION",
     "TRACE_KINDS",
@@ -67,4 +70,5 @@ __all__ = [
     "suggest_element",
     "unknown_elements",
     "valid_traces",
+    "written_gaps",
 ]

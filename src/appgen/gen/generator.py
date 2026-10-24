@@ -48,6 +48,8 @@ class GenerationResult:
     """The element kinds that are out of the scope of the binding, sorted."""
     elements: dict[str, str] = field(default_factory=dict[str, str])
     """The kind of each element of the definition, by ID, in source order."""
+    stub_markers: tuple[str, ...] = ()
+    """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
 
 
 def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
@@ -99,6 +101,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
         gaps=gaps,
         excluded_kinds=tuple(sorted(binding.excludes)),
         elements={e.id: e.kind for e in elements},
+        stub_markers=binding.stub_markers,
     )
 
 

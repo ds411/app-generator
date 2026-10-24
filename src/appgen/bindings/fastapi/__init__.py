@@ -124,4 +124,5 @@ BINDING = Binding(
     excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
+    stub_markers=("TODO(appgen)", "NotImplementedError"),
 )

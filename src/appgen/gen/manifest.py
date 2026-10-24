@@ -55,6 +55,8 @@ class Manifest:
     With `removed`, the checker can suggest the element that replaced a
     renamed element.
     """
+    stub_markers: tuple[str, ...] = ()
+    """The text that the stubs of the extension files contain. Empty if the manifest has none."""
 
     def to_json(self) -> str:
         """Return the manifest as JSON text, with sorted keys and a final newline."""
@@ -76,6 +78,8 @@ class Manifest:
             data["removed"] = dict(sorted(self.removed.items()))
         if self.added:
             data["added"] = sorted(self.added)
+        if self.stub_markers:
+            data["stub_markers"] = list(self.stub_markers)
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
     @classmethod
@@ -97,6 +101,7 @@ class Manifest:
                 elements={str(k): str(v) for k, v in data.get("elements", {}).items()},
                 removed={str(k): str(v) for k, v in data.get("removed", {}).items()},
                 added=tuple(str(i) for i in data.get("added", [])),
+                stub_markers=tuple(str(m) for m in data.get("stub_markers", [])),
             )
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise ManifestError(f"The manifest is not valid: {error}") from None
@@ -173,7 +178,11 @@ def write_result(
         raise ManualEditsError(edited, unknown)
 
     report = WriteReport()
-    new = Manifest(binding=binding, excluded_kinds=result.excluded_kinds)
+    new = Manifest(
+        binding=binding,
+        excluded_kinds=result.excluded_kinds,
+        stub_markers=result.stub_markers,
+    )
     _record_changes(new, old, result.elements)
     for path, file in sorted(generated.items()):
         data = file.content.encode("utf-8")
