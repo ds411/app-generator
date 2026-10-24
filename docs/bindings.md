@@ -263,7 +263,11 @@ files ([ADR 0005](adr/0005-generation-gaps.md)):
 The generator writes an extension file only if it does not exist, and
 never changes or deletes it. The app must build and pass its type check
 with the stubs. `appgen.bindings.shared.gaps` has helpers for the gap
-files of the front ends (`gap_spec`, `gap_rules()`).
+files of the front ends (`gap_spec`, `gap_rules()`). The stub of a
+custom UI element (a widget, a form widget, or a detail tab) shows its
+element ID only in a development build (`process.env.NODE_ENV` in
+Next.js, `import.meta.env.DEV` in React). A production build shows the
+neutral text "Not available yet.".
 
 ## Shared templates
 
