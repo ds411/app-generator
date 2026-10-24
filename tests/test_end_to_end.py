@@ -23,13 +23,15 @@ runner = CliRunner()
 # app has no pages and no UI.
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": ["api"],
-    # The React app has no sign-up page (#269) and no password reset pages (#270) yet.
+    # The React app has no sign-up page (#269), no password reset pages (#270), and no
+    # owner rules (#273) yet.
     "react": [
         "api",
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
         "password_reset",
+        "record_rule",
         "sign_up",
     ],
     "fastapi": ["page", "translations", "ui"],

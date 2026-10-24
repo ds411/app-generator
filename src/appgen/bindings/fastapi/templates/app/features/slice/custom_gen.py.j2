@@ -8,9 +8,10 @@ The logic of the operation is in `{{ op.name }}_ext.py`, which appgen creates
 once and never changes.
 """
 
+{% set owner = op.owner_action %}
 {% set lines = [
     "from uuid import UUID",
-    "from fastapi import APIRouter",
+    "from fastapi import APIRouter" ~ (", Depends" if owner),
     "from app.core.db import SessionDep, commit",
     "from app.core.errors import problem_responses",
     "from app.features." ~ e.slice ~ " import repository",
@@ -32,9 +33,18 @@ once and never changes.
 {% if names %}
 {% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ (names | sort | join(", "))] %}
 {% endif %}
+{% if owner %}
+{% set lines = lines + ["from typing import Annotated", "from app.core.access import owner_of"] %}
+{% endif %}
 {{ py.imports(lines) }}
 
 router = APIRouter(prefix="{{ e.path }}")
+{% if owner %}
+
+{{ trace(e.owner.id) }}
+Owner = Annotated[UUID | None, Depends(owner_of("{{ e.name }}", "{{ owner }}"))]
+"""The user whose records the request may use (ADR 0018), or None for all records."""
+{% endif %}
 
 
 {{ op.decorator() }}
@@ -47,9 +57,12 @@ async def run_{{ op.name }}(
 {% for api_name in op.apis %}
     {{ py_apis[api_name].param }}: {{ py_apis[api_name].dependency_type }},
 {% endfor %}
+{% if owner %}
+    owner: Owner,
+{% endif %}
 ) -> {{ op.returns_class or "None" }}:
     """{{ op.description or ("Run the operation " ~ op.name ~ " on a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.get(session, id)
+    record = await repository.get(session, id{{ ", owner" if owner }})
 {% set ns = namespace(args=["session", "record"] + (["params"] if op.params else [])) %}
 {% for api_name in op.apis %}
 {% set ns.args = ns.args + [py_apis[api_name].param] %}

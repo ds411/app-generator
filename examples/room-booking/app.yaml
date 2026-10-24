@@ -377,7 +377,8 @@ auth:
     token_minutes: 30
 
 # An admin may do all. A member may read all data, and book rooms, but
-# may not change the rooms, the amenities, or the members.
+# may not change the rooms, the amenities, or the members. A member sees
+# and changes only the bookings that the member organizes.
 access:
   role_field: role
   roles:
@@ -399,3 +400,5 @@ access:
         - update_booking
         - cancel_booking
       pages: [dashboard, room_detail, bookings, booking_calendar, booking_detail, members, member_detail, amenities]
+      records:
+        Booking: { owner: organizer }

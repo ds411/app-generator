@@ -16,18 +16,62 @@
 {% endfor %}
 
 
+{% if e.owner %}
+{{ trace(e.owner.id) }}
+def owned(
+    statement: Select[{{ e.name }}],
+    owner: UUID | None,
+) -> Select[{{ e.name }}]:
+    """Return the statement for the records of an owner, or for all records without an owner.
+
+    The owner rules of the roles (ADR 0018) give the owner of a request.
+    """
+    if owner is None:
+        return statement
+    return statement.where({{ e.name }}.{{ e.owner.fk_attr }} == owner)
+
+
+async def get(session: AsyncSession, id: UUID, owner: UUID | None = None) -> {{ e.name }}:
+    """Return the record with an ID, with fresh data. Give a 404 error if it does not exist.
+
+    With an owner, a record of another user also gives 404, so that a
+    caller cannot find the IDs of the records of other users.
+    """
+    record = await session.get({{ e.name }}, id, populate_existing=True)
+    if record is None or (owner is not None and record.{{ e.owner.fk_attr }} != owner):
+        raise ProblemError(404, f"No {{ e.name }} has the ID {id}.")
+    return record
+{% else %}
 async def get(session: AsyncSession, id: UUID) -> {{ e.name }}:
     """Return the record with an ID, with fresh data. Give a 404 error if it does not exist."""
     record = await session.get({{ e.name }}, id, populate_existing=True)
     if record is None:
         raise ProblemError(404, f"No {{ e.name }} has the ID {id}.")
     return record
+{% endif %}
 
 
+{% if e.owner %}
+async def add(
+    session: AsyncSession,
+    data: {{ e.name }}Create,
+    owner: UUID | None = None,
+) -> {{ e.name }}:
+    """Validate a new record, and add it to the session without a commit. Return the record.
+
+    With an owner, the record belongs to the owner, whatever the request gives.
+    """
+    record = {{ e.name }}(id=uuid4())
+    values = data.model_dump(by_alias=False)
+    if owner is not None:
+        values["{{ e.owner.fk_attr }}"] = owner
+    await _apply(session, record, values)
+{% else %}
 async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     """Validate a new record, and add it to the session without a commit. Return the record."""
     record = {{ e.name }}(id=uuid4())
     await _apply(session, record, data.model_dump(by_alias=False))
+{% endif %}
 {% if e.workflows %}
     check_workflows(record, None)
 {% endif %}
@@ -39,19 +83,49 @@ async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     return record
 
 
+{% if e.owner %}
+async def create(
+    session: AsyncSession,
+    data: {{ e.name }}Create,
+    owner: UUID | None = None,
+) -> {{ e.name }}:
+    """Validate and store a new record, and return it. With an owner, it belongs to the owner."""
+    record = await add(session, data, owner)
+{% else %}
 async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     """Validate and store a new record, and return it."""
     record = await add(session, data)
+{% endif %}
     await commit(session)
     return await get(session, record.id)
 
 
+{% if e.owner %}
+async def update(
+    session: AsyncSession,
+    record: {{ e.name }},
+    data: {{ e.name }}Update,
+    owner: UUID | None = None,
+) -> {{ e.name }}:
+    """Change the fields that the request gives, validate the record, and return it.
+
+    With an owner, the record stays with the owner.
+    """
+{% else %}
 async def update(session: AsyncSession, record: {{ e.name }}, data: {{ e.name }}Update) -> {{ e.name }}:
     """Change the fields that the request gives, validate the record, and return it."""
+{% endif %}
 {% if e.workflows %}
     before = { {%- for w in e.workflows %}"{{ w.attr }}": record.{{ w.attr }}{{ ", " if not loop.last }}{% endfor -%} }
 {% endif %}
+{% if e.owner %}
+    values = data.model_dump(by_alias=False, exclude_unset=True)
+    if owner is not None and "{{ e.owner.fk_attr }}" in values:
+        values["{{ e.owner.fk_attr }}"] = owner
+    await _apply(session, record, values)
+{% else %}
     await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
+{% endif %}
 {% if e.workflows %}
     check_workflows(record, before)
 {% endif %}

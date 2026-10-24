@@ -241,7 +241,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "access", "role"}
+        | {"auth", "sign_up", "password_reset", "access", "role", "record_rule"}
         | {"api", "api_operation"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),

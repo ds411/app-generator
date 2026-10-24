@@ -1,17 +1,27 @@
 {{ trace_header(definition.access.id) }}
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+{% set rules = definition.access.roles.values() | map(attribute="records") | select | list %}
 """The permissions of the roles (ADR 0012): the operations that each role may call.
 
 The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
 is not public checks the role of the signed-in user, by the operation ID
-of its route.
+of its route.{% if rules %} The owner rules (ADR 0018) limit a role to the records of
+its user.{% endif %}
 """
 
+{% if rules %}
+from collections.abc import Awaitable, Callable
+from uuid import UUID
+
+{% endif %}
 from fastapi import Request
 
 from app.core.auth import CurrentUser
 from app.core.errors import ProblemError
+{% if rules %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+{% endif %}
 
 ALL = "*"
 PERMISSIONS: dict[str, frozenset[str]] = {
@@ -44,3 +54,41 @@ async def check_access(request: Request, user: CurrentUser) -> None:
     operation = getattr(request.scope.get("route"), "operation_id", None)
     if operation is None or not allows(user.{{ role.attr }}, str(operation)):
         raise ProblemError(403, "Your role may not do this operation.")
+{% if rules %}
+
+
+OWNER_RULES: dict[str, dict[str, frozenset[str]]] = {
+{% for name, r in definition.access.roles.items() if r.records %}
+    "{{ name }}": {
+{% for entity, rule in r.records.items() %}
+        "{{ entity }}": frozenset({ {%- for action in rule.operations | sort %}"{{ action }}"{{ ", " if not loop.last }}{% endfor -%} }),  {{ trace(rule.id) }}
+{% endfor %}
+    },
+{% endfor %}
+}
+"""The owner rules of each role: the entities, and the operations that each rule applies to."""
+
+
+def record_owner(user: {{ u.name }} | None, entity: str, action: str) -> UUID | None:
+    """Return the ID of the user if an owner rule of its role applies, else None.
+
+    The action is `read` (a list or a read) or `change` (a create, a change,
+    a delete, or a custom operation). A rule for `read` also applies to
+    `change`: a user cannot change a record that it cannot see.
+    """
+    if user is None:
+        return None
+    role = getattr(user.{{ role.attr }}, "value", user.{{ role.attr }})
+    actions = OWNER_RULES.get(str(role), {}).get(entity, frozenset[str]())
+    applies = bool(actions) if action == "change" else action in actions
+    return user.id if applies else None
+
+
+def owner_of(entity: str, action: str) -> Callable[[{{ u.name }}], Awaitable[UUID | None]]:
+    """Return a dependency: the user whose records a request may use, or None for all records."""
+
+    async def owner(user: CurrentUser) -> UUID | None:
+        return record_owner(user, entity, action)
+
+    return owner
+{% endif %}
