@@ -1120,8 +1120,15 @@ numbers have the format of the locale of the selected language: the
 views, the forms, the filters, the charts, the date pickers, and the
 calendars. The format of a field (`number`, `currency`, `percent`,
 `date`, `datetime`, `relative_time`) and its currency stay the same in
-each language. The `lang` of the page is the locale. The back ends do
-not use the section.
+each language. The `lang` of the page is the locale.
+
+The FastAPI app gives its messages in the language of the request: the
+first language of the `Accept-Language` header that the app has, as the
+Next.js server takes it, else the default language. Each response has
+the locale in `Content-Language`. The title and the detail of the
+problem details, and the message of each error of the input, are in the
+language (see the list below). With `x-react-data: api`, the API client
+of the React app sends the locale of the selected language.
 
 ### Fixed texts
 
@@ -1177,6 +1184,59 @@ use in the app does not show.
   `Sign in to do this.`, `Your role may not do this operation.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`.
+
+### Messages of the FastAPI app
+
+The FastAPI app gives these messages in the default language. Add a key
+to translate one. The rules and the workflows give their own messages.
+
+- The titles of the problem details: `Bad Request`, `Unauthorized`,
+  `Forbidden`, `Not Found`, `Method Not Allowed`, `Conflict`,
+  `Unprocessable Content`, `Too Many Requests`, `Internal Server Error`,
+  `Not Implemented`, `Bad Gateway`, `Service Unavailable`.
+- The errors of the input: `The request is not valid.`, and for each
+  value `Enter a value.`, `Use {count} or more characters.`,
+  `Use {count} or fewer characters.`, `Use {count} or more.`,
+  `Use {count} or less.`, `Enter a whole number.`, `Enter a number.`,
+  `Use the correct format.`, `Select a value.`, `Enter a valid URL.`,
+  `Enter a valid email address.`, `The value is not valid.`. The `type`
+  of the error keeps the kind of the error.
+- The data access: `No {entity} has the ID {id}.`,
+  `The field '{field}' refers to {entity} {id}, which does not exist.`,
+  `The field '{field}' refers to {entity} records that do not exist: {ids}.`,
+  `The change breaks a rule of the data: a value must be unique, or other records refer to this record.`,
+  `Cannot sort by '{name}'. Use one of: {names}.`.
+- The workflows without a message:
+  `A new record starts with the {field} '{initial}', not '{state}'.`,
+  `The {field} cannot change from '{before}' to '{after}'.`.
+- The sign-in and the access checks: `Sign in to use this endpoint.`,
+  `The user name or the password is not correct.`,
+  `The current password is not correct.`,
+  `Your role may not do this operation.`, `The server has no AUTH_SECRET.`,
+  `If the user name exists, the user gets a message with a reset link.`,
+  `The reset link is not valid, was used, or has ended.`.
+- The sign-in with a provider:
+  `The server has no client ID or client secret for {name}.`,
+  `The provider did not answer correctly: {url}`,
+  `The discovery document of the provider is not valid.`,
+  `The discovery document of the provider has another issuer.`,
+  `The token endpoint of the provider did not answer.`,
+  `The provider did not accept the code. Start the sign-in again.`,
+  `The token endpoint of the provider gave no ID token.`,
+  `The ID token is not valid: the provider has no key for it.`,
+  `The ID token is not valid: {error}`,
+  `The ID token is not valid: the nonce is not the one of the flow.`,
+  `The ID token has no claim '{claim}'.`,
+  `The provider did not verify the email address.`,
+  `No user has the user name {username}. Ask an administrator.`,
+  `The claims of the provider do not give a valid user.`,
+  `The origin of return_to is not in CORS_ORIGINS.`,
+  `The provider gave the error '{error}'.`,
+  `The state of the callback is not correct. Sign in again.`,
+  `The sign-in has no valid flow. Sign in again.`, `The sign-in failed.`.
+- The rate limit: `Send not more than {limit} requests in each minute.`,
+  and with the store in Redis
+  `The store of the rate limit is not available. Try again later.`.
 
 ## Extension keys
 

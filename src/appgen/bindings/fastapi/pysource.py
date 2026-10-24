@@ -5,7 +5,25 @@ the line length stays on one line. A longer call has one argument on
 each line and a trailing comma, which the formatter keeps as it is.
 """
 
+import ast
+import json
+
+from appgen.dsl.translations import VALUE
+
 LINE_LENGTH = 100
+
+
+def string(value: str) -> str:
+    """Return a text as a Python string literal, with the quotes of the Ruff formatter.
+
+    The literal has double quotes, unless the text has more double quotes
+    than single quotes.
+    """
+    quote = "'" if value.count('"') > value.count("'") else '"'
+    body = json.dumps(value, ensure_ascii=False)[1:-1]
+    if quote == "'":
+        body = body.replace('\\"', '"').replace("'", "\\'")
+    return quote + body + quote
 
 
 def call(prefix: str, func: str, args: list[str], indent: int = 4, suffix: str = "") -> str:
@@ -20,6 +38,72 @@ def call(prefix: str, func: str, args: list[str], indent: int = 4, suffix: str =
         return one_line
     inner = "".join(f"{pad}    {arg},\n" for arg in args)
     return f"{prefix}{func}(\n{inner}{pad}){suffix}"
+
+
+def raise_problem(
+    status: int,
+    text: str,
+    values: dict[str, str],
+    *,
+    indent: int,
+    translated: bool,
+    suffix: str = "",
+) -> str:
+    """Return `raise ProblemError(<status>, <message>)`, on one line if it fits, else on many lines.
+
+    With translations, the message is a call of `t` (ADR 0010), for
+    example `t("No {entity} has the ID {id}.", entity="Project", id=id)`.
+    Else it is a string literal, or an f-string with the values in it. Each
+    value is a Python expression. A string literal goes into the f-string
+    as text. A text without values stays as it is, also with braces. The
+    suffix follows the raise, for example ` from error`. The result has no
+    indent on its first line.
+    """
+    pad = " " * indent
+    parts = VALUE.split(text) if values else [text]
+    if set(parts[1::2]) != set(values):
+        raise ValueError(f"The values {sorted(values)} do not agree with the text {text!r}.")
+    if translated:
+        args = [string(text), *(f"{name}={expression}" for name, expression in values.items())]
+        message = f"t({', '.join(args)})"
+    else:
+        args = []
+        message = _f_string(parts, values)
+    one_line = f"raise ProblemError({status}, {message}){suffix}"
+    if indent + len(one_line) <= LINE_LENGTH:
+        return one_line
+    if translated:
+        message = call("", "t", args, indent + 4, ",")
+    else:
+        message += ","
+    return f"raise ProblemError(\n{pad}    {status},\n{pad}    {message}\n{pad}){suffix}"
+
+
+def _f_string(parts: list[str], values: dict[str, str]) -> str:
+    """Return a text with values as an f-string, or as a string literal without a value."""
+    literals: dict[str, str] = {}
+    for name, expression in values.items():
+        try:
+            value = ast.literal_eval(expression)
+        except ValueError, SyntaxError:
+            continue
+        if isinstance(value, str):
+            literals[name] = value
+    if len(literals) == len(values):
+        return string("".join(literals[part] if i % 2 else part for i, part in enumerate(parts)))
+
+    def escaped(part: str) -> str:
+        return part.replace("{", "{{").replace("}", "}}")
+
+    body = "".join(
+        escaped(part)
+        if i % 2 == 0
+        else escaped(literals[part])
+        if part in literals
+        else "{" + values[part] + "}"
+        for i, part in enumerate(parts)
+    )
+    return "f" + string(body)
 
 
 def from_import(module: str, names: set[str]) -> str:

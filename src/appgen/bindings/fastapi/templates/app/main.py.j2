@@ -14,6 +14,9 @@ from app.core.config import Settings
 from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
+{% if i18n %}
+from app.core.i18n import LanguageMiddleware
+{% endif %}
 from app.core.logging import RequestLogMiddleware, configure_logging
 {% if py.providers %}
 from app.core.providers import router as providers_router
@@ -76,6 +79,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% else %}
         app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
         app.add_middleware(RateLimitMiddleware, limiter=app.state.rate_limiter)
+{% endif %}
+{% if i18n %}
+    {{ trace(i18n.element_id) }}
+    # The language middleware runs before the rate limit, so a 429 has the language too.
+    app.add_middleware(LanguageMiddleware)
 {% endif %}
     # The last middleware runs first, so the log has each response, also a 429.
     app.add_middleware(RequestLogMiddleware)

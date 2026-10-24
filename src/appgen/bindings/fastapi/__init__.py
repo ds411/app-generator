@@ -94,6 +94,7 @@ BINDING = Binding(
         Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
+        Output(template="app/core/i18n.py.j2", path="app/core/i18n.py", when="i18n"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
         Output(
             template="app/cli.py.j2",
@@ -265,6 +266,7 @@ BINDING = Binding(
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
         Output(template="tests/test_logging.py.j2", path="tests/test_logging.py"),
         Output(template="tests/test_rate_limit.py.j2", path="tests/test_rate_limit.py"),
+        Output(template="tests/test_i18n.py.j2", path="tests/test_i18n.py", when="i18n"),
     ),
     covers=frozenset(
         {"app", "entity", "field", "relation", "operation", "param"}
@@ -272,8 +274,9 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
         | {"api", "api_operation"}
+        | {"translations", "language"}
     ),
-    excludes=frozenset({"page", "ui", "translations"}),
+    excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),

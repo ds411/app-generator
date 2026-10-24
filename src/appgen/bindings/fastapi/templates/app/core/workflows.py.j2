@@ -4,6 +4,9 @@
 from collections.abc import Set
 
 from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 
 
 def _state(value: object) -> object:
@@ -25,15 +28,46 @@ def check_transition(
 
     A new record must start in the initial state. A change to the same
     state, and a change from or to no state, pass.
+{% if i18n %}
+    The message is in the language of the request.
+{% endif %}
     """
     old, new = _state(before), _state(after)
     if created:
         if initial is not None and new is not None and new != initial:
+{% if i18n %}
+            raise ProblemError(
+                422,
+                t(message)
+                if message
+                else t(
+                    "A new record starts with the {field} '{initial}', not '{state}'.",
+                    field=field,
+                    initial=initial,
+                    state=new,
+                ),
+            )
+{% else %}
             raise ProblemError(
                 422, message or f"A new record starts with the {field} '{initial}', not '{new}'."
             )
+{% endif %}
         return
     if old is None or new is None or old == new:
         return
     if (old, new) not in allowed:
+{% if i18n %}
+        raise ProblemError(
+            422,
+            t(message)
+            if message
+            else t(
+                "The {field} cannot change from '{before}' to '{after}'.",
+                field=field,
+                before=old,
+                after=new,
+            ),
+        )
+{% else %}
         raise ProblemError(422, message or f"The {field} cannot change from '{old}' to '{new}'.")
+{% endif %}

@@ -45,6 +45,9 @@ from app.core.db import SessionDep, commit
 from app.core.db import SessionDep
 {% endif %}
 from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 {% if creates %}
 from app.features.{{ u.slice }} import repository
 {% endif %}
@@ -108,7 +111,7 @@ def provider_of(settings: Settings, name: ProviderName) -> Provider:
     }
     provider = providers[name]
     if not provider.client_id or not provider.client_secret:
-        raise ProblemError(500, f"The server has no client ID or client secret for {name}.")
+        {{ py.problem(500, "The server has no client ID or client secret for {name}.", 8, name="name") }}
     return provider
 
 
@@ -142,7 +145,7 @@ async def _get_json(client: httpx.AsyncClient, url: str) -> Any:
         response.raise_for_status()
         return response.json()
     except (httpx.HTTPError, ValueError) as error:
-        raise ProblemError(502, f"The provider did not answer correctly: {url}") from error
+        {{ py.problem(502, "The provider did not answer correctly: {url}", 8, suffix=" from error", url="url") }}
 
 
 async def discover(client: httpx.AsyncClient, provider: Provider) -> ProviderMetadata:
@@ -151,9 +154,9 @@ async def discover(client: httpx.AsyncClient, provider: Provider) -> ProviderMet
     try:
         metadata = ProviderMetadata.model_validate(await _get_json(client, url))
     except ValueError as error:
-        raise ProblemError(502, "The discovery document of the provider is not valid.") from error
+        {{ py.problem(502, "The discovery document of the provider is not valid.", 8, suffix=" from error") }}
     if metadata.issuer != provider.issuer:
-        raise ProblemError(502, "The discovery document of the provider has another issuer.")
+        {{ py.problem(502, "The discovery document of the provider has another issuer.", 8) }}
     return metadata
 
 
@@ -179,14 +182,14 @@ async def _exchange(
             metadata.token_endpoint, data=data, auth=auth, headers={"Accept": "application/json"}
         )
     except httpx.HTTPError as error:
-        raise ProblemError(502, "The token endpoint of the provider did not answer.") from error
+        {{ py.problem(502, "The token endpoint of the provider did not answer.", 8, suffix=" from error") }}
     if response.status_code in (400, 401):
-        raise ProblemError(401, "The provider did not accept the code. Start the sign-in again.")
+        {{ py.problem(401, "The provider did not accept the code. Start the sign-in again.", 8) }}
     try:
         response.raise_for_status()
         return TokenAnswer.model_validate(response.json()).id_token
     except (httpx.HTTPError, ValueError) as error:
-        raise ProblemError(502, "The token endpoint of the provider gave no ID token.") from error
+        {{ py.problem(502, "The token endpoint of the provider gave no ID token.", 8, suffix=" from error") }}
 
 
 async def check_id_token(
@@ -207,7 +210,7 @@ async def check_id_token(
         keys = jwt.PyJWKSet.from_dict(await _get_json(client, metadata.jwks_uri)).keys
         found = [k for k in keys if kid is None or k.key_id == kid]
         if len(found) != 1 or found[0].algorithm_name not in ALGORITHMS:
-            raise ProblemError(401, "The ID token is not valid: the provider has no key for it.")
+            {{ py.problem(401, "The ID token is not valid: the provider has no key for it.", 12) }}
         claims = jwt.decode(
             id_token,
             found[0].key,
@@ -218,9 +221,9 @@ async def check_id_token(
             options={"require": ["aud", "exp", "iat", "iss", "nonce", "sub"]},
         )
     except jwt.PyJWTError as error:
-        raise ProblemError(401, f"The ID token is not valid: {error}") from error
+        {{ py.problem(401, "The ID token is not valid: {error}", 8, suffix=" from error", error="error") }}
     if not hmac.compare_digest(str(claims["nonce"]), nonce):
-        raise ProblemError(401, "The ID token is not valid: the nonce is not the one of the flow.")
+        {{ py.problem(401, "The ID token is not valid: the nonce is not the one of the flow.", 8) }}
     return claims
 
 
@@ -232,14 +235,14 @@ async def user_of(
     """Return the user of the claims of an ID token. With `create_users`, make a new user."""
     username = claims.get(provider.username_claim)
     if not isinstance(username, str) or not username:
-        raise ProblemError(401, f"The ID token has no claim '{provider.username_claim}'.")
+        {{ py.problem(401, "The ID token has no claim '{claim}'.", 8, claim="provider.username_claim") }}
     if provider.username_claim == "email" and claims.get("email_verified") in (False, "false"):
-        raise ProblemError(401, "The provider did not verify the email address.")
+        {{ py.problem(401, "The provider did not verify the email address.", 8) }}
     user = await find_user(session, username)
     if user is not None:
         return user
     if not provider.create_users:
-        raise ProblemError(403, f"No user has the user name {username}. Ask an administrator.")
+        {{ py.problem(403, "No user has the user name {username}. Ask an administrator.", 8, username="username") }}
 {% if creates %}
     values: dict[str, Any] = {attr: claims.get(claim) for attr, claim in provider.claims}
     values["{{ username.attr }}"] = username
@@ -250,7 +253,7 @@ async def user_of(
     try:
         data = {{ u.name }}Create.model_validate(values)
     except ValidationError as error:
-        raise ProblemError(401, "The claims of the provider do not give a valid user.") from error
+        {{ py.problem(401, "The claims of the provider do not give a valid user.", 8, suffix=" from error") }}
     user = await repository.add(session, data)
     await commit(session)
     return user
@@ -274,7 +277,7 @@ def _check_return_to(request: Request, return_to: str) -> None:
     parts = urlsplit(return_to)
     origin = f"{parts.scheme}://{parts.netloc}"
     if parts.scheme not in ("http", "https") or origin not in {o.rstrip("/") for o in origins}:
-        raise ProblemError(422, "The origin of return_to is not in CORS_ORIGINS.")
+        {{ py.problem(422, "The origin of return_to is not in CORS_ORIGINS.", 8) }}
 
 
 def _with_fragment(url: str, values: dict[str, Any]) -> str:
@@ -348,9 +351,9 @@ async def _sign_in(
     error: str | None,
 ) -> Token:
     if error is not None:
-        raise ProblemError(401, f"The provider gave the error '{error}'.")
+        {{ py.problem(401, "The provider gave the error '{error}'.", 8, error="error") }}
     if code is None or state is None or not hmac.compare_digest(state, str(flow["state"])):
-        raise ProblemError(400, "The state of the callback is not correct. Sign in again.")
+        {{ py.problem(400, "The state of the callback is not correct. Sign in again.", 8) }}
     provider = provider_of(request.app.state.settings, name)
     metadata = await discover(client, provider)
     redirect_uri = callback_url(request, name)
@@ -384,14 +387,14 @@ async def finish_provider_sign_in(
     cookie = request.cookies.get(_cookie(name), "")
     flow = unsign(signing_key(request), f"provider-flow.{name}", cookie)
     if flow is None:
-        raise ProblemError(400, "The sign-in has no valid flow. Sign in again.")
+        {{ py.problem(400, "The sign-in has no valid flow. Sign in again.", 8) }}
     return_to: str | None = flow.get("return_to")
     try:
         token = await _sign_in(request, session, client, name, flow, code, state, error)
     except ProblemError as problem:
         if return_to is None:
             raise
-        target = _with_fragment(return_to, {"error": problem.detail or "The sign-in failed."})
+        target = _with_fragment(return_to, {"error": problem.detail or {{ py.message("The sign-in failed.") }}})
     else:
         if return_to is None:
             response.delete_cookie(_cookie(name))

@@ -35,7 +35,7 @@ BY_DESIGN: dict[str, list[str]] = {
         "record_rule",
         "sign_up",
     ],
-    "fastapi": ["page", "translations", "ui"],
+    "fastapi": ["page", "ui"],
 }
 
 # The stubs that each app has after a first run: the custom operations,

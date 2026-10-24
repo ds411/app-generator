@@ -316,6 +316,25 @@ adds `id`, a list of record IDs, to the list endpoint of the target.
 An unknown parameter, value, or sort key gives 422. The response has the
 `items` and the `total` number of records.
 
+{% if i18n %}
+## Languages
+
+The API gives its messages in the language of the request: the first
+language of the `Accept-Language` header that the API has, by its code
+or its locale, also with only the same primary language (`de-CH` gives
+`de`), else the default language (`{{ i18n.default }}`). The languages are
+{% for language in i18n.languages %}`{{ language.code }}` ({{ language.label }}){{ ", " if not loop.last else "." }}{% endfor %}
+
+
+Each response has the locale of the language in the header
+`Content-Language`. The title and the detail of the problem details,
+and the message of each error of the input, are in the language. The
+translations come from the `translations` section of the definition
+(`app/core/i18n.py`). Use `t` of `app.core.i18n` for a message of an
+extension file, for example `ProblemError(422, t("The room is closed."))`,
+and add its translation to the definition.
+
+{% endif %}
 ## Endpoints
 
 | Operation | Method | Path |

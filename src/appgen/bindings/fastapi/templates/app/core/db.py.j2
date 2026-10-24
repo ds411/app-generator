@@ -20,6 +20,9 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 
 # Fixed names for the constraints, so that the migrations and the models agree.
 NAMING_CONVENTION = {
@@ -135,7 +138,7 @@ async def commit(session: AsyncSession) -> None:
         await session.commit()
     except IntegrityError as error:
         await session.rollback()
-        raise ProblemError(409, CONFLICT) from error
+        raise ProblemError(409, {{ "t(CONFLICT)" if i18n else "CONFLICT" }}) from error
 
 
 async def flush(session: AsyncSession) -> None:
@@ -147,7 +150,7 @@ async def flush(session: AsyncSession) -> None:
         await session.flush()
     except IntegrityError as error:
         await session.rollback()
-        raise ProblemError(409, CONFLICT) from error
+        raise ProblemError(409, {{ "t(CONFLICT)" if i18n else "CONFLICT" }}) from error
 
 
 async def ensure_exists[M: Record](
@@ -155,9 +158,21 @@ async def ensure_exists[M: Record](
 ) -> None:
     """Check that the record of a foreign key exists. Else give a 422 error."""
     if await session.get(model, id) is None:
+{% if i18n %}
+        raise ProblemError(
+            422,
+            t(
+                "The field '{field}' refers to {entity} {id}, which does not exist.",
+                field=field,
+                entity=model.__name__,
+                id=id,
+            ),
+        )
+{% else %}
         raise ProblemError(
             422, f"The field '{field}' refers to {model.__name__} {id}, which does not exist."
         )
+{% endif %}
 
 
 async def load_all[M: Record](
@@ -168,8 +183,20 @@ async def load_all[M: Record](
     missing = set(ids) - {record.id for record in records}
     if missing:
         names = ", ".join(sorted(str(id) for id in missing))
+{% if i18n %}
+        raise ProblemError(
+            422,
+            t(
+                "The field '{field}' refers to {entity} records that do not exist: {ids}.",
+                field=field,
+                entity=model.__name__,
+                ids=names,
+            ),
+        )
+{% else %}
         raise ProblemError(
             422,
             f"The field '{field}' refers to {model.__name__} records that do not exist: {names}.",
         )
+{% endif %}
     return records

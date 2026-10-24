@@ -10,6 +10,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
+{% if i18n %}
+
+from app.core.i18n import t
+{% endif %}
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -51,7 +55,11 @@ def problem_response(
 ) -> JSONResponse:
     """Return an error response in the problem details format."""
     problem = Problem(
+{% if i18n %}
+        title=t(HTTPStatus(status).phrase),
+{% else %}
         title=HTTPStatus(status).phrase,
+{% endif %}
         status=status,
         detail=detail,
         instance=request.url.path,
@@ -84,16 +92,59 @@ async def _problem_error(request: Request, error: Exception) -> JSONResponse:
 async def _http_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, HTTPException)
     detail = None if error.detail == HTTPStatus(error.status_code).phrase else str(error.detail)
+{% if i18n %}
+    return problem_response(request, error.status_code, detail and t(detail))
+{% else %}
     return problem_response(request, error.status_code, detail)
+{% endif %}
 
 
+{% if i18n %}
+def _input_message(item: dict[str, Any]) -> str:
+    """Return the message of an input error in the language of the request.
+
+    The messages are the messages of the form fields of the front ends.
+    """
+    context: dict[str, Any] = item.get("ctx") or {}
+    match item["type"]:
+        case "missing":
+            return t("Enter a value.")
+        case "string_too_short":
+            return t("Use {count} or more characters.", count=context["min_length"])
+        case "string_too_long":
+            return t("Use {count} or fewer characters.", count=context["max_length"])
+        case "greater_than_equal":
+            return t("Use {count} or more.", count=context["ge"])
+        case "less_than_equal":
+            return t("Use {count} or less.", count=context["le"])
+        case "int_type" | "int_parsing" | "int_from_float":
+            return t("Enter a whole number.")
+        case "decimal_type" | "decimal_parsing" | "float_type" | "float_parsing":
+            return t("Enter a number.")
+        case "string_pattern_mismatch":
+            return t("Use the correct format.")
+        case "enum" | "literal_error":
+            return t("Select a value.")
+        case kind if kind.startswith("url_"):
+            return t("Enter a valid URL.")
+        case "value_error" if str(item["msg"]).startswith("value is not a valid email address"):
+            return t("Enter a valid email address.")
+        case _:
+            return t("The value is not valid.")
+
+
+{% endif %}
 async def _validation_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, RequestValidationError)
     items = [
+{% if i18n %}
+        ProblemItem(loc=list(item["loc"]), msg=_input_message(item), type=str(item["type"]))
+{% else %}
         ProblemItem(loc=list(item["loc"]), msg=str(item["msg"]), type=str(item["type"]))
+{% endif %}
         for item in jsonable_encoder(error.errors())
     ]
-    return problem_response(request, 422, "The request is not valid.", items)
+    return problem_response(request, 422, {{ py.message("The request is not valid.") }}, items)
 
 
 async def _not_implemented(request: Request, error: Exception) -> JSONResponse:

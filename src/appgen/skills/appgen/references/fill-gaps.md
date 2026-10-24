@@ -163,6 +163,10 @@ of the entity in snake case, for example `bookings`.
   give the operation a client with a mock transport
   (`tests/integrations/mocks.py`), which answers with the examples of
   the OpenAPI document.
+- With `translations`, translate the message with `t` of `app.core.i18n`,
+  for example `ProblemError(409, t("The booking is cancelled already."))`,
+  and add the message as a key of each language. The response is in the
+  language of `Accept-Language`.
 - The generated test of a custom operation accepts the status 501 of the
   stub and the result of the logic. Write the tests of your logic in a
   new file, for example `tests/features/<slice>/test_<operation>_logic.py`.

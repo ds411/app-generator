@@ -60,6 +60,9 @@ from app.core.db import Base, SessionDep, commit
 from app.core.db import SessionDep
 {% endif %}
 from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 {% if reset %}
 from app.core.password_reset_ext import deliver_password_reset
 {% endif %}
@@ -121,7 +124,7 @@ def signing_key(request: Request) -> bytes:
     """Return the key that signs the tokens: the setting `AUTH_SECRET`."""
     secret: str = request.app.state.settings.auth_secret
     if not secret:
-        raise ProblemError(500, "The server has no AUTH_SECRET.")
+        raise ProblemError(500, {{ py.message("The server has no AUTH_SECRET.") }})
     return secret.encode()
 
 
@@ -203,7 +206,7 @@ async def current_user(
     user_id = read_token(signing_key(request), credentials.credentials) if credentials else None
     user = await session.get({{ u.name }}, user_id) if user_id else None
     if user is None:
-        raise ProblemError(401, "Sign in to use this endpoint.")
+        raise ProblemError(401, {{ py.message("Sign in to use this endpoint.") }})
     return user
 
 
@@ -290,7 +293,7 @@ async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
         or credential is None
         or not verify_password(data.password, credential.password_hash)
     ):
-        raise ProblemError(401, "The user name or the password is not correct.")
+        raise ProblemError(401, {{ py.message("The user name or the password is not correct.") }})
     return Token(access_token=make_token(signing_key(request), user.id))
 {% endif %}
 {% if sign_up %}
@@ -333,7 +336,7 @@ async def change_password(data: PasswordChange, user: CurrentUser, session: Sess
     """Change the password of the signed-in user."""
     credential = await session.get(Credential, user.id)
     if credential is None or not verify_password(data.current_password, credential.password_hash):
-        raise ProblemError(422, "The current password is not correct.")
+        raise ProblemError(422, {{ py.message("The current password is not correct.") }})
     await set_password(session, user, data.new_password)
 {% endif %}
 {% if reset %}
@@ -358,7 +361,13 @@ async def request_password_reset(
         token = make_reset_token(signing_key(request), user.id, password_hash, expires)
         settings = request.app.state.settings
         await deliver_password_reset(settings, user, f"{settings.password_reset_url}?token={token}")
+{% if i18n %}
+    return PasswordResetRequested(
+        detail=t("If the user name exists, the user gets a message with a reset link.")
+    )
+{% else %}
     return PasswordResetRequested()
+{% endif %}
 
 
 {{ trace(reset.id) }}
@@ -377,6 +386,6 @@ async def confirm_password_reset(
     credential = await session.get(Credential, user.id) if user else None
     tag = password_tag(credential.password_hash if credential else None)
     if found is None or user is None or not hmac.compare_digest(found[1], tag):
-        raise ProblemError(400, "The reset link is not valid, was used, or has ended.")
+        raise ProblemError(400, {{ py.message("The reset link is not valid, was used, or has ended.") }})
     await set_password(session, user, data.new_password)
 {% endif %}

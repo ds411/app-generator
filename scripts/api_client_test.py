@@ -15,6 +15,9 @@ that the two generated apps work together:
    table must load each page with one request to the list endpoint, and
    send its search and its sort to the API. The tabs of a project must
    load the tasks and the members of the project from the API.
+5. With translations: the API gives an error in the second language of
+   `Accept-Language`, and the page in the second language asks the API
+   for it (ADR 0010).
 
 Run it from the repository root:
 
@@ -60,8 +63,10 @@ PROJECT_COUNT = PAGE_SIZE + 5
 
 # Open the project table, and check the requests to the list endpoint of
 # the projects: one for each page, and the search and the sort of the
-# view. Then open the first project, and check its tabs. The argument is
-# a JSON object with the URLs and the names of the records.
+# view. Then open the first project, and check its tabs. With a second
+# language, open the table in it: each request to the API must ask for
+# its locale and get it. The argument is a JSON object with the URLs,
+# the names of the records, and the second language.
 PAGE_CHECK = """
 const { existsSync } = require("node:fs");
 const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
@@ -125,6 +130,28 @@ function check(ok, message) {
     await page.getByRole("tab", { name: "Members" }).click();
     await shows(test.person);
     check(failed.length === 0, `The API gave errors: ${failed.join(", ")}`);
+
+    if (test.language) {
+      const { storageKey, code, locale } = test.language;
+      const other = await browser.newPage();
+      const wrong = [];
+      let answers = 0;
+      const store = ([key, value]) => window.localStorage.setItem(key, value);
+      await other.addInitScript(store, [storageKey, code]);
+      other.on("response", (response) => {
+        if (!response.url().startsWith(test.api)) return;
+        answers += 1;
+        const asked = response.request().headers()["accept-language"];
+        const given = response.headers()["content-language"];
+        if (asked !== locale || given !== locale) {
+          wrong.push(`${response.url()}: ${asked}, ${given}`);
+        }
+      });
+      await other.goto(`${test.web}/projects`);
+      await other.getByText(test.names[0], { exact: true }).first().waitFor({ timeout });
+      check(answers > 0, "The page in the second language sent no request to the API.");
+      check(wrong.length === 0, `The requests do not ask for ${locale}: ${wrong.join(", ")}`);
+    }
   } finally {
     await browser.close();
   }
@@ -160,6 +187,39 @@ def request(method: str, url: str, body: object | None = None) -> dict[str, Any]
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
         raise ApiClientError(f"{method} {url} gave {error.code}: {detail}") from error
+
+
+def check_language(definition_path: Path) -> dict[str, str] | None:
+    """Check that the API gives an error in the second language of `Accept-Language`.
+
+    Return the storage key of the language in the React app, the second
+    language, and its locale, or None without translations.
+    """
+    definition = load_definition(definition_path)
+    translations = definition.translations
+    if translations is None:
+        return None
+    code, language = next(
+        (code, language)
+        for code, language in translations.languages.items()
+        if code != translations.default
+    )
+    locale = language.locale_tag(code)
+    url = f"{API_URL}/people?limit=0"
+    call = urllib.request.Request(url, headers={"Accept-Language": locale})
+    try:
+        urllib.request.urlopen(call, timeout=30).close()
+    except urllib.error.HTTPError as error:
+        status, headers, problem = error.code, error.headers, json.loads(error.read())
+    else:
+        raise ApiClientError(f"GET {url} gave no error.")
+    expected = language.text.get("The request is not valid.", "The request is not valid.")
+    if status != 422 or problem.get("detail") != expected:
+        raise ApiClientError(f"GET {url} in {locale} gave {status}: {problem}")
+    if headers.get("Content-Language") != locale:
+        given = headers.get("Content-Language")
+        raise ApiClientError(f"GET {url} in {locale} gave the Content-Language {given}.")
+    return {"storageKey": f"{definition.app.name}-language", "code": code, "locale": locale}
 
 
 def wait_for(url: str) -> None:
@@ -286,9 +346,12 @@ def api_client_test(out: Path) -> None:
         ]
         task = {"title": "API task", "project_id": projects[0]["id"]}
         request("POST", f"{API_URL}/tasks", task)
+        language = check_language(definition)
+        if language is not None:
+            log(f"the API gives its messages in '{language['locale']}' for Accept-Language")
         wait_for(WEB_URL)
         log(f"open {WEB_URL}/projects, and check the requests of the pages")
-        check = {
+        check: dict[str, object] = {
             "api": API_URL,
             "web": WEB_URL,
             "pageSize": str(PAGE_SIZE),
@@ -296,6 +359,7 @@ def api_client_test(out: Path) -> None:
             "project": projects[0]["id"],
             "task": task["title"],
             "person": person["name"],
+            "language": language,
         }
         run("node", "-e", PAGE_CHECK, json.dumps(check))
     log("passed")

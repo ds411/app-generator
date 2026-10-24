@@ -10,6 +10,9 @@ from sqlalchemy import ColumnElement, ScalarSelect, UnaryExpression, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 
 
 class PageQuery(BaseModel):
@@ -52,7 +55,13 @@ def sort_order(
         column = columns.get(name.removeprefix("-"))
         if column is None:
             names = ", ".join(sorted(columns))
+{% if i18n %}
+            raise ProblemError(
+                422, t("Cannot sort by '{name}'. Use one of: {names}.", name=name, names=names)
+            )
+{% else %}
             raise ProblemError(422, f"Cannot sort by '{name}'. Use one of: {names}.")
+{% endif %}
         terms.append((column.desc() if descending else column.asc()).nulls_last())
     terms.append(default.asc())
     return terms

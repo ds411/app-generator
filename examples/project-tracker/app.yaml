@@ -1106,6 +1106,22 @@ translations:
         Choose the year: Jahr wählen
         'Today, {date}': 'Heute, {date}'
         '{date}, selected': '{date}, ausgewählt'
+        "Cannot sort by '{name}'. Use one of: {names}.": "Sortieren nach '{name}' ist nicht möglich. Verwenden Sie eines von: {names}."
+        Enter a number.: Geben Sie eine Zahl ein.
+        No {entity} has the ID {id}.: Es gibt kein {entity} mit der ID {id}.
+        Send not more than {limit} requests in each minute.: Senden Sie nicht mehr als {limit} Anfragen pro Minute.
+        'The change breaks a rule of the data: a value must be unique, or other records refer to this record.': 'Die Änderung verletzt eine Regel der Daten: Ein Wert muss eindeutig sein, oder andere Datensätze verweisen auf diesen Datensatz.'
+        "The field '{field}' refers to {entity} records that do not exist: {ids}.": "Das Feld '{field}' verweist auf {entity}-Datensätze, die es nicht gibt: {ids}."
+        "The field '{field}' refers to {entity} {id}, which does not exist.": "Das Feld '{field}' verweist auf {entity} {id}, das es nicht gibt."
+        The request is not valid.: Die Anfrage ist nicht gültig.
+        The value is not valid.: Der Wert ist nicht gültig.
+        Not Found: Nicht gefunden
+        Method Not Allowed: Methode nicht erlaubt
+        Conflict: Konflikt
+        Unprocessable Content: Nicht verarbeitbarer Inhalt
+        Too Many Requests: Zu viele Anfragen
+        Internal Server Error: Interner Serverfehler
+        Not Implemented: Nicht implementiert
         Plan a new body of work.: Planen Sie ein neues Arbeitspaket.
         Planning: Planung
         Posted: Verfasst
