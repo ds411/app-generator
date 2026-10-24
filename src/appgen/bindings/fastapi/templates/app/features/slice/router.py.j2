@@ -10,7 +10,7 @@ router = APIRouter(tags=[{{ e.plural_label | tojson }}])
 {% for op in e.operations %}
 {{ trace(op.id) }}
 {% if op.protected %}
-router.include_router({{ op.module }}.router, dependencies=[Depends(current_user)])
+router.include_router({{ op.module }}.router, dependencies=[Depends({{ e.guard }})])
 {% else %}
 router.include_router({{ op.module }}.router)
 {% endif %}

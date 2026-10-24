@@ -35,3 +35,12 @@ def public_kinds(definition: AppDefinition, entity: str) -> list[str]:
             if definition.operations[name].entity == entity
         }
     )
+
+
+def kind_operations(definition: AppDefinition, entity: str) -> dict[str, str]:
+    """Return the name of the first operation of each kind of an entity, for the permissions."""
+    result: dict[str, str] = {}
+    for name, operation in definition.operations.items():
+        if operation.entity == entity:
+            result.setdefault(operation.kind, name)
+    return result

@@ -1,0 +1,46 @@
+{{ trace_header(definition.access.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+"""The permissions of the roles (ADR 0012): the operations that each role may call.
+
+The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
+is not public checks the role of the signed-in user, by the operation ID
+of its route.
+"""
+
+from fastapi import Request
+
+from app.core.auth import CurrentUser
+from app.core.errors import ProblemError
+
+ALL = "*"
+PERMISSIONS: dict[str, frozenset[str]] = {
+{% for name, r in definition.access.roles.items() %}
+    {{ trace(r.id) }}
+{% if r.operations %}
+    "{{ name }}": frozenset(
+        {
+{% for op_name in r.operations %}
+            "{{ op_name }}",
+{% endfor %}
+        }
+    ),
+{% else %}
+    "{{ name }}": frozenset[str](),
+{% endif %}
+{% endfor %}
+}
+"""The operations of each role. `*` stands for all operations."""
+
+
+def allows(role: object, operation: str) -> bool:
+    """Return True if a role may call an operation."""
+    operations = PERMISSIONS.get(str(getattr(role, "value", role)), frozenset[str]())
+    return ALL in operations or operation in operations
+
+
+async def check_access(request: Request, user: CurrentUser) -> None:
+    """Give a 403 error if the role of the signed-in user may not call the operation."""
+    operation = getattr(request.scope.get("route"), "operation_id", None)
+    if operation is None or not allows(user.{{ role.attr }}, str(operation)):
+        raise ProblemError(403, "Your role may not do this operation.")

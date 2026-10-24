@@ -597,6 +597,13 @@ class PyEntity:
     computed: list[PyComputed] = field(default_factory=list[PyComputed])
     rules: list[PyRule] = field(default_factory=list[PyRule])
     workflows: list[PyWorkflow] = field(default_factory=list[PyWorkflow])
+    guard: str = "current_user"
+    """The dependency of the protected operations: `current_user`, or `check_access` with roles."""
+
+    @property
+    def guard_module(self) -> str:
+        return "access" if self.guard == "check_access" else "auth"
+
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
 
@@ -749,7 +756,7 @@ class PyEntity:
         if any(o.protected for o in self.operations):
             lines |= {
                 "from fastapi import APIRouter, Depends",
-                "from app.core.auth import current_user",
+                f"from app.core.{self.guard_module} import {self.guard}",
             }
             lines.discard("from fastapi import APIRouter")
         if self.operations:
@@ -978,6 +985,8 @@ def python_app(definition: AppDefinition) -> PyApp:
         operations[name] = py_operation
         entities[operation.entity].operations.append(py_operation)
     for entity in entities.values():
+        if definition.access is not None:
+            entity.guard = "check_access"
         _place_routes(entity)
         _check_names(entity)
     return PyApp(

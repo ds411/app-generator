@@ -1,8 +1,0 @@
-# expect: not-supported
-version: 0
-app: { name: broken, title: Broken }
-access:
-  roles: [admin]
-entities:
-  Task:
-    fields: { title: { type: string } }

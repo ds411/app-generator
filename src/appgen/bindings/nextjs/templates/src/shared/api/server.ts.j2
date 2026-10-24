@@ -4,6 +4,9 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+{% if definition.access %}
+import { ForbiddenError, requireOperation } from "@/shared/auth/access";
+{% endif %}
 {% if definition.auth %}
 import { UnauthorizedError, requireUser } from "@/shared/auth/session";
 
@@ -62,13 +65,21 @@ function postgresCode(error: unknown): string | undefined {
  */
 export async function runAction<T>(
   body: () => Promise<T>,
-  options: { changes?: boolean{% if definition.auth %}; public?: boolean{% endif %} } = {},
+  options: { changes?: boolean{% if definition.auth %}; public?: boolean{% endif %}{% if definition.access %}; operation?: string{% endif %} } = {},
 ): Promise<ActionResult<T>> {
   try {
 {% if definition.auth %}
+{% if definition.access %}
+    if (options.operation !== undefined && !options.public) {
+      await requireOperation(options.operation);
+    } else if (!options.public) {
+      await requireUser();
+    }
+{% else %}
     if (!options.public) {
       await requireUser();
     }
+{% endif %}
 {% endif %}
     const data = await body();
     if (options.changes) {
@@ -77,7 +88,7 @@ export async function runAction<T>(
     return { ok: true, data };
   } catch (error) {
 {% if definition.auth %}
-    if (error instanceof UnauthorizedError) {
+    if (error instanceof UnauthorizedError{% if definition.access %} || error instanceof ForbiddenError{% endif %}) {
       return { ok: false, error: { name: "Error", message: error.message } };
     }
 {% endif %}

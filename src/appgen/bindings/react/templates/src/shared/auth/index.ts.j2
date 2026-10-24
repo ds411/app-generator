@@ -1,4 +1,5 @@
 {% set key = definition.auth.username_field | camel %}
+{% set role_key = definition.access.role_field | camel if definition.access else none %}
 {{ trace_header(definition.auth.id) }}
 // The sign-in of the app with mock data (ADR 0011). The users are the mock
 // records of {{ definition.auth.user_entity }}, and each one signs in with the password
@@ -10,11 +11,56 @@ export const MOCK_PASSWORD = "password";
 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 
-const users: { id: string; username: string }[] = [
+const users: { id: string; username: string{% if role_key %}; role: string | null{% endif %} }[] = [
 {% for record in mock[definition.auth.user_entity] %}
-  { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }} },
+  { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %} },
 {% endfor %}
 ];
+{% if definition.access %}
+
+// The permissions of the roles (ADR 0012). `*` stands for all operations or pages.
+const ALL = "*";
+
+const OPERATIONS: Record<string, readonly string[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: {{ r.operations | list | tojson }}, {{ trace(r.id) }}
+{% endfor %}
+};
+
+const PAGES: Record<string, readonly string[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: {{ r.pages | list | tojson }}, {{ trace(r.id) }}
+{% endfor %}
+};
+
+/** An operation that the role of the user may not call. */
+export class ForbiddenError extends Error {
+  constructor() {
+    super("Your role may not do this operation.");
+    this.name = "ForbiddenError";
+  }
+}
+
+function roleNames(table: Record<string, readonly string[]>): readonly string[] {
+  const id = currentUserId();
+  const role = users.find((user) => user.id === id)?.role;
+  return (role && table[role]) || [];
+}
+
+/** Return true if the signed-in user may open a page. */
+export function canOpenPage(page: string): boolean {
+  const names = roleNames(PAGES);
+  return names.includes(ALL) || names.includes(page);
+}
+
+/** Throw a ForbiddenError if the signed-in user may not call an operation. */
+export function requireOperation(operation: string): void {
+  const names = roleNames(OPERATIONS);
+  if (!names.includes(ALL) && !names.includes(operation)) {
+    throw new ForbiddenError();
+  }
+}
+{% endif %}
 
 /** Return the ID of the signed-in user, or null. */
 export function currentUserId(): string | null {

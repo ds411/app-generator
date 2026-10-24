@@ -17,8 +17,9 @@ VALID = sorted(EXAMPLES.glob("*/app.yaml"))
 INVALID = sorted((EXAMPLES / "invalid").glob("*.yaml"))
 
 # Each diagnostic code that a YAML file can cause. "file-error" (a file
-# that cannot be read) and "duplicate-id" (only from code, see ADR 0002)
-# have no example file.
+# that cannot be read), "duplicate-id" (only from code, see ADR 0002),
+# and "not-supported" (version 0 has no reserved section left) have no
+# example file.
 DIAGNOSTIC_CODES = {
     "yaml-syntax",
     "duplicate-key",
@@ -26,7 +27,6 @@ DIAGNOSTIC_CODES = {
     "empty-definition",
     "missing-version",
     "unsupported-version",
-    "not-supported",
     "missing-key",
     "unknown-key",
     "invalid-value",

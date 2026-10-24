@@ -11,7 +11,9 @@ import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.en
 
 {% endif %}
 import { {{ info.component }} } from "@/pages/{{ info.slice }}";
-{% if protected %}
+{% if protected and definition.access %}
+import { requirePage } from "@/shared/auth/access";
+{% elif protected %}
 import { requirePageUser } from "@/shared/auth/session";
 {% endif %}
 
@@ -21,7 +23,11 @@ export const metadata: Metadata = { title: {{ element.title | tojson }} };
 /** Show the not-found page (status 404) if the record does not exist. */
 export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>) {
 {% if protected %}
+{% if definition.access %}
+  await requirePage({{ name | tojson }}, {{ element.path | tojson }}, await params); {{ trace(definition.access.id) }}
+{% else %}
   await requirePageUser({{ element.path | tojson }}, await params); {{ trace(definition.auth.id) }}
+{% endif %}
 {% endif %}
   const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
   if (!(await {{ element.entity | camel }}Repository.exists(id))) {
@@ -33,7 +39,11 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 
 {% if protected %}
 export default async function Route({% if info.params %}{ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>{% endif %}) {
+{% if definition.access %}
+  await requirePage({{ name | tojson }}, {{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.access.id) }}
+{% else %}
   await requirePageUser({{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.auth.id) }}
+{% endif %}
   return <{{ info.component }} />;
 }
 {% else %}

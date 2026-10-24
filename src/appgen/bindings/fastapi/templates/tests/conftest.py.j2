@@ -13,6 +13,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
+{% if definition.access %}
+from app.core.access import check_access
+{% endif %}
 {% if definition.auth %}
 from app.core.auth import current_user
 {% endif %}
@@ -105,6 +108,9 @@ async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[Asyn
     """
     app = create_app(Settings(database_url=migrated_url, auth_secret="test-secret"))
     app.dependency_overrides[current_user] = lambda: None
+{% if definition.access %}
+    app.dependency_overrides[check_access] = lambda: None
+{% endif %}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await app.state.engine.dispose()

@@ -2,6 +2,11 @@
 {% set var = name | camel %}
 {{ trace_header(element_id) }}
 {% set public = public_kinds(definition, name) %}
+{% set ops = kind_operations(definition, name) if definition.access else {} %}
+{% macro opt(kind, changes) -%}
+{%- set items = (["changes: true"] if changes else []) + (["public: true"] if kind in public else []) + (["operation: " ~ (ops[kind] | tojson)] if kind in ops and kind not in public else []) -%}
+{%- if items %}, { {{ items | join(", ") }} }{% endif -%}
+{%- endmacro %}
 "use server";
 
 import type { ActionResult, ListQuery, ListResult } from "@/shared/api";
@@ -17,15 +22,15 @@ import { {{ var }}Repository } from "./{{ name | kebab }}-repository";
 export async function list{{ type }}Action(
   query?: ListQuery<{{ type }}>,
 ): Promise<ActionResult<ListResult<{{ type }}>>> {
-  return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)){% if "list" in public %}, { public: true }{% endif %});
+  return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)){{ opt("list", false) }});
 }
 
 export async function get{{ type }}Action(id: string): Promise<ActionResult<{{ type }}>> {
-  return runAction(() => {{ var }}Repository.get(idSchema.parse(id)){% if "read" in public %}, { public: true }{% endif %});
+  return runAction(() => {{ var }}Repository.get(idSchema.parse(id)){{ opt("read", false) }});
 }
 
 export async function create{{ type }}Action(input: {{ type }}Input): Promise<ActionResult<{{ type }}>> {
-  return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)), { changes: true{% if "create" in public %}, public: true{% endif %} });
+  return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)){{ opt("create", true) }});
 }
 
 export async function update{{ type }}Action(
@@ -34,7 +39,7 @@ export async function update{{ type }}Action(
 ): Promise<ActionResult<{{ type }}>> {
   return runAction(
     () => {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(patch)),
-    { changes: true{% if "update" in public %}, public: true{% endif %} },
+    {{ opt("update", true)[2:] }},
   );
 }
 
@@ -44,6 +49,6 @@ export async function remove{{ type }}Action(id: string): Promise<ActionResult<n
       await {{ var }}Repository.remove(idSchema.parse(id));
       return null;
     },
-    { changes: true{% if "delete" in public %}, public: true{% endif %} },
+    {{ opt("delete", true)[2:] }},
   );
 }

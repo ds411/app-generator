@@ -2,6 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/ds411/app-generator/main/schema/app.schema.json",
   "$defs": {
+    "Access": {
+      "additionalProperties": false,
+      "description": "The roles of the users. It needs the section `auth`.\n\nThe value of `role_field` (an enum field of the user entity) is the\nrole of a user. A user may call the public operations and open the\npublic pages of `auth`, and the operations and the pages of the role.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "role_field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "roles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Role"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Roles",
+          "type": "object"
+        }
+      },
+      "required": [
+        "role_field",
+        "roles"
+      ],
+      "title": "Access",
+      "type": "object"
+    },
     "Action": {
       "oneOf": [
         {
@@ -3974,6 +4003,44 @@
       "title": "RequiredRule",
       "type": "object"
     },
+    "Role": {
+      "additionalProperties": false,
+      "description": "A role: the operations and the pages that its users may use (ADR 0012).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operations": {
+          "items": {
+            "pattern": "^([a-z][a-z0-9_]*|\\*)$",
+            "type": "string"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "pages": {
+          "items": {
+            "pattern": "^([a-z][a-z0-9_]*|\\*)$",
+            "type": "string"
+          },
+          "title": "Pages",
+          "type": "array"
+        }
+      },
+      "title": "Role",
+      "type": "object"
+    },
     "SearchFilter": {
       "additionalProperties": false,
       "description": "A text search in one or more fields.",
@@ -5334,6 +5401,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/Auth"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "access": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Access"
         },
         {
           "type": "null"

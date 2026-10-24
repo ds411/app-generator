@@ -3,12 +3,22 @@
 {% set var = name | camel %}
 {% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | list %}
 {% set lists = inverse_lists(definition, name) %}
+{% set guarded = definition.access and (ops | rejectattr("0", "in", definition.auth.public_operations) | list) %}
+{% macro guard(op_name) -%}
+{% if definition.access and op_name not in definition.auth.public_operations %}
+  requireOperation({{ op_name | tojson }}); {{ trace(definition.access.id) }}
+{% endif %}
+{%- endmacro %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
 import { type EntityApi, type ListQuery, type ListResult, MockStore } from "@/shared/api";
 {% else %}
 import { type EntityApi, MockStore } from "@/shared/api";
 {% endif %}
 
+{% if guarded %}
+import { requireOperation } from "@/shared/auth";
+
+{% endif %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";
 
@@ -48,23 +58,23 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
 {% endif %}
 {% if op.kind == "create" %}
 export function {{ op_name | camel }}(input: {{ type }}Input): Promise<{{ type }}> { {{ trace(op.id) }}
-  return {{ var }}Api.create(input);
+{{ guard(op_name) }}  return {{ var }}Api.create(input);
 }
 {% elif op.kind == "read" %}
 export function {{ op_name | camel }}(id: string): Promise<{{ type }}> { {{ trace(op.id) }}
-  return {{ var }}Api.get(id);
+{{ guard(op_name) }}  return {{ var }}Api.get(id);
 }
 {% elif op.kind == "update" %}
 export function {{ op_name | camel }}(id: string, patch: Partial<{{ type }}Input>): Promise<{{ type }}> { {{ trace(op.id) }}
-  return {{ var }}Api.update(id, patch);
+{{ guard(op_name) }}  return {{ var }}Api.update(id, patch);
 }
 {% elif op.kind == "delete" %}
 export function {{ op_name | camel }}(id: string): Promise<void> { {{ trace(op.id) }}
-  return {{ var }}Api.remove(id);
+{{ guard(op_name) }}  return {{ var }}Api.remove(id);
 }
 {% elif op.kind == "list" %}
 export function {{ op_name | camel }}(query?: ListQuery<{{ type }}>): Promise<ListResult<{{ type }}>> { {{ trace(op.id) }}
-  return {{ var }}Api.list(query);
+{{ guard(op_name) }}  return {{ var }}Api.list(query);
 }
 {% endif %}
 {% endfor %}

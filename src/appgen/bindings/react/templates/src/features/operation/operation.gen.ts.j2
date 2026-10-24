@@ -13,6 +13,9 @@ import {
   type {{ name | pascal }}Params,
 {% endif %}
 } from "@/entities/{{ entity | kebab }}";
+{% if definition.access and name not in definition.auth.public_operations %}
+import { requireOperation } from "@/shared/auth";
+{% endif %}
 
 import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
 
@@ -22,6 +25,9 @@ import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
 /** The operation {{ name }}. The logic is in the extension file. */
 {% endif %}
 export async function {{ spec.name }}(id: string{% if element.params %}, params: {{ name | pascal }}Params{% endif %}): {{ spec.returns }} {
+{% if definition.access and name not in definition.auth.public_operations %}
+  requireOperation({{ name | tojson }}); {{ trace(definition.access.id) }}
+{% endif %}
   const record = await {{ entity | camel }}Api.get(id);
   return {{ spec.name }}Ext(record{% if element.params %}, params{% endif %});
 }

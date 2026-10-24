@@ -70,15 +70,17 @@ def test_each_binding_has_a_sign_in_and_protects_its_parts() -> None:
     assert "app/core/auth.py" in api
     assert "tests/test_auth.py" in api
     router = api["app/features/bookings/router.py"]
-    assert "router.include_router(list_bookings.router, dependencies=[Depends(current_user)])" in (
+    assert "router.include_router(list_bookings.router, dependencies=[Depends(check_access)])" in (
         router
     )
     assert "router.include_router(list_rooms.router)\n" in api["app/features/rooms/router.py"]
     web = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
     assert "app/sign-in/page.tsx" in web
-    assert 'await requirePageUser("/bookings");' in web["app/(app-shell)/bookings/page.tsx"]
+    assert 'await requirePage("bookings", "/bookings");' in web["app/(app-shell)/bookings/page.tsx"]
     assert "requirePageUser" not in web["app/(app-shell)/rooms/page.tsx"]
     assert ", { public: true });" in web["src/entities/room/api/room-actions.ts"]
     spa = {f.path: f.content for f in generate(definition, react.BINDING).files}
-    assert "<RequireAuth><BookingsPage /></RequireAuth>" in spa["src/app/router.tsx"]
+    assert (
+        '<RequireAuth page="bookings"><BookingsPage /></RequireAuth>' in spa["src/app/router.tsx"]
+    )
     assert "element: <RoomsPage /> }" in spa["src/app/router.tsx"]
