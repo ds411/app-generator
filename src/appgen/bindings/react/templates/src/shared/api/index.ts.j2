@@ -1,5 +1,10 @@
 {{ trace_header("app") }}
+{% if react.api %}
+export { API_URL, ApiError, accessToken, apiRequest, setAccessToken } from "./http";
+export { type ApiShape, HttpStore } from "./http-store";
+{% else %}
 export { MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
+{% endif %}
 export type {
   EntityApi,
   EntityRecord,

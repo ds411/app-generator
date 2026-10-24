@@ -1,0 +1,143 @@
+{{ trace_header("app") }}
+import { ApiError, apiRequest } from "./http";
+import { applyQuery } from "./query";
+import { type EntityApi, type EntityRecord, type ListQuery, type ListResult, NotFoundError } from "./types";
+
+/** The JSON names of an entity in the API. */
+export type ApiShape = {
+  /** The key of the TypeScript type for each JSON name, for example `due_date: "dueDate"`. */
+  keys: Readonly<Record<string, string>>;
+  /** The keys of the decimal fields: the API sends them as text. */
+  numbers: readonly string[];
+  /** The keys that the list endpoint can filter by equality. */
+  filters: readonly string[];
+};
+
+/** The largest page of the list endpoints. */
+const PAGE_LIMIT = 200;
+
+/**
+ * The records of one entity in the FastAPI app. The list endpoint filters
+ * by equality, and gives pages. The other filters, the search, the order,
+ * and the pages of the UI apply in the browser to all records that the
+ * endpoint returns.
+ */
+export class HttpStore<T extends EntityRecord, TInput extends object>
+  implements EntityApi<T, TInput>
+{
+  private readonly listeners = new Set<() => void>();
+  private readonly jsonNames: Record<string, string>;
+
+  constructor(
+    private readonly entity: string,
+    private readonly path: string,
+    private readonly shape: ApiShape,
+  ) {
+    this.jsonNames = Object.fromEntries(Object.entries(shape.keys).map(([json, key]) => [key, json]));
+  }
+
+  async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
+    const params = new URLSearchParams();
+    const local = [];
+    for (const filter of query.filters ?? []) {
+      const json = this.jsonNames[filter.field];
+      const value = filter.value;
+      if (
+        filter.op === "eq" &&
+        json !== undefined &&
+        this.shape.filters.includes(filter.field) &&
+        (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+      ) {
+        params.set(json, String(value));
+      } else {
+        local.push(filter);
+      }
+    }
+    const records: T[] = [];
+    for (let offset = 0; ; offset += PAGE_LIMIT) {
+      params.set("limit", String(PAGE_LIMIT));
+      params.set("offset", String(offset));
+      const page = (await apiRequest("GET", `${this.path}?${params.toString()}`)) as {
+        items: Record<string, unknown>[];
+        total: number;
+      };
+      records.push(...page.items.map((item) => this.fromJson(item)));
+      if (page.items.length === 0 || records.length >= page.total) break;
+    }
+    return applyQuery(records, { ...query, filters: local });
+  }
+
+  async get(id: string): Promise<T> {
+    return this.fromJson(await this.request("GET", id));
+  }
+
+  async create(input: TInput): Promise<T> {
+    const record = this.fromJson(await this.request("POST", null, this.toJson(input)));
+    this.notify();
+    return record;
+  }
+
+  async update(id: string, patch: Partial<TInput>): Promise<T> {
+    const record = this.fromJson(await this.request("PATCH", id, this.toJson(patch)));
+    this.notify();
+    return record;
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.request("DELETE", id);
+    this.notify();
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Call the endpoint of a custom operation, for example `/{id}/cancel`, with the JSON params. */
+  async call(method: string, suffix: string, id: string, params: object): Promise<unknown> {
+    const result = await this.request(method, id, params, suffix);
+    this.notify();
+    return result;
+  }
+
+  /** Return the record of a JSON object of the API. */
+  fromJson(json: unknown): T {
+    const values = json as Record<string, unknown>;
+    const record: Record<string, unknown> = { id: String(values.id) };
+    for (const [name, key] of Object.entries(this.shape.keys)) {
+      const value = values[name];
+      record[key] = this.shape.numbers.includes(key) && typeof value === "string" ? Number(value) : value;
+    }
+    return record as T;
+  }
+
+  private toJson(values: object): Record<string, unknown> {
+    const json: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(values)) {
+      if (value !== undefined) {
+        json[this.jsonNames[key] ?? key] = value;
+      }
+    }
+    return json;
+  }
+
+  private async request(method: string, id: string | null, body?: unknown, suffix = ""): Promise<unknown> {
+    const path = id === null ? this.path : `${this.path}/${encodeURIComponent(id)}${suffix}`;
+    try {
+      return await apiRequest(method, path, body);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404 && id !== null) {
+        throw new NotFoundError(this.entity, id);
+      }
+      throw error;
+    }
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}

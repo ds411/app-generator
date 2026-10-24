@@ -16,6 +16,11 @@ COPY package.json pnpm-lock.yaml* ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --store-dir /pnpm/store
 COPY . .
+{% if react.api %}
+# The URL of the FastAPI app, as the browser reaches it.
+ARG VITE_API_URL=http://localhost:8000
+ENV VITE_API_URL=${VITE_API_URL}
+{% endif %}
 RUN pnpm build
 
 FROM ${NGINX_IMAGE}

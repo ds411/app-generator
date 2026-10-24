@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from appgen.bindings.react import versions
+from appgen.bindings.react.api_client import api_entities, data_source
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
@@ -90,7 +91,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
     components = shadcn.used_components(definition)
     theme = definition.ui.theme if definition.ui is not None else None
+    api = data_source(definition) == "api"
     return {
+        "api_entities": api_entities(definition) if api else {},
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -105,6 +108,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "hooks": shadcn.hooks(components),
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
+            "api": api,
         },
     }
 

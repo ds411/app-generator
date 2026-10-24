@@ -1,7 +1,7 @@
 {{ trace_header("app") }}
 // The interface of the data access of each entity. The mock store
-// implements it in memory. A later version can replace the mock store
-// with a client of a real API that has the same interface.
+// implements it in memory. The HTTP store implements it with the REST API
+// of the FastAPI app (`x-react-data: api`).
 
 export type SortDirection = "asc" | "desc";
 
