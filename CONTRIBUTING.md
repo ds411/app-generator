@@ -188,7 +188,8 @@ A story is done when all these conditions are true:
 - The docs agree with the change.
 - The skill agrees with the change: the agent skill in
   `src/appgen/skills/appgen/` describes each changed command, option, DSL
-  section, and diagnostic code (ADR 0015).
+  section, and diagnostic code (ADR 0015). After a change to
+  `docs/dsl.md`, run `uv run scripts/update_skill_references.py`.
 - The pull request that closes the story is merged.
 
 ## Generated code

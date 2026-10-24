@@ -17,12 +17,19 @@ code by hand.
 
 ## Tasks
 
-| Task                                        | Read                       |
-| ------------------------------------------- | -------------------------- |
-| Validate a definition, generate, and check. | This file.                 |
+| Task                                        | Read                                                         |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| Validate a definition, generate, and check. | This file.                                                   |
+| Write a new app definition.                 | [references/new-definition.md](references/new-definition.md) |
 
 Each task uses the CLI loop of this file. Read the file of your task
-before you start it.
+before you start it. Two more files help in all tasks:
+
+- [references/dsl.md](references/dsl.md): the reference of the DSL, with
+  an example for each section. Read the section that you need, not the
+  whole file.
+- [references/diagnostics.md](references/diagnostics.md): the cause and
+  the fix of each diagnostic code of `appgen validate` and `appgen check`.
 
 ## Run appgen
 

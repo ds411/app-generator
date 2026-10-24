@@ -790,7 +790,7 @@ ui:
       mode: dialog
       title: New task
       fields:
-        title: { placeholder: What needs to be done? }
+        title: { placeholder: "What needs to be done?" }
         project: {}
         priority: { widget: radio }
         due_date: {}

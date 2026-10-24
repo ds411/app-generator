@@ -96,6 +96,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Run all hook checks   | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null`        |
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
+| Update the skill DSL reference | `uv run scripts/update_skill_references.py` |
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 
@@ -140,8 +141,12 @@ A relative path to `schema/app.schema.json` also works.
 format, for Claude Code, Codex, and other agents. It tells an agent how
 to use the CLI: validate a definition, fix the diagnostics, generate an
 app, and check its traces. The skill is a part of the package, so each
-version of appgen has its own skill. Tests fail if the skill and the CLI
-do not agree. [ADR 0015](docs/adr/0015-agent-skills.md) describes the
+version of appgen has its own skill. The reference files of the skill
+tell how to write a new definition, and give the DSL and the diagnostic
+codes. `references/dsl.md` is a copy of `docs/dsl.md` with links to
+GitHub: after a change to `docs/dsl.md`, run
+`uv run scripts/update_skill_references.py`. Tests fail if the skill does
+not agree with the CLI, the DSL, or the diagnostic codes. [ADR 0015](docs/adr/0015-agent-skills.md) describes the
 design.
 
 ## One definition, three apps
