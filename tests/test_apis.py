@@ -394,6 +394,8 @@ def test_a_document_must_be_a_local_file(tmp_path: Path) -> None:
         ("{ scheme: key, env: PETS_API_URL }", [("duplicate-name", "apis.pets")]),
         ("{ scheme: key, env: DATABASE_URL }", [("reserved-name", "apis.pets")]),
         ("{ scheme: key, env: PASSWORD_RESET_URL }", [("reserved-name", "apis.pets")]),
+        ("{ scheme: key, env: NEXT_PUBLIC_PETS_KEY }", [("reserved-name", "apis.pets")]),
+        ("{ scheme: key, env: VITE_PETS_KEY }", [("reserved-name", "apis.pets")]),
     ],
 )
 def test_the_security_scheme_exists_and_suits_the_clients(

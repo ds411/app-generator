@@ -20,9 +20,11 @@ built (`pnpm build`). Then the script does the same checks. The
 third-party APIs of the app point to a mock server
 (`scripts/mock_api.py`), and the FastAPI check also runs the custom
 operation `schedule_task`, which calls the holidays API through it.
-The operation needs the hand-written code of the example
-(`examples/project-tracker/extensions/`), which the script copies into
-an app that it generates.
+In Docker, the apps reach the mock server through the host gateway
+(`host.docker.internal`), and with `--ui`, the dashboard of the Next.js
+app calls the holidays API in a server action. These checks need the
+hand-written code of the example (`examples/project-tracker/extensions/`),
+which the script copies into an app that it generates.
 
 With `--ui`, the script also runs the Playwright UI tests in `ui-tests/`
 on a front-end app, while the app runs: each page in the light and the
@@ -176,8 +178,15 @@ def build(binding: str, app: Path, image: str) -> None:
 
 
 @contextmanager
-def started(binding: str, app: Path, image: str, temp: Path) -> Generator[None]:
-    """Start the app, and stop it and delete its data at the end."""
+def started(
+    binding: str, app: Path, image: str, temp: Path, apis: dict[str, str]
+) -> Generator[None]:
+    """Start the app, and stop it and delete its data at the end.
+
+    `apis` holds the environment variables of the base URLs of the APIs,
+    with the host `host.docker.internal`: the containers of the app reach
+    the mock server on the machine through it.
+    """
     project = f"appgen-smoke-{binding}"
     if binding == "react":
         log(binding, "docker run")
@@ -187,9 +196,13 @@ def started(binding: str, app: Path, image: str, temp: Path) -> Generator[None]:
     else:
         # Run the image that the script built, not a new build of Compose.
         override = temp / "smoke.compose.yaml"
-        override.write_text(
-            "services:\n" + "".join(f"  {s}:\n    image: {image}\n" for s in SERVICES[binding])
-        )
+        service = {
+            "image": image,
+            "extra_hosts": ["host.docker.internal:host-gateway"],
+            "environment": apis,
+        }
+        # JSON is valid YAML.
+        override.write_text(json.dumps({"services": dict.fromkeys(SERVICES[binding], service)}))
         compose = [
             "docker",
             "compose",
@@ -449,6 +462,18 @@ def check(binding: str, definition: AppDefinition, ui: bool) -> None:
             check_ui(binding, definition)
 
 
+def check_api_calls(binding: str, mock: MockApi) -> None:
+    """Check that the UI tests called the holidays API through the server of the app.
+
+    The custom widget `holidays` of the dashboard of the Next.js app calls
+    the API in a server action.
+    """
+    calls = mock.calls("holidays", "getNextPublicHolidays")
+    if not calls:
+        raise SmokeError(f"{binding}: the dashboard did not call the holidays API.")
+    log(binding, f"the dashboard called the holidays API {len(calls)} times")
+
+
 def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = False) -> None:
     definition = load_definition(DEFINITION)
     with tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp:
@@ -458,8 +483,14 @@ def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = Fal
         if image is None:
             image = f"appgen-smoke-{binding}"
             build(binding, app, image)
-        with started(binding, app, image, Path(temp)):
+        # The containers reach the mock server through the host gateway.
+        with (
+            MockApi(definition, host="0.0.0.0") as mock,
+            started(binding, app, image, Path(temp), mock.env("host.docker.internal")),
+        ):
             check(binding, definition, ui)
+            if ui and binding == "nextjs":
+                check_api_calls(binding, mock)
     log(binding, "passed")
 
 

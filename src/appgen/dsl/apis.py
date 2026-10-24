@@ -31,6 +31,8 @@ RESERVED_ENV_NAMES = frozenset(
         "HOSTNAME",
         "LOG_JSON",
         "LOG_LEVEL",
+        "NEXT_OUTPUT",
+        "NEXT_RUNTIME",
         "NODE_ENV",
         "PASSWORD_RESET_URL",
         "PATH",
@@ -41,6 +43,8 @@ RESERVED_ENV_NAMES = frozenset(
     }
 )
 """The environment variables that the generated apps use for their own settings."""
+PUBLIC_ENV_PREFIXES = ("NEXT_PUBLIC_", "VITE_")
+"""The prefixes of the variables that the front-end builds put into the code for the browser."""
 
 type OperationId = Annotated[str, StringConstraints(pattern=OPERATION_ID_PATTERN)]
 """The operation ID of an OpenAPI operation. A trace segment has only letters, digits, and `_`."""

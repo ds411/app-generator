@@ -928,6 +928,12 @@ ui:
           kind: custom
           label: Team workload
           span: 1
+        # The hand-written code of the widget calls the holidays API
+        # (examples/project-tracker/extensions/).
+        holidays:
+          kind: custom
+          label: Next public holidays
+          span: 4
 
   defaults:
     layout: app_shell
@@ -1064,6 +1070,7 @@ translations:
         Name: Name
         name@example.com: name@beispiel.de
         Next page: Nächste Seite
+        Next public holidays: Nächste Feiertage
         'No': Nein
         No comments yet: Noch keine Kommentare
         No data yet: Noch keine Daten

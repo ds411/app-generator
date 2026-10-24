@@ -1,0 +1,37 @@
+{% set api = ts_apis[name] %}
+{{ trace_header(element_id) }}
+/*
+ * The types of the schemas of the API `{{ api.name }}` ({{ api.title }}) that the client
+ * uses. The keys are the JSON names of the API. The client does not check
+ * the answers at run time.
+ */
+{% for type in api.types %}
+
+{% if type.description %}
+/** {{ type.description }} */
+{% endif %}
+{% if type.properties is none %}
+export type {{ type.name }} = {{ type.alias }};
+{% else %}
+export interface {{ type.name }} {
+{% for p in type.properties %}
+{% if p.description %}
+  /** {{ p.description }} */
+{% endif %}
+  {{ p.line() }}
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+{% for m in api.methods if m.params_type %}
+
+/** The parameters of the operation {{ m.operation_id }}. */
+export interface {{ m.params_type }} {
+{% for p in m.parameters %}
+{% if p.description %}
+  /** {{ p.description }} */
+{% endif %}
+  {{ p.line() }}
+{% endfor %}
+}
+{% endfor %}

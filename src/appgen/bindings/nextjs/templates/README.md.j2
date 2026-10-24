@@ -69,6 +69,33 @@ The `Dockerfile` builds a standalone Next.js server that runs as a
 non-root user. If `drizzle/` does not exist, the build writes the first
 migration from the schema.
 
+{% if ts_apis %}
+## Third-party APIs
+
+Each API of the definition has a client in `src/shared/api/<api>/`:
+the TypeScript types of its schemas and a class with one method for
+each operation that the app uses. The clients import `server-only`, so
+that only server code, for example a server action or the extension
+file of a custom operation, can use them, and the secrets stay on the
+server. An answer with an error status throws `ApiError` of
+`@/shared/api/third-party`, and each request stops after 10 seconds.
+
+| API | Client | Base URL | Secret |
+| --- | ------ | -------- | ------ |
+{% for api in ts_apis.values() %}
+| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | `{{ api.url_env }}` | {{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+{% endfor %}
+
+`{{ (ts_apis.values() | first).factory }}()` reads the settings from the environment, for
+example:
+
+```ts
+import { {{ (ts_apis.values() | first).factory }} } from "@/shared/api/{{ (ts_apis.values() | first).folder }}";
+
+const client = {{ (ts_apis.values() | first).factory }}();
+```
+
+{% endif %}
 ## Structure
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

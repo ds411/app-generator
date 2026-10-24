@@ -23,6 +23,7 @@ _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 
 # The app shell: the layouts, the menus, the breadcrumbs, and the search
 # (shared templates, see `appgen.bindings.shared.ui`). Each layout with
@@ -245,6 +246,19 @@ BINDING = Binding(
                 ("api/operation.ext.ts", "api/{{ name | kebab }}.ext.ts"),
             )
         ),
+        Output(
+            template="integrations/third-party.ts.j2",
+            path="src/shared/api/third-party.ts",
+            when="ts_apis",
+        ),
+        *(
+            Output(
+                template=f"integrations/{template}.j2",
+                path=f"{_INTEGRATION}/{template}",
+                for_each="api",
+            )
+            for template in ("index.ts", "types.ts", "client.ts")
+        ),
         *gap_rules(),
         *_SHADCN,
         *_HOOKS,
@@ -272,9 +286,8 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
+        | {"api", "api_operation"}
     ),
-    # The clients of the third-party APIs come with #264.
-    excludes=frozenset({"api"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

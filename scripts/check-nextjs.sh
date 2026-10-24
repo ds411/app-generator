@@ -45,6 +45,9 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
 fi
 
 step "generate $definition in $out"
+# The hand-written code of the example: appgen keeps an extension file
+# that exists.
+cp -R examples/project-tracker/extensions/nextjs/. "$out"/
 uv run --locked appgen generate "$definition" -b nextjs -o "$out" >/dev/null
 
 cd "$out"

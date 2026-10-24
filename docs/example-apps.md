@@ -55,7 +55,7 @@ done
 gaps. `appgen check` prints the trace coverage of the definition and
 the invalid traces. For each app, the result is `Result: passed.` with
 no uncovered elements and no invalid traces. The stubs of the custom
-elements are open gaps until you write them: 9 for Next.js and React,
+elements are open gaps until you write them: 10 for Next.js and React,
 4 for FastAPI. The FastAPI app has no pages, so
 its report shows the kinds `page` and `ui` as excluded. See
 [traces.md](traces.md) for the report format.
@@ -146,6 +146,35 @@ folder. To delete all data, stop the server and delete `.pglite/`.
 To use the Postgres container instead, copy the settings file in step 2
 (`cp .env.example .env.local`), and set `DATABASE_MIGRATE=true` in it.
 The `DATABASE_URL` in the file agrees with the Postgres container.
+
+### Show data of a third-party API
+
+The dashboard of the project tracker has the custom widget `holidays`,
+which shows the next public holidays. Its hand-written code is in
+`examples/project-tracker/extensions/nextjs/`: the widget calls a server
+action, and the server action calls the server-only client of the
+holidays API. The example also has the code of the custom operation
+`schedule_task`.
+
+1. Copy the hand-written code into the app, and generate it again.
+   appgen keeps an extension file that exists:
+
+   ```sh
+   cp -R examples/project-tracker/extensions/nextjs/. /tmp/tracker-nextjs/
+   uv run appgen generate examples/project-tracker/app.yaml -b nextjs -o /tmp/tracker-nextjs
+   ```
+
+2. Start the mock server from the repository root (see
+   [Call a third-party API](#call-a-third-party-api)), and add the base
+   URL to the settings of the app:
+
+   ```sh
+   uv run scripts/mock_api.py
+   printf 'HOLIDAYS_API_URL=http://localhost:8430/holidays\n' >> /tmp/tracker-nextjs/.env.local
+   ```
+
+3. Start the dev server, and open <http://localhost:3000>. The widget
+   shows the holidays of the example of the OpenAPI document.
 
 ### Run in Docker
 
@@ -367,10 +396,13 @@ uv run scripts/smoke_test.py nextjs --app /tmp/tracker-nextjs --local
 uv run scripts/smoke_test.py fastapi --app /tmp/tracker-fastapi --local
 ```
 
-With `--local`, the third-party APIs of the app point to the mock
-server of `scripts/mock_api.py`. The FastAPI check also runs the custom
-operation `schedule_task` through it, so the app needs the hand-written
-code of the example (see [Call a third-party API](#call-a-third-party-api)).
+The third-party APIs of the apps point to the mock server of
+`scripts/mock_api.py`. In Docker, the apps reach it through the host
+gateway (`host.docker.internal`). With `--local`, the FastAPI check also
+runs the custom operation `schedule_task` through it. With `--ui`, the
+dashboard of the Next.js app calls the holidays API through it. These
+checks need the hand-written code of the example (see
+[Call a third-party API](#call-a-third-party-api)).
 
 ## Clean up
 
