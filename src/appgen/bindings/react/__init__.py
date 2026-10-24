@@ -304,11 +304,11 @@ BINDING = Binding(
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
     # The React app has no sign-up page (#269), no password reset pages
-    # (#270), and no owner rules (#273) yet. The clients of the third-party
-    # APIs come with #265.
+    # (#270), no owner rules (#273), and no sign-in with a provider (#271)
+    # yet. The clients of the third-party APIs come with #265.
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "api"}
-        | {"sign_up", "password_reset", "record_rule"}
+        | {"sign_up", "password_reset", "record_rule", "provider"}
     ),
     context=context,
     finish=finish,

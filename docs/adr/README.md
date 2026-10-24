@@ -36,3 +36,4 @@ gives the rules.
 | 0017   | [Password reset](0017-password-reset.md)                               | Accepted |
 | 0018   | [Owner rules for single records](0018-owner-rules.md)                  | Accepted |
 | 0019   | [Third-party APIs from OpenAPI documents](0019-third-party-apis.md)    | Accepted |
+| 0020   | [Sign-in with OpenID Connect providers](0020-providers.md)             | Accepted |

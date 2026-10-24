@@ -213,7 +213,7 @@
     },
     "Auth": {
       "additionalProperties": false,
-      "description": "The sign-in with a user name and a password (ADR 0011).\n\nThe users are the records of `user_entity`. Each app stores the\npassword hashes apart from the records. All pages and operations need\na signed-in user, except the public ones.",
+      "description": "The sign-in with a user name and a password (ADR 0011), or with providers (ADR 0020).\n\nThe users are the records of `user_entity`. Each app stores the\npassword hashes apart from the records. All pages and operations need\na signed-in user, except the public ones.",
       "patternProperties": {
         "^x-": {}
       },
@@ -273,6 +273,21 @@
             }
           ],
           "default": null
+        },
+        "password": {
+          "default": true,
+          "title": "Password",
+          "type": "boolean"
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Provider"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Providers",
+          "type": "object"
         }
       },
       "required": [
@@ -997,6 +1012,10 @@
       ],
       "title": "ChartWidget",
       "type": "object"
+    },
+    "Claim": {
+      "pattern": "^[^\\s\\\"\\\\]+$",
+      "type": "string"
     },
     "ColorMode": {
       "enum": [
@@ -4075,6 +4094,81 @@
         "both"
       ],
       "type": "string"
+    },
+    "Provider": {
+      "additionalProperties": false,
+      "description": "An OpenID Connect provider for the sign-in (ADR 0020).\n\nThe app sends the user to the provider, and gets an ID token back: the\nauthorization code flow with PKCE. The claim `username_claim` of the\ntoken gives the user name. The app signs in the user with this user\nname, or with `create_users` makes a new user.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "issuer": {
+          "pattern": "^https://\\S+$",
+          "title": "Issuer",
+          "type": "string"
+        },
+        "client_id_env": {
+          "$ref": "#/$defs/EnvName"
+        },
+        "client_secret_env": {
+          "$ref": "#/$defs/EnvName"
+        },
+        "scopes": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "username_claim": {
+          "$ref": "#/$defs/Claim",
+          "default": "email"
+        },
+        "create_users": {
+          "default": false,
+          "title": "Create Users",
+          "type": "boolean"
+        },
+        "default_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claims": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Claim"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Claims",
+          "type": "object"
+        }
+      },
+      "required": [
+        "issuer",
+        "client_id_env",
+        "client_secret_env"
+      ],
+      "title": "Provider",
+      "type": "object"
     },
     "RecordAction": {
       "enum": [

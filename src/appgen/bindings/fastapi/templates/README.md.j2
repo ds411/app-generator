@@ -140,7 +140,8 @@ variable `POSTGRES_IMAGE` for Compose.
 {# The secrets of deploy/knative/service.yaml: each one is a secret of its own. #}
 {% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if py.redis else [])
     + (["AUTH_SECRET"] if definition.auth else [])
-    + (py_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
+    + (py_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list)
+    + (py.providers | map(attribute="client_secret_env") | list) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
   limits), and Cloud Run accepts the same file. Push the image, and set
@@ -179,6 +180,7 @@ variable `POSTGRES_IMAGE` for Compose.
 {% endif %}
 
 {% if definition.auth %}
+{% set password = definition.auth.password %}
 ## Sign-in
 
 Each endpoint needs a bearer token (`Authorization: Bearer <token>`),
@@ -186,9 +188,14 @@ except `/health`, the sign-in{{ " and the sign-up" if definition.auth.sign_up }}
 operations of the definition. `AUTH_SECRET` signs the tokens: set it to
 a long random text in each environment.
 
+{% if password %}
 - `POST /auth/sign-in` gives a token for a user name and a password.
 - `GET /auth/me` gives the signed-in user, and `PUT /auth/password`
   changes the password.
+{% else %}
+- `GET /auth/me` gives the signed-in user. The users sign in with a
+  provider, not with a password.
+{% endif %}
 {% if definition.auth.sign_up %}
 - `POST /auth/sign-up` makes a new user with a password, and gives a
   token. A user name that exists gives 409.
@@ -203,10 +210,23 @@ a long random text in each environment.
   goes to the log with `ENVIRONMENT=development`, and the endpoint
   gives 501 in production.
 {% endif %}
+{% if py.providers %}
+- `GET /auth/providers/<name>/start` sends the browser to the sign-in
+  page of a provider ({% for p in py.providers %}`{{ p.name }}`{{ ", " if not loop.last }}{% endfor %}). The provider sends the browser
+  back to `GET /auth/providers/<name>/callback`, which gives a token.
+  With `?return_to=<page>` (a page of a front end in `CORS_ORIGINS`),
+  the callback sends the browser to the page, with the token in the
+  fragment of the URL (`#access_token=...`), or the error (`#error=...`).
+  Register `<PUBLIC_URL>/auth/providers/<name>/callback` as the
+  redirect URI of the app at the provider. Set the issuer, the client
+  ID, and the client secret of each provider (see `.env.example`).
+{% endif %}
+{% if password %}
 - `uv run python -m app.cli set-password <user name>` sets the password
   of a user.
 
 A new password needs {{ definition.auth.min_password_length }} or more characters.
+{% endif %}
 
 {% endif %}
 ## Layout

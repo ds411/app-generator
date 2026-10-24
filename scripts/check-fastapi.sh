@@ -8,18 +8,22 @@
 # that two processes share in Redis (scripts/check_shared_rate_limit.py),
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
-# example, which has the sign-in, the sign-up, and the roles, and check
-# its code and run its tests. The pre-push hook runs this script when a
-# push changes the generator or the FastAPI binding. Run it by hand from
-# the repository root:
+# example, which has the sign-in, the sign-up, the roles, and a
+# provider, and check its code and run its tests. Last, generate
+# tests/fixtures/provider-sign-in.yaml (only the sign-in with
+# providers), and check it. For both apps, a browser signs in through
+# the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
+# The pre-push hook runs this script when a push changes the generator
+# or the FastAPI binding. Run it by hand from the repository root:
 #
 #   scripts/check-fastapi.sh [output folder]
 #
 # Without an output folder, the script uses a temporary folder and
-# deletes it at the end. The room booking app goes to the folder
-# "<output folder>-room-booking", and the app of the rate limit check to
-# "<output folder>-rate-limit". The generated tests run on Postgres
-# (Docker, or a database in TEST_DATABASE_URL), then on SQLite.
+# deletes it at the end. The other apps go to the folders
+# "<output folder>-room-booking", "<output folder>-provider-sign-in", and
+# "<output folder>-rate-limit" (the app of the rate limit check). The
+# generated tests run on Postgres (Docker, or a database in
+# TEST_DATABASE_URL), then on SQLite.
 #
 # Environment variables:
 #   POSTGRES_IMAGE            The Postgres image of the tests and the smoke test.
@@ -33,6 +37,7 @@ set -eu
 
 definition=examples/project-tracker/app.yaml
 auth_definition=examples/room-booking/app.yaml
+provider_definition=tests/fixtures/provider-sign-in.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -40,9 +45,10 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
+provider_out="$out-provider-sign-in"
 
 step() {
     echo "check-fastapi: $*"
@@ -123,5 +129,23 @@ step "room booking: pytest on SQLite"
 TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
 rm -f test.db
 cd "$root"
+step "room booking: the sign-in with the mock provider"
+uv run --locked scripts/check_provider_sign_in.py "$auth_definition" "$auth_out"
+
+step "generate $provider_definition in $provider_out"
+rm -rf "$provider_out"
+uv run --locked appgen generate "$provider_definition" -b fastapi -o "$provider_out" >/dev/null
+uv run --locked appgen check "$provider_definition" "$provider_out"
+cd "$provider_out"
+step "provider sign-in: uv sync, ruff, pyright, pytest on SQLite"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+cd "$root"
+step "provider sign-in: the sign-in with the mock provider"
+uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
 
 step "passed"

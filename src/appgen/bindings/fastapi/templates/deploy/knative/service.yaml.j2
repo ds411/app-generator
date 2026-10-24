@@ -60,6 +60,18 @@ spec:
             - name: {{ api.url_env }}
               value: {{ api.base_url | tojson }}
 {% endfor %}
+{% if py.providers %}
+            # The URL of the API for the browsers: the providers send the users back to it.
+            - name: PUBLIC_URL
+              value: https://api.example.com
+{% for p in py.providers %}
+            {{ trace(p.id) }}
+            - name: {{ p.name | upper }}_ISSUER
+              value: {{ p.issuer | tojson }}
+            - name: {{ p.client_id_env }}
+              value: ""
+{% endfor %}
+{% endif %}
             # The secrets. In Cloud Run, `name` is a secret of Secret Manager
             # and `key` its version. In Knative, `name` is a Kubernetes Secret
             # and `key` the key of the value in it.
@@ -88,6 +100,14 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ app.name }}-{{ api.secret_env | lower | replace("_", "-") }}
+                  key: latest
+{% endfor %}
+{% for p in py.providers %}
+            {{ trace(p.id) }}
+            - name: {{ p.client_secret_env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ app.name }}-{{ p.client_secret_env | lower | replace("_", "-") }}
                   key: latest
 {% endfor %}
           resources:

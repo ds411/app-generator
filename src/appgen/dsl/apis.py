@@ -37,6 +37,7 @@ RESERVED_ENV_NAMES = frozenset(
         "PASSWORD_RESET_URL",
         "PATH",
         "PORT",
+        "PUBLIC_URL",
         "RATE_LIMIT_PER_MINUTE",
         "SEED_PASSWORD",
         "TEST_DATABASE_URL",

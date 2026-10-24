@@ -3,10 +3,12 @@
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
 {% set sign_up = definition.auth.sign_up %}
 {% set reset = definition.auth.password_reset %}
+{% set password = definition.auth.password %}
 {% if sign_up and definition.access %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set default_role = sign_up.default_role or (definition.entities[u.name].fields[role.name].default) %}
 {% endif %}
+{% if password %}
 """The sign-in of the users (ADR 0011): password hashes, tokens, and the auth endpoints.
 
 The users are the records of {{ u.name }}. The table `credentials` holds
@@ -15,27 +17,47 @@ endpoint of {{ u.name }} returns it. A token is a signed text with the ID
 of the user and the end of its time. Set `AUTH_SECRET` to a long random
 text in each environment.
 """
+{% else %}
+"""The sign-in of the users (ADR 0011): tokens, and the auth endpoints.
+
+The users are the records of {{ u.name }}. They sign in with a provider
+(`app/core/providers.py`), not with a password. A token is a signed text
+with the ID of the user and the end of its time. Set `AUTH_SECRET` to a
+long random text in each environment.
+"""
+{% endif %}
 
 import base64
 import hashlib
 import hmac
 import json
+{% if password %}
 import secrets
+{% endif %}
 import time
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+{% if password %}
 from pydantic import BaseModel, Field
 from sqlalchemy import ForeignKey, String, select
+{% else %}
+from pydantic import BaseModel
+from sqlalchemy import select
+{% endif %}
 from sqlalchemy.ext.asyncio import AsyncSession
+{% if password %}
 from sqlalchemy.orm import Mapped, mapped_column
+{% endif %}
 
 {% if sign_up %}
 from app.core.db import Base, SessionDep, commit, flush
-{% else %}
+{% elif password %}
 from app.core.db import Base, SessionDep, commit
+{% else %}
+from app.core.db import SessionDep
 {% endif %}
 from app.core.errors import ProblemError, problem_responses
 {% if reset %}
@@ -49,12 +71,15 @@ from app.features.{{ u.slice }}.models import {{ u.name }}
 
 SESSION_SECONDS = {{ definition.auth.session_hours * 3600 }}
 """The time after which a token ends: {{ definition.auth.session_hours }} hours."""
+{% if password %}
 MIN_PASSWORD_LENGTH = {{ definition.auth.min_password_length }}
 """The lowest number of characters of a new password."""
+{% endif %}
 {% if reset %}
 RESET_SECONDS = {{ reset.token_minutes * 60 }}
 """The time that a password reset link stays valid: {{ reset.token_minutes }} minutes."""
 {% endif %}
+{% if password %}
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -81,6 +106,7 @@ def verify_password(password: str, stored: str) -> bool:
     _, salt, digest = stored.split("$")
     found = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), **_SCRYPT)
     return hmac.compare_digest(found.hex(), digest)
+{% endif %}
 
 
 def _encode(data: bytes) -> str:
@@ -91,33 +117,50 @@ def _decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def _key(request: Request) -> bytes:
+def signing_key(request: Request) -> bytes:
+    """Return the key that signs the tokens: the setting `AUTH_SECRET`."""
     secret: str = request.app.state.settings.auth_secret
     if not secret:
         raise ProblemError(500, "The server has no AUTH_SECRET.")
     return secret.encode()
 
 
-def make_token(request: Request, user_id: UUID) -> str:
-    """Return a signed token for a user."""
-    payload = {"sub": str(user_id), "exp": int(time.time()) + SESSION_SECONDS}
+def _signature(key: bytes, purpose: str, body: str) -> str:
+    # The purpose is part of the message, so that a text of one purpose is
+    # never valid for another purpose.
+    message = f"{purpose}.{body}".encode()
+    return _encode(hmac.new(key, message, hashlib.sha256).digest())
+
+
+def sign(key: bytes, purpose: str, payload: dict[str, Any]) -> str:
+    """Return a signed text with a payload. The payload has the end of its time in `exp`."""
     body = _encode(json.dumps(payload, separators=(",", ":")).encode())
-    signature = _encode(hmac.new(_key(request), body.encode(), hashlib.sha256).digest())
-    return f"{body}.{signature}"
+    return f"{body}.{_signature(key, purpose, body)}"
 
 
-def read_token(request: Request, token: str) -> UUID | None:
-    """Return the user ID of a valid token that has not ended, else None."""
-    body, _, signature = token.partition(".")
-    expected = _encode(hmac.new(_key(request), body.encode(), hashlib.sha256).digest())
-    if not hmac.compare_digest(signature, expected):
+def unsign(key: bytes, purpose: str, text: str) -> dict[str, Any] | None:
+    """Return the payload of a signed text of a purpose that has not ended, else None."""
+    body, _, signature = text.partition(".")
+    if not hmac.compare_digest(signature, _signature(key, purpose, body)):
         return None
     try:
         payload: dict[str, Any] = json.loads(_decode(body))
-        if int(payload["exp"]) < time.time():
-            return None
-        return UUID(str(payload["sub"]))
+        return payload if int(payload["exp"]) >= time.time() else None
     except ValueError, KeyError, TypeError:
+        return None
+
+
+def make_token(key: bytes, user_id: UUID) -> str:
+    """Return a signed token for a user."""
+    return sign(key, "session", {"sub": str(user_id), "exp": int(time.time()) + SESSION_SECONDS})
+
+
+def read_token(key: bytes, token: str) -> UUID | None:
+    """Return the user ID of a valid token that has not ended, else None."""
+    payload = unsign(key, "session", token)
+    try:
+        return UUID(str(payload["sub"])) if payload else None
+    except ValueError, KeyError:
         return None
 {% if reset %}
 
@@ -128,13 +171,6 @@ def password_tag(password_hash: str | None) -> str:
     return hashlib.sha256((password_hash or "").encode()).hexdigest()[:32]
 
 
-def _reset_signature(key: bytes, body: str) -> str:
-    # Another message than the one of the session tokens, so that one kind
-    # of token is never valid as the other kind.
-    message = f"password-reset.{body}".encode()
-    return _encode(hmac.new(key, message, hashlib.sha256).digest())
-
-
 def make_reset_token(key: bytes, user_id: UUID, password_hash: str | None, expires: int) -> str:
     """Return a signed one-time token for a password reset, valid until the time `expires`.
 
@@ -142,21 +178,15 @@ def make_reset_token(key: bytes, user_id: UUID, password_hash: str | None, expir
     password (also the one of the reset) makes the token invalid.
     """
     payload = {"sub": str(user_id), "exp": expires, "pwd": password_tag(password_hash)}
-    body = _encode(json.dumps(payload, separators=(",", ":")).encode())
-    return f"{body}.{_reset_signature(key, body)}"
+    return sign(key, "password-reset", payload)
 
 
 def read_reset_token(key: bytes, token: str) -> tuple[UUID, str] | None:
     """Return the user ID and the password tag of a valid reset token that has not ended."""
-    body, _, signature = token.partition(".")
-    if not hmac.compare_digest(signature, _reset_signature(key, body)):
-        return None
+    payload = unsign(key, "password-reset", token)
     try:
-        payload: dict[str, Any] = json.loads(_decode(body))
-        if int(payload["exp"]) < time.time():
-            return None
-        return UUID(str(payload["sub"])), str(payload["pwd"])
-    except ValueError, KeyError, TypeError:
+        return (UUID(str(payload["sub"])), str(payload["pwd"])) if payload else None
+    except ValueError, KeyError:
         return None
 {% endif %}
 
@@ -170,7 +200,7 @@ async def current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> {{ u.name }}:
     """Return the signed-in user. Give a 401 error without a valid token."""
-    user_id = read_token(request, credentials.credentials) if credentials else None
+    user_id = read_token(signing_key(request), credentials.credentials) if credentials else None
     user = await session.get({{ u.name }}, user_id) if user_id else None
     if user is None:
         raise ProblemError(401, "Sign in to use this endpoint.")
@@ -179,6 +209,7 @@ async def current_user(
 
 CurrentUser = Annotated[{{ u.name }}, Depends(current_user)]
 """The signed-in user, as a parameter of an endpoint."""
+{% if password %}
 
 
 async def set_password(session: AsyncSession, user: {{ u.name }}, password: str) -> None:
@@ -189,6 +220,7 @@ async def set_password(session: AsyncSession, user: {{ u.name }}, password: str)
     else:
         credential.password_hash = hash_password(password)
     await commit(session)
+{% endif %}
 
 
 async def find_user(session: AsyncSession, username: str) -> {{ u.name }} | None:
@@ -197,6 +229,7 @@ async def find_user(session: AsyncSession, username: str) -> {{ u.name }} | None
     return result.scalar_one_or_none()
 
 
+{% if password %}
 class SignIn(BaseModel):
     """The user name and the password of a sign-in."""
 
@@ -204,12 +237,14 @@ class SignIn(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
+{% endif %}
 class Token(BaseModel):
     """A token for the `Authorization: Bearer` header."""
 
     access_token: str
     token_type: str = "bearer"
     expires_in: int = SESSION_SECONDS
+{% if password %}
 
 
 class PasswordChange(BaseModel):
@@ -217,6 +252,7 @@ class PasswordChange(BaseModel):
 
     current_password: str = Field(min_length=1, max_length=200)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+{% endif %}
 {% if reset %}
 
 
@@ -241,6 +277,7 @@ class PasswordReset(BaseModel):
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+{% if password %}
 
 
 @router.post("/sign-in", responses=problem_responses(401, 422), operation_id="sign_in")
@@ -254,7 +291,8 @@ async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
         or not verify_password(data.password, credential.password_hash)
     ):
         raise ProblemError(401, "The user name or the password is not correct.")
-    return Token(access_token=make_token(request, user.id))
+    return Token(access_token=make_token(signing_key(request), user.id))
+{% endif %}
 {% if sign_up %}
 
 
@@ -274,7 +312,7 @@ async def sign_up(data: {{ u.name }}SignUp, request: Request, session: SessionDe
     await flush(session)
     session.add(Credential(user_id=user.id, password_hash=hash_password(data.password)))
     await commit(session)
-    return Token(access_token=make_token(request, user.id))
+    return Token(access_token=make_token(signing_key(request), user.id))
 {% endif %}
 
 
@@ -282,6 +320,7 @@ async def sign_up(data: {{ u.name }}SignUp, request: Request, session: SessionDe
 async def read_me(user: CurrentUser) -> {{ u.name }}Read:
     """Return the signed-in user."""
     return {{ u.name }}Read.model_validate(user)
+{% if password %}
 
 
 @router.put(
@@ -296,6 +335,7 @@ async def change_password(data: PasswordChange, user: CurrentUser, session: Sess
     if credential is None or not verify_password(data.current_password, credential.password_hash):
         raise ProblemError(422, "The current password is not correct.")
     await set_password(session, user, data.new_password)
+{% endif %}
 {% if reset %}
 
 
@@ -315,7 +355,7 @@ async def request_password_reset(
         credential = await session.get(Credential, user.id)
         expires = int(time.time()) + RESET_SECONDS
         password_hash = credential.password_hash if credential else None
-        token = make_reset_token(_key(request), user.id, password_hash, expires)
+        token = make_reset_token(signing_key(request), user.id, password_hash, expires)
         settings = request.app.state.settings
         await deliver_password_reset(settings, user, f"{settings.password_reset_url}?token={token}")
     return PasswordResetRequested()
@@ -332,7 +372,7 @@ async def confirm_password_reset(
     data: PasswordReset, request: Request, session: SessionDep
 ) -> None:
     """Set a new password with the token of a reset link. A used or an ended token gives 400."""
-    found = read_reset_token(_key(request), data.token)
+    found = read_reset_token(signing_key(request), data.token)
     user = await session.get({{ u.name }}, found[0]) if found else None
     credential = await session.get(Credential, user.id) if user else None
     tag = password_tag(credential.password_hash if credential else None)

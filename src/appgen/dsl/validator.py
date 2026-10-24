@@ -21,6 +21,7 @@ from appgen.dsl.auth import (
     SIGN_IN_PATH,
     SIGN_UP_PATH,
     Auth,
+    Provider,
     SignUp,
 )
 from appgen.dsl.currencies import CURRENCY_CODES
@@ -524,6 +525,35 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
     if entity is not None and auth.sign_up is not None:
         yield from _check_sign_up(definition, auth, auth.sign_up, entity)
+    yield from _check_password_off(auth)
+    # The settings of the issuers, and the variables of the API clients, also use names.
+    variables = {f"{name.upper()}_ISSUER" for name in auth.providers}
+    for api in definition.apis.values():
+        variables.add(api.base_url_env)
+        if api.security is not None:
+            variables.add(api.security.env)
+    for provider in auth.providers.values():
+        for key in ("client_id_env", "client_secret_env"):
+            variable: str = getattr(provider, key)
+            if variable in RESERVED_ENV_NAMES:
+                yield _error(
+                    "reserved-name",
+                    f"The apps use the environment variable '{variable}' for their own settings.",
+                    provider,
+                    at=key,
+                    hint="Use a name with the provider name, for example 'COMPANY_CLIENT_ID'.",
+                )
+            elif variable in variables:
+                yield _error(
+                    "duplicate-name",
+                    f"The environment variable '{variable}' has two uses.",
+                    provider,
+                    at=key,
+                    hint="Give each client ID and each client secret its own variable.",
+                )
+            variables.add(variable)
+        if entity is not None:
+            yield from _check_provider(definition, auth, provider, entity)
     for name in auth.public_pages:
         if name not in definition.pages:
             yield _missing(auth, "public_pages", "page", name, definition.pages)
@@ -592,26 +622,124 @@ def _check_sign_up(
                 sign_up,
                 hint="Make the relation optional, or turn off the sign-up.",
             )
+    yield from _check_default_role(definition, sign_up, sign_up.default_role, entity, "sign-up")
+
+
+def _check_default_role(
+    definition: AppDefinition,
+    element: Element,
+    default_role: str | None,
+    entity: Entity,
+    what: str,
+) -> Iterator[Diagnostic]:
+    """A new user of a sign-up or of a provider gets a role that exists."""
+    access = definition.access
     if access is None:
-        if sign_up.default_role is not None:
+        if default_role is not None:
             yield _error(
                 "invalid-option",
                 "'default_role' needs the section 'access'.",
-                sign_up,
+                element,
                 at="default_role",
             )
-    elif sign_up.default_role is not None:
-        if sign_up.default_role not in access.roles:
-            yield _missing(sign_up, "default_role", "role", sign_up.default_role, access.roles)
+    elif default_role is not None:
+        if default_role not in access.roles:
+            yield _missing(element, "default_role", "role", default_role, access.roles)
     else:
         role = entity.fields.get(access.role_field)
         if role is not None and role.default is None:
             yield _error(
                 "missing-key",
-                "The sign-up needs 'default_role': the role field has no default.",
-                sign_up,
+                f"The {what} needs 'default_role': the role field has no default.",
+                element,
                 hint=f"Add for example 'default_role: {next(iter(access.roles))}'.",
             )
+
+
+def _check_password_off(auth: Auth) -> Iterator[Diagnostic]:
+    """Without the sign-in with a password, a provider is necessary, and no password parts."""
+    if auth.password:
+        return
+    if not auth.providers:
+        yield _error(
+            "missing-key",
+            "Without the sign-in with a password ('password: false'), the app needs a provider.",
+            auth,
+            at="password",
+            hint="Add an OpenID Connect provider in 'providers'.",
+        )
+    for key, part in (("sign_up", auth.sign_up), ("password_reset", auth.password_reset)):
+        if part is not None:
+            yield _error(
+                "invalid-option",
+                f"'{key}' needs the sign-in with a password.",
+                part,
+                hint="Remove 'password: false', or remove '" + key + "'.",
+            )
+
+
+def _check_provider(
+    definition: AppDefinition, auth: Auth, provider: Provider, entity: Entity
+) -> Iterator[Diagnostic]:
+    """A provider asks for `openid`, and with `create_users` gives each required field."""
+    if "openid" not in provider.scopes:
+        yield _error(
+            "invalid-value",
+            "The scopes of a provider must include 'openid'.",
+            provider,
+            at="scopes",
+        )
+    if not provider.create_users:
+        for key in ("default_role", "claims"):
+            if getattr(provider, key):
+                yield _error(
+                    "invalid-option",
+                    f"'{key}' needs 'create_users: true'.",
+                    provider,
+                    at=key,
+                )
+        return
+    role_field = definition.access.role_field if definition.access is not None else None
+    for name in provider.claims:
+        found = entity.fields.get(name)
+        if found is None:
+            yield _missing(provider, "claims", "field", name, entity.stored_fields)
+        elif found.computed is not None or name in (role_field, auth.username_field):
+            if found.computed is not None:
+                reason = "the app computes it."
+            elif name == role_field:
+                reason = "it is the role."
+            else:
+                reason = "'username_claim' gives it."
+            yield _error(
+                "unsuitable-field",
+                f"A claim cannot set the field '{name}': {reason}",
+                provider,
+                at="claims",
+            )
+    for name, field in entity.stored_fields.items():
+        if (
+            field.required
+            and field.default is None
+            and name not in provider.claims
+            and name not in (role_field, auth.username_field)
+        ):
+            yield _error(
+                "missing-key",
+                f"A new user needs the required field '{name}' of '{auth.user_entity}'.",
+                provider,
+                at="claims",
+                hint=f"Add a claim for '{name}' to 'claims', for example '{name}: {name}'.",
+            )
+    for name, relation in entity.relations.items():
+        if relation.required and relation.kind == "many_to_one":
+            yield _error(
+                "unsuitable-field",
+                f"A provider cannot set the required relation '{name}' of '{auth.user_entity}'.",
+                provider,
+                hint="Make the relation optional, or remove 'create_users'.",
+            )
+    yield from _check_default_role(definition, provider, provider.default_role, entity, "provider")
 
 
 def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:

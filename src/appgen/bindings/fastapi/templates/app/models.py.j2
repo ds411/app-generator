@@ -2,7 +2,8 @@
 """All models of the app. Alembic and the relations between slices need them all."""
 
 from sqlalchemy.orm import configure_mappers
-{% if definition.auth %}
+{% set password = definition.auth and definition.auth.password %}
+{% if password %}
 
 {{ trace(definition.auth.id) }}
 from app.core.auth import Credential
@@ -14,7 +15,7 @@ from app.features.{{ e.slice }}.models import {{ e.name }}
 {% endfor %}
 
 __all__ = [
-{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if definition.auth else [])) | sort %}
+{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else [])) | sort %}
     "{{ model }}",
 {% endfor %}
 ]

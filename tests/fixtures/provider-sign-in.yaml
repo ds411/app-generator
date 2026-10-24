@@ -1,0 +1,49 @@
+# An app whose users sign in only with OpenID Connect providers
+# (`auth.password: false`, ADR 0020). scripts/check-fastapi.sh checks the
+# FastAPI app of this definition.
+version: 0
+app:
+  name: staff-notes
+  title: Staff notes
+entities:
+  Person:
+    fields:
+      email: { type: email, required: true, unique: true }
+      name: { type: string, required: true, max_length: 120 }
+      role: { type: enum, values: [admin, staff] }
+  Note:
+    fields:
+      text: { type: text, required: true }
+    relations:
+      author: { kind: many_to_one, target: Person }
+operations:
+  list_people: { kind: list, entity: Person }
+  create_person: { kind: create, entity: Person }
+  list_notes: { kind: list, entity: Note }
+  create_note: { kind: create, entity: Note }
+  read_note: { kind: read, entity: Note }
+auth:
+  user_entity: Person
+  username_field: email
+  password: false
+  providers:
+    company:
+      title: Company account
+      issuer: https://login.example.com
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      create_users: true
+      default_role: staff
+      claims: { name: name }
+    partner:
+      issuer: https://partner.example.com/realms/staff
+      client_id_env: PARTNER_OIDC_CLIENT
+      client_secret_env: PARTNER_OIDC_SECRET
+access:
+  role_field: role
+  roles:
+    admin: { operations: ["*"] }
+    staff:
+      operations: [list_people, list_notes, create_note, read_note]
+      records:
+        Note: { owner: author, operations: [change] }
