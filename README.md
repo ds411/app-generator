@@ -146,7 +146,10 @@ for binding in nextjs fastapi react; do
 done
 ```
 
-Each check reports no invalid traces and 100 % coverage. The FastAPI
+Each check reports no invalid traces and no uncovered elements. The
+stubs of the custom operations (and in the front ends, of the custom UI
+elements) are open gaps until a developer writes them: 8 for Next.js
+and React, 3 for FastAPI. The FastAPI
 app leaves out the pages and the UI by design, so its report lists the
 kinds `page` and `ui` as excluded. `tests/test_end_to_end.py` runs these
 steps with the CLI.
@@ -540,8 +543,9 @@ tool folders). It reports each malformed trace with its file, line, and
 column.
 
 The coverage (`appgen.trace.compute_coverage`) gives the status of each
-definition element: covered (a `generated` or a `manual` trace), an
-open gap (only `gap` traces), or uncovered (no trace). It gives the
+definition element: an open gap (a `gap` trace), covered (a
+`generated` or a `manual` trace, and no `gap` trace), or uncovered (no
+trace). It gives the
 coverage as a percentage, in total and for each element kind. A list of
 excluded kinds removes elements and the elements under them from the
 coverage, for example `ui` for an app without a front end.

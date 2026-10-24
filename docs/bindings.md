@@ -196,7 +196,8 @@ binding:
 A binding must declare each kind that its templates render in
 `covers`, else the generator makes gap files for elements that the app
 already has. `tests/test_end_to_end.py` checks that each app of the
-project tracker has 100 % coverage.
+project tracker has no uncovered elements, and that its open gaps are
+the stubs of the custom elements.
 
 ## Extension files
 

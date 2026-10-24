@@ -178,7 +178,7 @@ def render_json(report: CheckReport) -> str:
             {
                 "id": e.element_id,
                 "kind": e.kind,
-                "traces": [{"file": t.file, "line": t.line} for t in e.traces],
+                "traces": [{"file": t.file, "line": t.line} for t in e.gap_traces],
             }
             for e in coverage.gaps
         ],
@@ -213,7 +213,7 @@ def _kind_row(kind: KindCoverage) -> list[str]:
 
 
 def _locations(element: ElementCoverage) -> str:
-    return ", ".join(f"{t.file}:{t.line}" for t in element.traces)
+    return ", ".join(f"{t.file}:{t.line}" for t in element.gap_traces)
 
 
 def _count(number: int, noun: str) -> str:

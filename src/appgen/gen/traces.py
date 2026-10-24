@@ -106,7 +106,9 @@ def trace_globals(definition: AppDefinition) -> dict[str, Callable[..., str]]:
         return f"{before}{tag}{after}"
 
     @jinja2.pass_context
-    def trace_header(context: jinja2.runtime.Context, *element_ids: str) -> str:
+    def trace_header(
+        context: jinja2.runtime.Context, *element_ids: str, kind: str | None = None
+    ) -> str:
         if not element_ids:
             raise GenerationError("A trace header needs one or more element IDs.")
         before, after = _style(context, jsx=False)
@@ -115,7 +117,7 @@ def trace_globals(definition: AppDefinition) -> dict[str, Callable[..., str]]:
         lines = [f"{before}{notice}{after}"]
         for element_id in element_ids:
             _check(element_id)
-            tag = format_trace(element_id, _default_kind(context), "file")
+            tag = format_trace(element_id, kind or _default_kind(context), "file")
             lines.append(f"{before}{tag}{after}")
         return "\n".join(lines)
 

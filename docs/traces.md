@@ -56,9 +56,12 @@ Examples:
 | `gap`       | The generator | The element needs hand-written code here.                  |
 | `manual`    | The developer | This hand-written code covers the element.                 |
 
-For the coverage, an element with a `generated` or a `manual` trace is
-**covered**, an element with only `gap` traces is an **open gap**, and
-an element without a trace is **uncovered**. A trace covers only its
+For the coverage, an element with a `gap` trace is an **open gap**, an
+element with a `generated` or a `manual` trace and no `gap` trace is
+**covered**, and an element without a trace is **uncovered**. A `gap`
+trace keeps the element open also when other traces refer to it: the
+generated code that calls a stub has a `generated` trace to the element
+of the stub, but the stub still needs hand-written code. A trace covers only its
 own element: a trace to an entity does not cover the fields of the
 entity.
 
@@ -123,6 +126,14 @@ function. The app builds with the stub. To fill the gap:
 2. Change `@trace:gap` to `@trace:manual` in its header.
 3. Run `appgen check`: the element is covered, not an open gap.
 
+While the header has `@trace:gap`, the checker reports the element as an
+open gap, also when generated code calls the stub.
+
+An extension file can also be an optional hook that works as it is, for
+example the `validation_ext.py` of an entity in the FastAPI binding (by
+default it accepts all records). The definition does not ask for a
+hook, so it is not a gap: its header has a `@trace:manual` trace.
+
 The generator writes an extension file only if it does not exist, and
 never changes or deletes it. Thus a new run keeps the hand-written code.
 
@@ -175,7 +186,10 @@ Invalid traces: 0
 
 Uncovered elements: 0
 
-Open gaps: 0
+Open gaps: 3
+  operations.archive_project (operation): app/features/projects/archive_project_ext.py:2
+  operations.assign_task (operation): app/features/tasks/assign_task_ext.py:2
+  operations.complete_task (operation): app/features/tasks/complete_task_ext.py:2
 
 Coverage:
   kind       covered  gaps  uncovered  coverage
@@ -183,9 +197,9 @@ Coverage:
   entity           4     0          0   100.0 %
   field           20     0          0   100.0 %
   relation        10     0          0   100.0 %
-  operation       21     0          0   100.0 %
+  operation       18     3          0    85.7 %
   param            2     0          0   100.0 %
-  all             58     0          0   100.0 %
+  all             55     3          0    94.8 %
   Excluded kinds: page, ui.
 
 Result: passed.
@@ -195,7 +209,7 @@ The report has these parts:
 
 - **Invalid traces**: each one with its file, line, column, and reason.
 - **Uncovered elements**: the elements without a trace.
-- **Open gaps**: the elements with only gap traces, and where the
+- **Open gaps**: the elements with a gap trace, and where the gap
   traces are.
 - **Coverage**: the counts and the percentage for each element kind,
   and in total, and the excluded kinds.
@@ -214,12 +228,18 @@ gives the same text. A change that breaks readers changes `version`.
   "traces": 376,
   "invalid": [],
   "uncovered": [],
-  "gaps": [],
+  "gaps": [
+    {
+      "id": "operations.archive_project",
+      "kind": "operation",
+      "traces": [{ "file": "app/features/projects/archive_project_ext.py", "line": 2 }]
+    }
+  ],
   "coverage": {
-    "percent": 100.0,
+    "percent": 94.83,
     "total": 58,
-    "covered": 58,
-    "gaps": 0,
+    "covered": 55,
+    "gaps": 3,
     "uncovered": 0,
     "min_percent": null,
     "excluded_kinds": ["page", "ui"],
@@ -230,8 +250,9 @@ gives the same text. A change that breaks readers changes `version`.
 
 An entry of `invalid` has `file`, `line`, `column`, `code`, `message`,
 `text`, `element_id`, and `hint`. An entry of `uncovered` has `id` and
-`kind`. An entry of `gaps` has `id`, `kind`, and `traces` (`file` and
-`line`).
+`kind`. An entry of `gaps` has `id`, `kind`, and `traces`: the `file`
+and `line` of each gap trace. `coverage.gaps` and `gaps` in each entry
+of `by_kind` give the number of open gaps for each element kind.
 
 ## Invalid traces
 
@@ -261,7 +282,7 @@ Trace check: 109 files, 383 traces.
 
 Invalid traces: 3
   app/features/comments/validation_ext.py:2:3: unknown-element: The definition has no element 'entities.Comment'.
-    @trace:gap entities.Comment file
+    @trace:manual entities.Comment file
     hint: Did you mean 'entities.Project'?
   app/features/tasks/complete_task_ext.py:4:3: unknown-element: The definition has no element 'entities.Comment'.
     @trace:manual entities.Comment

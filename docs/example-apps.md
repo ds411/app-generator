@@ -54,7 +54,9 @@ done
 `appgen generate` prints the files that it wrote and the generation
 gaps. `appgen check` prints the trace coverage of the definition and
 the invalid traces. For each app, the result is `Result: passed.` with
-100 % coverage and no invalid traces. The FastAPI app has no pages, so
+no uncovered elements and no invalid traces. The stubs of the custom
+elements are open gaps until you write them: 8 for Next.js and React,
+3 for FastAPI. The FastAPI app has no pages, so
 its report shows the kinds `page` and `ui` as excluded. See
 [traces.md](traces.md) for the report format.
 

@@ -69,8 +69,23 @@ fastapi: 108 files, 376 traces. Invalid traces: 0. Uncovered elements: 0. Open g
          all   58  covered, 100.0 %. Excluded kinds: page, ui. Result: passed.
 ```
 
-`tests/test_end_to_end.py` asserts 100 % coverage for each app. The
-full FastAPI report is in [traces.md](traces.md#the-text-report).
+`tests/test_end_to_end.py` asserted 100 % coverage for each app.
+
+Update after #151: the checker now reports an element with a `gap`
+trace as an open gap, also when generated code calls the stub. The
+reports now show the stubs:
+
+```text
+nextjs:  Open gaps: 8. all  435 covered, 8 gaps, 98.2 %. Result: passed.
+react:   Open gaps: 8. all  435 covered, 8 gaps, 98.2 %. Result: passed.
+fastapi: Open gaps: 3. all   55 covered, 3 gaps, 94.8 %. Result: passed.
+```
+
+The FastAPI app has 3 stubs (the custom operations), not 8. Its 4
+`validation_ext.py` files are optional hooks that accept all records
+by default, so their trace is `manual`, not `gap`.
+`tests/test_end_to_end.py` asserts the open gaps of each app. The full
+FastAPI report is in [traces.md](traces.md#the-text-report).
 
 ### The change scenario
 

@@ -1,5 +1,5 @@
 # Created by appgen once. appgen never changes or deletes this file.
-# @trace:gap entities.Project file
+# @trace:manual entities.Project file
 """The custom validation of the entity Project.
 
 The create and update operations call `validate` before they store a
@@ -19,4 +19,4 @@ async def validate(session: AsyncSession, record: Project, *, created: bool) -> 
     new record. To reject the record, raise
     `app.core.errors.ProblemError(422, "<the reason>")`.
     """
-    # TODO(appgen): add the validation rules of the entity Project, if it has some.
+    # Add the validation rules of the entity Project here, if it has some.

@@ -134,8 +134,11 @@ changes `@trace:gap` to `@trace:manual` in the same place.
 
 The checker uses the kinds for coverage:
 
-- An element with a `generated` or a `manual` trace is covered.
-- An element with only `gap` traces is an open gap.
+- An element with a `gap` trace is an open gap, also when it has other
+  traces (changed by #151: the generated code that calls a stub has a
+  `generated` trace to the same element).
+- An element with a `generated` or a `manual` trace, and no `gap`
+  trace, is covered.
 - An element with no trace is uncovered.
 
 A trace covers only its own element. A trace to an entity does not

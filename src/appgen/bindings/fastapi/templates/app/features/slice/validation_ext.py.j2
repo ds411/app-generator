@@ -1,4 +1,9 @@
-{{ trace_header(element_id) }}
+{#
+  An optional hook, not a generation gap: the default code accepts all
+  records, and the definition does not ask for it. Thus its trace is
+  manual, and the checker counts the entity as covered (#151).
+#}
+{{ trace_header(element_id, kind="manual") }}
 {% set e = py.entity(name) %}
 """The custom validation of the entity {{ e.name }}.
 
@@ -20,4 +25,4 @@ async def validate(session: AsyncSession, record: {{ e.name }}, *, created: bool
     new record. To reject the record, raise
     `app.core.errors.ProblemError(422, "<the reason>")`.
     """
-    # TODO(appgen): add the validation rules of the entity {{ e.name }}, if it has some.
+    # Add the validation rules of the entity {{ e.name }} here, if it has some.
