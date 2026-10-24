@@ -388,3 +388,76 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     assert 'command: ["alembic", "upgrade", "head"]' in compose
     assert "condition: service_completed_successfully" in compose
     assert ".venv\n" in files[".dockerignore"]
+
+
+NAMING = (
+    "version: 0\n"
+    "app: { name: rooms, title: Rooms }\n"
+    "entities:\n"
+    "  Room:\n"
+    "    crud: [list]\n"
+    "    x-fastapi-path: /meeting-rooms\n"
+    "    x-fastapi-table: room\n"
+    "    fields:\n"
+    "      name: { type: string }\n"
+    "    relations:\n"
+    "      tags: { kind: many_to_many, target: Tag, inverse: rooms }\n"
+    "  Tag:\n"
+    "    fields:\n"
+    "      name: { type: string }\n"
+    "    relations:\n"
+    "      rooms: { kind: many_to_many, target: Room, inverse: tags, x-fastapi-table: room_tag }\n"
+    "  Booking:\n"
+    "    fields:\n"
+    "      title: { type: string }\n"
+    "    relations:\n"
+    "      room: { kind: many_to_one, target: Room, x-fastapi-column: room_ref }\n"
+)
+
+
+def test_extension_keys_set_the_table_column_and_url_names(fastapi: Binding) -> None:
+    files = _files(generate(load_definition_text(NAMING), fastapi))
+
+    rooms = files["app/features/rooms/models.py"]
+    assert '    __tablename__ = "room"\n' in rooms
+    # The key of the second side names the join table of the pair.
+    assert 'room_tag = Table(\n    "room_tag",' in rooms
+    list_rooms = files["app/features/rooms/list_rooms.py"]
+    assert 'router = APIRouter(prefix="/meeting-rooms")' in list_rooms
+    bookings = files["app/features/bookings/models.py"]
+    assert '"room_ref",' in bookings and 'ForeignKey("room.id")' in bookings
+    # The API field keeps the name of the relation.
+    assert "    room_id: UUID | None" in files["app/features/bookings/schemas.py"]
+    migration = files["migrations/versions/0001_schema.py"]
+    assert 'sa.Column("room_ref", sa.Uuid(), nullable=True)' in migration
+    assert '"fk_bookings_room_ref_room",' in migration
+
+
+def test_without_the_keys_the_names_follow_the_slice(fastapi: Binding) -> None:
+    text = NAMING.replace(", x-fastapi-table: room_tag", "")
+    text = text.replace(", x-fastapi-column: room_ref", "")
+    text = "\n".join(line for line in text.splitlines() if "x-fastapi-" not in line)
+    app = python_app(load_definition_text(text))
+
+    room = app.entity("Room")
+    assert (room.table, room.path, room.join_tables[0].name) == ("rooms", "/rooms", "rooms_tags")
+    assert [(r.fk, r.fk_attr) for r in app.entity("Booking").relations] == [("room_id", "room_id")]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("x-fastapi-table: room\n", "x-fastapi-table: bookings\n", "both use the table name"),
+        ("/meeting-rooms", "/bookings", "both use the URL prefix"),
+        (", x-fastapi-table: room_tag", ", x-fastapi-table: tag_room", "different values"),
+        ("inverse: tags,", "inverse: tags, x-fastapi-column: c,", "has no foreign key column"),
+        ("x-fastapi-column", "x-fastapi-table", "has no join table"),
+    ],
+)
+def test_wrong_naming_keys_stop_the_run(fastapi: Binding, old: str, new: str, message: str) -> None:
+    text = NAMING.replace(old, new)
+    if "different" in message:
+        text = text.replace("inverse: rooms }", "inverse: rooms, x-fastapi-table: room_tag }")
+
+    with pytest.raises(Exception, match=message):
+        generate(load_definition_text(text), fastapi)

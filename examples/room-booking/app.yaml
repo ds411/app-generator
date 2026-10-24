@@ -12,6 +12,8 @@ app:
 entities:
   Room:
     description: A meeting room that members can book.
+    # The API serves the rooms under /meeting-rooms, not under /rooms.
+    x-fastapi-path: /meeting-rooms
     crud:
       views: [table, detail]
       forms: [create, update]
@@ -23,7 +25,11 @@ entities:
       hourly_rate: { type: decimal, min: 0, precision: 8, scale: 2, format: currency }
       bookable: { type: boolean, default: true }
     relations:
-      amenities: { kind: many_to_many, target: Amenity, inverse: rooms }
+      amenities:
+        kind: many_to_many
+        target: Amenity
+        inverse: rooms
+        x-fastapi-table: room_amenity
       bookings: { kind: one_to_many, target: Booking, inverse: room }
 
   Amenity:
@@ -78,6 +84,8 @@ entities:
         required: true
         on_delete: restrict
         inverse: bookings
+        # The column name of the database. The API field stays `organizer_id`.
+        x-fastapi-column: organizer_member_id
 
 operations:
   cancel_booking:

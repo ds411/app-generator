@@ -47,7 +47,9 @@ Each entity is a vertical slice in `app/features/<slice>/`. The slice
 name is the plural of the entity in snake case, for example `tasks`, or
 the `plural_label` of the entity in snake case, for example `people`.
 The slice name is also the table name and the URL prefix
-(`/tasks`, `/people`).
+(`/tasks`, `/people`). The extension keys `x-fastapi-table` and
+`x-fastapi-path` of an entity change the table name and the URL prefix
+(#186). The slice folder keeps its name.
 
 | Path                               | Content                                         |
 | ---------------------------------- | ----------------------------------------------- |
@@ -87,9 +89,14 @@ generator stops with an error.
   relation, have a foreign key column `<relation>_id`. Of a pair of
   `one_to_one` relations, the side with `required` or `on_delete` owns
   the key. Else the side that comes first in the definition owns it.
+  The extension key `x-fastapi-column` changes the column name. The
+  attribute and the JSON key stay `<relation>_id`.
 - A `many_to_many` relation has a join table `<slice>_<relation>`. A
   pair of inverse relations shares the table of the side that comes
-  first in the definition.
+  first in the definition. The extension key `x-fastapi-table` of one
+  of the two sides changes the table name.
+- Two tables, or two URL prefixes, with the same name stop the
+  generator with an error.
 - Enum fields are text columns with a check constraint, not native
   Postgres enums, so that a migration can add a value easily.
 - One generated Alembic migration creates the schema of the current

@@ -98,3 +98,12 @@ def test_validate_and_generate_report_the_keys(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert f"{path}:9:82:" in result.output
     assert not (tmp_path / "o").exists()
+
+
+def test_the_naming_keys_of_fastapi_need_valid_names() -> None:
+    keys = "x-fastapi-path: orders/all\n    x-fastapi-table: Orders"
+    text = TEXT.replace("x-mock-count: 5", keys)
+    valid = text.replace("orders/all", "/orders/all").replace("Orders", "order")
+
+    assert [c[0] for c in check(text, "fastapi")] == ["invalid-value", "invalid-value"]
+    assert check(valid, "fastapi") == []

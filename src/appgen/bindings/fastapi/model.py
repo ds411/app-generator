@@ -24,6 +24,12 @@ EMBED_KEY = "x-fastapi-embed"
 """The extension key of a relation that the read schema embeds as an object."""
 EXAMPLE_KEY = "x-example"
 """The extension key of a field that gives a valid sample value for the tests."""
+PATH_KEY = "x-fastapi-path"
+"""The extension key of an entity that sets the URL prefix of its router."""
+TABLE_KEY = "x-fastapi-table"
+"""The extension key of an entity or a many-to-many relation that sets its table name."""
+COLUMN_KEY = "x-fastapi-column"
+"""The extension key of a relation that sets the name of its foreign key column."""
 
 _INT32 = 2**31 - 1
 _ON_DELETE = {"restrict": "RESTRICT", "cascade": "CASCADE", "set_null": "SET NULL"}
@@ -430,7 +436,9 @@ class PyEntity:
     id: str
     snake: str
     slice: str
-    """The name of the slice folder and of the table, for example `tasks`."""
+    """The name of the slice folder, for example `tasks`."""
+    table: str
+    """The name of the table, the slice unless `x-fastapi-table` sets it."""
     path: str
     """The URL prefix of the slice, for example `/tasks`."""
     label: str
@@ -442,10 +450,6 @@ class PyEntity:
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
-
-    @property
-    def table(self) -> str:
-        return self.slice
 
     @property
     def params(self) -> list[PyField]:
@@ -774,13 +778,15 @@ def python_app(definition: AppDefinition) -> PyApp:
     """Return the model of the binding for an app definition.
 
     Raise GenerationError if two names of an entity give the same Python
-    name, or if embedded relations form a cycle.
+    name, if two tables or URL prefixes have the same name, or if embedded
+    relations form a cycle.
     """
     entities = {name: _entity(name, entity) for name, entity in definition.entities.items()}
     for py_entity in entities.values():
         py_entity.app_entities = entities
     for name, entity in definition.entities.items():
         _relations(definition, entities, name, entity)
+    _check_extensions(definition, entities)
     _check_embed_cycles(entities)
     operations: dict[str, PyOperation] = {}
     for name, operation in definition.operations.items():
@@ -803,17 +809,19 @@ def python_app(definition: AppDefinition) -> PyApp:
 def _entity(name: str, entity: Entity) -> PyEntity:
     slice_name = snake(entity.plural_label) if entity.plural_label else plural(name)
     label = entity.label or " ".join(snake(name).split("_")).capitalize()
+    table = str(entity.extensions.get(TABLE_KEY, slice_name))
     return PyEntity(
         name=name,
         id=entity.id,
         snake=snake(name),
         slice=slice_name,
-        path="/" + kebab(slice_name),
+        table=table,
+        path=str(entity.extensions.get(PATH_KEY, "/" + kebab(slice_name))),
         label=label,
         plural_label=entity.plural_label or " ".join(slice_name.split("_")).capitalize(),
         description=entity.description,
         fields=[
-            _field(field_name, f, f"{name}{pascal(field_name)}", slice_name)
+            _field(field_name, f, f"{name}{pascal(field_name)}", table)
             for field_name, f in entity.fields.items()
         ],
     )
@@ -1067,8 +1075,8 @@ def _relations(
             rel.ids_field = singular(rel_name) + "_ids"
             _join_table(definition, entities, py_entity, target, rel_name, relation, rel)
         else:
-            rel.fk = f"{rel_name}_id"
-            rel.fk_attr = attribute(rel.fk)
+            rel.fk_attr = attribute(f"{rel_name}_id")
+            rel.fk = str(relation.extensions.get(COLUMN_KEY, f"{rel_name}_id"))
             rel.on_delete = _ON_DELETE.get(relation.on_delete or "")
             rel.unique = relation.kind == "one_to_one"
         py_entity.relations.append(rel)
@@ -1124,7 +1132,7 @@ def _join_table(
     left = f"{owner.snake}_id"
     right = f"{target.snake}_id" if target.name != owner.name else f"{singular(rel_name)}_id"
     table = PyJoinTable(
-        name=f"{owner.slice}_{rel_name}",
+        name=_join_table_name(definition, owner, rel_name, relation),
         relation_id=relation.id,
         left_table=owner.table,
         left_column=left,
@@ -1134,6 +1142,57 @@ def _join_table(
     owner.join_tables.append(table)
     rel.secondary = table.name
     rel.local_column, rel.remote_column = left, right
+
+
+def _join_table_name(
+    definition: AppDefinition, owner: PyEntity, rel_name: str, relation: Relation
+) -> str:
+    """Return the name of a join table: `x-fastapi-table` of one of the two sides, or a default."""
+    names = {relation.extensions.get(TABLE_KEY)}
+    if relation.inverse is not None:
+        other = definition.entities[relation.target].relations[relation.inverse]
+        names.add(other.extensions.get(TABLE_KEY))
+    names.discard(None)
+    if len(names) > 1:
+        raise GenerationError(
+            f"The relation '{relation.id}' and its inverse set different values of "
+            f"'{TABLE_KEY}'. Set the same value on the two sides, or on one side only."
+        )
+    return str(names.pop()) if names else f"{owner.slice}_{rel_name}"
+
+
+def _check_extensions(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Raise GenerationError for a naming key on a relation that does not use it,
+    or for two tables or two URL prefixes with the same name."""
+    for name, entity in definition.entities.items():
+        for rel in entities[name].relations:
+            relation = entity.relations[rel.name]
+            if COLUMN_KEY in relation.extensions and rel.side != "fk":
+                raise GenerationError(
+                    f"The relation '{relation.id}' has no foreign key column, so "
+                    f"'{COLUMN_KEY}' has no effect. Set it on the other side of the relation."
+                )
+            if TABLE_KEY in relation.extensions and rel.side != "m2m":
+                raise GenerationError(
+                    f"The relation '{relation.id}' has no join table, so '{TABLE_KEY}' "
+                    "has no effect. Use it on a many-to-many relation or on an entity."
+                )
+    tables: dict[str, str] = {}
+    paths: dict[str, str] = {}
+    for e in entities.values():
+        for table, owner in [(e.table, e.id), *((t.name, t.relation_id) for t in e.join_tables)]:
+            if table in tables:
+                raise GenerationError(
+                    f"'{tables[table]}' and '{owner}' both use the table name '{table}'. "
+                    f"Set another name with '{TABLE_KEY}'."
+                )
+            tables[table] = owner
+        if e.path in paths:
+            raise GenerationError(
+                f"'{paths[e.path]}' and '{e.id}' both use the URL prefix '{e.path}'. "
+                f"Set another prefix with '{PATH_KEY}'."
+            )
+        paths[e.path] = e.id
 
 
 def _check_embed_cycles(entities: dict[str, PyEntity]) -> None:
