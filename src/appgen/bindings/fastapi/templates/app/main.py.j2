@@ -15,7 +15,11 @@ from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
 from app.core.logging import RequestLogMiddleware, configure_logging
+{% if py.redis %}
+from app.core.rate_limit import Limiter, RateLimiter, RateLimitMiddleware, RedisRateLimiter
+{% else %}
 from app.core.rate_limit import RateLimiter, RateLimitMiddleware
+{% endif %}
 {% for e in py.entity_order() | sort(attribute="slice") %}
 
 {{ trace(e.id) }}
@@ -26,9 +30,14 @@ from app.models import configure_models
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Close the connections of the database when the app stops."""
+    """Close the connections of the database{{ " and of Redis" if py.redis }} when the app stops."""
     yield
     await app.state.engine.dispose()
+{% if py.redis %}
+    limiter = getattr(app.state, "rate_limiter", None)
+    if isinstance(limiter, RedisRateLimiter):
+        await limiter.redis.aclose()
+{% endif %}
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -55,8 +64,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     if settings.rate_limit_per_minute > 0:
+{% if py.redis %}
+        limit, store = settings.rate_limit_per_minute, settings.rate_limit_store_url
+        limiter: Limiter = RedisRateLimiter(limit, store) if store else RateLimiter(limit)
+        app.state.rate_limiter = limiter
+        fail_closed = settings.rate_limit_fail_closed
+        app.add_middleware(RateLimitMiddleware, limiter=limiter, fail_closed=fail_closed)
+{% else %}
         app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
         app.add_middleware(RateLimitMiddleware, limiter=app.state.rate_limiter)
+{% endif %}
     # The last middleware runs first, so the log has each response, also a 429.
     app.add_middleware(RequestLogMiddleware)
     add_problem_handlers(app)

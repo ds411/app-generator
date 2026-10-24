@@ -1,4 +1,8 @@
 {{ trace_header("app") }}
+{% if py.redis %}
+import logging
+
+{% endif %}
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -9,6 +13,22 @@ from app.main import create_app
 pytestmark = pytest.mark.anyio
 
 
+{% if py.redis %}
+# A Redis URL where no server listens: the store is not available.
+NO_REDIS = "redis://127.0.0.1:1/0"
+
+
+def make_settings(limit: int, store: str | None = None, fail_closed: bool = False) -> Settings:
+    return Settings(
+        database_url="sqlite+aiosqlite:///:memory:",
+        rate_limit_per_minute=limit,
+        rate_limit_store_url=store,
+        rate_limit_fail_closed=fail_closed,
+{% if definition.auth %}
+        auth_secret="test-secret",
+{% endif %}
+    )
+{% else %}
 def make_settings(limit: int) -> Settings:
     return Settings(
         database_url="sqlite+aiosqlite:///:memory:",
@@ -17,18 +37,20 @@ def make_settings(limit: int) -> Settings:
         auth_secret="test-secret",
 {% endif %}
     )
+{% endif %}
 
 
-def test_the_limiter_counts_the_requests_of_each_client_in_each_minute() -> None:
+{% set aw = "await " if py.redis else "" %}
+{{ "async " if py.redis }}def test_the_limiter_counts_the_requests_of_each_client_in_each_minute() -> None:
     now = [30.0]
     limiter = RateLimiter(2, clock=lambda: now[0])
 
-    assert limiter.hit("a") == (True, 1, 30)
-    assert limiter.hit("a") == (True, 0, 30)
-    assert limiter.hit("a") == (False, 0, 30)
-    assert limiter.hit("b") == (True, 1, 30)
+    assert {{ aw }}limiter.hit("a") == (True, 1, 30)
+    assert {{ aw }}limiter.hit("a") == (True, 0, 30)
+    assert {{ aw }}limiter.hit("a") == (False, 0, 30)
+    assert {{ aw }}limiter.hit("b") == (True, 1, 30)
     now[0] = 60.0
-    assert limiter.hit("a") == (True, 1, 60)
+    assert {{ aw }}limiter.hit("a") == (True, 1, 60)
 
 
 async def test_a_client_over_the_limit_gets_429() -> None:
@@ -51,3 +73,28 @@ async def test_without_a_limit_there_is_no_429() -> None:
         responses = [await client.get("/openapi.json") for _ in range(5)]
 
     assert {r.status_code for r in responses} == {200}
+{% if py.redis %}
+
+
+async def test_without_the_store_a_request_passes_with_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(make_settings(1, store=NO_REDIS))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with caplog.at_level(logging.WARNING, logger="app.core.rate_limit"):
+            responses = [await client.get("/openapi.json") for _ in range(2)]
+
+    assert [r.status_code for r in responses] == [200, 200]
+    warnings = [r for r in caplog.records if "rate limit store" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+async def test_without_the_store_and_fail_closed_a_request_gets_503() -> None:
+    app = create_app(make_settings(1, store=NO_REDIS, fail_closed=True))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/openapi.json")
+
+    assert response.status_code == 503
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["status"] == 503
+{% endif %}

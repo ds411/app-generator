@@ -1,6 +1,10 @@
 {{ trace_header("app") }}
 # Start Postgres, run the migrations, and start the API on port 8000:
 #   docker compose up --build
+{% if py.redis %}
+# With Redis for the rate limit of all replicas:
+#   RATE_LIMIT_STORE_URL=redis://redis:6379/0 docker compose --profile redis up --build
+{% endif %}
 
 name: {{ app.name | tojson }}
 
@@ -34,6 +38,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+{% if py.redis %}
+      RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
+{% endif %}
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
@@ -50,6 +57,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+{% if py.redis %}
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:8-alpine}
+    profiles: [redis]
+{% endif %}
 
 volumes:
   db-data:

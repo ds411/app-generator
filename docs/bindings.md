@@ -251,6 +251,7 @@ The keys of the bindings of this repository:
 | `fastapi` | `x-fastapi-path`  | `entity`         | The URL prefix of the router, for example `/meeting-rooms`. |
 | `fastapi` | `x-fastapi-table` | `entity`, `relation` | The table name of the entity, or the join table of a `many_to_many` relation. |
 | `fastapi` | `x-fastapi-column` | `relation`      | The foreign key column of a `many_to_one` or owning `one_to_one` relation. |
+| `fastapi` | `x-fastapi-rate-limit-store` | `app` | `memory` (default) or `redis`: where the rate limit counts the requests. |
 | `react`   | `x-mock-count`    | `entity`         | An integer, 1 or more.        |
 | `react`   | `x-react-data`    | `app`            | `mock` (default) or `api`.    |
 

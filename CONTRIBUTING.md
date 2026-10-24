@@ -242,7 +242,9 @@ git config core.hooksPath .githooks
   hook also runs `scripts/check-fastapi.sh`. The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
-  the output. Then it generates the room booking example (sign-in,
+  the output. It also starts two processes of the app with Redis, and
+  checks that they share the rate limit. Then it generates the room
+  booking example (sign-in,
   sign-up, and roles), and runs Ruff, pyright, the generated tests, and
   `appgen check` on it. It needs Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
@@ -340,6 +342,7 @@ manual steps.
 | `PYTHON_IMAGE`    | `mirror.gcr.io/library/python:3.14-slim`                |
 | `NGINX_IMAGE`     | `mirror.gcr.io/nginxinc/nginx-unprivileged:1.29-alpine` |
 | `NODE_IMAGE`      | `localhost/appgen-node:24-alpine`                       |
+| `REDIS_IMAGE`     | `mirror.gcr.io/library/redis:8-alpine`                  |
 | `UV_SYSTEM_CERTS` | `true`                                                  |
 
 `UV_SYSTEM_CERTS` makes uv trust the system certificates, which hold

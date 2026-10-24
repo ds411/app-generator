@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     """Write each log line as a JSON object. Set it to false for plain text."""
     rate_limit_per_minute: int = 0
     """The number of requests that each client can send in each minute. 0 sets no limit."""
+{% if py.redis %}
+    rate_limit_store_url: str | None = None
+    """The Redis of the rate limit, for example `redis://localhost:6379/0`, so that all
+    replicas share one limit. Without it, each process counts in its memory."""
+    rate_limit_fail_closed: bool = False
+    """True: give 503 when the Redis of the rate limit is not available. False: log a
+    warning, and let the request through."""
+{% endif %}
 {% if definition.auth %}
     auth_secret: str = ""
     """The secret key that signs the sign-in tokens: a long random text (`AUTH_SECRET`)."""

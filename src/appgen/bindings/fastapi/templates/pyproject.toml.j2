@@ -14,6 +14,9 @@ dependencies = [
     "httpx>=0.28",
 {% endif %}
     "pydantic-settings>=2.16",
+{% if py.redis %}
+    "redis>=8.0",
+{% endif %}
     "sqlalchemy[asyncio]>=2.1",
 ]
 

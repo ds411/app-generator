@@ -43,6 +43,8 @@ TABLE_KEY = "x-fastapi-table"
 """The extension key of an entity or a many-to-many relation that sets its table name."""
 COLUMN_KEY = "x-fastapi-column"
 """The extension key of a relation that sets the name of its foreign key column."""
+RATE_LIMIT_STORE_KEY = "x-fastapi-rate-limit-store"
+"""The extension key of the app that selects the store of the rate limit: `memory` or `redis`."""
 
 _INT32 = 2**31 - 1
 _ON_DELETE = {"restrict": "RESTRICT", "cascade": "CASCADE", "set_null": "SET NULL"}
@@ -924,6 +926,8 @@ class PyApp:
     description: str | None
     entities: dict[str, PyEntity]
     operations: dict[str, PyOperation]
+    redis: bool = False
+    """True if the rate limit can count in Redis (`RATE_LIMIT_STORE_URL`), for all replicas."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1036,6 +1040,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         description=definition.app.description,
         entities=entities,
         operations=operations,
+        redis=definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis",
     )
 
 

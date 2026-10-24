@@ -7,7 +7,7 @@ Pages and the UI are out of the scope of the binding.
 """
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import JsonValue, StringConstraints
 
@@ -16,6 +16,7 @@ from appgen.bindings.fastapi.model import (
     EMBED_KEY,
     EXAMPLE_KEY,
     PATH_KEY,
+    RATE_LIMIT_STORE_KEY,
     TABLE_KEY,
     binding_context,
 )
@@ -279,6 +280,15 @@ BINDING = Binding(
             description=(
                 "The foreign key column of a many-to-one or owning one-to-one relation. "
                 "The API field keeps its name."
+            ),
+        ),
+        ExtensionKey(
+            name=RATE_LIMIT_STORE_KEY,
+            kinds=frozenset({"app"}),
+            type=Literal["memory", "redis"],
+            description=(
+                "The store of the rate limit: `memory` (default) or `redis`, which adds "
+                "the setting `RATE_LIMIT_STORE_URL`: all replicas share one limit."
             ),
         ),
     ),
