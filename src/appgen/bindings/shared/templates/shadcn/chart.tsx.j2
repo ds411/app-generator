@@ -3,8 +3,10 @@
 "use client"
 
 import * as React from "react"
+{% endraw %}{% if i18n %}{% raw %}import { getLocale } from "@/shared/lib/i18n"
 import { cn } from "@/shared/lib/utils"
-import * as RechartsPrimitive from "recharts"
+{% endraw %}{% else %}{% raw %}import { cn } from "@/shared/lib/utils"
+{% endraw %}{% endif %}{% raw %}import * as RechartsPrimitive from "recharts"
 import type { TooltipValueType } from "recharts"
 
 // Format: { THEME_NAME: CSS_SELECTOR }
@@ -256,7 +258,7 @@ function ChartTooltipContent({
                       {item.value != null && (
                         <span className="font-mono font-medium text-foreground tabular-nums">
                           {typeof item.value === "number"
-                            ? item.value.toLocaleString()
+                            ? {% endraw %}{% if i18n %}{% raw %}item.value.toLocaleString(getLocale()){% endraw %}{% else %}{% raw %}item.value.toLocaleString(){% endraw %}{% endif %}{% raw %}
                             : String(item.value)}
                         </span>
                       )}

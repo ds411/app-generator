@@ -2999,6 +2999,17 @@
           },
           "title": "Text",
           "type": "object"
+        },
+        "locale": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

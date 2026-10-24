@@ -31,6 +31,8 @@ export type ExpectedToken = {
 /** The test language of scripts/translation_test.py. */
 export type ExpectedTestLanguage = {
   code: string;
+  /** The locale of the test language: the `lang` of the page. */
+  locale: string;
   /** The key of the selected language in the browser storage. */
   storageKey: string;
   /** The texts that are not UI text: the values of the records and the names of the languages. */

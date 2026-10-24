@@ -93,6 +93,88 @@ def default(name: str, text: str) -> tuple[str, str]:
     return f'{name} = "{text}"', f'{name} = {{% endraw %}}{{{{ tr(js("{text}")) }}}}{{% raw %}}'
 
 
+def localized(old: str, new: str) -> tuple[str, str]:
+    """Code for an app with translations, for example a format in the selected locale."""
+    end, start = "{% endraw %}", "{% raw %}"
+    return (
+        old,
+        f"{end}{{% if i18n %}}{start}{new}{end}{{% else %}}{start}{old}{end}{{% endif %}}{start}",
+    )
+
+
+def text(value: str) -> str:
+    """A fixed text as a JavaScript expression in the code of a `localized` change."""
+    return f'{{% endraw %}}{{{{ tr(js("{value}")) }}}}{{% raw %}}'
+
+
+def text_format(value: str, **values: str) -> str:
+    """A fixed text with values as a JavaScript expression in the code of a `localized` change."""
+    arguments = "".join(f', {name}="{expression}"' for name, expression in values.items())
+    return f'{{% endraw %}}{{{{ js_format("{value}"{arguments}) }}}}{{% raw %}}'
+
+
+_CALENDAR_LOCALE = f"""/** The names of the months and the days, in the selected locale. */
+const localeFormatters: Partial<Formatters> = {{
+  formatCaption: (month) => dateTimeFormat({{ month: "long", year: "numeric" }}).format(month),
+  formatMonthDropdown: (month) => dateTimeFormat({{ month: "short" }}).format(month),
+  formatYearDropdown: (year) => dateTimeFormat({{ year: "numeric" }}).format(year),
+  formatWeekdayName: (weekday) => dateTimeFormat({{ weekday: "short" }}).format(weekday),
+}}
+
+/** The labels of the calendar, in the selected language. */
+const localeLabels: Partial<Labels> = {{
+  labelNav: () => {text("Navigation bar")},
+  labelNext: () => {text("Go to the next month")},
+  labelPrevious: () => {text("Go to the previous month")},
+  labelMonthDropdown: () => {text("Choose the month")},
+  labelYearDropdown: () => {text("Choose the year")},
+  labelGrid: (month) => dateTimeFormat({{ month: "long", year: "numeric" }}).format(month),
+  labelWeekday: (weekday) => dateTimeFormat({{ weekday: "long" }}).format(weekday),
+  labelDayButton: (day, modifiers) => {{
+    const date = dateTimeFormat({{ dateStyle: "full" }}).format(day)
+    const label = modifiers.today ? {text_format("Today, {date}", date="date")} : date
+    return modifiers.selected ? {text_format("{date}, selected", date="label")} : label
+  }},
+}}
+
+"""
+
+# The code of the components that formats dates and numbers. An app with
+# translations uses the locale of the selected language (ADR 0010).
+LOCALE: dict[str, tuple[tuple[str, str], ...]] = {
+    "calendar": (
+        localized(
+            'import { Button, buttonVariants } from "@/shared/ui/button"\n',
+            'import { Button, buttonVariants } from "@/shared/ui/button"\n'
+            'import { dateTimeFormat, firstWeekday } from "@/shared/lib/format"\n'
+            'import { getLocale } from "@/shared/lib/i18n"\n',
+        ),
+        localized("  type DayButton,\n", "  type DayButton,\n  type Formatters,\n  type Labels,\n"),
+        localized("function Calendar({\n", _CALENDAR_LOCALE + "function Calendar({\n"),
+        localized(
+            """      formatters={{
+        formatMonthDropdown: (date) =>
+          date.toLocaleString("default", { month: "short" }),
+        ...formatters,
+      }}
+""",
+            """      lang={getLocale()}
+      weekStartsOn={firstWeekday()}
+      labels={localeLabels}
+      formatters={{ ...localeFormatters, ...formatters }}
+""",
+        ),
+    ),
+    "chart": (
+        localized(
+            'import { cn } from "@/shared/lib/utils"\n',
+            'import { getLocale } from "@/shared/lib/i18n"\n'
+            'import { cn } from "@/shared/lib/utils"\n',
+        ),
+        localized("item.value.toLocaleString()", "item.value.toLocaleString(getLocale())"),
+    ),
+}
+
 # The fixed text of the components. The text helpers of the bindings
 # write a call of `t` for an app with translations, and the text as it is
 # for an app without translations (ADR 0010).
@@ -124,8 +206,8 @@ TEXTS: dict[str, tuple[tuple[str, str], ...]] = {
 
 
 def translate(name: str, source: str) -> str:
-    """Change the fixed text of a component to calls of the text helpers."""
-    for old, new in TEXTS.get(name, ()):
+    """Change the fixed text of a component to calls of the text helpers, and its formats."""
+    for old, new in (*TEXTS.get(name, ()), *LOCALE.get(name, ())):
         if old not in source:
             raise ValueError(f"The component {name} has no text {old!r}.")
         source = source.replace(old, new)

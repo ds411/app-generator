@@ -4,6 +4,9 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
+{% if i18n %}
+import { dateTimeFormat, firstWeekday } from "@/shared/lib/format";
+{% endif %}
 import { cn } from "@/shared/lib/utils";
 import { Link } from "@/shared/lib/router";
 import { Button } from "@/shared/ui/button";
@@ -21,10 +24,18 @@ export type CalendarEvent = {
 export type CalendarMode = "week" | "month";
 
 const DAY_COUNT = { week: 7, month: 42 };
+{% if i18n %}
+// The names of the days and months, in the locale of the selected language.
+const weekdayFormat = () => dateTimeFormat({ weekday: "short" });
+const monthFormat = () => dateTimeFormat({ month: "long", year: "numeric" });
+const rangeFormat = () => dateTimeFormat({ day: "numeric", month: "short", year: "numeric" });
+const timeFormat = () => dateTimeFormat({ timeStyle: "short" });
+{% else %}
 const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const monthFormat = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 const rangeFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
 const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+{% endif %}
 
 function startOfDay(date: Date): Date {
   const result = new Date(date);
@@ -38,6 +49,15 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
+{% if i18n %}
+/** Return the first day of the week of a date, in the locale of the selected language. */
+function startOfWeek(date: Date): Date {
+  const day = startOfDay(date);
+  return addDays(day, -((day.getDay() - firstWeekday() + 7) % 7));
+}
+
+/** Return the first day of the grid: the first day of the week, or of the first week of the month. */
+{% else %}
 /** Return the Monday of the week of a date. */
 function startOfWeek(date: Date): Date {
   const day = startOfDay(date);
@@ -45,6 +65,7 @@ function startOfWeek(date: Date): Date {
 }
 
 /** Return the first day of the grid: the Monday of the week, or of the first week of the month. */
+{% endif %}
 function firstDay(anchor: Date, mode: CalendarMode): Date {
   return mode === "week" ? startOfWeek(anchor) : startOfWeek(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
 }
@@ -75,8 +96,12 @@ export function CalendarGrid({
   const today = startOfDay(new Date()).getTime();
   const title =
     mode === "month"
-      ? monthFormat.format(anchor)
+      ? monthFormat{{ "()" if i18n }}.format(anchor)
+{% if i18n %}
+      : rangeFormat().formatRange(first, addDays(first, 6));
+{% else %}
       : `${rangeFormat.format(first)} – ${rangeFormat.format(addDays(first, 6))}`;
+{% endif %}
   const move = (step: number) =>
     setAnchor((date) =>
       mode === "month" ? new Date(date.getFullYear(), date.getMonth() + step, 1) : addDays(date, 7 * step),
@@ -114,7 +139,7 @@ export function CalendarGrid({
       <div className="grid grid-cols-7 overflow-hidden rounded-lg border text-sm">
         {days.slice(0, 7).map((day) => (
           <div key={`head-${day.getTime()}`} className="border-b bg-muted/50 px-2 py-1.5 text-xs font-medium text-muted-foreground">
-            {weekdayFormat.format(day)}
+            {weekdayFormat{{ "()" if i18n }}.format(day)}
           </div>
         ))}
         {days.map((day) => {
@@ -123,7 +148,7 @@ export function CalendarGrid({
           return (
             <section
               key={day.getTime()}
-              aria-label={rangeFormat.format(day)}
+              aria-label={rangeFormat{{ "()" if i18n }}.format(day)}
               className={cn(
                 "flex flex-col gap-1 border-b border-r p-1.5 [&:nth-child(7n)]:border-r-0",
                 mode === "week" ? "min-h-48" : "min-h-24",
@@ -139,7 +164,7 @@ export function CalendarGrid({
                 {day.getDate()}
               </span>
               {items.map((event) => {
-                const time = dateOnly || event.start < day ? null : timeFormat.format(event.start);
+                const time = dateOnly || event.start < day ? null : timeFormat{{ "()" if i18n }}.format(event.start);
                 const content = (
                   <>
                     {time && <span className="mr-1 tabular-nums text-muted-foreground">{time}</span>}

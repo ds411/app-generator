@@ -28,6 +28,7 @@ from appgen.gen.binding import Binding, Output
 I18N_MODULE = "@/shared/lib/i18n"
 _CALL = re.compile(r"(?<![\w.$])t\(")
 _IMPORT = f'import {{ t }} from "{I18N_MODULE}";\n'
+_MODULE_IMPORT = re.compile(rf'^import \{{ ([^}}]*) \}} from "{I18N_MODULE}";?$', re.MULTILINE)
 _STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 
 _texts: ContextVar[set[str] | None] = ContextVar("appgen_i18n_texts", default=None)
@@ -39,6 +40,8 @@ class LanguagePlan:
 
     code: str
     label: str
+    locale: str
+    """The locale of the dates and numbers (BCP 47): `locale`, or the code."""
     element_id: str
     text: dict[str, str]
 
@@ -67,6 +70,7 @@ def i18n_plan(definition: AppDefinition) -> I18nPlan | None:
             LanguagePlan(
                 code=code,
                 label=translations.languages[code].label,
+                locale=translations.languages[code].locale_tag(code),
                 element_id=translations.languages[code].id,
                 text=dict(sorted(translations.languages[code].text.items())),
             )
@@ -150,8 +154,9 @@ def _record(text: str) -> None:
 def finish(path: str, content: str, definition: AppDefinition) -> str:
     """Add the import of `t` to a TypeScript file that calls it.
 
-    The import goes before the first import, else after the directive,
-    else after the comments of the header (the traces).
+    A file that imports other names of the module gets `t` in the same
+    import. Else the import goes before the first import, else after the
+    directive, else after the comments of the header (the traces).
     """
     if (
         definition.translations is None
@@ -161,6 +166,11 @@ def finish(path: str, content: str, definition: AppDefinition) -> str:
         or not _CALL.search(content)
     ):
         return content
+    found = _MODULE_IMPORT.search(content)
+    if found is not None:
+        names = {name.strip() for name in found[1].split(",")} | {"t"}
+        names_text = ", ".join(sorted(names, key=str.lower))
+        return content[: found.start(1)] + names_text + content[found.end(1) :]
     lines = content.splitlines(keepends=True)
     index = next((i for i, line in enumerate(lines) if line.startswith("import ")), None)
     if index is not None:

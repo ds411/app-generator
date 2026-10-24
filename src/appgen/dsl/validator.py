@@ -37,7 +37,7 @@ from appgen.dsl.expressions import (
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
-from appgen.dsl.translations import VALUE
+from appgen.dsl.translations import LOCALE, VALUE
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
     check_ui_dashboards,
@@ -397,6 +397,20 @@ def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
     if translations.default not in languages:
         yield _missing(translations, "default", "language", translations.default, languages)
         return
+    for code, language in languages.items():
+        if not LOCALE.fullmatch(language.locale_tag(code)):
+            yield _error(
+                "translation-locale",
+                f"The locale '{language.locale}' of '{code}' is not a language tag (BCP 47)."
+                if language.locale
+                else f"The code '{code}' is not a language tag (BCP 47), and the language has no "
+                "locale.",
+                language,
+                at="locale" if language.locale else None,
+                hint="Give a language tag, for example 'de' or 'pt-BR'."
+                if language.locale
+                else f"Add a locale, for example 'locale: {_locale_hint(code)}'.",
+            )
     default = languages[translations.default]
     if default.text:
         yield _error(
@@ -433,6 +447,13 @@ def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
                 at="text",
                 hint="Keep each value in braces of the text, and add no other value.",
             )
+
+
+def _locale_hint(code: str) -> str:
+    """Return a language tag for a code, for example `pt-BR` for `pt_br`."""
+    first, *rest = code.split("_")
+    tag = "-".join([first, *(part.upper() if len(part) == 2 else part.title() for part in rest)])
+    return tag if LOCALE.fullmatch(tag) else "pt-BR"
 
 
 def check_workflows(definition: AppDefinition) -> Iterator[Diagnostic]:

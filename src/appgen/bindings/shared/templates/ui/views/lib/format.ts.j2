@@ -1,5 +1,10 @@
 {{ trace_header("app") }}
 // The display formats of the views: numbers, money, dates, and times.
+{% if i18n %}
+// The formats use the locale of the selected language.
+
+import { getLocale } from "@/shared/lib/i18n";
+{% endif %}
 
 export type Format =
   | "text"
@@ -18,12 +23,53 @@ export type Format =
 /** The default currency of the `currency` format. A field can give another currency. */
 export const CURRENCY = "USD";
 
+{% if i18n %}
+/** The formats of each locale. The app makes a format at its first use. */
+const formats = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>();
+
+/** Return a format in the locale of the selected language. */
+function localeFormat<T extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>(
+  key: string,
+  make: (locale: string) => T,
+): T {
+  const locale = getLocale();
+  const id = `${locale} ${key}`;
+  let format = formats.get(id) as T | undefined;
+  if (format === undefined) {
+    format = make(locale);
+    formats.set(id, format);
+  }
+  return format;
+}
+
+/** Return a number format in the locale of the selected language. */
+export function numberFormat(options: Intl.NumberFormatOptions = {}): Intl.NumberFormat {
+  return localeFormat(`number ${JSON.stringify(options)}`, (locale) => new Intl.NumberFormat(locale, options));
+}
+
+/** Return a date format in the locale of the selected language. */
+export function dateTimeFormat(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  return localeFormat(`date ${JSON.stringify(options)}`, (locale) => new Intl.DateTimeFormat(locale, options));
+}
+
+/** The first day of the week in the locale of the selected language: 0 is Sunday, 1 is Monday. */
+export function firstWeekday(): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
+  type WeekInfo = { firstDay: number };
+  const locale = new Intl.Locale(getLocale()) as Intl.Locale & { getWeekInfo?: () => WeekInfo; weekInfo?: WeekInfo };
+  // Some browsers do not give the week of a locale: the week starts on Monday (ISO 8601).
+  const firstDay = (locale.getWeekInfo?.() ?? locale.weekInfo)?.firstDay ?? 1;
+  return (firstDay % 7) as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+}
+
+const relativeFormat = () => localeFormat("relative", (locale) => new Intl.RelativeTimeFormat(locale, { numeric: "auto" }));
+{% else %}
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const currencyFormats = new Map<string, Intl.NumberFormat>();
 const percentFormat = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+{% endif %}
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 365 * 24 * 3600],
@@ -35,6 +81,7 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["second", 1],
 ];
 
+{% if not i18n %}
 /** Return the number format of a currency (an ISO 4217 code). */
 function currencyFormat(currency: string): Intl.NumberFormat {
   let format = currencyFormats.get(currency);
@@ -44,6 +91,7 @@ function currencyFormat(currency: string): Intl.NumberFormat {
   }
   return format;
 }
+{% endif %}
 
 /** Return a date (`YYYY-MM-DD`) or a date and time (ISO 8601) as a Date. */
 export function toDate(value: string): Date {
@@ -55,7 +103,7 @@ export function formatRelative(date: Date, now: Date = new Date()): string {
   const seconds = (date.getTime() - now.getTime()) / 1000;
   for (const [unit, size] of UNITS) {
     if (Math.abs(seconds) >= size || unit === "second") {
-      return relativeFormat.format(Math.round(seconds / size), unit);
+      return relativeFormat{{ "()" if i18n }}.format(Math.round(seconds / size), unit);
     }
   }
   return "";
@@ -68,6 +116,18 @@ export function formatRelative(date: Date, now: Date = new Date()): string {
 export function formatValue(value: unknown, format: Format = "text", currency: string = CURRENCY): string {
   if (value === null || value === undefined || value === "") return "";
   switch (format) {
+{% if i18n %}
+    case "number":
+      return numberFormat({ maximumFractionDigits: 2 }).format(Number(value));
+    case "currency":
+      return numberFormat({ style: "currency", currency }).format(Number(value));
+    case "percent":
+      return numberFormat({ style: "percent", maximumFractionDigits: 1 }).format(Number(value));
+    case "date":
+      return dateTimeFormat({ dateStyle: "medium" }).format(toDate(String(value)));
+    case "datetime":
+      return dateTimeFormat({ dateStyle: "medium", timeStyle: "short" }).format(toDate(String(value)));
+{% else %}
     case "number":
       return numberFormat.format(Number(value));
     case "currency":
@@ -78,6 +138,7 @@ export function formatValue(value: unknown, format: Format = "text", currency: s
       return dateFormat.format(toDate(String(value)));
     case "datetime":
       return dateTimeFormat.format(toDate(String(value)));
+{% endif %}
     case "relative_time":
       return formatRelative(toDate(String(value)));
     case "boolean":

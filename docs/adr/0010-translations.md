@@ -57,6 +57,20 @@ and data in modules, for example the badge sets and the page titles.
 - The selected language is in the browser storage. A change renders the
   pages again. Next.js renders the default language on the server, and
   the client changes to the stored language after the hydration.
+- Each language has a locale, a language tag (BCP 47) in
+  `translations.languages.<code>.locale`. The default is the code. The
+  validator reports a locale that is not a language tag
+  (`translation-locale`).
+- The front ends format the dates and numbers with `Intl` in the locale
+  of the selected language: `getLocale` of `src/shared/lib/i18n.ts`
+  gives it, and `src/shared/lib/format.ts` keeps one format for each
+  locale and options. The format of a field (`currency`, `date`, and so
+  on) and its currency stay the same in each language. The calendar
+  views and the date pickers start the week on the first day of the
+  locale (`Intl.Locale` week info, else Monday) and use its names of the
+  months and days. `scripts/vendor_shadcn.py` changes the date picker
+  and the chart tooltip of shadcn/ui to use the locale. The `lang` of
+  the page is the locale.
 
 ## Consequences
 
@@ -67,8 +81,12 @@ and data in modules, for example the badge sets and the page titles.
 - The validator cannot report a text of the app that a language does not
   translate, because some texts come from the templates. Such a text
   shows in the default language.
-- The format of dates and numbers stays in the default language. A
-  later change can add it.
+- A language with a code that is not a language tag, for example
+  `pt_br`, must give a locale (`pt-BR`).
+- In a browser without the week info of `Intl.Locale`, the week starts on
+  Monday.
+- The test language has the Japanese locale, so a date or number that
+  does not use the locale shows Latin letters, and the UI test finds it.
 - A new fixed text in a template must use a text helper, else it shows
   in the default language. `scripts/untranslated_text.mjs` finds such a
   text in the code, and the test language finds it on the pages.

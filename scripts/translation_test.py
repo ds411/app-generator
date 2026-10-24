@@ -6,15 +6,16 @@ test proves it for the project tracker:
 
 1. Collect the texts that the app translates (`app_texts`), and write
    the project tracker with a test language instead of its languages.
-   The test language changes each text to `⟦text⟧`.
+   The test language changes each text to `⟦text⟧`, and has the
+   locale `ja`, so its dates and numbers have no Latin letters.
 2. Generate the app, and find the UI text in the code that does not
    call `t` (`scripts/untranslated_text.mjs`).
 3. Build and start the app: React with `vite preview`, Next.js with
    `pnpm start` and PGlite.
 4. Run the UI test `ui-tests/tests/test-language.spec.ts`: it opens each
    page in the test language, with its search, the menu of a record, and
-   a form. Each text with a Latin letter must have ⟦, or be a value of
-   the records.
+   a form with its date picker. Each text with a Latin letter must have
+   ⟦, or be a value of the records.
 
 Run it from the repository root:
 
@@ -63,6 +64,8 @@ PORTS = {"react": 5430, "nextjs": 3430}
 CODE = "xx"
 """The code of the test language."""
 LABEL = "Test"
+LOCALE = "ja"
+"""The locale of the test language: its dates and numbers have no Latin letters."""
 
 
 class TranslationTestError(Exception):
@@ -97,7 +100,11 @@ def test_definition(definition: AppDefinition, binding: str, folder: Path) -> Pa
             "default": default,
             "languages": {
                 default: {"label": definition.translations.languages[default].label},
-                CODE: {"label": LABEL, "text": {text: f"⟦{text}⟧" for text in texts}},
+                CODE: {
+                    "label": LABEL,
+                    "locale": LOCALE,
+                    "text": {text: f"⟦{text}⟧" for text in texts},
+                },
             },
         }
     }
@@ -193,6 +200,7 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
         **expected_ui(binding, definition),
         "testLanguage": {
             "code": CODE,
+            "locale": LOCALE,
             "storageKey": f"{definition.app.name}-language",
             "ignore": ignored_texts(definition),
         },

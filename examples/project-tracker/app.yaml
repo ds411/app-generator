@@ -1086,6 +1086,13 @@ translations:
         Pages: Seiten
         Person: Person
         Pick a date: Datum wählen
+        Navigation bar: Navigationsleiste
+        Go to the next month: Zum nächsten Monat
+        Go to the previous month: Zum vorherigen Monat
+        Choose the month: Monat wählen
+        Choose the year: Jahr wählen
+        'Today, {date}': 'Heute, {date}'
+        '{date}, selected': '{date}, ausgewählt'
         Plan a new body of work.: Planen Sie ein neues Arbeitspaket.
         Planning: Planung
         Posted: Verfasst
