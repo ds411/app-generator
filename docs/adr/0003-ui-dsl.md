@@ -633,6 +633,7 @@ defines the mechanism.
 | Responsive behavior beyond `hide_below`, the grid overrides, the layout overrides, and the board `responsive` hint | Hand-written code, or the shadcn component sources. |
 | Pixel-level layout inside a component               | The shadcn component sources, which the app developer can change. |
 | A page layout beyond the order and the columns of its regions | A page with `content: { custom: true }`. |
+| A place of an action other than the page header and the top bar (`placement`) | A custom action, or hand-written code. |
 | Accessibility beyond the shadcn components          | Hand-written code.                            |
 | Authentication, roles, and translations of the UI   | Later sections (ADR 0002).                    |
 

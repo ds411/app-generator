@@ -91,6 +91,10 @@ class OnSuccess(Element):
     """A page to open."""
 
 
+type Placement = Literal["page", "topbar", "both"]
+"""Where a page action shows: in the page header, in the top bar, or in both."""
+
+
 class ActionBase(Element):
     """The keys of all actions."""
 
@@ -98,6 +102,9 @@ class ActionBase(Element):
     icon: IconName | None = None
     variant: Variant = "default"
     confirm: Confirm | None = None
+    placement: Placement | None = None
+    """Only for a page action: where it shows. Without it, the page header shows it,
+    unless the top bar of the page has the same action."""
 
 
 class NavigateAction(ActionBase):

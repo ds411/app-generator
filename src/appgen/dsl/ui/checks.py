@@ -12,6 +12,7 @@ from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Page
 from appgen.dsl.ui.common import (
+    ActionBase,
     FormAction,
     Grid,
     NavigateAction,
@@ -658,6 +659,8 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
             continue
         yield from _check_token_refs(tokens, element)
         yield from _check_page_refs(definition, element)
+        if isinstance(element, ActionBase) and element.placement is not None:
+            yield from _check_placement(definition, element)
         match element:
             case Page():
                 if element.layout is not None and element.layout not in layouts:
@@ -697,6 +700,43 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
                 yield from _check_board_move(definition, element)
             case _:
                 pass
+
+
+def _check_placement(definition: AppDefinition, action: ActionBase) -> Iterator[Diagnostic]:
+    parts = action.id.split(".")
+    if len(parts) != 4 or parts[0] != "pages" or parts[2] != "actions":
+        yield _error(
+            "invalid-option",
+            "Only a page action has 'placement'.",
+            action,
+            at="placement",
+            hint="Remove 'placement', or move the action to 'pages.<page>.actions'.",
+        )
+        return
+    if action.placement == "page":
+        return
+    ui = definition.ui
+    page = definition.pages[parts[1]]
+    layout_name = page.layout or (ui.defaults.layout if ui and ui.defaults else None)
+    layout = ui.layouts.get(layout_name) if ui and layout_name else None
+    if layout is not None and layout.topbar is None:
+        yield _error(
+            "invalid-option",
+            f"The action has the placement '{action.placement}', but the layout "
+            f"'{layout_name}' of the page '{parts[1]}' has no top bar.",
+            action,
+            at="placement",
+            hint="Use 'placement: page', or give the layout a top bar.",
+        )
+    elif layout is None and layout_name is None:
+        yield _error(
+            "invalid-option",
+            f"The action has the placement '{action.placement}', but the page "
+            f"'{parts[1]}' has no layout, so it has no top bar.",
+            action,
+            at="placement",
+            hint="Use 'placement: page', or give the page a layout with a top bar.",
+        )
 
 
 def _has_ui_keys(page: Page) -> bool:

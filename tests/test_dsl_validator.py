@@ -312,3 +312,27 @@ def test_the_responsive_hint_of_a_board_needs_a_breakpoint_token() -> None:
     )
 
     assert codes(BASE + board) == [("unknown-reference", "ui.views.board.responsive")]
+
+
+def test_only_a_page_action_has_a_placement_and_the_top_bar_must_exist() -> None:
+    page = "tasks: { path: /tasks, title: Tasks, entity: Task }"
+    action = "{ kind: custom, label: Export, placement: topbar }"
+    with_action = page.replace(" }", f", actions: {{ export: {action} }} }}")
+    text = BASE.replace(page, with_action)
+    shell = "ui:\n  layouts:\n    shell:\n      sidebar: {}\n  defaults: { layout: shell }\n"
+
+    assert codes(text) == [("invalid-option", "pages.tasks.actions.export")]
+    assert codes(text + shell) == [("invalid-option", "pages.tasks.actions.export")]
+    assert codes(text + shell.replace("sidebar: {}", "topbar: {}")) == []
+    assert codes(text.replace("placement: topbar", "placement: page")) == []
+
+    view = (
+        "ui:\n  views:\n    list:\n      kind: table\n      entity: Task\n"
+        "      columns: { title: {} }\n"
+        f"      actions:\n        export: {action}\n"
+    )
+    [diagnostic] = check(BASE + view)
+    assert (diagnostic.code, diagnostic.message) == (
+        "invalid-option",
+        "Only a page action has 'placement'.",
+    )

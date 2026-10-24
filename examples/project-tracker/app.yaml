@@ -144,7 +144,8 @@ pages:
     content: { view: project_detail }
     arrangement: { regions: [title, actions, content], columns: 2 }
     actions:
-      new_task: { kind: form, form: new_task, label: New task, icon: plus }
+      # The page header shows the action, and the top bar hides its own.
+      new_task: { kind: form, form: new_task, label: New task, icon: plus, placement: page }
   task_board:
     path: /tasks
     title: Tasks
