@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from appgen.bindings.shared.auth import kind_operations
 from appgen.bindings.shared.gaps import gap_spec
 from appgen.bindings.shared.ui import css_class_var, css_var, js
 from appgen.dsl.expressions import (
@@ -173,6 +174,10 @@ class ActionPlan:
     """For a top bar action: the pages that show it. Empty: all pages, except `except_pages`."""
     except_pages: tuple[str, ...] = ()
     """For a top bar action: the pages that do not show it (`placement: page`)."""
+    page: str | None = None
+    """The page that the action opens. With access, it shows only if the role allows it."""
+    operation: str | None = None
+    """The operation that the action calls. With access, it shows only if the role allows it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +321,8 @@ class ViewPlan:
     """The Tailwind CSS classes of a board column."""
     move: str | None = None
     """The TypeScript that moves `record` to the column `value` of a board."""
+    move_operation: str | None = None
+    """The update operation that the move of a board calls, for the check of the role."""
     calendar: CalendarPlan | None = None
     forms: list[FormRef] = field(default_factory=lambda: list[FormRef]())
     """The forms that the actions of the view open in a dialog or a sheet."""
@@ -1074,11 +1081,13 @@ class ViewContext:
         if operation is not None and operation.kind == "update":
             op = camel(view.move or "")
             plan.move = f"{op}(record.id, {{ {key} }})"
+            plan.move_operation = view.move
             plan.imports = sorted(
                 {*plan.imports, f'import {{ {op} }} from "@/entities/{_kebab(view.entity)}";'}
             )
         else:
             plan.move = f"{plan.var}Api.update(record.id, {{ {key} }})"
+            plan.move_operation = kind_operations(self.definition, view.entity).get("update")
 
     def _calendar(self, plan: ViewPlan, view: CalendarView) -> CalendarPlan:
         start = self.value(view.entity, view.start)
@@ -1284,7 +1293,7 @@ class ViewContext:
             if _path_params(page.path) and not record:
                 return None
             href = self.href(entity, action.page, action.params, "record")
-            return ActionPlan(**common, href=href)
+            return ActionPlan(**common, href=href, page=action.page)
         if isinstance(action, OperationAction):
             if not record:
                 return None
@@ -1305,6 +1314,7 @@ class ViewContext:
                 )
                 return ActionPlan(
                     **common,
+                    operation=action.operation,
                     run=f"Promise.all(records.map((record) => {op}(record.id)))",
                     navigate_to=navigate_to,
                     imports=(f'import {{ {op} }} from "{module}";',),
@@ -1317,8 +1327,10 @@ class ViewContext:
             if scope == "bulk" or (form.needs_record and not record):
                 return None
             if form.page_href is not None:
-                return ActionPlan(**common, href=form.page_href)
-            return ActionPlan(**common, form=action.form)
+                return ActionPlan(
+                    **common, href=form.page_href, page=form.host_page, operation=form.operation
+                )
+            return ActionPlan(**common, form=action.form, operation=form.operation)
         if action.kind == "custom":
             gap = gap_path(definition, action.id)
             function = gap[1]

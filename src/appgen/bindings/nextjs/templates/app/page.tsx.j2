@@ -34,7 +34,7 @@ export const metadata: Metadata = { title: {{ element.title | tojson }} };
 export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>) {
 {% if protected %}
 {% if definition.access %}
-  await requirePage({{ name | tojson }}, {{ element.path | tojson }}, await params); {{ trace(definition.access.id) }}
+  await requirePage({{ name | camel | tojson }}, {{ element.path | tojson }}, await params); {{ trace(definition.access.id) }}
 {% else %}
   await requirePageUser({{ element.path | tojson }}, await params); {{ trace(definition.auth.id) }}
 {% endif %}
@@ -50,7 +50,7 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 {% if protected %}
 export default async function Route({% if info.params %}{ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>{% endif %}) {
 {% if definition.access %}
-  await requirePage({{ name | tojson }}, {{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.access.id) }}
+  await requirePage({{ name | camel | tojson }}, {{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.access.id) }}
 {% else %}
   await requirePageUser({{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.auth.id) }}
 {% endif %}

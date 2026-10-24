@@ -102,6 +102,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 | Test language check   | `uv run scripts/translation_test.py [react] [nextjs]`      |
+| Sign-in UI check      | `uv run scripts/auth_ui_test.py [react] [nextjs]`          |
 
 ## Layout
 
@@ -245,6 +246,15 @@ test. For Next.js, it also sends requests in the test language and in
 the default language at the same time, and each page must be in the
 language of its request. The pre-push hook runs it with
 `scripts/check-translations.sh`.
+
+`scripts/auth_ui_test.py` checks that the front ends show only what the
+role of the user allows (ADR 0012). It builds and starts the room
+booking example with React and Next.js without Docker. The UI test
+`ui-tests/tests/auth.spec.ts` signs in as a user of each role, compares
+the menu with the menu that the role allows and with an approved
+screenshot (`ui-tests/approved/<binding>/room-booking/<mode>/`), opens
+the pages that the role may not open, and checks the page actions. The
+pre-push hook runs it with `scripts/check-auth-ui.sh`.
 
 The check scripts reuse caches, so a second run is faster:
 

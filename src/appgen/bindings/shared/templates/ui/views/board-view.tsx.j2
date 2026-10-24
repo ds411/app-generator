@@ -6,6 +6,8 @@
 "use client";
 
 {% set ui_lines = ['import { Badge } from "@/shared/ui/badge";', m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { ScrollArea, ScrollBar } from "@/shared/ui/scroll-area";', 'import { cn } from "@/shared/lib/utils";'] %}
+{% set check_move = definition.access is not none and plan.move_operation is not none %}
+{% if check_move %}{% set ui_lines = ui_lines + ['import { useAccess } from "@/shared/lib/access";'] %}{% endif %}
 {{ m.imports(plan, "board", lucide=["TriangleAlertIcon"], react=["type CSSProperties", "type ReactNode"], ui=ui_lines) }}
 
 {{ m.data(plan) }}
@@ -52,6 +54,10 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% endif %}
   const [dragged, setDragged] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
+{% if check_move %}
+  // A role that may not call {{ js(plan.move_operation) }} cannot move the cards.
+  const canMove = useAccess().canCall({{ js(plan.move_operation) }}); {{ trace(definition.access.id) }}
+{% endif %}
 
 {{ m.states(plan, "board") }}
 
@@ -131,7 +137,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                     {cards.map((row) => (
                       <div
                         key={row.id}
-                        draggable
+                        draggable{{ "={canMove}" if check_move }}
                         className={cn("cursor-grab active:cursor-grabbing", dragged === row.id && "opacity-50")}
                         onDragStart={(event) => {
                           event.dataTransfer.setData("text/plain", row.id);
@@ -150,15 +156,26 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% endif %}
                           menu={
                             <RowActionsMenu actions={ {{- "Object.values(rowActions)" if plan.row_actions else "[]" }}} record={row} onRun={ {{- "run" if plan.row_actions else "() => {}" }}}>
+{% set move_items %}
 {% if plan.row_actions %}
-                              <DropdownMenuSeparator />
+<DropdownMenuSeparator />
 {% endif %}
-                              <DropdownMenuLabel>{{ jsx_text("Move to") }}</DropdownMenuLabel>
-                              {COLUMNS.filter((other) => other.value !== column.value).map((other) => (
-                                <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
-                                  {{ '{' ~ tr('other.label') ~ '}' }}
-                                </DropdownMenuItem>
-                              ))}
+<DropdownMenuLabel>{{ jsx_text("Move to") }}</DropdownMenuLabel>
+{COLUMNS.filter((other) => other.value !== column.value).map((other) => (
+  <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
+    {{ '{' ~ tr('other.label') ~ '}' }}
+  </DropdownMenuItem>
+))}
+{% endset %}
+{% if check_move %}
+                              {canMove && (
+                                <>
+{{ move_items.rstrip() | indent(34, first=True) }}
+                                </>
+                              )}
+{% else %}
+{{ move_items.rstrip() | indent(30, first=True) }}
+{% endif %}
                             </RowActionsMenu>
                           }
                         />

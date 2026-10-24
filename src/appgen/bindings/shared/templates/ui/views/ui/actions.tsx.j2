@@ -25,6 +25,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
+{% if definition.access %}
+import type { PageName } from "@/shared/config/pages";
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
 import { useNavigate } from "@/shared/lib/router";
 
 export type ActionVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
@@ -47,9 +51,24 @@ export type ActionSpec<T> = {
   toast?: string;
   /** The path to open after a success. */
   navigateTo?: string;
+{% if definition.access %}
+  /** The page that the action opens: the action shows only if the user may open it. */
+  page?: PageName;
+  /** The operation that the action calls: the action shows only if the user may call it. */
+  operation?: string;
+{% endif %}
 };
 
 type Pending<T> = { action: ActionSpec<T>; records: T[] };
+{% if definition.access %}
+
+/** Return a check of the actions: true if the role of the user allows the page and the operation of an action. */
+function useAllowed<T>(): (action: ActionSpec<T>) => boolean {
+  const { canOpenPage, canCall } = useAccess(); {{ trace(definition.access.id) }}
+  return (action) =>
+    (action.page === undefined || canOpenPage(action.page)) && (action.operation === undefined || canCall(action.operation));
+}
+{% endif %}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The action did not succeed.")) }};
@@ -133,6 +152,10 @@ export function ActionButton<T>({
   size?: "sm" | "default";
   disabled?: boolean;
 }) {
+{% if definition.access %}
+  const allowed = useAllowed<T>();
+  if (!allowed(action)) return null;
+{% endif %}
   const Icon = action.icon;
   return (
     <Button variant={action.variant ?? "default"} size={size} disabled={disabled} onClick={() => onRun(action, records)}>
@@ -155,7 +178,12 @@ export function RowActionsMenu<T>({
   /** More menu items, for example the columns of a board. */
   children?: ReactNode;
 }) {
-  if (actions.length === 0 && !children) return null;
+{% set shown = "shown" if definition.access else "actions" %}
+{% if definition.access %}
+  const allowed = useAllowed<T>();
+  const shown = actions.filter(allowed);
+{% endif %}
+  if ({{ shown }}.length === 0 && !children) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -171,7 +199,7 @@ export function RowActionsMenu<T>({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44" onClick={(event) => event.stopPropagation()}>
         <DropdownMenuLabel>{{ jsx_text("Actions") }}</DropdownMenuLabel>
-        {actions.map((action, index) => {
+        {{ '{' }}{{ shown }}.map((action, index) => {
           const Icon = action.icon;
           const destructive = action.variant === "destructive";
           return (

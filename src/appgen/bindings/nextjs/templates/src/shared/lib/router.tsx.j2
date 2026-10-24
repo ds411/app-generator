@@ -11,13 +11,37 @@ import {
   useRouter,
 } from "next/navigation";
 import { type ComponentProps, useMemo } from "react";
+{% if definition.access %}
 
+import { useAccess } from "@/shared/lib/access";
+import { matchPage } from "@/shared/lib/pages";
+{% endif %}
+
+{% if definition.access %}
+export type LinkProps = Omit<ComponentProps<typeof NextLink>, "href"> & {
+  href: string;
+  /** Show the link also if the user may not open its page, for example the link to the start page. */
+  always?: boolean;
+};
+{% else %}
 export type LinkProps = Omit<ComponentProps<typeof NextLink>, "href"> & { href: string };
+{% endif %}
 
-/** A link to a path of the app. */
+/** A link to a path of the app.{% if definition.access %} A link to a page that the user may not open shows only its content.{% endif %} */
+{% if definition.access %}
+export function Link({ always = false, ...props }: LinkProps) {
+  const { canOpenPage } = useAccess(); {{ trace(definition.access.id) }}
+  const page = always ? undefined : matchPage(props.href.split(/[?#]/)[0] ?? "")?.name;
+  if (page !== undefined && !canOpenPage(page)) {
+    return <span className={props.className}>{props.children}</span>;
+  }
+  return <NextLink {...props} />;
+}
+{% else %}
 export function Link(props: LinkProps) {
   return <NextLink {...props} />;
 }
+{% endif %}
 
 /** Return a function that opens a path of the app. */
 export function useNavigate(): (href: string) => void {

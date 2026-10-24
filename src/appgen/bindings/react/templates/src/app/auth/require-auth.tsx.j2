@@ -6,12 +6,13 @@ import { SignInForm } from "@/features/sign-in";
 {% if definition.access %}
 import { NotFoundPage } from "@/pages/not-found";
 import { canOpenPage, currentUserId } from "@/shared/auth";
+import type { PageName } from "@/shared/config/pages";
 {% else %}
 import { currentUserId } from "@/shared/auth";
 {% endif %}
 
 /** Show a page that needs a signed-in user, or go to the sign-in page.{% if definition.access %} A page that the role may not open shows as not found.{% endif %} */
-export function RequireAuth({ {% if definition.access %}page, {% endif %}children }: { {% if definition.access %}page: string; {% endif %}children: ReactNode }) {
+export function RequireAuth({ {% if definition.access %}page, {% endif %}children }: { {% if definition.access %}page: PageName; {% endif %}children: ReactNode }) {
   const location = useLocation();
   if (currentUserId() === null) {
     const next = location.pathname + location.search;

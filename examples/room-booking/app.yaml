@@ -388,9 +388,10 @@ auth:
       claims:
         name: name
 
-# An admin may do all. A member may read all data, and book rooms, but
-# may not change the rooms, the amenities, or the members. A member sees
-# and changes only the bookings that the member organizes.
+# An admin may do all. A member may read the rooms, the amenities, and
+# the bookings, and book rooms, but may not change the rooms, the
+# amenities, or the members, and does not see the pages of the members.
+# A member sees and changes only the bookings that the member organizes.
 access:
   role_field: role
   roles:
@@ -411,6 +412,6 @@ access:
         - create_booking
         - update_booking
         - cancel_booking
-      pages: [dashboard, room_detail, bookings, booking_calendar, booking_detail, members, member_detail, amenities]
+      pages: [dashboard, room_detail, bookings, booking_calendar, booking_detail, amenities]
       records:
         Booking: { owner: organizer }

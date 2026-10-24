@@ -8,6 +8,10 @@
 // API refuses: the API checks each request.{% endif %}
 
 import { apiRequest, setAccessToken } from "@/shared/api";
+{% if role_key %}
+import type { PageName } from "@/shared/config/pages";
+import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% endif %}
 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 {% if role_key %}
@@ -19,6 +23,11 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 // MOCK_PASSWORD. The session stays in the browser tab. An app with a back
 // end checks the passwords on the server.
 
+{% if role_key %}
+import type { PageName } from "@/shared/config/pages";
+import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+
+{% endif %}
 /** The password of each mock user. */
 export const MOCK_PASSWORD = "password";
 
@@ -32,21 +41,6 @@ const users: { id: string; username: string{% if role_key %}; role: string | nul
 {% endif %}
 {% if definition.access %}
 
-// The permissions of the roles (ADR 0012). `*` stands for all operations or pages.
-const ALL = "*";
-
-const OPERATIONS: Record<string, readonly string[]> = {
-{% for name, r in definition.access.roles.items() %}
-  {{ name | tojson }}: {{ r.operations | list | tojson }}, {{ trace(r.id) }}
-{% endfor %}
-};
-
-const PAGES: Record<string, readonly string[]> = {
-{% for name, r in definition.access.roles.items() %}
-  {{ name | tojson }}: {{ r.pages | list | tojson }}, {{ trace(r.id) }}
-{% endfor %}
-};
-
 /** An operation that the role of the user may not call. */
 export class ForbiddenError extends Error {
   constructor() {
@@ -55,31 +49,29 @@ export class ForbiddenError extends Error {
   }
 }
 
-function roleNames(table: Record<string, readonly string[]>): readonly string[] {
+/** Return the role of the signed-in user, or null without a session or a role. */
+export function currentRole(): string | null {
 {% if react.api %}
-  let role: string | null;
+  if (currentUserId() === null) return null;
   try {
-    role = window.sessionStorage.getItem(ROLE_KEY);
+    return window.sessionStorage.getItem(ROLE_KEY) || null;
   } catch {
-    role = null;
+    return null;
   }
 {% else %}
   const id = currentUserId();
-  const role = users.find((user) => user.id === id)?.role;
+  return users.find((user) => user.id === id)?.role ?? null;
 {% endif %}
-  return (role && table[role]) || [];
 }
 
-/** Return true if the signed-in user may open a page. */
-export function canOpenPage(page: string): boolean {
-  const names = roleNames(PAGES);
-  return names.includes(ALL) || names.includes(page);
+/** Return true if the signed-in user may open a page (ADR 0012). */
+export function canOpenPage(page: PageName): boolean {
+  return roleMayOpenPage(currentRole(), page);
 }
 
-/** Throw a ForbiddenError if the signed-in user may not call an operation. */
+/** Throw a ForbiddenError if the signed-in user may not call an operation (ADR 0012). */
 export function requireOperation(operation: string): void {
-  const names = roleNames(OPERATIONS);
-  if (!names.includes(ALL) && !names.includes(operation)) {
+  if (!roleMayCall(currentRole(), operation)) {
     throw new ForbiddenError();
   }
 }

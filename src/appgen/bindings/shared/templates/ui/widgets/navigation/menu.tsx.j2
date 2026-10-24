@@ -29,10 +29,35 @@ import {
   SidebarMenuSubItem,
 {% endif %}
 } from "@/shared/ui/sidebar";
+{% if definition.access %}
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
 import { isActivePath, pageHref } from "@/shared/lib/pages";
 import { Link, usePathname } from "@/shared/lib/router";
 
+{# With access (ADR 0012), a part of the menu shows only if the role may open one of its pages. #}
+{% macro shown(pages) -%}
+{% set names = pages | unique | list %}
+{%- if names | length == 1 %}canOpenPage({{ js(names[0] | camel) }}){% else %}({% for page in names %}canOpenPage({{ js(page | camel) }}){{ " || " if not loop.last }}{% endfor %}){% endif %}
+{%- endmacro %}
+{% macro item_pages(items) -%}
+{% set ns = namespace(pages=[]) %}
+{% for item in items %}
+{% set ns.pages = ns.pages + [item.page] %}
+{% for sub in (item["items"] or {}).values() %}{% set ns.pages = ns.pages + [sub.page] %}{% endfor %}
+{% endfor %}
+{{- ns.pages | join(" ") -}}
+{%- endmacro %}
+{% macro allowed(items, spaces) -%}
+{% if definition.access %}
+{{ " " * spaces }}{{ "{" }}{{ shown(item_pages(items).split(" ")) }} && (
+{{ caller() | indent(2, first=True) }}{{ " " * spaces }})}
+{% else %}
+{{ caller() }}
+{%- endif %}
+{%- endmacro %}
 {% macro menu_item(item_name, item) %}
+{% call allowed([item], 10) %}
           <SidebarMenuItem> {{ trace(item.id, jsx=True) }}
             <SidebarMenuButton asChild isActive={isActivePath(pageHref({{ js(item.page | camel) }}), pathname)} tooltip={{ jsx_attr(item.label or ui_plan.pages[item.page].page.title) }}>
               <Link href={pageHref({{ js(item.page | camel) }})}>
@@ -43,6 +68,7 @@ import { Link, usePathname } from "@/shared/lib/router";
 {% if item["items"] %}
             <SidebarMenuSub>
 {% for sub_name, sub in item["items"].items() %}
+{% call allowed([sub], 14) %}
               <SidebarMenuSubItem> {{ trace(sub.id, jsx=True) }}
                 <SidebarMenuSubButton asChild isActive={isActivePath(pageHref({{ js(sub.page | camel) }}), pathname)}>
                   <Link href={pageHref({{ js(sub.page | camel) }})}>
@@ -53,17 +79,23 @@ import { Link, usePathname } from "@/shared/lib/router";
                   </Link>
                 </SidebarMenuSubButton>
               </SidebarMenuSubItem>
+{% endcall %}
 {% endfor %}
             </SidebarMenuSub>
 {% endif %}
           </SidebarMenuItem>
+{% endcall %}
 {% endmacro %}
 /** The menu {{ js(name) }}: its items, and its groups of items. */
 export function {{ name | pascal }}Menu() {
   const pathname = usePathname();
+{% if definition.access %}
+  const { canOpenPage } = useAccess(); {{ trace(definition.access.id) }}
+{% endif %}
   return (
     <>
 {% if element["items"] %}
+{% call allowed(element["items"].values(), 6) %}
       <SidebarGroup>
         <SidebarMenu>
 {% for item_name, item in element["items"].items() %}
@@ -71,8 +103,10 @@ export function {{ name | pascal }}Menu() {
 {%- endfor %}
         </SidebarMenu>
       </SidebarGroup>
+{% endcall %}
 {% endif %}
 {% for group_name, group in element.groups.items() %}
+{% call allowed(group["items"].values(), 6) %}
 {% if group.collapsible %}
       <Collapsible defaultOpen className="group/collapsible"> {{ trace(group.id, jsx=True) }}
         <SidebarGroup>
@@ -115,6 +149,7 @@ export function {{ name | pascal }}Menu() {
         </SidebarGroupContent>
       </SidebarGroup>
 {% endif %}
+{% endcall %}
 {% endfor %}
     </>
   );

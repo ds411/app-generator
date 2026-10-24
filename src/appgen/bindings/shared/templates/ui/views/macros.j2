@@ -298,6 +298,12 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
 {% if a.navigate_to %}
     navigateTo: {{ a.navigate_to }},{{ " " ~ trace(on_success.id) if on_success and not on_success.toast }}
 {% endif %}
+{% if definition.access and a.page %}
+    page: {{ js(a.page | camel) }},
+{% endif %}
+{% if definition.access and a.operation %}
+    operation: {{ js(a.operation) }},
+{% endif %}
   },
 {%- endmacro %}
 

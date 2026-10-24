@@ -1,0 +1,38 @@
+{{ trace_header(definition.access.id) }}
+// The permissions of the roles (ADR 0012): the operations and the pages
+// that each role may use. The checks of the app and the menus, the
+// links, and the actions of the UI read this table. `*` stands for all
+// operations or pages. A public page or operation needs no role.
+import type { PageName } from "@/shared/config/pages";
+
+const ALL = "*";
+
+const OPERATIONS: Record<string, readonly string[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: {{ r.operations | list | tojson }}, {{ trace(r.id) }}
+{% endfor %}
+};
+
+const PAGES: Record<string, readonly (PageName | typeof ALL)[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: [{% for page in r.pages %}{{ (page if page == "*" else page | camel) | tojson }}{{ ", " if not loop.last }}{% endfor %}], {{ trace(r.id) }}
+{% endfor %}
+};
+
+const PUBLIC_OPERATIONS: readonly string[] = {{ definition.auth.public_operations | list | tojson }}; {{ trace(definition.auth.id) }}
+
+const PUBLIC_PAGES: readonly PageName[] = [{% for page in definition.auth.public_pages %}{{ page | camel | tojson }}{{ ", " if not loop.last }}{% endfor %}]; {{ trace(definition.auth.id) }}
+
+function allows(names: readonly string[] | undefined, name: string): boolean {
+  return names !== undefined && (names.includes(ALL) || names.includes(name));
+}
+
+/** Return true if a role may call an operation. Without a role (null), only the public operations. */
+export function roleMayCall(role: string | null, operation: string): boolean {
+  return PUBLIC_OPERATIONS.includes(operation) || (role !== null && allows(OPERATIONS[role], operation));
+}
+
+/** Return true if a role may open a page. Without a role (null), only the public pages. */
+export function roleMayOpenPage(role: string | null, page: PageName): boolean {
+  return PUBLIC_PAGES.includes(page) || (role !== null && allows(PAGES[role], page));
+}
