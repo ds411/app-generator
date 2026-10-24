@@ -1,0 +1,40 @@
+{{ trace_header(*(definition.auth.providers.values() | map(attribute="id") | list)) }}
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
+
+import {
+  ProviderError,
+  finishProviderSignIn,
+  flowCookie,
+  flowPath,
+  isProviderName,
+  readFlow,
+  signInPageWithError,
+} from "@/shared/auth/providers";
+import { startSession } from "@/shared/auth/session";
+
+/**
+ * The provider sends the browser back here (ADR 0020). Check its answer,
+ * start the session of the user, and open the page after the sign-in. A
+ * failed sign-in opens the sign-in page with a message.
+ */
+export async function GET(request: NextRequest, { params }: RouteContext<"/auth/providers/[name]/callback">) {
+  const { name } = await params;
+  if (!isProviderName(name)) notFound();
+  const store = await cookies();
+  const flow = readFlow(name, store.get(flowCookie(name))?.value ?? "");
+  store.delete({ name: flowCookie(name), path: flowPath(name) });
+  let target: string;
+  try {
+    if (flow === null) {
+      throw new ProviderError("The sign-in has no valid flow. Sign in again.");
+    }
+    await startSession(await finishProviderSignIn(name, flow, request.nextUrl.searchParams));
+    target = flow.next;
+  } catch (error) {
+    console.error(error);
+    target = signInPageWithError(error, flow?.next ?? "/");
+  }
+  redirect(target);
+}

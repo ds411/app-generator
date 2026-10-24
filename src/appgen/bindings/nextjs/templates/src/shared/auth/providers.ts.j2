@@ -1,0 +1,335 @@
+{% set auth = definition.auth %}
+{% set table = nextjs.tables_by_entity[auth.user_entity] %}
+{% set username = table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[auth.username_field].id) | first %}
+{% set var = auth.user_entity | camel %}
+{% set role_key = definition.access.role_field | camel if definition.access else none %}
+{% set creates = auth.providers.values() | selectattr("create_users") | list %}
+{{ trace_header(*(auth.providers.values() | map(attribute="id") | list)) }}
+import "server-only";
+
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
+import { eq } from "drizzle-orm";
+import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
+import { z } from "zod";
+
+import { getDb, {{ table.const }} } from "@/shared/db";
+
+{% if creates %}
+import { {{ var }}InputSchema } from "@/entities/{{ auth.user_entity | kebab }}";
+import { {{ var }}Repository } from "@/entities/{{ auth.user_entity | kebab }}/server";
+
+{% endif %}
+import { SIGN_IN_PATH, publicUrl, sign } from "./session";
+
+// The sign-in with OpenID Connect providers (ADR 0020): the authorization
+// code flow with PKCE. The route `/auth/providers/<name>/start` sends the
+// browser to the provider. The provider sends the browser back to
+// `/auth/providers/<name>/callback` with a code. The app changes the code
+// for an ID token at the provider, checks the token, and starts the
+// session of the user. A signed cookie holds the state, the nonce, and the
+// PKCE verifier of the flow between the two requests.
+
+/** The time that a user has for the sign-in at the provider. */
+export const FLOW_SECONDS = 600;
+/** The signature algorithms of the ID tokens that the app accepts: no symmetric algorithm. */
+const ALGORITHMS = ["ES256", "ES384", "ES512", "EdDSA", "PS256", "PS384", "PS512", "RS256", "RS384", "RS512"];
+/** The difference of the clocks of the app and of a provider that the checks accept. */
+const LEEWAY_SECONDS = 60;
+/** The time that the app waits for an answer of a provider. */
+const TIMEOUT_MS = 10_000;
+
+/** The names of the providers. */
+export const PROVIDER_NAMES = [{{ auth.providers | map("tojson") | join(", ") }}] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
+
+/** A provider of the definition, with the values of its settings. */
+type Provider = {
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  scope: string;
+  usernameClaim: string;
+  createUsers: boolean;
+  /** The fields of a new user, and the claims that give their values. */
+  claims: Record<string, string>;
+{% if role_key %}
+  /** The role of a new user. */
+  defaultRole?: string;
+{% endif %}
+};
+
+/** A sign-in that failed. The code selects the message of the sign-in page. */
+export class ProviderError extends Error {
+  readonly code: "provider" | "unknown-user";
+
+  constructor(message: string, code: "provider" | "unknown-user" = "provider") {
+    super(message);
+    this.name = "ProviderError";
+    this.code = code;
+  }
+}
+
+/** Return true if a name is the name of a provider. */
+export function isProviderName(name: string): name is ProviderName {
+  return (PROVIDER_NAMES as readonly string[]).includes(name);
+}
+
+/** Return a provider with the values of its settings. Throw a ProviderError without a client ID. */
+function providerOf(name: ProviderName): Provider {
+  const providers: Record<ProviderName, Provider> = {
+{% for name, p in auth.providers.items() %}
+    {{ trace(p.id) }}
+    {{ name }}: {
+      issuer: process.env.{{ name | upper }}_ISSUER || {{ p.issuer | tojson }},
+      clientId: process.env.{{ p.client_id_env }} ?? "",
+      clientSecret: process.env.{{ p.client_secret_env }} ?? "",
+      scope: {{ p.scopes | join(" ") | tojson }},
+      usernameClaim: {{ p.username_claim | tojson }},
+      createUsers: {{ "true" if p.create_users else "false" }},
+      claims: { {%- for field, claim in p.claims.items() %} {{ field | camel }}: {{ claim | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.claims }}},
+{% if role_key and p.create_users and p.default_role %}
+      defaultRole: {{ p.default_role | tojson }},
+{% endif %}
+    },
+{% endfor %}
+  };
+  const provider = providers[name];
+  if (!provider.clientId || !provider.clientSecret) {
+    throw new ProviderError(`The server has no client ID or client secret for ${name}.`);
+  }
+  return provider;
+}
+
+/** The name of the cookie of the flow of a provider. */
+export function flowCookie(name: ProviderName): string {
+  return `provider_flow_${name}`;
+}
+
+/** The path of the cookie of the flow: only the routes of the provider get it. */
+export function flowPath(name: ProviderName): string {
+  return `/auth/providers/${name}`;
+}
+
+/** Return a path of the app for the page after the sign-in, else the start page. */
+export function pageAfterSignIn(next: string | null | undefined): string {
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+}
+
+/** Return the sign-in page with the message of an error, and the page after the sign-in. */
+export function signInPageWithError(error: unknown, next: string): string {
+  const code = error instanceof ProviderError ? error.code : "provider";
+  return `${SIGN_IN_PATH}?error=${code}&next=${encodeURIComponent(next)}`;
+}
+
+/** The values of a flow: the checks of the callback, and the page after the sign-in. */
+const flowSchema = z.object({
+  state: z.string(),
+  nonce: z.string(),
+  verifier: z.string(),
+  next: z.string(),
+  exp: z.number(),
+});
+export type Flow = z.infer<typeof flowSchema>;
+
+function flowSignature(name: ProviderName, body: string): string {
+  return sign(`provider-flow.${name}.${body}`);
+}
+
+/** Return the signed text of a flow, for its cookie. */
+function makeFlow(name: ProviderName, flow: Flow): string {
+  const body = Buffer.from(JSON.stringify(flow)).toString("base64url");
+  return `${body}.${flowSignature(name, body)}`;
+}
+
+/** Return the flow of a valid signed text that has not ended, else null. */
+export function readFlow(name: ProviderName, text: string): Flow | null {
+  const [body = "", signature = ""] = text.split(".");
+  const expected = flowSignature(name, body);
+  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const flow = flowSchema.safeParse(JSON.parse(Buffer.from(body, "base64url").toString()));
+    return flow.success && flow.data.exp * 1000 > Date.now() ? flow.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The parts of the discovery document of a provider that the app uses. */
+const metadataSchema = z.object({
+  issuer: z.string(),
+  authorization_endpoint: z.url(),
+  token_endpoint: z.url(),
+  jwks_uri: z.url(),
+});
+type Metadata = z.infer<typeof metadataSchema>;
+
+async function getJson(url: string): Promise<unknown> {
+  try {
+    const response = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (response.ok) return await response.json();
+  } catch {
+    // The message below says what failed.
+  }
+  throw new ProviderError(`The provider did not answer correctly: ${url}`);
+}
+
+/** Return the discovery document of a provider. Its issuer must be the issuer of the settings. */
+async function discover(provider: Provider): Promise<Metadata> {
+  const url = `${provider.issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
+  const metadata = metadataSchema.safeParse(await getJson(url));
+  if (!metadata.success) {
+    throw new ProviderError("The discovery document of the provider is not valid.");
+  }
+  if (metadata.data.issuer !== provider.issuer) {
+    throw new ProviderError("The discovery document of the provider has another issuer.");
+  }
+  return metadata.data;
+}
+
+/** Return the URL that the provider sends the browser back to. */
+function callbackUrl(name: ProviderName): string {
+  return `${publicUrl()}${flowPath(name)}/callback`;
+}
+
+function randomText(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Start the sign-in with a provider: return the URL of the sign-in page of
+ * the provider, and the signed flow for the cookie. After the sign-in, the
+ * app opens the page `next`.
+ */
+export async function startProviderSignIn(name: ProviderName, next: string): Promise<{ url: string; flow: string }> {
+  const provider = providerOf(name);
+  const metadata = await discover(provider);
+  const [state, nonce, verifier] = [randomText(), randomText(), randomText()];
+  const url = new URL(metadata.authorization_endpoint);
+  const query = {
+    response_type: "code",
+    client_id: provider.clientId,
+    redirect_uri: callbackUrl(name),
+    scope: provider.scope,
+    state,
+    nonce,
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+  };
+  for (const [key, value] of Object.entries(query)) {
+    url.searchParams.set(key, value);
+  }
+  const exp = Math.floor(Date.now() / 1000) + FLOW_SECONDS;
+  return { url: url.toString(), flow: makeFlow(name, { state, nonce, verifier, next, exp }) };
+}
+
+/** Change the code of the callback for an ID token at the token endpoint of a provider. */
+async function exchange(provider: Provider, metadata: Metadata, code: string, redirectUri: string, verifier: string): Promise<string> {
+  // RFC 6749: the client ID and the secret of the basic scheme are URL encoded.
+  const basic = Buffer.from(`${encodeURIComponent(provider.clientId)}:${encodeURIComponent(provider.clientSecret)}`).toString("base64");
+  let response: Response;
+  try {
+    response = await fetch(metadata.token_endpoint, {
+      method: "POST",
+      headers: { Accept: "application/json", Authorization: `Basic ${basic}` },
+      body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new ProviderError("The token endpoint of the provider did not answer.");
+  }
+  if (response.status === 400 || response.status === 401) {
+    throw new ProviderError("The provider did not accept the code. Start the sign-in again.");
+  }
+  const answer = z.object({ id_token: z.string() }).safeParse(await response.json().catch(() => null));
+  if (!response.ok || !answer.success) {
+    throw new ProviderError("The token endpoint of the provider gave no ID token.");
+  }
+  return answer.data.id_token;
+}
+
+/**
+ * Return the claims of a valid ID token, else throw a ProviderError. The
+ * signature must come from a key of the provider (its JWKS), and the token
+ * must have the issuer, the audience (the client ID), a time that has not
+ * ended, and the nonce of the flow.
+ */
+async function checkIdToken(provider: Provider, metadata: Metadata, idToken: string, nonce: string): Promise<JWTPayload> {
+  let claims: JWTPayload;
+  try {
+    const keys = createRemoteJWKSet(new URL(metadata.jwks_uri), { timeoutDuration: TIMEOUT_MS });
+    ({ payload: claims } = await jwtVerify(idToken, keys, {
+      issuer: provider.issuer,
+      audience: provider.clientId,
+      algorithms: ALGORITHMS,
+      clockTolerance: LEEWAY_SECONDS,
+      requiredClaims: ["aud", "exp", "iat", "iss", "nonce", "sub"],
+    }));
+  } catch (error) {
+    throw new ProviderError(`The ID token is not valid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const found = Buffer.from(String(claims.nonce));
+  if (found.length !== Buffer.byteLength(nonce) || !timingSafeEqual(found, Buffer.from(nonce))) {
+    throw new ProviderError("The ID token is not valid: the nonce is not the one of the flow.");
+  }
+  return claims;
+}
+
+/** Return the ID of the user of the claims of an ID token. With `create_users`, make a new user. */
+async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
+  const username = claims[provider.usernameClaim];
+  if (typeof username !== "string" || !username) {
+    throw new ProviderError(`The ID token has no claim '${provider.usernameClaim}'.`);
+  }
+  if (provider.usernameClaim === "email" && (claims.email_verified === false || claims.email_verified === "false")) {
+    throw new ProviderError("The provider did not verify the email address.");
+  }
+  const rows = await getDb()
+    .select({ id: {{ table.const }}.id })
+    .from({{ table.const }})
+    .where(eq({{ table.const }}.{{ username.key }}, username))
+    .limit(1);
+  const [found] = rows;
+  if (found) return found.id;
+{% if creates %}
+  if (!provider.createUsers) {
+    throw new ProviderError(`No user has the user name ${username}.`, "unknown-user");
+  }
+  const values: Record<string, unknown> = Object.fromEntries(Object.entries(provider.claims).map(([key, claim]) => [key, claims[claim]]));
+  values.{{ username.key }} = username;
+{% if role_key %}
+  if (provider.defaultRole !== undefined) {
+    values.{{ role_key }} = provider.defaultRole;
+  }
+{% endif %}
+  const input = {{ var }}InputSchema.safeParse(values);
+  if (!input.success) {
+    throw new ProviderError("The claims of the provider do not give a valid user.");
+  }
+  return (await {{ var }}Repository.create(input.data)).id;
+{% else %}
+  throw new ProviderError(`No user has the user name ${username}.`, "unknown-user");
+{% endif %}
+}
+
+/**
+ * Finish the sign-in with a provider: check the answer of the provider in
+ * the query of the callback, and return the ID of the user.
+ */
+export async function finishProviderSignIn(name: ProviderName, flow: Flow, query: URLSearchParams): Promise<string> {
+  const error = query.get("error");
+  if (error !== null) {
+    throw new ProviderError(`The provider gave the error '${error.slice(0, 200)}'.`);
+  }
+  const code = query.get("code");
+  const state = Buffer.from(query.get("state") ?? "");
+  if (code === null || state.length !== Buffer.byteLength(flow.state) || !timingSafeEqual(state, Buffer.from(flow.state))) {
+    throw new ProviderError("The state of the callback is not correct. Sign in again.");
+  }
+  const provider = providerOf(name);
+  const metadata = await discover(provider);
+  const idToken = await exchange(provider, metadata, code, callbackUrl(name), flow.verifier);
+  return userOf(provider, await checkIdToken(provider, metadata, idToken, flow.nonce));
+}

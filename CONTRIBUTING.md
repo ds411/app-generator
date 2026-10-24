@@ -276,15 +276,18 @@ git config core.hooksPath .githooks
   `src/appgen/bindings/shared/i18n.py`, for example `jsx_text("Close")`,
   else the check fails.
 - When a push changes the generator core, a front-end binding, the
-  shared binding code, or the room booking example, the hook also runs
-  `scripts/check-auth-ui.sh`. The script builds the room booking example
+  FastAPI binding, the shared binding code, or the room booking example,
+  the hook also runs `scripts/check-auth-ui.sh`. The script builds the room booking example
   with React and Next.js, signs in as a user of each role, and checks
   the menus, the pages, and the actions of the role. It also signs up
-  a new user, resets a password (Next.js), and checks that a user of an
-  owner rule sees only the records of the user
-  (`scripts/auth_ui_test.py`). It needs pnpm, but not Docker. Update its
-  approved screenshots with `APPGEN_UPDATE_SCREENSHOTS=1
-  scripts/check-auth-ui.sh`.
+  a new user, resets a password (Next.js), checks that a user of an
+  owner rule sees only the records of the user, and signs in with a
+  provider through the mock provider of `scripts/mock_oidc.py`
+  (`scripts/auth_ui_test.py`). The binding `react-api` is the React app
+  with the FastAPI app of the example: the script starts both, and signs
+  in through the flow of the FastAPI app. It needs uv and pnpm, but not
+  Docker. Update its approved screenshots with
+  `APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-auth-ui.sh`.
 - Each check script ends with the smoke test of its app
   (`scripts/smoke_test.py`): it starts the Docker image that the script
   built, and requests one page for each entity (Next.js and React) or

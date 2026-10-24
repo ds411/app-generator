@@ -204,13 +204,36 @@ BINDING = Binding(
                 when="definition.access" if "access" in template else "definition.auth",
             )
             for template, path in (
-                ("src/shared/db/schema/credentials.ts.j2", "src/shared/db/schema/credentials.ts"),
                 ("src/shared/auth/session.ts.j2", "src/shared/auth/session.ts"),
-                ("src/shared/auth/password.ts.j2", "src/shared/auth/password.ts"),
                 ("src/shared/auth/actions.ts.j2", "src/shared/auth/actions.ts"),
                 ("src/shared/auth/index.ts.j2", "src/shared/auth/index.ts"),
                 ("src/shared/auth/access.ts.j2", "src/shared/auth/access.ts"),
                 ("app/sign-in/page.tsx.j2", "app/sign-in/page.tsx"),
+            )
+        ),
+        *(
+            Output(
+                template=template, path=path, when="definition.auth and definition.auth.password"
+            )
+            for template, path in (
+                ("src/shared/db/schema/credentials.ts.j2", "src/shared/db/schema/credentials.ts"),
+                ("src/shared/auth/password.ts.j2", "src/shared/auth/password.ts"),
+            )
+        ),
+        *(
+            Output(
+                template=template, path=path, when="definition.auth and definition.auth.providers"
+            )
+            for template, path in (
+                ("src/shared/auth/providers.ts.j2", "src/shared/auth/providers.ts"),
+                (
+                    "app/auth/providers/start/route.ts.j2",
+                    "app/auth/providers/[name]/start/route.ts",
+                ),
+                (
+                    "app/auth/providers/callback/route.ts.j2",
+                    "app/auth/providers/[name]/callback/route.ts",
+                ),
             )
         ),
         *(
@@ -322,7 +345,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "access", "role", "record_rule"}
+        | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),

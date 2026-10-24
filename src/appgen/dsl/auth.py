@@ -15,6 +15,8 @@ FORGOT_PASSWORD_PATH = "/forgot-password"
 """The path of the page that asks for a password reset, with `auth.password_reset`."""
 RESET_PASSWORD_PATH = "/reset-password"
 """The path of the page that sets a new password with a reset link, with `auth.password_reset`."""
+PROVIDER_PATHS = "/auth/"
+"""With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8
 """The default and the lowest value of `auth.min_password_length`."""
 

@@ -1,5 +1,6 @@
+{% set callback = react.api and definition.auth.providers %}
 {{ trace_header(definition.auth.id) }}
-import type { ReactNode } from "react";
+import {{ "{ type ReactNode, useEffect }" if callback else "type { ReactNode }" }} from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router";
 
 {% if auth_pages.password_reset %}
@@ -11,10 +12,10 @@ import { SignUpForm } from "@/features/sign-up";
 {% endif %}
 {% if definition.access %}
 import { NotFoundPage } from "@/pages/not-found";
-import { canOpenPage, currentUserId } from "@/shared/auth";
+import { canOpenPage, currentUserId{{ ", finishProviderSignIn" if callback }} } from "@/shared/auth";
 import type { PageName } from "@/shared/config/pages";
 {% else %}
-import { currentUserId } from "@/shared/auth";
+import { currentUserId{{ ", finishProviderSignIn" if callback }} } from "@/shared/auth";
 {% endif %}
 
 /** Show a page that needs a signed-in user, or go to the sign-in page.{% if definition.access %} A page that the role may not open shows as not found.{% endif %} */
@@ -32,12 +33,44 @@ export function RequireAuth({ {% if definition.access %}page, {% endif %}childre
   return children;
 }
 
+{% if definition.auth.providers %}
+/**
+ * The sign-in page. After the sign-in, the app opens the page in `next`.
+ * After a failed sign-in with a provider, `error` gives the message.
+ */
+export function SignInRoute() {
+  const [params] = useSearchParams();
+  const next = params.get("next");
+  return <SignInForm next={next && next.startsWith("/") ? next : "/"} error={params.get("error") ?? undefined} />;
+}
+{% else %}
 /** The sign-in page. After the sign-in, the app opens the page in `next`. */
 export function SignInRoute() {
   const [params] = useSearchParams();
   const next = params.get("next");
   return <SignInForm next={next && next.startsWith("/") ? next : "/"} />;
 }
+{% endif %}
+{% if callback %}
+
+/**
+ * The page after a sign-in with a provider (ADR 0020): the FastAPI app
+ * gives the token in the fragment of the URL. The page starts the session,
+ * and opens the page in `next`. A failed sign-in opens the sign-in page
+ * with a message. The page replaces its URL, so that the token does not
+ * stay in the history of the browser.
+ */
+export function ProviderCallbackRoute() {
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next");
+    const page = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    finishProviderSignIn(window.location.hash).then((ok) => {
+      window.location.replace(ok ? page : `/sign-in?error=provider&next=${encodeURIComponent(page)}`);
+    });
+  }, []);
+  return null;
+}
+{% endif %}
 {% if definition.auth.sign_up %}
 
 /** The sign-up page. After the sign-up, the app opens the page in `next`. */

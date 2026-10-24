@@ -9,7 +9,7 @@
 // browser tab.{% if role_key %} The checks of the roles in the browser only hide what the
 // API refuses: the API checks each request.{% endif %}
 
-import { apiRequest, setAccessToken } from "@/shared/api";
+import { {{ "API_URL, " if definition.auth.providers }}apiRequest, setAccessToken } from "@/shared/api";
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
@@ -20,11 +20,20 @@ const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 {% endif %}
 {% else %}
+{% if definition.auth.password %}
 // The sign-in of the app with mock data (ADR 0011). The users are the mock
 // records of {{ definition.auth.user_entity }}, and each one signs in with the password
 // MOCK_PASSWORD. The session stays in the browser tab. An app with a back
 // end checks the passwords on the server.{% if sign_up %} A user of the sign-up
 // (ADR 0016) stays in the browser tab too, and signs in with its own password.{% endif +%}
+{% else %}
+// The sign-in of the app with mock data (ADR 0011). The users are the mock
+// records of {{ definition.auth.user_entity }}. The session stays in the browser tab.
+{% endif %}
+{% if definition.auth.providers %}
+// A sign-in with a provider (ADR 0020) signs in a mock user at once, as a
+// demonstration. An app with a back end sends the browser to the provider.
+{% endif %}
 {% if definition.auth.password_reset %}
 // The password reset needs a server that sends the reset links (ADR 0017),
 // so an app with mock data has no reset pages. {{ trace(definition.auth.password_reset.id) }}
@@ -39,9 +48,11 @@ import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% endif %}
 
 {% endif %}
+{% if definition.auth.password %}
 /** The password of each mock user. */
 export const MOCK_PASSWORD = "password";
 
+{% endif %}
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 {% if sign_up %}
 const SIGN_UPS_KEY = {{ (app.name ~ "-sign-ups") | tojson }};
@@ -179,6 +190,7 @@ export async function startSession(token: string): Promise<void> {
   }
 }
 
+{% if definition.auth.password %}
 /** Sign in with the API. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
   try {
@@ -190,6 +202,41 @@ export async function signIn(username: string, password: string): Promise<string
   }
   return null;
 }
+{% endif %}
+{% if definition.auth.providers %}
+
+/**
+ * Sign in with a provider (ADR 0020): the browser goes to the flow of the
+ * FastAPI app, and comes back to the page `/auth/callback` with a token.
+ * Then the app opens the page `next`. Return null, or the message of the error.
+ */
+export async function signInWithProvider(name: string, next: string): Promise<string | null> {
+  const returnTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  window.location.assign(`${API_URL}/auth/providers/${encodeURIComponent(name)}/start?return_to=${encodeURIComponent(returnTo)}`);
+  return null;
+}
+
+/**
+ * Finish a sign-in with a provider: the FastAPI app gives the token, or
+ * the error, in the fragment of the URL of `/auth/callback`. Return true
+ * if the session starts.
+ */
+export async function finishProviderSignIn(fragment: string): Promise<boolean> {
+  const values = new URLSearchParams(fragment.replace(/^#/, ""));
+  const token = values.get("access_token");
+  if (token === null) {
+    console.error(values.get("error") ?? "The callback has no token.");
+    return false;
+  }
+  try {
+    await startSession(token);
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+  return true;
+}
+{% endif %}
 
 {% if definition.auth.password_reset %}
 
@@ -227,6 +274,7 @@ export async function signOut(): Promise<void> {
   }
 }
 {% else %}
+{% if definition.auth.password %}
 /** Sign in. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
 {% if sign_up %}
@@ -245,6 +293,40 @@ export async function signIn(username: string, password: string): Promise<string
   }
   return null;
 }
+{% endif %}
+{% if definition.auth.providers %}
+{% set mock_users = mock[definition.auth.user_entity] %}
+
+/** The mock user of each provider: a sign-in with the provider signs in this user. */
+const PROVIDER_USERS: Record<string, string> = {
+{% for name, p in definition.auth.providers.items() %}
+{% set role_users = (mock_users | selectattr(role_key, "eq", p.default_role) | list) if role_key and p.create_users and p.default_role else [] %}
+{% set user = (role_users or mock_users) | first %}
+{% if user %}
+  {{ name }}: {{ user.id | tojson }}, {{ trace(p.id) }}
+{% endif %}
+{% endfor %}
+};
+
+/**
+ * Sign in with a provider (ADR 0020): with mock data, sign in the mock user
+ * of the provider at once, and open the page `next`. Return null, or the
+ * message of the error.
+ */
+export async function signInWithProvider(name: string, next: string): Promise<string | null> {
+  const userId = PROVIDER_USERS[name];
+  if (userId === undefined) {
+    return {{ tr(js("The sign-in failed.")) }};
+  }
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, userId);
+  } catch {
+    return {{ tr(js("The browser does not keep the session.")) }};
+  }
+  window.location.assign(next);
+  return null;
+}
+{% endif %}
 
 /** Sign out. */
 export async function signOut(): Promise<void> {

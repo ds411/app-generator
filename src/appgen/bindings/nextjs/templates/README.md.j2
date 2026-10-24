@@ -72,9 +72,26 @@ migration from the schema.
 
 ## Sign-in
 
+{% if definition.auth.password %}
 The users sign in on `/sign-in` with a user name and a password. Set
 `AUTH_SECRET` to a long random text. With `SEED_PASSWORD`, the seed
 gives each seed user this password.
+{% else %}
+The users sign in on `/sign-in` with a provider. Set `AUTH_SECRET` to a
+long random text.
+{% endif %}
+{% if definition.auth.providers %}
+The sign-in page has a button for each OpenID Connect provider: the
+authorization code flow with PKCE. Register the redirect URI
+`<PUBLIC_URL>/auth/providers/<name>/callback` at each provider, and set
+`PUBLIC_URL` to the URL of the app for the browsers.
+
+| Provider | Issuer | Client ID | Client secret |
+| -------- | ------ | --------- | ------------- |
+{% for name, p in definition.auth.providers.items() %}
+| `{{ name }}` | `{{ name | upper }}_ISSUER` (default `{{ p.issuer }}`) | `{{ p.client_id_env }}` | `{{ p.client_secret_env }}` |
+{% endfor %}
+{% endif %}
 {% if definition.auth.sign_up %}
 New users make an account on `/sign-up`.
 {% endif %}

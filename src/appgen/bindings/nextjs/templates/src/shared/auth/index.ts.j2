@@ -1,15 +1,33 @@
 {{ trace_header(definition.auth.id) }}
 {% if definition.auth.password_reset %}
 import { confirmPasswordResetAction, requestPasswordResetAction, signInAction, signOutAction } from "./actions";
-{% else %}
+{% elif definition.auth.password %}
 import { signInAction, signOutAction } from "./actions";
+{% else %}
+import { signOutAction } from "./actions";
 {% endif %}
+{% if definition.auth.password %}
 
 /** Sign in. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
   const result = await signInAction(username, password);
   return result.ok ? null : result.error.message;
 }
+{% endif %}
+{% if definition.auth.providers %}
+
+/**
+ * Sign in with a provider (ADR 0020): the browser goes to the provider,
+ * and then opens the page `next`. Return null, or the message of the error.
+ */
+export async function signInWithProvider(name: string, next: string): Promise<string | null> {
+  // The start is a route handler, not a page: the browser loads it from the server.
+  const start = new URL(`/auth/providers/${encodeURIComponent(name)}/start`, window.location.origin);
+  start.searchParams.set("next", next);
+  window.location.assign(start);
+  return null;
+}
+{% endif %}
 
 /** Sign out. */
 export async function signOut(): Promise<void> {

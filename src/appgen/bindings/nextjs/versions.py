@@ -65,3 +65,6 @@ A test checks that this mapping has a version for each of them.
 
 TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 """The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
+
+PROVIDER_PACKAGES: dict[str, str] = {"jose": "6.2.12"}
+"""The packages of the sign-in with providers (ADR 0020): `jose` checks the ID tokens."""

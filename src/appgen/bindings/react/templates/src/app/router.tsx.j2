@@ -26,7 +26,7 @@ import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{
 
 {% endif %}
 {% if definition.auth %}
-import { RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
+import { {% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
@@ -36,6 +36,9 @@ import { RootLayout } from "./layout/root-layout";
 export const router = createBrowserRouter([
 {% if definition.auth %}
   { path: "/sign-in", element: <SignInRoute /> }, {{ trace(definition.auth.id) }}
+{% endif %}
+{% if react.api and definition.auth and definition.auth.providers %}
+  { path: "/auth/callback", element: <ProviderCallbackRoute /> }, {{ trace(definition.auth.id) }}
 {% endif %}
 {% if definition.auth and definition.auth.sign_up %}
   { path: "/sign-up", element: <SignUpRoute /> }, {{ trace(definition.auth.sign_up.id) }}

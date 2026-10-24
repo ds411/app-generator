@@ -1,7 +1,8 @@
 // The front ends show only the pages and the operations that the role of
 // the user allows (ADR 0012), a new user can sign up (ADR 0016), a user
-// can reset the password (ADR 0017), and a user of an owner rule sees
-// only the records of the user (ADR 0018).
+// can reset the password (ADR 0017), a user of an owner rule sees only
+// the records of the user (ADR 0018), and a user signs in with a provider
+// (ADR 0020).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -198,5 +199,18 @@ for (const rule of auth?.ownerRules ?? []) {
     await page.goto(rule.otherPath);
     await expect(page.getByText(rule.otherMessage, { exact: true }).first()).toBeVisible();
     await expect(page.getByText(rule.otherTitle, { exact: true })).toHaveCount(0);
+  });
+}
+
+for (const provider of auth?.providers ?? []) {
+  test(`a user signs in with the provider ${provider.name}, and sees the menu of its role`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "light", "The sign-in does not depend on the color mode.");
+    await page.goto("/sign-in");
+    const app = new URL(page.url()).origin;
+    await page.getByRole("button", { name: provider.title, exact: true }).click();
+    // The browser goes to the provider, and comes back to the start page of the app.
+    await page.waitForURL((url) => url.origin === app && url.pathname === "/");
+    await page.waitForLoadState("networkidle");
+    expect(await menuLabels(page)).toEqual(provider.menu);
   });
 }

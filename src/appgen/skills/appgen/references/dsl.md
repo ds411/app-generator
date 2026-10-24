@@ -988,9 +988,10 @@ auth:
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up` or `password_reset`.
-- No page can use the path `/sign-in`, `/sign-up` with a sign-up, or
-  `/forgot-password` and `/reset-password` with a password reset: they
-  are the pages of the front ends.
+- No page can use the path `/sign-in`, `/sign-up` with a sign-up,
+  `/forgot-password` and `/reset-password` with a password reset, or a
+  path under `/auth/` with providers: they are the pages of the front
+  ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -1037,6 +1038,20 @@ as the FastAPI app, and the link starts with `PUBLIC_URL`. Its
 extension file `src/shared/auth/password-reset.ext.ts` delivers the
 link, with the same stub. The React app with mock data has no reset
 pages.
+
+With `providers`, the sign-in page of each front end has a button for
+each provider, with its `title`. With `password: false`, the page has
+no password form. The Next.js app does the flow itself: the routes
+`/auth/providers/<name>/start` and `/auth/providers/<name>/callback` do
+the authorization code flow with PKCE, check the ID token with the
+package `jose`, and set the session cookie. Register the redirect URI
+`<PUBLIC_URL>/auth/providers/<name>/callback` at the provider, and set
+`PUBLIC_URL` and the client variables. The React app with
+`x-react-data: api` sends the browser to the flow of the FastAPI app,
+with `return_to` set to its page `/auth/callback`: add the origin of
+the React app to `CORS_ORIGINS` of the FastAPI app. The React app with
+mock data signs in a mock user at once, as a demonstration. A failed
+sign-in opens the sign-in page with a message.
 
 ## access
 
@@ -1178,6 +1193,9 @@ use in the app does not show.
   `breadcrumb`, `More`, `Notifications`, `Close toast`, `Sign in`,
   `Password`, `Sign out`, `Sign up`, `Do you need an account?`,
   `Do you have an account?`.
+- The sign-in with a provider: `or`,
+  `No user has this user name. Ask an administrator.`,
+  `The sign-in with the provider failed.`.
 - The password reset: `Did you forget the password?`,
   `Reset the password`,
   `Enter your user name. The app sends you a link to set a new password.`,

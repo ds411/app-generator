@@ -26,7 +26,18 @@ services:
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+{% if definition.auth.password %}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
+{% endif %}
+{% if definition.auth.password_reset or definition.auth.providers %}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+{% endif %}
+{% for name, p in definition.auth.providers.items() %}
+      {{ trace(p.id) }}
+      {{ name | upper }}_ISSUER: ${{ "{" }}{{ name | upper }}_ISSUER:-{{ p.issuer }}{{ "}" }}
+      {{ p.client_id_env }}: ${{ "{" }}{{ p.client_id_env }}:-{{ "}" }}
+      {{ p.client_secret_env }}: ${{ "{" }}{{ p.client_secret_env }}:-{{ "}" }}
+{% endfor %}
 {% endif %}
 {% for api in ts_apis.values() %}
       {{ trace(api.id) }}

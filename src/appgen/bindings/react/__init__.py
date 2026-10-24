@@ -340,15 +340,12 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "access", "role", "record_rule"}
+        | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
-    # The React app has no sign-in with a provider (#271) yet.
-    excludes=frozenset(
-        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "provider"}
-    ),
+    excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
     context=context,
     warnings=warnings,
     finish=finish,

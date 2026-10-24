@@ -21,15 +21,25 @@ test proves it for the room booking example (`examples/room-booking`):
    password (ADR 0017). For each owner rule (ADR 0018), it signs in as a
    user of the role, and checks that the list and the detail page show
    only the records of the user, and that the form of a new record does
-   not show the owner.
+   not show the owner. For each provider that makes users (ADR 0020), it
+   signs in with the button of the provider, and compares the menu with
+   the menu of the role of the new user. Next.js signs in through the
+   mock provider of scripts/mock_oidc.py. React with mock data signs in
+   a mock user at once.
+4. The binding `react-api` is the React app with `x-react-data: api` and
+   the FastAPI app of the example (SQLite). The script starts both and
+   the mock provider, and runs only the test of the sign-in with a
+   provider: the browser goes through the flow of the FastAPI app, and
+   comes back to the React app with a token.
 
 Run it from the repository root:
 
     uv run scripts/auth_ui_test.py [binding ...] [--out folder]
 
-Without a binding, the script tests React and Next.js. It needs pnpm
-and the Chromium of Playwright (see scripts/smoke_test.py). It uses the
-ports 5440 (React) and 3440 (Next.js). It does not need Docker.
+Without a binding, the script tests React, Next.js, and react-api. It
+needs uv, pnpm, and the Chromium of Playwright (see scripts/smoke_test.py).
+It uses the ports 5440 (React), 3440 (Next.js), 5441 and 8440 (react-api),
+and 9440 (the mock provider). It does not need Docker.
 
 Environment variables:
     APPGEN_UPDATE_SCREENSHOTS     1: write the approved screenshots again
@@ -55,8 +65,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import mock_oidc
 from smoke_test import expected_ui
 
+from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
@@ -67,10 +79,16 @@ from appgen.gen.naming import kebab
 
 DEFINITION = Path("examples/room-booking/app.yaml")
 UI_TESTS = Path("ui-tests")
-BINDINGS = ("react", "nextjs")
-PORTS = {"react": 5440, "nextjs": 3440}
+BINDINGS = ("react", "nextjs", "react-api")
+PORTS = {"react": 5440, "nextjs": 3440, "react-api": 5441}
 PASSWORDS = {"react": "password", "nextjs": "auth-ui-test-password"}
 """The password of the users: the mock password of React, and SEED_PASSWORD of Next.js."""
+API_PORT = 8440
+"""The port of the FastAPI app of the binding `react-api`."""
+OIDC_PORT = 9440
+"""The port of the mock OpenID Connect provider. scripts/check-fastapi.sh uses the default port."""
+PROVIDER_TEST = "signs in with the provider"
+"""The part of the name of the UI test of the sign-in with a provider, for `react-api`."""
 
 
 class AuthUiTestError(Exception):
@@ -294,6 +312,36 @@ def expected_owner_rules(binding: str, definition: AppDefinition) -> list[dict[s
     return checks
 
 
+def expected_providers(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
+    """Return the sign-in with each provider that makes users: the button, and the menu after it.
+
+    Through the mock provider, the user is a new user with the default
+    role of the provider. With mock data, the React app signs in the mock
+    user of the provider: the first one with the default role.
+    """
+    auth, access = definition.auth, definition.access
+    assert auth is not None and access is not None
+    users = mock_data(definition)[auth.user_entity]
+    default = definition.entities[auth.user_entity].fields[access.role_field].default
+    checks: list[dict[str, Any]] = []
+    for name, provider in auth.providers.items():
+        if not provider.create_users:
+            continue
+        role = provider.default_role or default
+        if binding == "react":
+            user = next((u for u in users if u.get(access.role_field) == role), users[0])
+            value = user.get(access.role_field)
+            role = value if isinstance(value, str) else None
+        checks.append(
+            {
+                "name": name,
+                "title": str(provider.title or name),
+                "menu": menu_labels(definition, Permissions(definition, role)),
+            }
+        )
+    return checks
+
+
 def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any]:
     """Return the values of the UI test: the users, and what each role sees."""
     auth, access = definition.auth, definition.access
@@ -337,6 +385,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         "signUp": expected_sign_up(definition),
         "passwordReset": expected_password_reset(binding, definition, app, used),
         "ownerRules": owner_rules,
+        "providers": expected_providers(binding, definition),
     }
 
 
@@ -362,7 +411,7 @@ def started(binding: str, app: Path) -> Generator[None]:
     """Start the built app, and stop it at the end."""
     port = str(PORTS[binding])
     env = {**os.environ, "PORT": port}
-    if binding == "react":
+    if binding in ("react", "react-api"):
         command = ["pnpm", "exec", "vite", "preview", "--port", port, "--strictPort"]
     else:
         run("pnpm", "--silent", "db:generate", cwd=app, quiet=True)
@@ -375,6 +424,7 @@ def started(binding: str, app: Path) -> Generator[None]:
             # The password reset writes the links to the log (server.log).
             "ENVIRONMENT": "development",
             "PUBLIC_URL": f"http://localhost:{port}",
+            **provider_env(load_definition(DEFINITION)),
         }
         command = ["pnpm", "--silent", "start"]
     log_file = app / "server.log"
@@ -401,15 +451,36 @@ def started(binding: str, app: Path) -> Generator[None]:
             os.killpg(process.pid, 9)
 
 
+def provider_env(definition: AppDefinition) -> dict[str, str]:
+    """Return the settings of an app that make each provider the mock provider."""
+    assert definition.auth is not None
+    env: dict[str, str] = {}
+    for name, provider in definition.auth.providers.items():
+        env[f"{name.upper()}_ISSUER"] = f"http://127.0.0.1:{OIDC_PORT}"
+        env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
+        env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
+    return env
+
+
 def check_ui(binding: str, definition: AppDefinition, app: Path) -> None:
     """Run the UI test of the sign-in and the permissions on the app that runs."""
     name = f"{binding}-auth"
     expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
     expected_file.parent.mkdir(exist_ok=True)
-    expected = {
-        **expected_ui(binding, definition),
-        "auth": expected_auth(binding, definition, app),
-    }
+    if binding == "react-api":
+        # Only the test of the sign-in with a provider: the FastAPI app has no seed users.
+        auth = {
+            "app": definition.app.name,
+            "password": "",
+            "roles": [],
+            "providers": expected_providers(binding, definition),
+        }
+        expected = {**expected_ui("react", definition), "auth": auth}
+    else:
+        expected = {
+            **expected_ui(binding, definition),
+            "auth": expected_auth(binding, definition, app),
+        }
     expected_file.write_text(json.dumps(expected, indent=2) + "\n")
     env = {
         "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}",
@@ -421,32 +492,101 @@ def check_ui(binding: str, definition: AppDefinition, app: Path) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
         run("pnpm", "install", "--silent", "--frozen-lockfile", cwd=UI_TESTS)
     command = ["pnpm", "exec", "playwright", "test", "tests/auth.spec.ts"]
+    if binding == "react-api":
+        command += ["--grep", PROVIDER_TEST]
     if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
         command.append("--update-snapshots")
     run(*command, cwd=UI_TESTS, env=env)
 
 
-def auth_ui_test(binding: str, out: Path) -> None:
-    definition = load_definition(DEFINITION)
-    app = out / binding
-    log(binding, f"generate {DEFINITION} in {app}")
+def generate(definition: Path, binding: str, app: Path) -> None:
+    log(binding, f"generate {definition} in {app}")
     run(
         "uv",
         "run",
         "--locked",
         "appgen",
         "generate",
-        str(DEFINITION),
+        str(definition),
         "-b",
         binding,
         "-o",
         str(app),
         quiet=True,
     )
+
+
+@contextmanager
+def started_api(app: Path) -> Generator[None]:
+    """Start the FastAPI app with SQLite and the mock provider, and stop it at the end."""
+    port, web = str(API_PORT), f"http://localhost:{PORTS['react-api']}"
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    env |= {
+        "DATABASE_URL": f"sqlite+aiosqlite:///{app / 'local.db'}",
+        "AUTH_SECRET": "auth-ui-test-secret",
+        "CORS_ORIGINS": json.dumps([web]),
+        "PUBLIC_URL": f"http://127.0.0.1:{port}",
+        "LOG_JSON": "false",
+        **provider_env(load_definition(DEFINITION)),
+    }
+    subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
+    log_file = app / "server.log"
+    with log_file.open("w") as output:
+        process = subprocess.Popen(
+            ["uv", "run", "fastapi", "run", "app/main.py", "--port", port],
+            cwd=app,
+            env=env,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    try:
+        wait_for("react-api", f"http://127.0.0.1:{port}/health")
+        yield
+    except BaseException:
+        print(log_file.read_text()[-4000:], file=sys.stderr)
+        raise
+    finally:
+        os.killpg(process.pid, 15)
+        process.wait(timeout=30)
+
+
+def react_api_test(out: Path) -> None:
+    """Sign in to the React app with the FastAPI app through the mock provider (ADR 0020)."""
+    binding, definition = "react-api", load_definition(DEFINITION)
+    source = out / "app.yaml"
+    marker = "\napp:\n"
+    text = DEFINITION.read_text()
+    if marker not in text:
+        raise AuthUiTestError(f"{DEFINITION} has no 'app:' line.")
+    source.write_text(text.replace(marker, f"{marker}  {DATA_KEY}: api\n", 1))
+    api, web = out / "react-api-fastapi", out / binding
+    generate(source, "fastapi", api)
+    generate(source, "react", web)
+    log(binding, "uv sync, pnpm install, and pnpm build")
+    # The FastAPI app has its own virtual environment.
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    subprocess.run(["uv", "sync", "--quiet"], cwd=api, env=env, check=True)
+    run("pnpm", "install", "--silent", cwd=web)
+    run("pnpm", "--silent", "build", cwd=web, env={"VITE_API_URL": f"http://127.0.0.1:{API_PORT}"})
+    with mock_oidc.serving(port=OIDC_PORT), started_api(api), started(binding, web):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the sign-in with a provider (Playwright)")
+        check_ui(binding, definition, web)
+    log(binding, "passed")
+
+
+def auth_ui_test(binding: str, out: Path) -> None:
+    if binding == "react-api":
+        react_api_test(out)
+        return
+    definition = load_definition(DEFINITION)
+    app = out / binding
+    generate(DEFINITION, binding, app)
     log(binding, "pnpm install and pnpm build")
     run("pnpm", "install", "--silent", cwd=app)
     run("pnpm", "--silent", "build", cwd=app)
-    with started(binding, app):
+    with mock_oidc.serving(port=OIDC_PORT), started(binding, app):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
         check_ui(binding, definition, app)
