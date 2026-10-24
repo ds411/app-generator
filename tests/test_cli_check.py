@@ -85,3 +85,10 @@ def test_check_needs_a_code_folder(tmp_path: Path) -> None:
     result = runner.invoke(app, ["check", DEFINITION, str(tmp_path / "missing")])
 
     assert result.exit_code == 2
+
+
+def test_orphans_needs_an_output_manifest(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["orphans", DEFINITION, str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert "has no output manifest" in result.output

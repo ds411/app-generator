@@ -8,14 +8,17 @@ of the hand-written code to the renamed and the removed elements as
 invalid, until the app developer updates them.
 """
 
+import json
 import re
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from appgen.cli import app
 from appgen.dsl import AppDefinition, load_definition_text
-from appgen.gen import find_binding, generate, write_result
-from appgen.trace import check_traces
+from appgen.gen import find_binding, generate, read_manifest, write_result
+from appgen.trace import check_traces, find_orphans, render_orphans
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
 
@@ -112,3 +115,41 @@ def test_extension_code_stays_and_the_check_reports_the_drift(
     hints = {p.element_id: p.hint for p in report.invalid}
     assert hints[RENAMED[0]] == f"Did you mean '{RENAMED[1]}'?"
     assert hints[REMOVED] == "Did you mean 'pages.projects'?"
+
+
+def test_the_orphans_command_lists_the_old_extension_file_and_the_new_element(
+    tmp_path: Path, changed: AppDefinition
+) -> None:
+    fastapi = find_binding("fastapi")
+    original = load_definition_text(EXAMPLE.read_text(), str(EXAMPLE))
+    write_result(generate(original, fastapi), tmp_path, "fastapi")
+    write_result(generate(changed, fastapi), tmp_path, "fastapi")
+    changed_file = tmp_path / "changed.yaml"
+    changed_file.write_text(change(EXAMPLE.read_text()))
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    runner = CliRunner()
+    text = runner.invoke(app, ["orphans", str(changed_file), str(tmp_path)])
+    data = runner.invoke(app, ["orphans", str(changed_file), str(tmp_path), "-f", "json"])
+
+    assert text.exit_code == 0, text.output
+    assert text.output == (
+        "Orphaned extension files: 1\n"
+        "  app/features/comments/validation_ext.py: entities.Comment\n"
+        "    suggestion: move the code to the element 'entities.Remark'.\n"
+    )
+    assert json.loads(data.output) == {
+        "version": 1,
+        "orphans": [
+            {
+                "file": "app/features/comments/validation_ext.py",
+                "element_id": "entities.Comment",
+                "suggestion": "entities.Remark",
+            }
+        ],
+    }
+    # The command changes no file.
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+    manifest = read_manifest(tmp_path)
+    assert manifest is not None
+    assert render_orphans(find_orphans(changed, tmp_path, manifest), "text") == text.output
