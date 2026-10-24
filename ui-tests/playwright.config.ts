@@ -29,6 +29,10 @@ export default defineConfig({
   use: {
     baseURL: process.env.APPGEN_BASE_URL ?? "http://localhost:3000",
     launchOptions: { executablePath },
+    // The charts (Recharts) do not animate when the system asks for
+    // reduced motion, so the screenshots show the charts at their end
+    // state. The apps keep the animation for other users.
+    contextOptions: { reducedMotion: "reduce" },
   },
   // One project for each color mode. The apps follow the mode of the
   // system (`ui.theme.default_mode: system`).
