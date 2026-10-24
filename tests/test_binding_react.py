@@ -287,6 +287,10 @@ def test_a_board_view_has_its_columns_and_moves_its_cards(result: GenerationResu
     assert 'return updateTask(record.id, { status: value as Task["status"] });' in board
     assert "<DropdownMenuLabel>Move to</DropdownMenuLabel>" in board
     assert '<ViewLoading indicator="skeleton" shape="board" text="Loading the board" />' in board
+    # The columns scroll in a scroll area with a horizontal scroll bar that always shows.
+    assert '<ScrollArea type="always" className="w-full min-w-0' in board
+    assert '<ScrollBar orientation="horizontal" />' in board
+    assert "src/shared/ui/scroll-area.tsx" in _files(result)
 
 
 VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"

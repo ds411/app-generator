@@ -5,7 +5,7 @@
 {{ trace_header(element_id) }}
 "use client";
 
-{% set ui_lines = ['import { Badge } from "@/shared/ui/badge";', m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { cn } from "@/shared/lib/utils";'] %}
+{% set ui_lines = ['import { Badge } from "@/shared/ui/badge";', m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { ScrollArea, ScrollBar } from "@/shared/ui/scroll-area";', 'import { cn } from "@/shared/lib/utils";'] %}
 {{ m.imports(plan, "board", lucide=["TriangleAlertIcon"], react=["type CSSProperties", "type ReactNode"], ui=ui_lines) }}
 
 {{ m.data(plan) }}
@@ -89,89 +89,93 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
       {all.length === 0 ? (
 {{ m.empty_state(plan) | indent(2, true) }}
       ) : (
-        <div className={{ js(plan.board_classes) }}>{{ (" " ~ trace(view.responsive.id, jsx=True)) if view.responsive else "" }}
-          {COLUMNS.map((column) => {
-            const cards = rows.filter((row) => {{ group.expr }} === column.value);
-            const over = column.limit !== undefined && cards.length > column.limit;
-            return (
-              <section
-                key={column.value}
-                aria-label={column.label}
-                style={column.color ? ({ "--column-color": column.color } as CSSProperties) : undefined}
-                className={cn(
-                  {{ js(plan.column_classes) }},
-                  target === column.value && "border-primary bg-primary/5",
-                )}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setTarget(column.value);
-                }}
-                onDragLeave={() => setTarget((value) => (value === column.value ? null : value))}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  drop(column.value);
-                }}
-              >
-                <header className="flex items-center gap-2 px-1.5 py-1">
-                  <span className="size-2.5 shrink-0 rounded-full bg-(--column-color,var(--muted-foreground))" />
-                  <h3 className="truncate text-sm font-medium">{column.label}</h3>
-                  <Badge variant={over ? "destructive" : "secondary"} className="ml-auto tabular-nums">
-                    {column.limit === undefined ? cards.length : `${cards.length} / ${column.limit}`}
-                  </Badge>
-                </header>
-                {over && (
-                  <p className="flex items-center gap-1.5 px-1.5 text-xs text-destructive">
-                    <TriangleAlertIcon className="size-3.5" />
-                    The column has more than {column.limit} cards.
-                  </p>
-                )}
-                <div className="flex min-h-24 flex-col gap-2">
-                  {cards.map((row) => (
-                    <div
-                      key={row.id}
-                      draggable
-                      className={cn("cursor-grab active:cursor-grabbing", dragged === row.id && "opacity-50")}
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData("text/plain", row.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        setDragged(row.id);
-                      }}
-                      onDragEnd={() => {
-                        setDragged(null);
-                        setTarget(null);
-                      }}
-                    >
-                      <RecordCard
-                        row={row}
-{% if m.card_uses_lookups(plan) | trim %}
-                        lookups={lookups}
-{% endif %}
-                        menu={
-                          <RowActionsMenu actions={ {{- "Object.values(rowActions)" if plan.row_actions else "[]" }}} record={row} onRun={ {{- "run" if plan.row_actions else "() => {}" }}}>
-{% if plan.row_actions %}
-                            <DropdownMenuSeparator />
-{% endif %}
-                            <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                            {COLUMNS.filter((other) => other.value !== column.value).map((other) => (
-                              <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
-                                {other.label}
-                              </DropdownMenuItem>
-                            ))}
-                          </RowActionsMenu>
-                        }
-                      />
-                    </div>
-                  ))}
-                  {cards.length === 0 && (
-                    <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                      Drop a card here
+        // The columns scroll in a horizontal scroll area with a scroll bar that always shows.
+        <ScrollArea type="always" className={{ js(plan.board_area_classes) }}>{{ (" " ~ trace(view.responsive.id, jsx=True)) if view.responsive else "" }}
+          <div className={{ js(plan.board_classes) }}>
+            {COLUMNS.map((column) => {
+              const cards = rows.filter((row) => {{ group.expr }} === column.value);
+              const over = column.limit !== undefined && cards.length > column.limit;
+              return (
+                <section
+                  key={column.value}
+                  aria-label={column.label}
+                  style={column.color ? ({ "--column-color": column.color } as CSSProperties) : undefined}
+                  className={cn(
+                    {{ js(plan.column_classes) }},
+                    target === column.value && "border-primary bg-primary/5",
+                  )}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setTarget(column.value);
+                  }}
+                  onDragLeave={() => setTarget((value) => (value === column.value ? null : value))}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    drop(column.value);
+                  }}
+                >
+                  <header className="flex items-center gap-2 px-1.5 py-1">
+                    <span className="size-2.5 shrink-0 rounded-full bg-(--column-color,var(--muted-foreground))" />
+                    <h3 className="truncate text-sm font-medium">{column.label}</h3>
+                    <Badge variant={over ? "destructive" : "secondary"} className="ml-auto tabular-nums">
+                      {column.limit === undefined ? cards.length : `${cards.length} / ${column.limit}`}
+                    </Badge>
+                  </header>
+                  {over && (
+                    <p className="flex items-center gap-1.5 px-1.5 text-xs text-destructive">
+                      <TriangleAlertIcon className="size-3.5" />
+                      The column has more than {column.limit} cards.
                     </p>
                   )}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+                  <div className="flex min-h-24 flex-col gap-2">
+                    {cards.map((row) => (
+                      <div
+                        key={row.id}
+                        draggable
+                        className={cn("cursor-grab active:cursor-grabbing", dragged === row.id && "opacity-50")}
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData("text/plain", row.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          setDragged(row.id);
+                        }}
+                        onDragEnd={() => {
+                          setDragged(null);
+                          setTarget(null);
+                        }}
+                      >
+                        <RecordCard
+                          row={row}
+{% if m.card_uses_lookups(plan) | trim %}
+                          lookups={lookups}
+{% endif %}
+                          menu={
+                            <RowActionsMenu actions={ {{- "Object.values(rowActions)" if plan.row_actions else "[]" }}} record={row} onRun={ {{- "run" if plan.row_actions else "() => {}" }}}>
+{% if plan.row_actions %}
+                              <DropdownMenuSeparator />
+{% endif %}
+                              <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                              {COLUMNS.filter((other) => other.value !== column.value).map((other) => (
+                                <DropdownMenuItem key={other.value} onSelect={() => void move(row, other.value)}>
+                                  {other.label}
+                                </DropdownMenuItem>
+                              ))}
+                            </RowActionsMenu>
+                          }
+                        />
+                      </div>
+                    ))}
+                    {cards.length === 0 && (
+                      <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+                        Drop a card here
+                      </p>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       )}
 {% if plan.actions or plan.row_actions %}
       {dialog}

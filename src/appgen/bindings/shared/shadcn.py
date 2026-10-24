@@ -180,7 +180,7 @@ def _view_components(view: View) -> set[str]:
 _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "table": ("table", "checkbox", "select"),
     "cards": ("card", "select"),
-    "board": ("card", "badge"),
+    "board": ("card", "badge", "scroll-area"),
     "search": ("input",),
     "boolean": ("switch",),
     "date_range": ("popover", "calendar"),
