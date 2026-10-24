@@ -510,6 +510,12 @@ action. Each action has `kind`, and `label`, `icon`, `variant`
 `form` and `operation` actions take `on_success`: `toast` and
 `navigate` (a page).
 
+The front ends show each action one time on a page. If the top bar of
+the page has the same action (the same kind, and the same form,
+operation, or page), the page header and the view of the page do not
+show it. A trace in the code of the page or the view still refers to
+the hidden action.
+
 ### views
 
 A view shows the records of one entity. Each view has `kind`, `entity`,

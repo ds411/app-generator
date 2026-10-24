@@ -91,6 +91,12 @@ import { useParams } from "@/shared/lib/router";
 {% set state = ["ViewLoading", "ViewMessage"] %}
 {% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
 import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+{%- for action_id in plan.hidden_actions %}
+
+
+// The top bar of the page has the same action, so the view does not show it.
+{{ trace(action_id) }}
+{%- endfor %}
 {%- endmacro %}
 
 {% macro data(plan) -%}

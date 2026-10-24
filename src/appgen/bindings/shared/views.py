@@ -222,6 +222,8 @@ class ViewPlan:
     state_ids: list[str] = field(default_factory=list[str])
     """The element IDs of the states that the view shows, for the traces."""
     actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
+    hidden_actions: list[str] = field(default_factory=list[str])
+    """The IDs of the view actions that the top bar also has: the view hides them."""
     row_actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
     bulk_actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
     imports: list[str] = field(default_factory=list[str])
@@ -302,6 +304,8 @@ class ActionBarPlan:
     param: str | None = None
     """The path parameter with the ID of the record."""
     actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
+    hidden_actions: list[str] = field(default_factory=list[str])
+    """The IDs of the page actions that the top bar also has: the page hides them."""
     record_actions: set[str] = field(default_factory=set[str])
     """The actions that need the record."""
     forms: list[FormRef] = field(default_factory=list[FormRef])
@@ -392,6 +396,9 @@ class ViewContext:
                 param=params[-1] if entity else None,
             )
             items = list(page.actions.items())
+            hidden = self._topbar_duplicates([parts[1]], items)
+            plan.hidden_actions = [page.actions[n].id for n in hidden]
+            items = [(n, a) for n, a in items if n not in hidden]
         else:
             # `ui.layouts.<layout>.topbar`
             assert definition.ui is not None
@@ -423,6 +430,31 @@ class ViewContext:
         plan.imports = sorted({line for a in plan.actions for line in a.imports})
         plan.icons = {a.action.icon for a in plan.actions if a.action.icon}
         return plan
+
+    def _topbar_duplicates(
+        self, pages: list[str], actions: Iterable[tuple[str, Action]]
+    ) -> list[str]:
+        """Return the names of the actions that the top bar of each page also has, in order.
+
+        An action is the same if it has the same kind and the same target
+        (the form, the operation, or the page). The top bar shows it, so a
+        page or a view does not show it a second time. A view on no page
+        hides no action.
+        """
+        if not pages or self.definition.ui is None:
+            return []
+        from appgen.bindings.shared.ui import ui_plan
+
+        plan = ui_plan(self.definition)
+        layouts = self.definition.ui.layouts
+        shared: set[tuple[str, str]] | None = None
+        for page_name in pages:
+            layout = plan.pages[page_name].layout
+            topbar = layouts[layout].topbar if layout in layouts else None
+            actions_of_bar = topbar.actions.values() if topbar else ()
+            keys = {key for a in actions_of_bar if (key := _action_key(a)) is not None}
+            shared = keys if shared is None else shared & keys
+        return [name for name, action in actions if _action_key(action) in (shared or set())]
 
     def _action_entity(self, action: Action) -> str | None:
         """Return an entity for an action without a record: the entity of its form or page."""
@@ -626,7 +658,16 @@ class ViewContext:
         plan.lookups = sorted(self._lookups(view.entity, paths))
         plan.states = effective_states(definition, view)
         plan.state_ids = state_ids(definition, view)
-        plan.actions = self._actions(view.entity, view.actions.items(), "view")
+        pages = [
+            page_name
+            for page_name, page in definition.pages.items()
+            if page.content is not None and page.content.view == name
+        ]
+        hidden = self._topbar_duplicates(pages, view.actions.items())
+        plan.hidden_actions = [view.actions[n].id for n in hidden]
+        plan.actions = self._actions(
+            view.entity, [(n, a) for n, a in view.actions.items() if n not in hidden], "view"
+        )
         if isinstance(view, TableView | CardsView | BoardView):
             plan.row_actions = self._actions(view.entity, view.row_actions.items(), "row")
         if isinstance(view, TableView):
@@ -1044,6 +1085,17 @@ def gap_path(definition: AppDefinition, element_id: str) -> tuple[str, str]:
     """Return the module path below `src/` and the function name of a custom action gap."""
     spec = gap_spec(definition, element_id, "custom_action")
     return spec.base.removeprefix("src/"), spec.name
+
+
+def _action_key(action: Action) -> tuple[str, str] | None:
+    """Return the kind and the target of an action, to find the same action in two places."""
+    if isinstance(action, FormAction):
+        return ("form", action.form)
+    if isinstance(action, OperationAction):
+        return ("operation", action.operation)
+    if isinstance(action, NavigateAction):
+        return ("navigate", action.page)
+    return None
 
 
 def _path_params(path: str) -> list[str]:
