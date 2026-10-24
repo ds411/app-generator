@@ -12,6 +12,7 @@ from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import build_tables, seed_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
@@ -153,6 +154,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_plan": plan,
         "ui_views": ViewContext(definition, forms=True),
         "ui_forms": FormContext(definition),
+        **text_helpers(definition),
         "nextjs": {
             "default_layout": default_layout,
             "groups": [(layout, route_group(layout)) for layout in sorted(groups, key=str)],

@@ -107,8 +107,9 @@ The output for the entity `Task`:
 | `helpers`              | Python functions that the templates call, for example `ts_type(field)`. |
 | `extension_keys`       | The `x-` keys that the binding reads, with their schema (see [Extension keys](#extension-keys)). |
 | `extension_prefix`     | A prefix that only the keys of the binding have, for example `x-fastapi-`. |
+| `finish`               | A function of the path, the content, and the definition that changes each rendered file, for example to add an import. |
 
-`context`, `filters`, and `helpers` must be deterministic: they must not
+`context`, `filters`, `helpers`, and `finish` must be deterministic: they must not
 read a clock, random values, or files. `context` cannot replace a value
 of the generator.
 

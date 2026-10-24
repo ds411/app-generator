@@ -152,7 +152,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
     ),
-    excludes=frozenset({"page", "ui"}),
+    excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),

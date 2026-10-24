@@ -56,13 +56,13 @@ export function PageSearch({ className }: { className?: string }) {
             {searchPages.map((name) => (
               <CommandItem
                 key={name}
-                value={pages[name].title}
+                value={{ '{' ~ tr('pages[name].title') ~ '}' }}
                 onSelect={() => {
                   setOpen(false);
                   navigate(pageHref(name));
                 }}
               >
-                {pages[name].title}
+                {{ '{' ~ tr('pages[name].title') ~ '}' }}
               </CommandItem>
             ))}
           </CommandGroup>

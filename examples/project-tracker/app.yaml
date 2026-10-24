@@ -906,3 +906,55 @@ ui:
       loading: { indicator: skeleton }
       empty: { title: Nothing here yet, icon: inbox }
       error: { title: Something went wrong, text: Try again in a moment., icon: triangle-alert, action: retry }
+
+translations:
+  default: en
+  languages:
+    en:
+      label: English
+    de:
+      label: Deutsch
+      text:
+        Project Tracker: Projekt-Tracker
+        Dashboard: Übersicht
+        Work: Arbeit
+        Team: Team
+        Projects: Projekte
+        Project: Projekt
+        Tasks: Aufgaben
+        Task: Aufgabe
+        Task board: Aufgabenboard
+        People: Personen
+        New project: Neues Projekt
+        New task: Neue Aufgabe
+        Open: Öffnen
+        Edit: Bearbeiten
+        Delete: Löschen
+        Archive: Archivieren
+        Complete: Abschließen
+        Assign: Zuweisen
+        Key: Schlüssel
+        Status: Status
+        Owner: Verantwortlich
+        Start: Beginn
+        Due: Fällig
+        Budget: Budget
+        Due date: Fälligkeitsdatum
+        Search projects: Projekte suchen
+        Planned: Geplant
+        Active: Aktiv
+        On hold: Pausiert
+        Done: Erledigt
+        To do: Zu erledigen
+        In progress: In Arbeit
+        In review: In Prüfung
+        Low: Niedrig
+        Medium: Mittel
+        High: Hoch
+        Urgent: Dringend
+        Cancel: Abbrechen
+        Save: Speichern
+        Create: Erstellen
+        No projects yet: Noch keine Projekte
+        Nothing here yet: Noch nichts vorhanden
+        Something went wrong: Etwas ist schiefgelaufen

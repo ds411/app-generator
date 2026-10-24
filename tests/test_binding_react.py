@@ -196,8 +196,8 @@ def test_the_menu_has_the_items_groups_icons_and_active_route(
         'SquareKanbanIcon, UsersIcon } from "lucide-react";'
     ) in menu
     assert 'isActive={isActivePath(pageHref("taskBoard"), pathname)}' in menu
-    assert "<span>Task board</span>" in menu
-    assert "<span>Projects</span>" in menu
+    assert '<span>{t("Task board")}</span>' in menu
+    assert '<span>{t("Projects")}</span>' in menu
     assert '<Collapsible defaultOpen className="group/collapsible">' in menu
     for element in iter_elements(definition):
         if element.id.startswith("ui.navigation.main"):
@@ -292,7 +292,9 @@ def test_a_board_view_has_its_columns_and_moves_its_cards(result: GenerationResu
     ) in board
     assert 'return updateTask(record.id, { status: value as Task["status"] });' in board
     assert "<DropdownMenuLabel>Move to</DropdownMenuLabel>" in board
-    assert '<ViewLoading indicator="skeleton" shape="board" text="Loading the board" />' in board
+    assert (
+        '<ViewLoading indicator="skeleton" shape="board" text={t("Loading the board")} />' in board
+    )
     # The columns scroll in a scroll area with a horizontal scroll bar that always shows.
     assert '<ScrollArea type="always" className="w-full min-w-0' in board
     assert '<ScrollBar orientation="horizontal" />' in board
@@ -450,7 +452,8 @@ def test_each_form_has_a_feature_slice_with_its_schema_and_rules(result: Generat
     form = files["src/features/new-project-form/ui/new-project-form.tsx"]
     assert "const SCHEMA = projectInputSchema.pick({ name: true," in form
     assert (
-        'errors.name ??= "Enter a name."; // @trace ui.forms.new_project.fields.name.rules.required'
+        'errors.name ??= t("Enter a name."); '
+        "// @trace ui.forms.new_project.fields.name.rules.required"
     ) in form
     assert '"zod": "4.6.7"' in files["package.json"]
     assert "export const projectInputSchema" in files["src/entities/project/model/schema.ts"]
@@ -521,7 +524,7 @@ def test_the_detail_and_dashboard_features_have_traces_for_each_element(
 def test_a_detail_page_has_one_main_heading(result: GenerationResult) -> None:
     files = _files(result)
     page = files["src/pages/project-detail/ui/project-detail-page.tsx"]
-    assert '<PageHeader\n        title="Project"\n        label\n' in page
+    assert '<PageHeader\n        title={t("Project")}\n        label\n' in page
     assert "        label\n" not in files["src/pages/projects/ui/projects-page.tsx"]
     view = files["src/widgets/project-detail/ui/project-detail-view.tsx"]
     assert '<h1 className="typography-heading">{String(record.name ?? "")}</h1>' in view

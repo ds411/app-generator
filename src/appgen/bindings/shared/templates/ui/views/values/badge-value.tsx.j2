@@ -27,7 +27,7 @@ export function BadgeValue({ set, value, className }: { set?: BadgeSet; value: u
       )}
     >
       {Icon && <Icon />}
-      {style.label}
+      {{ '{' ~ tr('style.label') ~ '}' }}
     </Badge>
   );
 }

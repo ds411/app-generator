@@ -1,10 +1,13 @@
 {{ trace_header(theme_element) }}
 import type { ReactNode } from "react";
 
+{% if i18n %}
+import { LanguageProvider } from "@/shared/lib/language-provider";
+{% endif %}
 import { ThemeProvider } from "@/shared/lib/theme";
 import { Toaster } from "@/shared/ui/sonner";
 
-/** The providers of the app: the color mode and the toasts. */
+/** The providers of the app: the color mode{% if i18n %}, the language,{% endif %} and the toasts. */
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <ThemeProvider
@@ -13,7 +16,11 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       enableSystem
       disableTransitionOnChange
     >
+{% if i18n %}
+      <LanguageProvider>{children}</LanguageProvider>
+{% else %}
       {children}
+{% endif %}
       <Toaster richColors closeButton />
     </ThemeProvider>
   );

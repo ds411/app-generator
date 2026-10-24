@@ -1,0 +1,28 @@
+{{ trace_header(i18n.element_id) }}
+"use client";
+
+import { LanguagesIcon } from "lucide-react";
+
+import { type Language, getLanguage, languages, setLanguage } from "@/shared/lib/i18n";
+
+/** A list of the languages of the app. The selected language applies to all pages. */
+export function LanguageSwitch() {
+  return (
+    <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <LanguagesIcon className="size-4" aria-hidden="true" />
+      <span className="sr-only">Language</span>
+      <select
+        aria-label="Language"
+        className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
+        value={getLanguage()}
+        onChange={(event) => setLanguage(event.target.value as Language)}
+      >
+        {languages.map((language) => (
+          <option key={language.code} value={language.code}>
+            {language.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}

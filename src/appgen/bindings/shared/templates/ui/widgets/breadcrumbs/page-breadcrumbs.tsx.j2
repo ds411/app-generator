@@ -46,9 +46,9 @@ export function PageBreadcrumbs({ className }: { className?: string }) {
           const recordId = page.recordParam ? params[page.recordParam] : undefined;
           const label =
             page.recordEntity && recordId ? (
-              <RecordLabel entity={page.recordEntity} id={recordId} fallback={page.breadcrumb} />
+              <RecordLabel entity={page.recordEntity} id={recordId} fallback={{ '{' ~ tr('page.breadcrumb') ~ '}' }} />
             ) : (
-              page.breadcrumb
+              {{ tr('page.breadcrumb') }}
             );
           const last = index === chain.length - 1;
           return (

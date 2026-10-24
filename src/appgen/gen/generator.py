@@ -80,7 +80,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
     for output in binding.outputs:
         for context in _contexts(base, output, elements):
             if _applies(environment, output, context):
-                add(_render(environment, output, context))
+                add(_render(environment, output, context, binding))
 
     gaps: list[Gap] = []
     for element in gap_elements:
@@ -89,7 +89,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
             continue
         rule = replace(binding.gap_rule, for_each=element.kind, extension=True)
         context = _element_context(base, element)
-        generated = _render(environment, rule, context)
+        generated = _render(environment, rule, context, binding)
         if "TODO(appgen)" not in generated.content:
             raise GenerationError(
                 f"The gap rule writes the file '{generated.path}' without a TODO(appgen) comment."
@@ -120,7 +120,7 @@ def _in_scope(
 
 
 def _render(
-    environment: jinja2.Environment, output: Output, context: dict[str, Any]
+    environment: jinja2.Environment, output: Output, context: dict[str, Any], binding: Binding
 ) -> GeneratedFile:
     where = f"'{output.template}'"
     if "element_id" in context:
@@ -134,6 +134,8 @@ def _render(
         raise GenerationError(f"The template {where} needs a missing value: {error}") from None
     except GenerationError as error:
         raise GenerationError(f"The template {where}: {error}") from None
+    if binding.finish is not None:
+        content = binding.finish(path, content, context["definition"])
     element_id: str | None = context.get("element_id")
     traces: tuple[str, ...] = ()
     if comment_style(path) is None:

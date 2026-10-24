@@ -28,6 +28,9 @@ import { PageSearch } from "@/features/search-pages";
 {% if mode_toggle %}
 import { ModeToggle } from "@/features/toggle-theme";
 {% endif %}
+{% if i18n and topbar is not none %}
+import { LanguageSwitch } from "@/features/switch-language";
+{% endif %}
 {% if sidebar is not none %}
 import {
   Sidebar,
@@ -107,6 +110,9 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
         <div className="{{ plan.search.classes('block') }}">
           <PageSearch />
         </div>
+{% endif %}
+{% if i18n %}
+        <LanguageSwitch />
 {% endif %}
 {% if mode_toggle %}
         <div className="{{ plan.mode_toggle.classes('block') }}">

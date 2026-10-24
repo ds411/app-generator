@@ -37,5 +37,5 @@ export const badges = {
 
 /** Return the options of a select filter from a badge set. */
 export function badgeOptions(set: BadgeSet): Option[] {
-  return Object.entries(set).map(([value, style]) => ({ value, label: style.label }));
+  return Object.entries(set).map(([value, style]) => ({ value, label: {{ tr('style.label') }} }));
 }

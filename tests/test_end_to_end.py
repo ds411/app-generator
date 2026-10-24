@@ -24,7 +24,7 @@ runner = CliRunner()
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": [],
     "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule"],
-    "fastapi": ["page", "ui"],
+    "fastapi": ["page", "translations", "ui"],
 }
 
 # The stubs that each app has after a first run: the custom operations,

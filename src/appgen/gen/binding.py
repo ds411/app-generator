@@ -145,3 +145,11 @@ class Binding:
     for example `{{ ts_type(field) }}`. A helper must be deterministic: it
     must not read a clock, random values, or files.
     """
+    finish: Callable[[str, str, AppDefinition], str] | None = None
+    """A function that changes the content of each rendered file.
+
+    The generator calls it with the path, the content, and the definition.
+    Use it for a change that depends on the whole content, for example an
+    import of a function that the content calls. The function must be
+    deterministic.
+    """

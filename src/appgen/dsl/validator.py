@@ -377,6 +377,39 @@ def _rule_members(
             yield _missing(rule, key, "field or relation", name, [*stored, *singles])
 
 
+def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The default language exists and has no text, and each language has all keys."""
+    translations = definition.translations
+    if translations is None:
+        return
+    languages = translations.languages
+    if translations.default not in languages:
+        yield _missing(translations, "default", "language", translations.default, languages)
+        return
+    default = languages[translations.default]
+    if default.text:
+        yield _error(
+            "invalid-value",
+            "The default language takes its text from the definition.",
+            default,
+            at="text",
+            hint="Remove 'text' from the default language.",
+        )
+    others = {code: language for code, language in languages.items() if language is not default}
+    keys = {key for language in others.values() for key in language.text}
+    for code, language in others.items():
+        missing = [key for key in sorted(keys) if key not in language.text]
+        if missing:
+            names = ", ".join(f"'{key}'" for key in missing)
+            yield _error(
+                "missing-translation",
+                f"The language '{code}' has no translation of {names}.",
+                language,
+                at="text",
+                hint="Each language translates the same keys.",
+            )
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -385,6 +418,7 @@ CHECKS: list[Check] = [
     check_fields,
     check_computed,
     check_rules,
+    check_translations,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

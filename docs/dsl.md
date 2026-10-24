@@ -28,6 +28,7 @@ examples. [ADR 0002](adr/0002-app-definition-dsl-v0.md) and
   - [dashboards](#dashboards)
   - [Grids](#grids)
   - [UI states and defaults](#ui-states-and-defaults)
+- [translations](#translations)
 - [Extension keys](#extension-keys)
 - [Reserved sections](#reserved-sections)
 - [Validation](#validation)
@@ -820,6 +821,47 @@ ui:
       error: { title: Something went wrong, icon: triangle-alert, action: retry }
 ```
 
+## translations
+
+The optional `translations` section gives the UI text in more than one
+language. The text of the definition (titles, labels, messages) is in
+the `default` language. Each other language translates the texts that
+the app shows:
+
+```yaml
+translations:
+  default: en
+  languages:
+    en: { label: English }
+    de:
+      label: Deutsch
+      text:
+        Projects: Projekte
+        New project: Neues Projekt
+        Done: Erledigt
+```
+
+- `default` is a key of `languages`. The default language has no `text`.
+- `label` is the name of the language in the language itself. The
+  language switch of the app shows it.
+- `text` maps a text of the default language, as the app shows it, to
+  its translation. A key can be a text that the definition does not
+  give, for example the default label of a field (`Due date` for
+  `due_date`) or a default text of a form (`Cancel`, `Save`, `Create`).
+- Each language translates the same keys. `appgen validate` reports a
+  key that one language has and another language does not have
+  (`missing-translation`).
+
+The React and Next.js apps have a language switch in the top bar (and
+in the frame of the pages without a layout). The app keeps the selected
+language in the browser. A text without a translation shows in the
+default language. The front ends translate the text of the definition:
+the titles, labels, and descriptions of pages, menus, views, forms, and
+dashboards, the badge labels, the actions, and the messages of the form
+rules. The fixed text of the components (for example "Search pages")
+and the format of dates and numbers stay as they are. The back ends do
+not use the section.
+
 ## Extension keys
 
 A key that starts with `x-` is an extension key, as in OpenAPI. The
@@ -834,7 +876,7 @@ is an error.
 ## Reserved sections
 
 These top-level keys are reserved for later versions: `auth`,
-`access`, `workflows`, and `translations`. The validator reports "not
+`access`, and `workflows`. The validator reports "not
 supported in this version" for each of them. A later version adds them
 as optional sections, so that the definitions that exist stay valid.
 [ADR 0002](adr/0002-app-definition-dsl-v0.md#how-the-out-of-scope-features-fit-in-later)

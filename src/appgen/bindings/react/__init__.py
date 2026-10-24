@@ -14,6 +14,7 @@ from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
 from appgen.bindings.shared import forms, shadcn, ui, views
+from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
@@ -152,6 +153,7 @@ BINDING = Binding(
         Output(template="src/app/router.tsx.j2", path="src/app/router.tsx"),
         *_APP_SHELL,
         *views.view_rules(),
+        *i18n_rules(),
         *forms.form_rules(),
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
@@ -264,11 +266,13 @@ BINDING = Binding(
         | {"custom_widget", "custom_rule", "custom_action"}
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
         | {"view_responsive", "motion"}
+        | {"translations", "language"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
     excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
     context=context,
+    finish=finish,
     filters={"json": to_json},
     helpers=HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
     stub_markers=("TODO(appgen)", "Not implemented yet"),

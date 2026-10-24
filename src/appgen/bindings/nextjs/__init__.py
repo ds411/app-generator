@@ -15,6 +15,7 @@ from appgen.bindings.nextjs import db
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
+from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.gen.binding import Binding, Output
 
 _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
@@ -142,6 +143,7 @@ BINDING = Binding(
         Output(template="app/layout.tsx.j2", path="app/layout.tsx"),
         *_APP_SHELL,
         *views.view_rules(),
+        *i18n_rules(),
         *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
@@ -248,10 +250,12 @@ BINDING = Binding(
         | {"custom_widget", "custom_rule", "custom_action"}
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
         | {"view_responsive", "motion"}
+        | {"translations", "language"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
+    finish=finish,
     filters={"json": typescript.to_json},
     helpers=typescript.HELPERS
     | ui.HELPERS
