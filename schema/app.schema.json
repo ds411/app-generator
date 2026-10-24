@@ -4076,6 +4076,13 @@
       ],
       "type": "string"
     },
+    "RecordAction": {
+      "enum": [
+        "read",
+        "change"
+      ],
+      "type": "string"
+    },
     "RecordFilter": {
       "additionalProperties": {
         "$ref": "#/$defs/JsonValue"
@@ -4083,6 +4090,31 @@
       "propertyNames": {
         "$ref": "#/$defs/FieldPath"
       },
+      "type": "object"
+    },
+    "RecordRule": {
+      "additionalProperties": false,
+      "description": "An owner rule: the role uses only the records of an entity that its user owns (ADR 0018).\n\nThe owner of a record is the user of a many-to-one relation of the\nentity to the user entity.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/RecordAction"
+          },
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "title": "RecordRule",
       "type": "object"
     },
     "Region": {
@@ -4227,6 +4259,16 @@
           },
           "title": "Pages",
           "type": "array"
+        },
+        "records": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RecordRule"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/EntityName"
+          },
+          "title": "Records",
+          "type": "object"
         }
       },
       "title": "Role",

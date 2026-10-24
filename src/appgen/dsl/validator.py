@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
-from appgen.dsl.access import ALL
+from appgen.dsl.access import ALL, RecordRule
 from appgen.dsl.apis import RESERVED_ENV_NAMES
 from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
@@ -653,6 +653,43 @@ def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
             for name in names:
                 if name != ALL and name not in known:
                     yield _missing(role, key, what, name, known)
+        for name, rule in role.records.items():
+            yield from _check_record_rule(definition, auth.user_entity, name, rule)
+    owners: dict[str, str] = {}
+    for role in access.roles.values():
+        for name, rule in role.records.items():
+            first = owners.setdefault(name, rule.owner)
+            if first != rule.owner:
+                yield _error(
+                    "invalid-value",
+                    f"All owner rules of '{name}' must use the same relation: '{first}'.",
+                    rule,
+                    at="owner",
+                )
+
+
+def _check_record_rule(
+    definition: AppDefinition, users: str, name: str, rule: RecordRule
+) -> Iterator[Diagnostic]:
+    """The entity exists, and its owner is a many-to-one relation to the user entity."""
+    entity = definition.entities.get(name)
+    if entity is None:
+        yield _missing(rule, "", "entity", name, definition.entities)
+        return
+    if len(set(rule.operations)) != len(rule.operations):
+        yield _error(
+            "duplicate-name", "The names in 'operations' must be unique.", rule, at="operations"
+        )
+    relation = entity.relations.get(rule.owner)
+    if relation is None:
+        yield _missing(rule, "owner", "relation", rule.owner, entity.relations)
+    elif relation.kind != "many_to_one" or relation.target != users:
+        yield _error(
+            "unsuitable-field",
+            f"The owner must be a many-to-one relation of '{name}' to the user entity '{users}'.",
+            rule,
+            at="owner",
+        )
 
 
 def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:

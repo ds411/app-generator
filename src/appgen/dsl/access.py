@@ -1,13 +1,31 @@
 """The roles of the users and their permissions: the operations and the pages of each role."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pydantic
 
-from appgen.dsl.element import Element, MemberName, Text
+from appgen.dsl.element import Element, EntityName, MemberName, Text
 
 ALL = "*"
 """In a list of operations or pages: all of them."""
+
+type RecordAction = Literal["read", "change"]
+"""`read`: the lists and the reads. `change`: the creates, the changes, and the deletes."""
+
+
+class RecordRule(Element):
+    """An owner rule: the role uses only the records of an entity that its user owns (ADR 0018).
+
+    The owner of a record is the user of a many-to-one relation of the
+    entity to the user entity.
+    """
+
+    owner: MemberName
+    """A many-to-one relation of the entity to the user entity."""
+    operations: Annotated[list[RecordAction], pydantic.Field(min_length=1)] = pydantic.Field(
+        default_factory=lambda: ["read", "change"]
+    )
+    """The operations that the rule applies to: `read`, `change`, or both (the default)."""
 
 
 class Role(Element):
@@ -22,6 +40,8 @@ class Role(Element):
         pydantic.Field(default_factory=list[str])
     )
     """The pages that the role may open, or `["*"]` for all pages."""
+    records: dict[EntityName, RecordRule] = pydantic.Field(default_factory=dict[str, RecordRule])
+    """The owner rules of the role, by entity: the role uses only the records of its user."""
 
     def allows_operation(self, name: str) -> bool:
         """Return True if the role may call an operation."""

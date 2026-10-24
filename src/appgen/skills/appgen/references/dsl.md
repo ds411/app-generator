@@ -990,6 +990,8 @@ access:
       label: Member
       operations: [list_bookings, read_booking, create_booking]
       pages: [bookings, booking_detail]
+      records:
+        Booking: { owner: organizer, operations: [read, change] }
 ```
 
 - `role_field` is an `enum` field of the user entity. Each key of
@@ -999,8 +1001,19 @@ access:
 - The public operations and pages of `auth` stay open to all users. A
   user without a role, or with a role that is not in `roles`, may use
   only the public parts.
+- `records` gives the role owner rules ([ADR 0018](https://github.com/ds411/app-generator/blob/main/docs/adr/0018-owner-rules.md)):
+  for each entity, the role uses only the records that its user owns.
+  `owner` is a many-to-one relation of the entity to the user entity.
+  `operations` is `read` (the lists and the reads), `change` (the
+  creates, the changes, the deletes, and the custom operations), or both
+  (the default). A rule for `read` also applies to the changes. All
+  rules of an entity use the same relation. A rule does not apply to the
+  public operations.
 
 The FastAPI app gives 403 for an operation that the role may not call.
+With an owner rule, a list gives only the records of the user, a read,
+a change, a delete, or a custom operation on another record gives 404,
+and a create sets the owner to the user.
 The Next.js app shows "not found" for a page, and gives an error for a
 server action. The React app (mock data) does the same checks in the
 browser, so they are a demonstration, not a protection.

@@ -3,31 +3,36 @@
 {% set e = py.entity(op.entity) %}
 """The operation `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}."""
 
+{% set owner = op.owner_action %}
 {% if op.kind == "list" %}
-{{ e.list_imports() }}
-{% elif op.kind == "create" %}
-from fastapi import APIRouter
-
-from app.core.db import SessionDep
-from app.core.errors import problem_responses
-from app.features.{{ e.slice }} import repository
-from app.features.{{ e.slice }}.schemas import {{ e.name }}Create, {{ e.name }}Read
+{{ e.list_imports(op) }}
 {% else %}
-from uuid import UUID
-
-from fastapi import APIRouter
-
-from app.core.db import SessionDep
-from app.core.errors import problem_responses
-from app.features.{{ e.slice }} import repository
-{% if op.kind == "update" %}
-from app.features.{{ e.slice }}.schemas import {{ e.name }}Read, {{ e.name }}Update
-{% elif op.kind == "read" %}
-from app.features.{{ e.slice }}.schemas import {{ e.name }}Read
+{% set lines = [
+    "from fastapi import APIRouter" ~ (", Depends" if owner),
+    "from app.core.db import SessionDep",
+    "from app.core.errors import problem_responses",
+    "from app.features." ~ e.slice ~ " import repository",
+] %}
+{% if op.kind != "create" or owner %}
+{% set lines = lines + ["from uuid import UUID"] %}
 {% endif %}
+{% if owner %}
+{% set lines = lines + ["from typing import Annotated", "from app.core.access import owner_of"] %}
+{% endif %}
+{% set schemas = {"create": [e.name ~ "Create", e.name ~ "Read"], "update": [e.name ~ "Read", e.name ~ "Update"], "read": [e.name ~ "Read"]}.get(op.kind) %}
+{% if schemas %}
+{% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ (schemas | join(", "))] %}
+{% endif %}
+{{ py.imports(lines) }}
 {% endif %}
 
 router = APIRouter(prefix="{{ e.path }}")
+{% if owner %}
+
+{{ trace(e.owner.id) }}
+Owner = Annotated[UUID | None, Depends(owner_of("{{ e.name }}", "{{ owner }}"))]
+"""The user whose records the request may use (ADR 0018), or None for all records."""
+{% endif %}
 {% if op.kind == "list" %}
 
 
@@ -63,15 +68,44 @@ SORTABLE = {
 
 
 {{ op.decorator() }}
-{% if op.kind == "create" %}
+{% if op.kind == "create" and owner %}
+async def {{ op.name }}(
+    data: {{ e.name }}Create,
+    session: SessionDep,
+    owner: Owner,
+) -> {{ e.name }}Read:
+    """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.create(session, data, owner)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "create" %}
 async def {{ op.name }}(data: {{ e.name }}Create, session: SessionDep) -> {{ e.name }}Read:
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.create(session, data)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "read" and owner %}
+async def {{ op.name }}(
+    id: UUID,
+    session: SessionDep,
+    owner: Owner,
+) -> {{ e.name }}Read:
+    """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id, owner)
     return {{ e.name }}Read.model_validate(record)
 {% elif op.kind == "read" %}
 async def {{ op.name }}(id: UUID, session: SessionDep) -> {{ e.name }}Read:
     """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
+    return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "update" and owner %}
+async def {{ op.name }}(
+    id: UUID,
+    data: {{ e.name }}Update,
+    session: SessionDep,
+    owner: Owner,
+) -> {{ e.name }}Read:
+    """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id, owner)
+    record = await repository.update(session, record, data, owner)
     return {{ e.name }}Read.model_validate(record)
 {% elif op.kind == "update" %}
 async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep) -> {{ e.name }}Read:
@@ -79,17 +113,36 @@ async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep)
     record = await repository.get(session, id)
     record = await repository.update(session, record, data)
     return {{ e.name }}Read.model_validate(record)
+{% elif op.kind == "delete" and owner %}
+async def {{ op.name }}(
+    id: UUID,
+    session: SessionDep,
+    owner: Owner,
+) -> None:
+    """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
+    record = await repository.get(session, id, owner)
+    await repository.delete(session, record)
 {% elif op.kind == "delete" %}
 async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
     """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
     await repository.delete(session, record)
 {% elif op.kind == "list" %}
+{% if owner %}
+async def {{ op.name }}(
+    query: Annotated[{{ op.name | pascal }}Query, Query()],
+    session: SessionDep,
+    owner: Owner,
+) -> Page[{{ e.name }}Read]:
+    """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
+    statement = repository.owned(select({{ e.name }}), owner)
+{% else %}
 async def {{ op.name }}(
     query: Annotated[{{ op.name | pascal }}Query, Query()], session: SessionDep
 ) -> Page[{{ e.name }}Read]:
     """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
     statement = select({{ e.name }})
+{% endif %}
 {% for p in e.query.params %}
 {% for line in p.where_lines() %}
     {{ line }}

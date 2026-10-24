@@ -550,6 +550,8 @@ class PyOperation:
     """True if the operation needs a signed-in user (the `auth` section)."""
     apis: list[str] = dataclass_field(default_factory=list[str])
     """The names of the third-party APIs that a custom operation calls."""
+    owner_action: str | None = None
+    """`read` or `change`, if an owner rule of a role can apply to the operation (ADR 0018)."""
 
     @property
     def custom(self) -> bool:
@@ -609,6 +611,8 @@ class PyEntity:
     """The filters and the sort keys of the list endpoints, from the fields and the views."""
     sign_up_fields: list[PyField] | None = None
     """The fields of the sign-up form, if the entity holds the users and `auth.sign_up` is set."""
+    owner: PyRelation | None = None
+    """The relation to the user entity of the owner rules of the entity, if a role has one."""
 
     @property
     def guard_module(self) -> str:
@@ -723,6 +727,8 @@ class PyEntity:
         lines.add(from_import("app.core.db", core))
         if self.workflows:
             lines.add("from app.core.workflows import check_transition")
+        if self.owner is not None:
+            lines.add("from sqlalchemy import Select")
         checks = {r.kind for r in self.check_rules}
         if checks:
             names = {"compare"} if "compare" in checks else set[str]()
@@ -734,7 +740,7 @@ class PyEntity:
                 lines.add(f"from app.features.{target.slice}.models import {target.name}")
         return import_block(lines)
 
-    def list_imports(self) -> str:
+    def list_imports(self, op: PyOperation | None = None) -> str:
         """Return the import block of a list operation of the entity."""
         query = self.query
         params = query.params
@@ -746,9 +752,12 @@ class PyEntity:
         pagination |= {
             n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
         }
+        owner = op is not None and op.owner_action is not None
         lines = {
             "from typing import Annotated",
-            "from fastapi import APIRouter, Query",
+            "from fastapi import APIRouter, Depends, Query"
+            if owner
+            else "from fastapi import APIRouter, Query",
             "from pydantic import ConfigDict"
             + (", Field" if any("Field(" in d for d in declarations) else ""),
             "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
@@ -769,7 +778,7 @@ class PyEntity:
             lines.add("import datetime as dt")
         if "Decimal" in types:
             lines.add("from decimal import Decimal")
-        if "UUID" in types:
+        if "UUID" in types or owner:
             lines.add("from uuid import UUID")
         enums: dict[str, set[str]] = {}
         for p in params:
@@ -778,6 +787,11 @@ class PyEntity:
                 enums.setdefault(p.path.entity.slice, set()).add(f.enum.name)
         for slice_name, names in enums.items():
             lines.add(from_import(f"app.features.{slice_name}.enums", names))
+        if owner:
+            lines |= {
+                "from app.core.access import owner_of",
+                f"from app.features.{self.slice} import repository",
+            }
         return import_block(lines)
 
     def router_imports(self) -> str:
@@ -1027,6 +1041,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         users = entities[auth.user_entity]
         by_name = {f.name: f for f in users.fields}
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
+    _owner_rules(definition, entities)
     for entity in entities.values():
         if definition.access is not None:
             entity.guard = "check_access"
@@ -1042,6 +1057,22 @@ def python_app(definition: AppDefinition) -> PyApp:
         operations=operations,
         redis=definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis",
     )
+
+
+def _owner_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Give each entity with an owner rule its owner relation, and its operations their action."""
+    if definition.access is None:
+        return
+    for role in definition.access.roles.values():
+        for name, rule in role.records.items():
+            entity = entities[name]
+            entity.owner = next(r for r in entity.relations if r.name == rule.owner)
+    for entity in entities.values():
+        if entity.owner is None:
+            continue
+        for op in entity.operations:
+            if op.protected:
+                op.owner_action = "read" if op.kind in ("list", "read") else "change"
 
 
 def _entity(name: str, entity: Entity) -> PyEntity:

@@ -40,7 +40,7 @@ DSL does not have one for this.
 - The permissions are in the definition, and all apps use the same
   table.
 - There is no rule on single records. A custom operation or a custom
-  rule (ADR 0005) can add one.
+  rule (ADR 0005) can add one. ADR 0018 adds owner rules.
 - The menus of the front ends still show all pages. A page that the
   role may not open shows "not found".
 - The checks of the React app are a demonstration, not a protection.
