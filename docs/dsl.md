@@ -294,7 +294,7 @@ ignores the pages.
 | `layout`      | A layout of `ui.layouts`. Default: `ui.defaults.layout`.                |
 | `content`     | One of `view: <view>`, `form: <form>`, `dashboard: <dashboard>`, or `custom: true` (a generation gap). |
 | `actions`     | Actions in the page header (see [Actions](#actions)).                   |
-| `breadcrumb`  | The label in the breadcrumbs. Default: the title, or the display field of the record for a page with an entity and a path parameter. |
+| `breadcrumb`  | The label in the breadcrumbs. Default: the label of the menu item of the page, else the title, or the display field of the record for a page with an entity and a path parameter. |
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
