@@ -236,3 +236,104 @@
     **Demo:** Not applicable.
 
     **Depends on:** M12.
+
+- title: "M14: Backlog"
+  description: |
+    **Goal:** Keep the stories that wait for a decision of a person.
+
+    **Scope**
+    - In: CI on GitHub Actions and an MCP server for appgen. Each story has the `deferred` label.
+    - Out: All work. Do not start a story in this milestone until a person moves it to an active milestone.
+
+    **Exit criteria**
+    - [ ] A person moved or closed each story.
+
+    **Demo:** Not applicable.
+
+    **Depends on:** None.
+
+- title: "M15: Agent skills"
+  description: |
+    **Goal:** An AI agent can use appgen to write and change app definitions, generate apps, and fill generation gaps.
+
+    **Scope**
+    - In: an `appgen` agent skill with the CLI workflow, references for a new definition, a change to a definition, and generation gaps, tests that keep the skill in agreement with the CLI and the DSL, the `appgen skills` commands that install the skill for Claude Code (`.claude`) and for other agents (`.agents`) in a project, the home folder, or a system folder, and an evaluation with agent tasks.
+    - Out: An MCP server (M14). Skills for the maintainers of appgen.
+
+    **Exit criteria**
+    - [ ] `appgen skills install` writes the skill to each target and scope, and a second run changes no file.
+    - [ ] A test fails when the skill names a command, an option, a DSL section, or a diagnostic code that does not exist, or leaves out one that exists.
+    - [ ] An agent with only the installed skill writes a new definition, generates an app, and fills a gap, and `appgen check` reports no invalid traces.
+
+    **Demo:** `appgen skills install --scope user`, then an agent session that adds an entity to the room-booking example and fills one gap.
+
+    **Depends on:** M13.
+
+- title: "M16: Third-party APIs"
+  description: |
+    **Goal:** A generated app can call third-party APIs that OpenAPI documents describe.
+
+    **Scope**
+    - In: a DSL section that names the OpenAPI documents and the operations that the app uses, the validation of the documents, a typed client for each binding, the use of a client in the extension files of custom operations, an example with a third-party API, and a mock server for the checks.
+    - Out: Views that show the data of a third-party operation without hand-written code. Calls to the real APIs in the checks. OAuth sign-in flows for the third-party APIs.
+
+    **Exit criteria**
+    - [ ] `appgen validate` reports an operation that the OpenAPI document does not have.
+    - [ ] Each binding generates a typed client, and the check of each app calls the mock server through it.
+    - [ ] The trace check covers the `apis` elements.
+
+    **Demo:** `appgen generate` for the example with the third-party API, then a custom operation that calls the API through the mock server.
+
+    **Depends on:** M13.
+
+- title: "M17: Sign-in and permissions"
+  description: |
+    **Goal:** The sign-in and the permissions of the generated apps cover the usual needs of a real app.
+
+    **Scope**
+    - In: sign-up, password reset with a generation gap for the delivery of the message, sign-in with an external OpenID Connect provider, permissions on single records (owner rules), and menus that show only the pages of the role.
+    - Out: Multi-factor sign-in. A rule language for conditions. A protection in the React app with mock data (ADR 0011).
+
+    **Exit criteria**
+    - [ ] A new user signs up, signs in, and resets the password in the FastAPI and the Next.js apps.
+    - [ ] A user signs in through a mock OpenID Connect provider in the checks.
+    - [ ] A member cannot read or change a record of another member, and the menus show only the pages of the role.
+
+    **Demo:** The room-booking example: sign up as a member, book a room, and try to change the booking of another member.
+
+    **Depends on:** M13.
+
+- title: "M18: Large lists and production"
+  description: |
+    **Goal:** The React client of the FastAPI app loads only the records that a page shows, and the FastAPI app runs on more than one replica and more than one platform.
+
+    **Scope**
+    - In: filters, search, and sort on the server for the list endpoints of the FastAPI app, a React client that sends the query of a view to the API, a shared store for the rate limit, and deployment files for a serverless container service.
+    - Out: Rate limits and deployment files for the Next.js app. A search engine.
+
+    **Exit criteria**
+    - [ ] With `x-react-data: api`, the React app loads one page of records for each list request.
+    - [ ] Two replicas of the FastAPI app share one rate limit.
+    - [ ] The check of the FastAPI app validates the deployment files of each target.
+
+    **Demo:** The React app with the FastAPI app and more records than one page, and the requests in the network log of the browser.
+
+    **Depends on:** M13.
+
+- title: "M19: Full translations"
+  description: |
+    **Goal:** The apps show all text and all formats in the selected language, and the back ends use the translations.
+
+    **Scope**
+    - In: the fixed text of the components, the format of dates and numbers for each language, the messages of the FastAPI app in the language of the request, and the render of the selected language on the Next.js server.
+    - Out: Languages from right to left. Translations of the data in the records.
+
+    **Exit criteria**
+    - [ ] With a second language, the UI tests find no text of the default language on the pages, the fixed text included.
+    - [ ] Dates and numbers use the format of the selected language.
+    - [ ] The FastAPI app gives its messages in the language of `Accept-Language`.
+    - [ ] Next.js renders the selected language on the server, and the text does not change after the hydration.
+
+    **Demo:** The project tracker in its second language, in the Next.js app and the React app.
+
+    **Depends on:** M13.
