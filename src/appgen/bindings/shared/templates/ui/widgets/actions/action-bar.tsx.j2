@@ -18,11 +18,14 @@ import { {{ plan.var }}Api, type {{ plan.type }} } from "@/entities/{{ plan.enti
 {% for line in plan.imports %}
 {{ line }}
 {% endfor %}
-{% if plan.needs("pageHref") %}
-import { pageHref } from "@/shared/lib/pages";
+{% set page_helpers = (["matchPage"] if plan.per_page else []) + (["pageHref"] if plan.needs("pageHref") else []) %}
+{% if page_helpers %}
+import { {{ page_helpers | join(", ") }} } from "@/shared/lib/pages";
 {% endif %}
 {% if plan.entity or plan.forms | selectattr("route_params") | list %}
-import { useParams } from "@/shared/lib/router";
+import { {{ "useParams, usePathname" if plan.per_page else "useParams" }} } from "@/shared/lib/router";
+{% elif plan.per_page %}
+import { usePathname } from "@/shared/lib/router";
 {% endif %}
 {% if plan.entity %}
 import { useResource } from "@/shared/lib/use-resource";
@@ -45,6 +48,10 @@ export function {{ plan.component }}() {
   );
   const record = resource.status === "success" ? resource.data : undefined;
 {% endif %}
+{% if plan.per_page %}
+  // Some actions show only on some pages (`placement`).
+  const page = matchPage(usePathname())?.name;
+{% endif %}
 {% if plan.forms %}
 {{ m.runner(plan) }}
 {% else %}
@@ -60,6 +67,11 @@ export function {{ plan.component }}() {
         onRun={run}
         disabled={!record}
       />
+{% elif a.only_pages or a.except_pages %}
+{% set pages = (a.only_pages or a.except_pages) | map("camel") | map("tojson") | join(", ") %}
+      {{ "{" }}{{ "" if a.only_pages else "!" }}[{{ pages }}].includes(page ?? "") && (
+        <ActionButton action={actions.{{ a.name | camel }}} records={[]} onRun={run} />
+      )}
 {% else %}
       <ActionButton action={actions.{{ a.name | camel }}} records={[]} onRun={run} />
 {% endif %}

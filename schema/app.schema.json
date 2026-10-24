@@ -1027,6 +1027,17 @@
           ],
           "default": null
         },
+        "placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "custom",
           "title": "Kind",
@@ -2119,6 +2130,17 @@
           ],
           "default": null
         },
+        "placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "form",
           "title": "Kind",
@@ -2996,6 +3018,17 @@
           ],
           "default": null
         },
+        "placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "navigate",
           "title": "Kind",
@@ -3182,6 +3215,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Confirm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placement"
             },
             {
               "type": "null"
@@ -3463,6 +3507,14 @@
       ],
       "title": "PatternRule",
       "type": "object"
+    },
+    "Placement": {
+      "enum": [
+        "page",
+        "topbar",
+        "both"
+      ],
+      "type": "string"
     },
     "RecordFilter": {
       "additionalProperties": {

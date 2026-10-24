@@ -121,7 +121,13 @@ pages:
     entity: Booking
     content: { view: booking_board }
     actions:
-      new_booking: { kind: form, form: new_booking, label: New booking, icon: calendar-plus }
+      new_booking:
+        kind: form
+        form: new_booking
+        label: New booking
+        icon: calendar-plus
+        # Only the top bar of this page shows the action.
+        placement: topbar
   booking_detail:
     path: "/bookings/{id}"
     title: Booking

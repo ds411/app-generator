@@ -516,6 +516,26 @@ operation, or page), the page header and the view of the page do not
 show it. A trace in the code of the page or the view still refers to
 the hidden action.
 
+A page action takes `placement` to choose where it shows:
+
+| Placement | The action shows                                                    |
+| --------- | ------------------------------------------------------------------- |
+| `page`    | In the page header. The top bar does not show the same action on the page. |
+| `topbar`  | In the top bar of the layout of the page, on the page only. The page header does not show it. |
+| `both`    | In the page header and in the top bar, on the page only.           |
+
+Without `placement`, the rule above applies. `topbar` and `both` need a
+layout with a top bar, and an action that does not need the record of
+the page (the top bar has no record). Only page actions take
+`placement`.
+
+```yaml
+pages:
+  project_detail:
+    actions:
+      new_task: { kind: form, form: new_task, label: New task, placement: page }
+```
+
 ### views
 
 A view shows the records of one entity. Each view has `kind`, `entity`,

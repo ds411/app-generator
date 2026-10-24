@@ -9,7 +9,7 @@ record (`row`) and the related records (`lookups`), for example
 """
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from appgen.bindings.shared.gaps import gap_spec
@@ -39,6 +39,7 @@ from appgen.dsl.ui.views import (
 )
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel, pascal, words
+from appgen.gen.render import GenerationError
 
 if TYPE_CHECKING:
     from appgen.bindings.shared.dashboards import DashboardPlan
@@ -146,6 +147,10 @@ class ActionPlan:
     form: str | None = None
     """For a form action that opens a dialog or a sheet: the name of the form."""
     imports: tuple[str, ...] = ()
+    only_pages: tuple[str, ...] = ()
+    """For a top bar action: the pages that show it. Empty: all pages, except `except_pages`."""
+    except_pages: tuple[str, ...] = ()
+    """For a top bar action: the pages that do not show it (`placement: page`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,7 +310,8 @@ class ActionBarPlan:
     """The path parameter with the ID of the record."""
     actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
     hidden_actions: list[str] = field(default_factory=list[str])
-    """The IDs of the page actions that the top bar also has: the page hides them."""
+    """The IDs of the page actions that the page header does not show, and that the
+    top bar does not render for the page: the top bar has the same action."""
     record_actions: set[str] = field(default_factory=set[str])
     """The actions that need the record."""
     forms: list[FormRef] = field(default_factory=list[FormRef])
@@ -325,6 +331,11 @@ class ActionBarPlan:
     def needs(self, name: str) -> bool:
         """Return True if the code of the actions calls a helper, for example `pageHref`."""
         return f"{name}(" in self.code()
+
+    @property
+    def per_page(self) -> bool:
+        """Return True if an action of the top bar shows only on some pages."""
+        return any(a.only_pages or a.except_pages for a in self.actions)
 
 
 class UsesParts(Protocol):
@@ -396,9 +407,15 @@ class ViewContext:
                 param=params[-1] if entity else None,
             )
             items = list(page.actions.items())
-            hidden = self._topbar_duplicates([parts[1]], items)
-            plan.hidden_actions = [page.actions[n].id for n in hidden]
-            items = [(n, a) for n, a in items if n not in hidden]
+            unplaced = [(n, a) for n, a in items if a.placement is None]
+            hidden = self._topbar_duplicates([parts[1]], unplaced)
+            # The top bar renders an action with `placement: topbar` or `both`, unless
+            # the top bar already has the same action.
+            in_bar = set(self._topbar_duplicates([parts[1]], items))
+            hidden += [n for n, a in items if a.placement == "topbar" and n in in_bar]
+            plan.hidden_actions = [page.actions[n].id for n, _ in items if n in hidden]
+            items = [(n, a) for n, a in items if n not in hidden and a.placement != "topbar"]
+            extra: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
         else:
             # `ui.layouts.<layout>.topbar`
             assert definition.ui is not None
@@ -409,13 +426,20 @@ class ViewContext:
                 component=f"{pascal(parts[2])}TopbarActions",
                 type="never",
             )
-            items = list(topbar.actions.items())
+            items, extra = self._topbar_items(parts[2], list(topbar.actions.items()))
         for name, action in items:
             entity = plan.entity or self._action_entity(action)
             if entity is None:
                 continue
             row = self._action(entity, name, action, "row" if plan.entity else "view")
+            if row is not None and name in extra:
+                row = replace(row, only_pages=extra[name][0], except_pages=extra[name][1])
             if row is None or "lookups." in (row.href or ""):
+                if name in extra and extra[name][0]:
+                    raise GenerationError(
+                        f"The action '{action.id}' needs the record of its page, so the top "
+                        "bar cannot show it. Use 'placement: page'."
+                    )
                 continue
             plan.actions.append(row)
             code = (row.href or "") + (row.run or "")
@@ -430,6 +454,39 @@ class ViewContext:
         plan.imports = sorted({line for a in plan.actions for line in a.imports})
         plan.icons = {a.action.icon for a in plan.actions if a.action.icon}
         return plan
+
+    def _topbar_items(
+        self, layout: str, own: list[tuple[str, Action]]
+    ) -> tuple[list[tuple[str, Action]], dict[str, tuple[tuple[str, ...], tuple[str, ...]]]]:
+        """Return the actions of a top bar, with the pages that show each one.
+
+        The top bar shows its own actions on each page, except on a page
+        with the same action and `placement: page`. A page action with
+        `placement: topbar` or `both` that the top bar does not have shows
+        in the top bar on its page only. Its name gets the page name as a
+        prefix, so that two pages can have actions with the same name.
+        """
+        from appgen.bindings.shared.ui import ui_plan
+
+        items = list(own)
+        extra: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        keys = {name: _action_key(action) for name, action in own}
+        excluded: dict[str, list[str]] = {name: [] for name, _ in own}
+        for info in ui_plan(self.definition).pages_of(layout):
+            for name, action in info.page.actions.items():
+                key = _action_key(action)
+                same = [n for n, k in keys.items() if k is not None and k == key]
+                if action.placement == "page":
+                    for n in same:
+                        excluded[n].append(info.name)
+                elif action.placement in ("topbar", "both") and not same:
+                    bar_name = f"{info.name}_{name}"
+                    items.append((bar_name, action))
+                    extra[bar_name] = ((info.name,), ())
+        for name, pages in excluded.items():
+            if pages:
+                extra[name] = ((), tuple(pages))
+        return items, extra
 
     def _topbar_duplicates(
         self, pages: list[str], actions: Iterable[tuple[str, Action]]

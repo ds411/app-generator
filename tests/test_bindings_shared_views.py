@@ -12,6 +12,7 @@ from appgen.bindings.shared.views import (
 )
 from appgen.dsl import load_definition, load_definition_text
 from appgen.dsl.ui.common import Grid, GridOverride
+from appgen.gen.render import GenerationError
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
 VIEWS = Path(__file__).parent / "fixtures" / "react-views.yaml"
@@ -170,7 +171,9 @@ def test_a_chart_does_not_animate_without_motion() -> None:
     assert context.dashboard_plan("overview").motion == "none"
 
 
-def test_a_page_does_not_show_an_action_that_its_top_bar_has(example: ViewContext) -> None:
+def test_a_page_does_not_show_an_action_that_its_top_bar_has() -> None:
+    text = EXAMPLE.read_text().replace(", placement: page", "")
+    example = ViewContext(load_definition_text(text), forms=True)
     bar = example.action_bar("pages.project_detail")
     assert bar.hidden_actions == ["pages.project_detail.actions.new_task"]
     assert all(a.name != "new_task" for a in bar.actions)
@@ -188,3 +191,69 @@ def test_a_view_does_not_show_an_action_that_the_top_bar_of_its_pages_has(
     assert board.hidden_actions == ["ui.views.task_board.actions.new_task"]
     assert board.actions == []
     assert [a.name for a in board.row_actions] == ["open", "edit"]
+
+
+def test_an_action_with_placement_page_shows_on_the_page_only(example: ViewContext) -> None:
+    bar = example.action_bar("pages.project_detail")
+    assert (bar.hidden_actions, [a.name for a in bar.actions]) == ([], ["new_task"])
+    # The top bar hides its own action on the page.
+    [new_task] = example.action_bar("ui.layouts.app_shell.topbar").actions
+    assert (new_task.only_pages, new_task.except_pages) == ((), ("project_detail",))
+
+
+PLACEMENT = """\
+version: 0
+app: { name: shop, title: Shop }
+entities:
+  Item:
+    crud: true
+    display_field: name
+    fields:
+      name: { type: string, required: true }
+pages:
+  items:
+    path: /items
+    title: Items
+    entity: Item
+    actions:
+      new_item: { kind: form, form: new_item, placement: topbar }
+      export: { kind: custom, label: Export, placement: both }
+  item:
+    path: "/items/{id}"
+    title: Item
+    entity: Item
+    actions:
+      edit: { kind: form, form: edit_item }
+ui:
+  layouts:
+    shell:
+      topbar: { breadcrumbs: true }
+  forms:
+    new_item: { entity: Item, operation: create_item, fields: { name: {} } }
+    edit_item: { entity: Item, operation: update_item, fields: { name: {} } }
+  defaults: { layout: shell }
+"""
+
+
+def test_an_action_with_placement_topbar_shows_in_the_top_bar_of_its_page() -> None:
+    context = ViewContext(load_definition_text(PLACEMENT), forms=True)
+
+    page = context.action_bar("pages.items")
+    topbar = context.action_bar("ui.layouts.shell.topbar")
+
+    # `both` shows in the page header and in the top bar.
+    assert [a.name for a in page.actions] == ["export"]
+    assert page.hidden_actions == []
+    assert [(a.name, a.element_id, a.only_pages) for a in topbar.actions] == [
+        ("items_new_item", "pages.items.actions.new_item", ("items",)),
+        ("items_export", "pages.items.actions.export", ("items",)),
+    ]
+    assert topbar.per_page
+
+
+def test_the_top_bar_cannot_show_an_action_that_needs_the_record() -> None:
+    text = PLACEMENT.replace("form: edit_item }", "form: edit_item, placement: topbar }")
+    context = ViewContext(load_definition_text(text), forms=True)
+
+    with pytest.raises(GenerationError, match="needs the record of its page"):
+        context.action_bar("ui.layouts.shell.topbar")
