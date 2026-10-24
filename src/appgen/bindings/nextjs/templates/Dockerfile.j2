@@ -14,7 +14,10 @@ RUN corepack enable
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
-RUN pnpm install
+# A BuildKit cache keeps the pnpm store between builds, so a new build
+# downloads only the packages that changed.
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --store-dir /pnpm/store
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules

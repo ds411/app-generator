@@ -180,6 +180,26 @@ pnpm --dir ui-tests exec playwright install chromium
 uv run scripts/smoke_test.py react --ui
 ```
 
+The check scripts reuse caches, so a second run is faster:
+
+- `docker build` reuses the image layers when the dependency files of
+  the app do not change. The Dockerfiles keep the pnpm store and the uv
+  cache in BuildKit cache mounts, so a build after a dependency change
+  downloads only the changed packages.
+- `pnpm install` on the host uses the shared pnpm store of the user
+  (`pnpm store path`), and uv uses its shared cache.
+
+Times of the check scripts in a cloud session (4 CPUs). The first run
+starts with no Docker build cache, no pnpm store, and no uv cache. The
+second run follows with no change.
+
+| Script                     | First run | Second run |
+| -------------------------- | --------- | ---------- |
+| `scripts/check-fastapi.sh` | 85 s      | 46 s       |
+| `scripts/check-nextjs.sh`  | 159 s     | 89 s       |
+| `scripts/check-react.sh`   | 63 s      | 53 s       |
+| All three                  | 307 s     | 188 s      |
+
 ## Bindings
 
 A binding is a `Binding` object (see `src/appgen/gen/binding.py`). It
