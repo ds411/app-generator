@@ -17,9 +17,12 @@ from skill_support import ROOT, SKILL
 from typer.testing import CliRunner
 
 from appgen.cli import app
+from appgen.dsl import load_definition
+from appgen.dsl.crud import operation_names
 
 EXAMPLE = ROOT / "examples" / "project-tracker" / "app.yaml"
 CHANGE_DEFINITION = SKILL / "references" / "change-definition.md"
+NEW_DEFINITION = SKILL / "references" / "new-definition.md"
 OPERATION = "app/features/tasks/complete_task_ext.py"
 VALIDATION = "app/features/comments/validation_ext.py"
 runner = CliRunner()
@@ -187,3 +190,65 @@ def test_the_reference_gives_the_steps_of_the_tests() -> None:
         "Never edit a generated file",
     ):
         assert words in text
+
+
+def test_the_plurals_of_the_references_agree_with_the_crud_shorthand() -> None:
+    text = "\n".join(p.read_text(encoding="utf-8") for p in (NEW_DEFINITION, CHANGE_DEFINITION))
+
+    examples = re.findall(r"`([A-Z][A-Za-z]*)`\s+gives\s+`(list_[a-z_]+)`", text)
+    labels = re.findall(r"`plural_label: ([A-Za-z]+)`\s+gives\s+`(list_[a-z_]+)`", text)
+
+    assert {name for _, name in examples} >= {"list_persons", "list_categories"}
+    for entity, name in examples:
+        assert operation_names(entity, {})["list"] == name
+    assert labels == [("People", "list_people")]
+    for label, name in labels:
+        assert operation_names("Person", {"plural_label": label})["list"] == name
+
+
+def test_the_names_of_the_crud_table_are_the_names_of_the_shorthand(tmp_path: Path) -> None:
+    text = CHANGE_DEFINITION.read_text(encoding="utf-8")
+    rows = {
+        line.split("|")[1].strip(): set(re.findall(r"`([a-z_]+)`", line.split("|")[2]))
+        for line in text.splitlines()
+        if line.startswith(("| Operations", "| Views", "| Forms"))
+    }
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        "version: 0\n"
+        "app: { name: people, title: People }\n"
+        "entities:\n"
+        "  Person:\n"
+        "    crud: { views: [table, detail], forms: [create, update] }\n"
+        "    fields: { name: { type: string } }\n",
+        encoding="utf-8",
+    )
+
+    definition = load_definition(path)
+
+    assert definition.ui is not None
+    assert rows["Operations"] == set(definition.operations)
+    assert rows["Views"] - {"table", "detail"} == set(definition.ui.views)
+    assert rows["Forms"] - {"create", "update"} == set(definition.ui.forms)
+
+
+def test_the_database_step_uses_the_sqlite_url_of_the_app_readme(tmp_path: Path) -> None:
+    appgen("generate", EXAMPLE, "-b", "fastapi", "-o", tmp_path)
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    command = "printf 'DATABASE_URL=sqlite+aiosqlite:///./local.db\\n' > .env"
+
+    assert command in readme
+    assert command in CHANGE_DEFINITION.read_text(encoding="utf-8")
+    assert "uv run alembic upgrade head" in readme
+
+
+def test_the_summary_of_generate_lists_the_stubs_as_extension_files(tmp_path: Path) -> None:
+    # SKILL.md and change-definition.md tell to read the open gaps in the
+    # report of the check, not in the summary of generate.
+    output = appgen("generate", EXAMPLE, "-b", "fastapi", "-o", tmp_path)
+    report = appgen("check", EXAMPLE, tmp_path, "--format", "json")
+
+    assert "Gaps created: 0\n" in output
+    assert f"  {OPERATION}\n" in output.split("Extension files created:")[1]
+    assert "operations.complete_task" in [g["id"] for g in report["gaps"]]
+    assert "Use this list, not the summary" in (SKILL / "SKILL.md").read_text(encoding="utf-8")

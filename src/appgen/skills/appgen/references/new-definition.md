@@ -214,8 +214,11 @@ generated app has a stub for it, and the check reports it in `gaps`.
 ## Operations
 
 `crud` gives the operations with fixed names. `<entity>` is the entity
-name in snake case, and `<plural>` comes from `plural_label` or the
-entity name:
+name in snake case, and `<plural>` comes from `plural_label` (`People`
+gives `people`), or else from a simple rule on the entity name: add
+`s`, or `es` after `s`, `x`, `z`, `ch`, and `sh`, or change a `y` after
+a consonant to `ies`. The rule knows no irregular plurals: `Person`
+gives `list_persons`, and `Category` gives `list_categories`.
 
 | `crud` value                         | Gives                                                         |
 | ------------------------------------ | ------------------------------------------------------------- |

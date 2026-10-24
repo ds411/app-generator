@@ -21,8 +21,9 @@ reports no invalid traces.
    diagnostic. A rename or a removal often leaves references to the old
    name (`unknown-reference`).
 5. Generate into the same folder: `appgen generate app.yaml -b <binding>
-   -o <dir>`. Read the summary: the files written and deleted, the gaps
-   created, and the orphaned extension files.
+   -o <dir>`. Read the summary: the files written and deleted, the
+   extension files created, and the orphaned extension files. The open
+   gaps are in the report of the next step.
 6. Check: `appgen check app.yaml <dir> --format json`. Fix each entry of
    `invalid`, as the sections below tell.
 7. Fill the new gaps ([fill-gaps.md](fill-gaps.md)).
@@ -47,7 +48,24 @@ In the definition, change all references to the old name too: the
 badges (`field: Comment.body`), and dashboards, and the names in
 `access`. The CRUD shorthand names its operations, views, and forms
 after the entity, so a rename of an entity also renames them, for
-example `create_comment` to `create_remark`.
+example `create_comment` to `create_remark`. For the entity `Person`
+(`<entity>` is `person`), the shorthand gives:
+
+| Element    | Names                                                               |
+| ---------- | ------------------------------------------------------------------- |
+| Operations | `create_person`, `read_person`, `update_person`, `delete_person`, and `list_persons` |
+| Views      | `person_table` (`crud.views: [table]`) and `person_detail` (`detail`) |
+| Forms      | `new_person` (`crud.forms: [create]`) and `edit_person` (`update`)  |
+
+The plural of the list operation comes from `plural_label`, if the
+entity has one (`plural_label: People` gives `list_people`), else from
+a simple rule: add `s`, or `es` after `s`, `x`, `z`, `ch`, and `sh`,
+or change a `y` after a consonant to `ies`. The rule knows no irregular
+plurals, so `Person` gives `list_persons`. Do not guess a name. After
+the rename, `appgen validate` reports each old name as
+`unknown-reference`. Its `hint` is the most similar name that exists,
+which is often the new name, but not always: for `list_members`, the
+hint can be `list_amenities`. Compare the hint with the names above.
 
 After `appgen generate`, the generated code uses the new name. The
 hand-written code keeps the old name, and the check reports each trace
@@ -107,14 +125,28 @@ the edit or stops.
 ## Database changes
 
 The FastAPI app creates its first migration once, and keeps all
-migrations. After a change of the entities, in the app folder:
+migrations. Alembic makes the next migration from the difference
+between the changed models and the database of `DATABASE_URL`, so it
+needs a database with the migrations that exist. A database server is
+not necessary: a SQLite file works. After a change of the entities, in
+the app folder:
 
-1. `uv run alembic revision --autogenerate -m "<change>"` makes the next
+1. Make the database, before you add a migration. If `.env` has no
+   `DATABASE_URL`, use SQLite:
+   `printf 'DATABASE_URL=sqlite+aiosqlite:///./local.db\n' > .env`.
+   Then `uv run alembic upgrade head`.
+2. `uv run alembic revision --autogenerate -m "<change>"` makes the next
    migration from the changed models.
-2. Review the new file in `migrations/versions/`. Alembic writes a
-   rename as a drop and an add: change it to a rename
-   (`op.alter_column(..., new_column_name=...)`) to keep the data.
-3. `uv run alembic upgrade head` applies it.
+3. Review the new file in `migrations/versions/`. Alembic writes a
+   rename as a drop and an add: change it to a rename to keep the data,
+   `op.rename_table("members", "persons")` for an entity, or
+   `op.alter_column(..., new_column_name=...)` for a field. After the
+   rename of a table, also rename its constraints for Postgres
+   (`ALTER TABLE ... RENAME CONSTRAINT`), because their names contain
+   the table name, for example `pk_members` and `uq_members_email`.
+4. `uv run alembic upgrade head` applies it. `uv run pytest` runs
+   `tests/test_migrations.py`, which compares the migrations with the
+   models.
 
 The Next.js app writes its SQL migrations with `pnpm db:generate`
 (Drizzle). Review them in `drizzle/` in the same way.

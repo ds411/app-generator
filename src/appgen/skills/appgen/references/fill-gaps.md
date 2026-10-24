@@ -86,10 +86,25 @@ of the entity in snake case, for example `bookings`.
   `<entity>Api` of `@/entities/<entity>` (for example
   `bookingApi.list()`), which calls the server actions, and with
   `useResource` of `@/shared/lib/use-resource`.
+- `<entity>Api.list(query)` gives `{ items, total, page, pageSize }`.
+  Without `page` in the query, `items` has all records. The query can
+  have `filters`, `sort`, and `search`. `<entity>Api.subscribe(listener)`
+  calls the listener after each change of the records, and gives a
+  function that stops it.
+- `useResource(key, load, subscribe)` gives `{ status: "loading" }`,
+  `{ status: "error", error }`, or `{ status: "success", data }`, with
+  `reload()`. It calls `load` again when `subscribe` reports a change.
+  The generated dashboard `src/widgets/<dashboard>/ui/<dashboard>-dashboard.tsx`
+  is an example: it loads the records of each entity, and subscribes to
+  their changes.
 - The UI components of shadcn/ui are in `@/shared/ui/`.
+- The generated views show their states with `ViewLoading`,
+  `ViewMessage`, and `RetryButton` of `@/shared/ui/view-state`, for
+  example `<ViewLoading indicator="skeleton" shape="widget" />`
+  (`indicator` and `shape` are required). Use them for the same look.
 - Test: `pnpm install`, `pnpm lint`, `pnpm typecheck`, and
-  `pnpm build`. Run it with `pnpm dev` (see the README of the app for
-  the database).
+  `pnpm build`. The app has no unit tests and no `test` script. Run it
+  with `pnpm dev` (see the README of the app for the database).
 
 ## React
 
@@ -108,6 +123,8 @@ of the entity in snake case, for example `bookings`.
   `<entity>Api` of `@/entities/<entity>`, for example
   `bookingApi.update(record.id, { status: "cancelled" })`. Load data in
   a component with `useResource` of `@/shared/lib/use-resource`.
+- `list`, `subscribe`, `useResource`, and the view states work as in
+  the Next.js app.
 - With `x-react-data: api` in `app`, the app uses the FastAPI app of the
   same definition. Then a custom operation calls its endpoint, and has
   no extension file: fill the gap in the FastAPI app. `<entity>Api.list`
@@ -115,7 +132,8 @@ of the entity in snake case, for example `bookings`.
   endpoint takes, and no search. `<entity>Api.page({ params, sort,
   page, pageSize })` loads one page with the parameters of the API.
 - Test: `pnpm install`, `pnpm lint`, `pnpm typecheck`, and
-  `pnpm build`. Run it with `pnpm dev`.
+  `pnpm build`. The app has no unit tests and no `test` script. Run it
+  with `pnpm dev`.
 
 ## FastAPI
 
@@ -145,5 +163,7 @@ of the entity in snake case, for example `bookings`.
   new file, for example `tests/features/<slice>/test_<operation>_logic.py`.
 - After a change to the definition that changes the database, make a
   migration: `uv run alembic revision --autogenerate -m "<change>"`.
+  It needs a database with the migrations that exist (see "Database
+  changes" in [change-definition.md](change-definition.md)).
 - Test: `uv sync`, `uv run ruff check`, `uv run ruff format --check`,
   `uv run pyright`, and `uv run pytest`.
