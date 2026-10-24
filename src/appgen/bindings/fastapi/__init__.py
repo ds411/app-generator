@@ -8,8 +8,10 @@ Pages and the UI are out of the scope of the binding.
 
 from pathlib import Path
 
-from appgen.bindings.fastapi.model import binding_context
-from appgen.gen.binding import Binding, Output
+from pydantic import JsonValue
+
+from appgen.bindings.fastapi.model import EMBED_KEY, EXAMPLE_KEY, binding_context
+from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
@@ -125,4 +127,19 @@ BINDING = Binding(
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),
+    extension_keys=(
+        ExtensionKey(
+            name=EMBED_KEY,
+            kinds=frozenset({"relation"}),
+            type=bool,
+            description="True: the read schema embeds the related record as an object.",
+        ),
+        ExtensionKey(
+            name=EXAMPLE_KEY,
+            kinds=frozenset({"field", "param"}),
+            type=JsonValue,
+            description="A valid sample value of the field for the generated tests.",
+        ),
+    ),
+    extension_prefix="x-fastapi-",
 )

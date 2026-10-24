@@ -6,12 +6,16 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 """
 
 from pathlib import Path
+from typing import Annotated
+
+import pydantic
 
 from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
 from appgen.bindings.shared import forms, shadcn, ui, views
-from appgen.gen.binding import Binding, Output
+from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
+from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
@@ -265,4 +269,12 @@ BINDING = Binding(
     filters={"json": to_json},
     helpers=HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
     stub_markers=("TODO(appgen)", "Not implemented yet"),
+    extension_keys=(
+        ExtensionKey(
+            name=MOCK_COUNT_KEY,
+            kinds=frozenset({"entity"}),
+            type=Annotated[int, pydantic.Field(ge=1)],
+            description="The number of mock records of the entity (default: 12).",
+        ),
+    ),
 )

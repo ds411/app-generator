@@ -46,6 +46,24 @@ class Output:
 
 
 @dataclass(frozen=True, slots=True)
+class ExtensionKey:
+    """An extension key (`x-...`) that a binding reads, with the schema of its value.
+
+    `appgen validate` and `appgen generate` check the keys of the bindings
+    in use (see `appgen.gen.extensions`).
+    """
+
+    name: str
+    """The key, for example `x-fastapi-embed`."""
+    kinds: frozenset[ElementKind]
+    """The element kinds that can have the key, for example `relation`."""
+    type: Any
+    """The type of the value, as a Pydantic type, for example `bool`."""
+    description: str
+    """What the key does. The docs and the error messages show it."""
+
+
+@dataclass(frozen=True, slots=True)
 class Binding:
     """A target stack that the generator writes code for.
 
@@ -109,6 +127,14 @@ class Binding:
     its stub is not written. When none is left, `appgen check` tells the
     developer to change the gap trace to a manual trace. The manifest
     records the markers.
+    """
+    extension_keys: tuple[ExtensionKey, ...] = ()
+    """The extension keys that the binding reads (the schema of its `x-` keys)."""
+    extension_prefix: str | None = None
+    """A prefix that only the keys of the binding have, for example `x-fastapi-`.
+
+    An unknown key with the prefix is an error, so that a typo does not
+    fail silently.
     """
     helpers: Mapping[str, Callable[..., Any]] = field(
         default_factory=dict[str, Callable[..., Any]], hash=False, compare=False

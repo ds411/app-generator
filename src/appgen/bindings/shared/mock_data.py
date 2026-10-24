@@ -26,6 +26,8 @@ from typing import Any
 from appgen.dsl.model import AppDefinition, Entity, Field
 
 DEFAULT_COUNT = 12
+MOCK_COUNT_KEY = "x-mock-count"
+"""The extension key of an entity that gives the number of mock records."""
 DERIVED_FIELDS = ("key", "code", "slug", "abbreviation", "short_name")
 """The string fields whose value comes from the source field of the record."""
 SOURCE_FIELDS = ("name", "title", "label")
@@ -139,7 +141,7 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
 
 
 def _count(entity: Entity) -> int:
-    count = entity.extensions.get("x-mock-count", DEFAULT_COUNT)
+    count = entity.extensions.get(MOCK_COUNT_KEY, DEFAULT_COUNT)
     return count if isinstance(count, int) and count > 0 else DEFAULT_COUNT
 
 
