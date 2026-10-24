@@ -86,11 +86,11 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% if plan.filters %}
       ) : rows.length === 0 ? (
         <ViewMessage
-          title="No matching records"
-          text="Change or reset the filters."
+          title={{ jsx_attr("No matching records") }}
+          text={{ jsx_attr("Change or reset the filters.") }}
           action={
             <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
-              Reset the filters
+              {{ jsx_text("Reset the filters") }}
             </Button>
           }
         />

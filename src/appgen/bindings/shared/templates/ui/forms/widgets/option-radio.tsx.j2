@@ -35,7 +35,7 @@ export function OptionRadio({
         <div key={option.value} className="flex items-center gap-2">
           <RadioGroupItem id={`${id}-${option.value}`} value={option.value} aria-invalid={invalid} />
           <Label htmlFor={`${id}-${option.value}`} className="font-normal">
-            {option.label}
+            {{ '{' ~ tr('option.label') ~ '}' }}
           </Label>
         </div>
       ))}

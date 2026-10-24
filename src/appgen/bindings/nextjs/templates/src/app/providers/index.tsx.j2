@@ -9,6 +9,20 @@ import { LanguageProvider } from "@/shared/lib/language-provider";
 import { ThemeProvider } from "@/shared/lib/theme";
 import { Toaster } from "@/shared/ui/sonner";
 
+{% if i18n %}
+/** The toasts, with their labels in the selected language. */
+function Toasts() {
+  return (
+    <Toaster
+      richColors
+      closeButton
+      containerAriaLabel={{ jsx_attr("Notifications") }}
+      toastOptions={ { closeButtonAriaLabel: {{ tr(js("Close toast")) }} } }
+    />
+  );
+}
+
+{% endif %}
 /** The providers of the app: the color mode{% if i18n %}, the language,{% endif %} and the toasts. */
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
   return (
@@ -19,11 +33,14 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       disableTransitionOnChange
     >
 {% if i18n %}
-      <LanguageProvider>{children}</LanguageProvider>
+      <LanguageProvider>
+        {children}
+        <Toasts />
+      </LanguageProvider>
 {% else %}
       {children}
-{% endif %}
       <Toaster richColors closeButton />
+{% endif %}
     </ThemeProvider>
   );
 }

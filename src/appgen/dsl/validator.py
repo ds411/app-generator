@@ -30,6 +30,7 @@ from appgen.dsl.expressions import (
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
+from appgen.dsl.translations import VALUE
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
     check_ui_dashboards,
@@ -410,6 +411,20 @@ def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
                 language,
                 at="text",
                 hint="Each language translates the same keys.",
+            )
+        for key, value in sorted(language.text.items()):
+            names = sorted(set(VALUE.findall(key)))
+            if names == sorted(set(VALUE.findall(value))):
+                continue
+            values = ", ".join(f"{{{name}}}" for name in names)
+            yield _error(
+                "translation-values",
+                f"The translation of '{key}' in '{code}' must have the values {values}."
+                if names
+                else f"The translation of '{key}' in '{code}' must have no values in braces.",
+                language,
+                at="text",
+                hint="Keep each value in braces of the text, and add no other value.",
             )
 
 

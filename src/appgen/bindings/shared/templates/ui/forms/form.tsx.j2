@@ -239,11 +239,11 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
     try {
       {{ "const result = " if plan.navigate and "result" in plan.navigate }}await {{ plan.call }};
 {% if on_success and on_success.toast %}
-      toast.success({{ js(on_success.toast) }}); {{ trace(on_success.id) }}
+      toast.success({{ tr(js(on_success.toast)) }}); {{ trace(on_success.id) }}
 {% elif on_success %}
-      toast.success("Saved."); {{ trace(on_success.id) }}
+      toast.success({{ tr(js("Saved.")) }}); {{ trace(on_success.id) }}
 {% else %}
-      toast.success("Saved.");
+      toast.success({{ tr(js("Saved.")) }});
 {% endif %}
 {% if not close %}
       setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams));
@@ -432,7 +432,7 @@ export function {{ c }}Page({ routeParams }: { routeParams: RouteParams }) {
     return (
       <div role="status" className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
         <Spinner />
-        Loading
+        {{ jsx_text("Loading") }}
       </div>
     );
   }

@@ -45,14 +45,14 @@ export function PageSearch({ className }: { className?: string }) {
         onClick={() => setOpen(true)}
       >
         <SearchIcon />
-        <span className="flex-1 text-left">Search pages</span>
-        <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px]">Ctrl K</kbd>
+        <span className="flex-1 text-left">{{ jsx_text("Search pages") }}</span>
+        <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px]">{{ jsx_text("Ctrl K") }}</kbd>
       </Button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Search pages" description="Find a page by its title.">
-        <CommandInput placeholder="Type a page title" />
-        <CommandList>
-          <CommandEmpty>No page has this title.</CommandEmpty>
-          <CommandGroup heading="Pages">
+      <CommandDialog open={open} onOpenChange={setOpen} title={{ jsx_attr("Search pages") }} description={{ jsx_attr("Find a page by its title.") }}>
+        <CommandInput placeholder={{ jsx_attr("Type a page title") }} />
+        <CommandList{{ " label=" ~ jsx_attr("Suggestions") if i18n }}>
+          <CommandEmpty>{{ jsx_text("No page has this title.") }}</CommandEmpty>
+          <CommandGroup heading={{ jsx_attr("Pages") }}>
             {searchPages.map((name) => (
               <CommandItem
                 key={name}

@@ -29,14 +29,14 @@ export function ListPagination({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
       <p className="tabular-nums">
-        {first}–{last} of {total}
+        {{ jsx_format("{first}–{last} of {total}", first="first", last="last", total="total") }}
       </p>
       <div className="flex flex-wrap items-center gap-4">
         {pageSizes.length > 1 && (
           <div className="flex items-center gap-2">
-            <span>Rows per page</span>
+            <span>{{ jsx_text("Rows per page") }}</span>
             <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
-              <SelectTrigger size="sm" className="w-20" aria-label="Rows per page">
+              <SelectTrigger size="sm" className="w-20" aria-label={{ jsx_attr("Rows per page") }}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -50,19 +50,19 @@ export function ListPagination({
           </div>
         )}
         <span className="tabular-nums">
-          Page {page} of {pageCount}
+          {{ jsx_format("Page {page} of {count}", page="page", count="pageCount") }}
         </span>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label="First page" disabled={page <= 1} onClick={() => onPageChange(1)}>
+          <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label={{ jsx_attr("First page") }} disabled={page <= 1} onClick={() => onPageChange(1)}>
             <ChevronsLeftIcon />
           </Button>
-          <Button variant="outline" size="icon" className="size-8" aria-label="Previous page" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          <Button variant="outline" size="icon" className="size-8" aria-label={{ jsx_attr("Previous page") }} disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
             <ChevronLeftIcon />
           </Button>
-          <Button variant="outline" size="icon" className="size-8" aria-label="Next page" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
+          <Button variant="outline" size="icon" className="size-8" aria-label={{ jsx_attr("Next page") }} disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
             <ChevronRightIcon />
           </Button>
-          <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label="Last page" disabled={page >= pageCount} onClick={() => onPageChange(pageCount)}>
+          <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label={{ jsx_attr("Last page") }} disabled={page >= pageCount} onClick={() => onPageChange(pageCount)}>
             <ChevronsRightIcon />
           </Button>
         </div>

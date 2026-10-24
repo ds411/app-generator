@@ -25,8 +25,8 @@ export const pages: Record<PageName, PageInfo> = {
 {% set crumb = info.crumbs[-1] %}
   {{ page_name | camel }}: { {{ trace(info.page.id) }}
     path: {{ js(info.page.path) }},
-    title: {{ js(info.page.title) }},
-    breadcrumb: {{ js(crumb[1]) }},
+    title: {{ text(info.page.title) }},
+    breadcrumb: {{ text(crumb[1]) }},
     parent: {{ js(info.parent | camel) if info.parent else "null" }},
     recordEntity: {{ js(info.page.entity) if crumb[2] else "null" }},
     recordParam: {{ js(info.params[-1]) if crumb[2] else "null" }},

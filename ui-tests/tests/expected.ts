@@ -28,6 +28,15 @@ export type ExpectedToken = {
   dark: string;
 };
 
+/** The test language of scripts/translation_test.py. */
+export type ExpectedTestLanguage = {
+  code: string;
+  /** The key of the selected language in the browser storage. */
+  storageKey: string;
+  /** The texts that are not UI text: the values of the records and the names of the languages. */
+  ignore: string[];
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -35,6 +44,8 @@ export type Expected = {
   colors: ExpectedToken[];
   /** The font size of the body text (`typography.body`), for each mode. */
   bodyFontSize: Record<Mode, string>;
+  /** Only for the test of the test language. */
+  testLanguage?: ExpectedTestLanguage;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

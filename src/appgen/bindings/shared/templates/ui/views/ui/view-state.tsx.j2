@@ -27,13 +27,13 @@ export function ViewLoading({
     return (
       <div role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
         <Spinner />
-        {text ?? "Loading"}
+        {text ?? {{ tr(js("Loading")) }}}
       </div>
     );
   }
   const items = Array.from({ length: rows }, (_, index) => index);
   return (
-    <div role="status" aria-label={text ?? "Loading"} className="space-y-3">
+    <div role="status" aria-label={text ?? {{ tr(js("Loading")) }}} className="space-y-3">
       {text && <p className="text-sm text-muted-foreground">{text}</p>}
       {shape === "table" && (
         <div className="space-y-2 rounded-md border p-3">
@@ -105,7 +105,7 @@ export function ViewMessage({
 export function RetryButton({ onRetry }: { onRetry: () => void }) {
   return (
     <Button variant="outline" size="sm" onClick={onRetry}>
-      Try again
+      {{ jsx_text("Try again") }}
     </Button>
   );
 }

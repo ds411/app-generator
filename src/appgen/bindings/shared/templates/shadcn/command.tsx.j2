@@ -32,8 +32,8 @@ function Command({
 }
 
 function CommandDialog({
-  title = "Command Palette",
-  description = "Search for a command to run...",
+  title = {% endraw %}{{ tr(js("Command Palette")) }}{% raw %},
+  description = {% endraw %}{{ tr(js("Search for a command to run...")) }}{% raw %},
   children,
   className,
   showCloseButton = true,

@@ -108,11 +108,11 @@ export function groupRows<T>(
       value: valueOf(byKey.get(group.key) ?? []),
     }));
     const other = [...byKey.entries()].filter(([key]) => !known.has(key)).flatMap(([, items]) => items);
-    if (other.length > 0) result.push({ key: "other", label: "Other", value: valueOf(other) });
+    if (other.length > 0) result.push({ key: "other", label: {% endraw %}{{ text("Other") }}{% raw %}, value: valueOf(other) });
     return result;
   }
   return [...byKey.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, items]) => ({ key: key || "none", label: key ? groupLabel(key) : "None", value: valueOf(items) }));
+    .map(([key, items]) => ({ key: key || "none", label: key ? groupLabel(key) : {% endraw %}{{ text("None") }}{% raw %}, value: valueOf(items) }));
 }
 {% endraw %}

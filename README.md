@@ -100,6 +100,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Install the agent skill | `uv run appgen skills install` |
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
+| Test language check   | `uv run scripts/translation_test.py [react] [nextjs]`      |
 
 ## Layout
 
@@ -227,6 +228,16 @@ pnpm --dir ui-tests install
 pnpm --dir ui-tests exec playwright install chromium
 uv run scripts/smoke_test.py react --ui
 ```
+
+`scripts/translation_test.py` checks that the front ends translate each
+text (ADR 0010). It generates the project tracker with a test language
+that changes each text to `⟦text⟧`, and finds the UI text in the code
+that does not call `t` (`scripts/untranslated_text.mjs`). Then it builds
+and starts the React app and the Next.js app without Docker, and the UI
+test `ui-tests/tests/test-language.spec.ts` opens each page in the test
+language, with the page search, the menu of a record, and a form. A
+Latin text without `⟦` that is not a value of the records fails the
+test. The pre-push hook runs it with `scripts/check-translations.sh`.
 
 The check scripts reuse caches, so a second run is faster:
 

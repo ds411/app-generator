@@ -259,6 +259,15 @@ git config core.hooksPath .githooks
   `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. It needs pnpm and Docker. Run it by hand
   with `scripts/check-react.sh [output folder]`.
+- When a push changes the generator core, a front-end binding, or the
+  shared binding code, the hook also runs
+  `scripts/check-translations.sh`. The script generates the project
+  tracker with a test language that changes each text, and checks that
+  the React and the Next.js apps show no text of the default language
+  (`scripts/translation_test.py`). It needs pnpm, but not Docker. A
+  fixed text in a template must use a text helper of
+  `src/appgen/bindings/shared/i18n.py`, for example `jsx_text("Close")`,
+  else the check fails.
 - Each check script ends with the smoke test of its app
   (`scripts/smoke_test.py`): it starts the Docker image that the script
   built, and requests one page for each entity (Next.js and React) or

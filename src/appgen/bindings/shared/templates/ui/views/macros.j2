@@ -193,7 +193,7 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
 {% macro action_spec(a, records_type) -%}
   { {{ trace(a.element_id) }}
     key: {{ js(a.name) }},
-    label: {{ js(a.label) }},
+    label: {{ text(a.label) }},
 {% if a.action.icon %}
     icon: {{ a.action.icon | pascal }}Icon,
 {% endif %}
@@ -202,12 +202,12 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
 {% endif %}
 {% if a.action.confirm %}
     confirm: { {{ trace(a.action.confirm.id) }}
-      title: {{ js(a.action.confirm.title) }},
+      title: {{ text(a.action.confirm.title) }},
 {% if a.action.confirm.message %}
-      message: {{ js(a.action.confirm.message) }},
+      message: {{ text(a.action.confirm.message) }},
 {% endif %}
 {% if a.action.confirm.confirm_label %}
-      confirmLabel: {{ js(a.action.confirm.confirm_label) }},
+      confirmLabel: {{ text(a.action.confirm.confirm_label) }},
 {% endif %}
     },
 {% endif %}
@@ -222,7 +222,7 @@ function sortRecords(rows: {{ plan.type }}[], _lookups: Lookups): {{ plan.type }
 {% endif %}
 {% set on_success = a.action.on_success if a.action.on_success is defined else none %}
 {% if on_success and on_success.toast %}
-    toast: {{ js(on_success.toast) }}, {{ trace(on_success.id) }}
+    toast: {{ text(on_success.toast) }}, {{ trace(on_success.id) }}
 {% endif %}
 {% if a.navigate_to %}
     navigateTo: {{ a.navigate_to }},{{ " " ~ trace(on_success.id) if on_success and not on_success.toast }}
@@ -336,7 +336,7 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
 {% if plan.filters %}
         {filtered && (
           <Button variant="ghost" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
-            Reset
+            {{ jsx_text("Reset") }}
             <XIcon />
           </Button>
         )}

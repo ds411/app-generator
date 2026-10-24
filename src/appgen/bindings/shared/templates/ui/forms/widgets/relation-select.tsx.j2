@@ -23,9 +23,9 @@ function OptionList({
 }) {
   return (
     <Command>
-      <CommandInput placeholder="Search" />
-      <CommandList>
-        <CommandEmpty>No results.</CommandEmpty>
+      <CommandInput placeholder={{ jsx_attr("Search") }} />
+      <CommandList{{ " label=" ~ jsx_attr("Suggestions") if i18n }}>
+        <CommandEmpty>{{ jsx_text("No results.") }}</CommandEmpty>
         <CommandGroup>
           {options.map((option) => (
             <CommandItem key={option.value} value={`${option.label} ${option.value}`} onSelect={() => onToggle(option.value)}>
@@ -45,7 +45,7 @@ export function RelationSelect({
   options,
   value,
   onChange,
-  placeholder = "Select a record",
+  placeholder = {{ tr(js("Select a record")) }},
   clearable = false,
   disabled,
   invalid,
@@ -91,7 +91,7 @@ export function RelationSelect({
         </PopoverContent>
       </Popover>
       {clearable && value && (
-        <Button type="button" variant="ghost" size="icon" aria-label="Clear" disabled={disabled} onClick={() => onChange(null)}>
+        <Button type="button" variant="ghost" size="icon" aria-label={{ jsx_attr("Clear") }} disabled={disabled} onClick={() => onChange(null)}>
           <XIcon />
         </Button>
       )}
@@ -105,7 +105,7 @@ export function RelationMultiSelect({
   options,
   value,
   onChange,
-  placeholder = "Select records",
+  placeholder = {{ tr(js("Select records")) }},
   disabled,
   invalid,
 }: {
@@ -133,7 +133,7 @@ export function RelationMultiSelect({
             disabled={disabled}
             className="w-full justify-between font-normal text-muted-foreground"
           >
-            <span className="truncate">{chosen.length > 0 ? `${chosen.length} selected` : placeholder}</span>
+            <span className="truncate">{chosen.length > 0 ? {{ js_format("{count} selected", count="chosen.length") }} : placeholder}</span>
             <ChevronsUpDownIcon className="opacity-50" />
           </Button>
         </PopoverTrigger>
@@ -152,7 +152,7 @@ export function RelationMultiSelect({
               {option.label}
               <button
                 type="button"
-                aria-label={`Remove ${option.label}`}
+                aria-label={{ "{" ~ js_format("Remove {label}", label="option.label") ~ "}" }}
                 disabled={disabled}
                 className="rounded-sm opacity-60 hover:opacity-100"
                 onClick={() => onChange(value.filter((item) => item !== option.value))}

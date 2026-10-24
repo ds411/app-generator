@@ -4,7 +4,8 @@ The Next.js and the React bindings write the shadcn/ui components into
 the generated apps. To keep the generation deterministic and without
 network, the component sources are templates in the repository. This
 script fetches them once from a fixed commit of the shadcn/ui repository,
-changes their imports to the FSD paths of the generated apps, and writes:
+changes their imports to the FSD paths of the generated apps, changes
+their fixed text to calls of the text helpers (`TEXTS`), and writes:
 
 - `src/appgen/bindings/shared/templates/shadcn/<name>.tsx.j2`: one
   template for each component, with a trace header.
@@ -77,6 +78,60 @@ IMPORTS = (
 )
 
 
+def attr(name: str, text: str) -> tuple[str, str]:
+    """A text in a JSX attribute, for example `aria-label="Close"`."""
+    return f'{name}="{text}"', f'{name}={{% endraw %}}{{{{ jsx_attr("{text}") }}}}{{% raw %}}'
+
+
+def child(text: str) -> tuple[str, str]:
+    """A text as a JSX child, for example `<span>Close</span>`."""
+    return f">{text}<", f'>{{% endraw %}}{{{{ jsx_text("{text}") }}}}{{% raw %}}<'
+
+
+def default(name: str, text: str) -> tuple[str, str]:
+    """A text as the default value of a parameter, for example `title = "Search"`."""
+    return f'{name} = "{text}"', f'{name} = {{% endraw %}}{{{{ tr(js("{text}")) }}}}{{% raw %}}'
+
+
+# The fixed text of the components. The text helpers of the bindings
+# write a call of `t` for an app with translations, and the text as it is
+# for an app without translations (ADR 0010).
+TEXTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "breadcrumb": (attr("aria-label", "breadcrumb"), child("More")),
+    "command": (
+        default("title", "Command Palette"),
+        default("description", "Search for a command to run..."),
+    ),
+    "dialog": (child("Close"),),
+    "pagination": (
+        attr("aria-label", "pagination"),
+        attr("aria-label", "Go to previous page"),
+        child("Previous"),
+        attr("aria-label", "Go to next page"),
+        child("Next"),
+        child("More pages"),
+    ),
+    "sheet": (child("Close"),),
+    "sidebar": (
+        child("Sidebar"),
+        child("Displays the mobile sidebar."),
+        child("Toggle Sidebar"),
+        attr("aria-label", "Toggle Sidebar"),
+        attr("title", "Toggle Sidebar"),
+    ),
+    "spinner": (attr("aria-label", "Loading"),),
+}
+
+
+def translate(name: str, source: str) -> str:
+    """Change the fixed text of a component to calls of the text helpers."""
+    for old, new in TEXTS.get(name, ()):
+        if old not in source:
+            raise ValueError(f"The component {name} has no text {old!r}.")
+        source = source.replace(old, new)
+    return source
+
+
 def fetch(path: str) -> str:
     with urllib.request.urlopen(f"{BASE}/{path}", timeout=30) as response:
         return response.read().decode("utf-8")
@@ -135,7 +190,8 @@ def main() -> int:
             for match in re.findall(r'from "([^".][^"]*)"', source)
             if not match.startswith("@/") and match != "react"
         }
-        template = '{{ trace_header("app") }}\n{% raw %}\n' + source.rstrip() + "\n{% endraw %}\n"
+        body = translate(name, source.rstrip())
+        template = '{{ trace_header("app") }}\n{% raw %}\n' + body + "\n{% endraw %}\n"
         (OUT / f"{name}.tsx.j2").write_text(template, encoding="utf-8", newline="\n")
         data[name] = {
             "dependencies": sorted(

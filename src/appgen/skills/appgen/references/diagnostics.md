@@ -35,6 +35,7 @@ same diagnostics if the definition is not valid.
 | `missing-inverse`      | A `one_to_many` relation has no `inverse`.                            | Add a `many_to_one` relation back on the target, and name it in `inverse`. |
 | `invalid-inverse`      | The `inverse` is not the other side of the relation.                  | Name the `many_to_one` relation of the target that points back to this entity. |
 | `missing-translation`  | A language of `translations` does not translate a key that another language translates. | Give each language the same keys of `text`.             |
+| `translation-values`   | A translation does not have the same values in braces as its key, for example `{count}` in `{count} selected`. | Keep each value of the key in the translation, and add no other value. |
 | `invalid-token-value`  | The `$value` of a token does not suit its group, for example `blue` in `color`. | Use a value of the group, for example `#2563eb` for a color. |
 | `token-type-mismatch`  | A token has a type that its group does not have.                      | Move the token to the group of its type, or change its value.       |
 | `token-loop`           | Tokens refer to each other in a loop.                                 | Give one token of the loop a literal value.                         |

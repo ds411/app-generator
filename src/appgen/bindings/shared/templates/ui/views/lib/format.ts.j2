@@ -81,7 +81,7 @@ export function formatValue(value: unknown, format: Format = "text", currency: s
     case "relative_time":
       return formatRelative(toDate(String(value)));
     case "boolean":
-      return value ? "Yes" : "No";
+      return value ? {{ tr(js("Yes")) }} : {{ tr(js("No")) }};
     default:
       return Array.isArray(value) ? value.join(", ") : String(value);
   }

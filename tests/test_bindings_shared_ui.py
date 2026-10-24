@@ -133,8 +133,10 @@ def test_a_stub_widget_shows_its_element_id_only_in_development(
     for path, content in stubs.items():
         line = next(line for line in content.splitlines() if "Not implemented yet" in line)
         element_id = content.splitlines()[1].split()[2]
+        # The example has translations, so the stub translates its text.
         assert line.strip() == (
-            f'{{{development} ? "Not implemented yet: {element_id}" : "Not available yet."}}'
+            f'{{{development} ? t("Not implemented yet: {{element}}", '
+            f'{{ element: "{element_id}" }}) : t("Not available yet.")}}'
         ), path
 
 

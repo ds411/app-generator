@@ -101,7 +101,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       if (before === undefined) {
         if (workflow.initial !== undefined && to !== workflow.initial) {
           throw new TransitionError(
-            workflow.message ?? `A new ${this.entity} starts with the state ${workflow.initial}, not ${String(to)}.`,
+            workflow.message ?? {{ js_format("A new {entity} starts with the state {initial}, not {state}.", entity="this.entity", initial="workflow.initial", state="String(to)") }},
           );
         }
         continue;
@@ -110,7 +110,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       if (from === null || from === undefined || from === to) continue;
       if (!workflow.transitions.some(([a, b]) => a === from && b === to)) {
         throw new TransitionError(
-          workflow.message ?? `The state of ${this.entity} cannot change from ${String(from)} to ${String(to)}.`,
+          workflow.message ?? {{ js_format("The state of {entity} cannot change from {before} to {after}.", entity="this.entity", before="String(from)", after="String(to)") }},
         );
       }
     }

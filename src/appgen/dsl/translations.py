@@ -1,8 +1,13 @@
 """The translations of the UI text: more than one language for the front ends."""
 
+import re
+
 import pydantic
 
 from appgen.dsl.element import Element, MemberName, Text
+
+VALUE = re.compile(r"\{([a-z][A-Za-z0-9_]*)\}")
+"""A value in a text, for example `{count}` in `{count} selected`. The app fills it in."""
 
 
 class Language(Element):

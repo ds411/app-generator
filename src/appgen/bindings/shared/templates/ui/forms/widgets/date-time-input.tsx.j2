@@ -51,7 +51,7 @@ export function DateTimeInput({
       />
       <Input
         type="time"
-        aria-label="Time"
+        aria-label={{ jsx_attr("Time") }}
         className="w-full"
         value={time}
         disabled={disabled || !day}

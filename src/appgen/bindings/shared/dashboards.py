@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pydantic import JsonValue
 
 from appgen.bindings.shared.gaps import GapSpec, component_gap
+from appgen.bindings.shared.i18n import text_js
 from appgen.bindings.shared.ui import css_var, js
 from appgen.bindings.shared.views import (
     CardPlan,
@@ -321,7 +322,7 @@ def _chart(
         for enum_value in group.enum_values:
             style = badge.values.get(enum_value) if badge else None
             text = (style.label if style else None) or label(enum_value)
-            item = f"{{ key: {js(enum_value)}, label: {js(text)}"
+            item = f"{{ key: {js(enum_value)}, label: {text_js(text)}"
             if style and style.color:
                 item += f", color: {js(css_var(style.color))}"
             items.append(item + " }")

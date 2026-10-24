@@ -22,9 +22,9 @@ export function FormattedValue({
   }
   if (format === "boolean") {
     return value ? (
-      <CheckIcon aria-label="Yes" className={cn("size-4 text-primary", className)} />
+      <CheckIcon aria-label={{ jsx_attr("Yes") }} className={cn("size-4 text-primary", className)} />
     ) : (
-      <MinusIcon aria-label="No" className={cn("size-4 text-muted-foreground", className)} />
+      <MinusIcon aria-label={{ jsx_attr("No") }} className={cn("size-4 text-muted-foreground", className)} />
     );
   }
   const text = formatValue(value, format, currency);

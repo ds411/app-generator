@@ -24,7 +24,7 @@ export function SelectFilter({
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL}>{`${label}: all`}</SelectItem>
+        <SelectItem value={ALL}>{{ "{" ~ js_format("{label}: all", label="label") ~ "}" }}</SelectItem>
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}
