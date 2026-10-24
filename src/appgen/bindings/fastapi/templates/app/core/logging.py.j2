@@ -1,0 +1,102 @@
+{{ trace_header("app") }}
+"""Structured logs: one JSON object for each log line, and one log line for each request."""
+
+import json
+import logging
+import sys
+import time
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+logger = logging.getLogger("app.requests")
+
+REQUEST_ID_HEADER = "x-request-id"
+
+_RECORD_KEYS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {
+    "message",
+    "asctime",
+    "taskName",
+}
+
+
+class JsonFormatter(logging.Formatter):
+    """Write a log record as one JSON object, with the `extra` values as keys."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict[str, Any] = {
+            "time": datetime.fromtimestamp(record.created, UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        entry.update((key, value) for key, value in vars(record).items() if key not in _RECORD_KEYS)
+        if record.exc_info:
+            entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(entry, default=str)
+
+
+def configure_logging(level: str, *, as_json: bool) -> None:
+    """Send the logs of the app to the standard output, as JSON or as plain text."""
+    handler = logging.StreamHandler(sys.stdout)
+    if as_json:
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    handler.set_name("app")
+    root = logging.getLogger()
+    for old in [h for h in root.handlers if h.get_name() == "app"]:
+        root.removeHandler(old)
+    root.addHandler(handler)
+    root.setLevel(level.upper())
+
+
+class RequestLogMiddleware:
+    """Log each HTTP request: the method, the path, the status, and the duration.
+
+    Each request gets an ID: the `X-Request-ID` header of the request, or a
+    new UUID. The response returns it in the same header.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope["headers"])
+        request_id = headers.get(REQUEST_ID_HEADER.encode(), b"").decode() or uuid.uuid4().hex
+        start = time.perf_counter()
+        status = 500
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                message["headers"] = [
+                    *message.get("headers", []),
+                    (REQUEST_ID_HEADER.encode(), request_id.encode()),
+                ]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_id)
+        finally:
+            client = scope.get("client")
+            logger.info(
+                "%s %s %s",
+                scope["method"],
+                scope["path"],
+                status,
+                extra={
+                    "request_id": request_id,
+                    "method": scope["method"],
+                    "path": scope["path"],
+                    "status": status,
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "client": client[0] if client else None,
+                },
+            )

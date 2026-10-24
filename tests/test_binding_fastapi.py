@@ -390,6 +390,31 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     assert ".venv\n" in files[".dockerignore"]
 
 
+def test_the_app_has_logs_rate_limits_and_kubernetes_files(result: GenerationResult) -> None:
+    files = _files(result)
+    main = files["app/main.py"]
+    assert "configure_logging(settings.log_level, as_json=settings.log_json)" in main
+    assert "app.add_middleware(RateLimitMiddleware, limiter=app.state.rate_limiter)" in main
+    assert "rate_limit_per_minute: int = 0" in files["app/core/config.py"]
+    assert "tests/test_logging.py" in files
+    assert "tests/test_rate_limit.py" in files
+    assert '"--no-access-log"' in files["Dockerfile"]
+    kubernetes = {path for path in files if path.startswith("deploy/kubernetes/")}
+    assert kubernetes == {
+        f"deploy/kubernetes/{name}"
+        for name in (
+            "kustomization.yaml",
+            "deployment.yaml",
+            "service.yaml",
+            "migrate-job.yaml",
+            "config.env",
+            "secret.example.env",
+        )
+    }
+    assert "readOnlyRootFilesystem: true" in files["deploy/kubernetes/deployment.yaml"]
+    assert "deploy/kubernetes/secret.env\n" in files[".gitignore"]
+
+
 NAMING = (
     "version: 0\n"
     "app: { name: rooms, title: Rooms }\n"

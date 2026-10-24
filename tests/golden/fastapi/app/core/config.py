@@ -15,3 +15,9 @@ class Settings(BaseSettings):
     aiosqlite driver for local runs, for example `sqlite+aiosqlite:///./local.db`."""
     cors_origins: list[str] = []
     """The origins of the browser apps that can call the API."""
+    log_level: str = "INFO"
+    """The lowest level of the log lines: DEBUG, INFO, WARNING, or ERROR."""
+    log_json: bool = True
+    """Write each log line as a JSON object. Set it to false for plain text."""
+    rate_limit_per_minute: int = 0
+    """The number of requests that each client can send in each minute. 0 sets no limit."""

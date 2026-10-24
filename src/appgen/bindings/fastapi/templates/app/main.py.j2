@@ -14,6 +14,8 @@ from app.core.config import Settings
 from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
+from app.core.logging import RequestLogMiddleware, configure_logging
+from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 {% for e in py.entity_order() | sort(attribute="slice") %}
 
 {{ trace(e.id) }}
@@ -32,6 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Return the FastAPI app with the routers of all slices."""
     settings = settings or Settings()
+    configure_logging(settings.log_level, as_json=settings.log_json)
     configure_models()
     app = FastAPI(
         title={{ app.title | tojson }},
@@ -49,7 +52,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+    if settings.rate_limit_per_minute > 0:
+        app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+        app.add_middleware(RateLimitMiddleware, limiter=app.state.rate_limiter)
+    # The last middleware runs first, so the log has each response, also a 429.
+    app.add_middleware(RequestLogMiddleware)
     add_problem_handlers(app)
     app.include_router(health_router)
 {% if definition.auth %}

@@ -1,0 +1,89 @@
+{{ trace_header("app") }}
+"""A limit on the number of requests of each client in each minute.
+
+The counts are in the memory of the process. With more than one process
+or replica, each one counts on its own, so the limit of the API is the
+limit of one process times the number of processes.
+"""
+
+import math
+import time
+from collections.abc import Callable
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.core.errors import PROBLEM_JSON, Problem
+
+WINDOW_SECONDS = 60
+EXEMPT_PATHS = frozenset({"/health"})
+"""The paths without a limit, for the health checks of the platform."""
+
+
+class RateLimiter:
+    """Count the requests of each client in fixed windows of one minute."""
+
+    def __init__(self, limit: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit = limit
+        self.clock = clock
+        self.window = -1
+        self.counts: dict[str, int] = {}
+
+    def hit(self, client: str) -> tuple[bool, int, int]:
+        """Count one request. Return if it is allowed, the remaining requests, and the wait."""
+        now = self.clock()
+        window = math.floor(now / WINDOW_SECONDS)
+        if window != self.window:
+            self.window = window
+            self.counts.clear()
+        count = self.counts.get(client, 0) + 1
+        self.counts[client] = count
+        wait = math.ceil((window + 1) * WINDOW_SECONDS - now)
+        return count <= self.limit, max(self.limit - count, 0), wait
+
+
+class RateLimitMiddleware:
+    """Return 429 Too Many Requests when a client sends more than the limit."""
+
+    def __init__(self, app: ASGIApp, limiter: RateLimiter) -> None:
+        self.app = app
+        self.limiter = limiter
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] in EXEMPT_PATHS:
+            await self.app(scope, receive, send)
+            return
+        client = scope.get("client")
+        allowed, remaining, wait = self.limiter.hit(client[0] if client else "unknown")
+        limit_headers = [
+            (b"x-ratelimit-limit", str(self.limiter.limit).encode()),
+            (b"x-ratelimit-remaining", str(remaining).encode()),
+        ]
+        if allowed:
+
+            async def send_with_headers(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    message["headers"] = [*message.get("headers", []), *limit_headers]
+                await send(message)
+
+            await self.app(scope, receive, send_with_headers)
+            return
+        problem = Problem(
+            title="Too Many Requests",
+            status=429,
+            detail=f"Send not more than {self.limiter.limit} requests in each minute.",
+            instance=scope["path"],
+        )
+        body = problem.model_dump_json(exclude_none=True).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [
+                    (b"content-type", PROBLEM_JSON.encode()),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"retry-after", str(wait).encode()),
+                    *limit_headers,
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
