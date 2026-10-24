@@ -8,7 +8,11 @@ import { notFound } from "next/navigation";
 
 import type { PageName } from "@/shared/config/pages";
 import { getDb, {{ table.const }} } from "@/shared/db";
+{% if owner_rules %}
+import { ownerRuleApplies, type RecordAction, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% endif %}
 
 import { requirePageUser, requireUser, sessionUserId } from "./session";
 
@@ -47,6 +51,21 @@ export async function requireOperation(operation: string): Promise<void> {
   }
 }
 
+{% if owner_rules %}
+/**
+ * Return the ID of the signed-in user if an owner rule of its role applies
+ * to an action on the records of an entity (ADR 0018). The data access then
+ * uses only the records of the user. Return null for all records.
+ */
+export async function recordOwner(entity: string, action: RecordAction): Promise<string | null> {
+  const userId = await sessionUserId();
+  if (userId === null) {
+    return null;
+  }
+  return ownerRuleApplies(await roleOf(userId), entity, action) ? userId : null;
+}
+
+{% endif %}
 /** Go to the sign-in page without a session. Show the not-found page if the role may not open the page. */
 export async function requirePage(page: PageName, path: string, params: Record<string, string | string[] | undefined> = {}): Promise<void> {
   await requirePageUser(path, params);

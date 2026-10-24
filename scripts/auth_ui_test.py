@@ -18,7 +18,10 @@ test proves it for the room booking example (`examples/room-booking`):
    new user (ADR 0016). In the Next.js app, it compares the password
    reset pages with approved screenshots, resets the password of a user
    with the link in the log of the app, and signs in with the new
-   password (ADR 0017).
+   password (ADR 0017). For each owner rule (ADR 0018), it signs in as a
+   user of the role, and checks that the list and the detail page show
+   only the records of the user, and that the form of a new record does
+   not show the owner.
 
 Run it from the repository root:
 
@@ -55,10 +58,11 @@ from typing import Any
 from smoke_test import expected_ui
 
 from appgen.bindings.shared.mock_data import mock_data
-from appgen.bindings.shared.views import label
+from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.access import ALL
 from appgen.dsl.ui.common import FormAction, NavigateAction, OperationAction
+from appgen.dsl.ui.states import effective_states
 from appgen.gen.naming import kebab
 
 DEFINITION = Path("examples/room-booking/app.yaml")
@@ -178,9 +182,9 @@ def expected_sign_up(definition: AppDefinition) -> dict[str, Any] | None:
 
 
 def expected_password_reset(
-    binding: str, definition: AppDefinition, app: Path, roles: list[dict[str, Any]]
+    binding: str, definition: AppDefinition, app: Path, used: set[str]
 ) -> dict[str, Any] | None:
-    """Return the values of the password reset: a user apart from the users of the roles.
+    """Return the values of the password reset: a user apart from the users of the other tests.
 
     Only the Next.js app has the reset pages: the React app with mock data
     has no server that sends the links. With `ENVIRONMENT=development`, the
@@ -190,11 +194,104 @@ def expected_password_reset(
     assert auth is not None
     if auth.password_reset is None or binding != "nextjs":
         return None
-    used = {role["username"] for role in roles}
     users = [
         u for u in mock_data(definition)[auth.user_entity] if u[auth.username_field] not in used
     ]
     return {"username": users[-1][auth.username_field], "serverLog": str(app / "server.log")}
+
+
+def entity_pages(
+    definition: AppDefinition, entity: str, allowed: Permissions
+) -> tuple[str | None, str | None]:
+    """Return the first list page and the first detail page of an entity that a role may open."""
+    ui = definition.ui
+    assert ui is not None
+    lists: list[str] = []
+    details: list[str] = []
+    for name, page in definition.pages.items():
+        view = ui.views.get(page.content.view or "") if page.content else None
+        if view is None or view.entity != entity or not allowed.page(name):
+            continue
+        if view.kind == "detail" and page.path.endswith("/{id}"):
+            details.append(name)
+        elif view.kind != "detail" and "{" not in page.path:
+            lists.append(name)
+    return (lists[0] if lists else None), (details[0] if details else None)
+
+
+def expected_owner_rules(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
+    """Return the checks of the owner rules of `read` (ADR 0018): what a user of a rule sees.
+
+    The user is the user of the role with the most records of the entity in
+    the mock data (the Next.js app seeds the same records). The list page
+    shows the titles of the records of the user, and no title of another
+    user. A detail page of a record of another user shows "not found"
+    (Next.js) or the empty state of the view (React). The form of a new
+    record on the list page does not show the owner field.
+    """
+    auth, access, ui = definition.auth, definition.access, definition.ui
+    assert auth is not None and access is not None and ui is not None
+    data = mock_data(definition)
+    checks: list[dict[str, Any]] = []
+    for role_name, role in access.roles.items():
+        allowed = Permissions(definition, role_name)
+        users = [u for u in data[auth.user_entity] if u.get(access.role_field) == role_name]
+        for entity, rule in role.records.items():
+            if "read" not in rule.operations:
+                continue
+            records = data[entity]
+            title = definition_display(definition.entities[entity])
+            user = max(users, key=lambda u: sum(r[rule.owner] == u["id"] for r in records))
+            own = [r for r in records if r[rule.owner] == user["id"]]
+            own_titles = {str(r[title]) for r in own}
+            others = [r for r in records if r[rule.owner] != user["id"]]
+            others = [r for r in others if str(r[title]) not in own_titles]
+            list_page, detail_page = entity_pages(definition, entity, allowed)
+            if not own or not others or list_page is None or detail_page is None:
+                raise AuthUiTestError(
+                    f"The owner rule of {role_name!r} on {entity!r} needs records of the user "
+                    "and of other users in the mock data, a list page, and a detail page."
+                )
+            detail = definition.pages[detail_page]
+            view = ui.views[str(detail.content.view if detail.content else "")]
+            page = definition.pages[list_page]
+            form = next(
+                (
+                    {
+                        "label": str(action.label or label(action_name)),
+                        "firstId": f"{kebab(action.form)}-{kebab(next(iter(f.fields)))}",
+                        "ownerId": f"{kebab(action.form)}-{kebab(rule.owner)}",
+                    }
+                    for action_name, action in page.actions.items()
+                    if isinstance(action, FormAction)
+                    and (f := ui.forms[action.form]).entity == entity
+                    and definition.operations[f.operation].kind == "create"
+                    and rule.owner in f.fields
+                    and next(iter(f.fields)) != rule.owner
+                    and allowed.operation(f.operation)
+                ),
+                None,
+            )
+            checks.append(
+                {
+                    "role": role_name,
+                    "entity": entity,
+                    "username": user[auth.username_field],
+                    "listPath": page.path,
+                    "listTitle": str(page.title),
+                    "own": sorted(own_titles),
+                    "others": sorted({str(r[title]) for r in others}),
+                    "ownPath": detail.path.replace("{id}", str(own[0]["id"])),
+                    "ownTitle": str(own[0][title]),
+                    "otherPath": detail.path.replace("{id}", str(others[0]["id"])),
+                    "otherTitle": str(others[0][title]),
+                    "otherMessage": "This page does not exist"
+                    if binding == "nextjs"
+                    else str(effective_states(definition, view).empty.title or "No records yet"),
+                    "form": form,
+                }
+            )
+    return checks
 
 
 def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any]:
@@ -221,6 +318,8 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
                 "actions": page_actions(definition, allowed),
             }
         )
+    owner_rules = expected_owner_rules(binding, definition)
+    used = {check["username"] for check in [*roles, *owner_rules]}
     anonymous = Permissions(definition, None)
     public = next(
         definition.pages[n] for n in auth.public_pages if "{" not in definition.pages[n].path
@@ -236,7 +335,8 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
             "actions": [a for a in page_actions(definition, anonymous) if a["path"] == public.path],
         },
         "signUp": expected_sign_up(definition),
-        "passwordReset": expected_password_reset(binding, definition, app, roles),
+        "passwordReset": expected_password_reset(binding, definition, app, used),
+        "ownerRules": owner_rules,
     }
 
 

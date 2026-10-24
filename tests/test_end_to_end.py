@@ -23,13 +23,12 @@ runner = CliRunner()
 # app has no pages and no UI.
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": [],
-    # The React app has no owner rules (#273) and no sign-in with a provider (#271) yet.
+    # The React app has no sign-in with a provider (#271) yet.
     "react": [
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
         "provider",
-        "record_rule",
     ],
     "fastapi": ["page", "ui"],
 }

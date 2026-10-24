@@ -8,15 +8,51 @@
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 import type { PageName } from "@/shared/config/pages";
+{% if owner_rules %}
+import { ownerRuleApplies, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% endif %}
 
 export type Access = {
   /** Return true if the user may open a page. */
   canOpenPage: (page: PageName) => boolean;
   /** Return true if the user may call an operation. */
   canCall: (operation: string) => boolean;
+{% if owner_rules %}
+  /**
+   * Return the ID of the user if an owner rule of the role applies to the
+   * changes of an entity (ADR 0018), else null. A form then gives a new
+   * record to the user, and does not show the owner.
+   */
+  ownerOf: (entity: string) => string | null;
+{% endif %}
 };
 
+{% if owner_rules %}
+function accessOf(role: string | null, userId: string | null): Access {
+  return {
+    canOpenPage: (page) => roleMayOpenPage(role, page),
+    canCall: (operation) => roleMayCall(role, operation),
+    ownerOf: (entity) => (userId !== null && ownerRuleApplies(role, entity, "change") ? userId : null),
+  };
+}
+
+// Without a provider, the user has no role: only the public pages and operations.
+const AccessContext = createContext<Access>(accessOf(null, null));
+
+/** Give the role and the ID of the signed-in user to the UI: null without a session or a role. */
+export function AccessProvider({
+  role,
+  userId,
+  children,
+}: {
+  role: string | null;
+  userId: string | null;
+  children: ReactNode;
+}) {
+  const access = useMemo(() => accessOf(role, userId), [role, userId]);
+{% else %}
 function accessOf(role: string | null): Access {
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
@@ -30,6 +66,7 @@ const AccessContext = createContext<Access>(accessOf(null));
 /** Give the role of the signed-in user to the UI: null without a session or a role. */
 export function AccessProvider({ role, children }: { role: string | null; children: ReactNode }) {
   const access = useMemo(() => accessOf(role), [role]);
+{% endif %}
   return <AccessContext value={access}>{children}</AccessContext>;
 }
 

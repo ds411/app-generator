@@ -2,7 +2,9 @@
 // The permissions of the roles (ADR 0012): the operations and the pages
 // that each role may use. The checks of the app and the menus, the
 // links, and the actions of the UI read this table. `*` stands for all
-// operations or pages. A public page or operation needs no role.
+// operations or pages. A public page or operation needs no role.{% if owner_rules %}
+
+// The owner rules (ADR 0018) limit a role to the records of its user.{% endif +%}
 import type { PageName } from "@/shared/config/pages";
 
 const ALL = "*";
@@ -36,3 +38,29 @@ export function roleMayCall(role: string | null, operation: string): boolean {
 export function roleMayOpenPage(role: string | null, page: PageName): boolean {
   return PUBLIC_PAGES.includes(page) || (role !== null && allows(PAGES[role], page));
 }
+{% if owner_rules %}
+
+/** The records of an owner rule: `read` (the lists and the reads) or `change` (the creates, the changes, the deletes, and the custom operations). */
+export type RecordAction = "read" | "change";
+
+const OWNER_RULES: Record<string, Record<string, readonly RecordAction[]>> = {
+{% for name, r in definition.access.roles.items() if r.records %}
+  {{ name | tojson }}: {
+{% for entity, rule in r.records.items() %}
+    {{ entity | tojson }}: {{ rule.operations | sort | list | tojson }}, {{ trace(rule.id) }}
+{% endfor %}
+  },
+{% endfor %}
+};
+
+/**
+ * Return true if an owner rule of a role applies to an action on the
+ * records of an entity: the role then uses only the records of its user.
+ * A rule for `read` also applies to `change`, because a user cannot change
+ * a record that the user cannot see.
+ */
+export function ownerRuleApplies(role: string | null, entity: string, action: RecordAction): boolean {
+  const actions = role === null ? undefined : OWNER_RULES[role]?.[entity];
+  return actions !== undefined && (action === "change" || actions.includes(action));
+}
+{% endif %}

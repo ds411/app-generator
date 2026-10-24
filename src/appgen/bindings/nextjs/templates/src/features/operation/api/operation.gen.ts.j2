@@ -1,11 +1,16 @@
 {% from "src/features/operation/api/macros.j2" import returns, entity_imports %}
 {% set fn = name | camel %}
 {% set result = "null" if element.returns == "none" else element.returns | pascal %}
+{# An owner rule (ADR 0018) applies to a custom operation that is not public. #}
+{% set rule = owner_rules.get(element.entity) if not (definition.auth and name in definition.auth.public_operations) else none %}
 {{ trace_header(element_id) }}
 "use server";
 
 import type { ActionResult } from "@/shared/api";
 import { idSchema, runAction } from "@/shared/api/server";
+{% if rule %}
+import { recordOwner } from "@/shared/auth/access";
+{% endif %}
 
 {% set imports = entity_imports(name, element, [fn ~ "ParamsSchema"] if element.params else []) | trim %}
 {% if imports %}
@@ -24,7 +29,13 @@ export async function {{ fn }}Action(
 ): Promise<ActionResult<{{ result }}>> {
   return runAction(
     async () => {
+{% if rule %}
+      // A user of an owner rule runs the operation only on a record of the user.
+      {{ trace(rule.element_id) }}
+      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id), await recordOwner({{ ts_value(element.entity) }}, "change"));
+{% else %}
       const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id));
+{% endif %}
 {% if element.returns == "none" %}
       await {{ fn }}(record{% if element.params %}, {{ fn }}ParamsSchema.parse(params){% endif %});
       return null;

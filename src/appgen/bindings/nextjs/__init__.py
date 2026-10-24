@@ -322,7 +322,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "access", "role"}
+        | {"auth", "sign_up", "password_reset", "access", "role", "record_rule"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),

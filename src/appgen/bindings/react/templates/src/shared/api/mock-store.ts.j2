@@ -12,6 +12,18 @@ export type Workflow = {
   message?: string;
 };
 
+{% if owner_rules %}
+/**
+ * An owner rule of the entity (ADR 0018): the key of the ID of the owner
+ * in the record, and the user whose records an action may use (`read`: the
+ * lists and the reads, `change`: the other calls), or null for all records.
+ */
+export type OwnerRule = {
+  key: string;
+  ownerOf: (action: "read" | "change") => string | null;
+};
+
+{% endif %}
 /** A change of state that no transition of a workflow allows. */
 export class TransitionError extends Error {
   constructor(message: string) {
@@ -29,7 +41,9 @@ function wait(): Promise<void> {
 
 /**
  * An in-memory store of the records of one entity. It starts with the
- * mock data, and keeps the changes until the page reloads.
+ * mock data, and keeps the changes until the page reloads.{% if owner_rules %} With an owner
+ * rule, a user uses only the records of the user: the other records do
+ * not exist for the user, and the user owns each new record.{% endif +%}
  */
 export class MockStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
@@ -42,13 +56,23 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     data: readonly T[],
     private readonly defaults: Partial<Omit<T, "id">>,
     private readonly workflows: readonly Workflow[] = [],
+{% if owner_rules %}
+    private readonly owner?: OwnerRule,
+{% endif %}
   ) {
     this.records = data.map((record) => ({ ...record }));
   }
 
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
     await wait();
+{% if owner_rules %}
+    return applyQuery(
+      this.records.filter((record) => this.owns(record, "read")),
+      query,
+    );
+{% else %}
     return applyQuery(this.records, query);
+{% endif %}
   }
 
   async get(id: string): Promise<T> {
@@ -58,7 +82,11 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async create(input: TInput): Promise<T> {
     await wait();
+{% if owner_rules %}
+    const record = { ...this.defaults, ...input, ...this.ownerValues(), id: crypto.randomUUID() } as unknown as T;
+{% else %}
     const record = { ...this.defaults, ...input, id: crypto.randomUUID() } as unknown as T;
+{% endif %}
     this.checkWorkflows(undefined, record);
     this.records = [...this.records, record];
     this.notify();
@@ -67,8 +95,13 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     await wait();
+{% if owner_rules %}
+    const before = this.find(id, "change");
+    const record = { ...before, ...patch, ...this.ownerValues(), id } as T;
+{% else %}
     const before = this.find(id);
     const record = { ...before, ...patch, id } as T;
+{% endif %}
     this.checkWorkflows(before, record);
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
@@ -77,7 +110,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async remove(id: string): Promise<void> {
     await wait();
-    this.find(id);
+    this.find(id{{ ', "change"' if owner_rules }});
     this.records = this.records.filter((item) => item.id !== id);
     this.notify();
   }
@@ -116,6 +149,29 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
   }
 
+{% if owner_rules %}
+  /** Return true if the user may use a record: without an owner rule, all records. */
+  private owns(record: T, action: "read" | "change"): boolean {
+    if (this.owner === undefined) return true;
+    const owner = this.owner.ownerOf(action);
+    return owner === null || (record as Record<string, unknown>)[this.owner.key] === owner;
+  }
+
+  /** Return the owner of a new or changed record: the user of an owner rule, or nothing. */
+  private ownerValues(): Record<string, string> {
+    const owner = this.owner?.ownerOf("change") ?? null;
+    return this.owner === undefined || owner === null ? {} : { [this.owner.key]: owner };
+  }
+
+  /** Return the record with an ID. A record that the user may not use does not exist. */
+  private find(id: string, action: "read" | "change" = "read"): T {
+    const record = this.records.find((item) => item.id === id);
+    if (!record || !this.owns(record, action)) {
+      throw new NotFoundError(this.entity, id);
+    }
+    return record;
+  }
+{% else %}
   private find(id: string): T {
     const record = this.records.find((item) => item.id === id);
     if (!record) {
@@ -123,6 +179,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
     return record;
   }
+{% endif %}
 
   private notify(): void {
     for (const listener of this.listeners) {

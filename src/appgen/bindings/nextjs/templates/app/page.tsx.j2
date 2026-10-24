@@ -1,6 +1,8 @@
 {% set info = nextjs.pages[name] %}
 {% set detail = element.entity and info.params and element.content is not none and element.content.view in ui_views.detail_views %}
 {% set protected = definition.auth and name not in definition.auth.public_pages %}
+{# On a protected page, an owner rule (ADR 0018) hides the records of other users. #}
+{% set rule = owner_rules.get(element.entity) if detail and protected else none %}
 {{ trace_header(element_id) }}
 import type { Metadata } from "next";
 {% if detail %}
@@ -12,7 +14,7 @@ import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.en
 {% endif %}
 import { {{ info.component }} } from "@/pages/{{ info.slice }}";
 {% if protected and definition.access %}
-import { requirePage } from "@/shared/auth/access";
+import { {{ "recordOwner, " if rule }}requirePage } from "@/shared/auth/access";
 {% elif protected %}
 import { requirePageUser } from "@/shared/auth/session";
 {% endif %}
@@ -40,7 +42,11 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 {% endif %}
 {% endif %}
   const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
+{% if rule %}
+  if (!(await {{ element.entity | camel }}Repository.exists(id, await recordOwner({{ ts_value(element.entity) }}, "read")))) { {{ trace(rule.element_id) }}
+{% else %}
   if (!(await {{ element.entity | camel }}Repository.exists(id))) {
+{% endif %}
     notFound();
   }
   return <{{ info.component }} />;
