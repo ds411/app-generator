@@ -1,3 +1,4 @@
+{% set SIDEBAR_COLUMN_CLASSES = "[&>[data-slot=sidebar]]:bg-sidebar [&>[data-slot=sidebar][data-side=left]]:border-r [&>[data-slot=sidebar][data-side=right]]:border-l [&>[data-slot=sidebar][data-collapsible=offcanvas]]:border-0" %}
 {{ trace_header(element_id) }}
 {% set plan = ui_plan.layouts[name] %}
 {% set sidebar = element.sidebar %}
@@ -162,13 +163,13 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
     </Sidebar>
   );
 
+  // The sidebar stays fixed on the screen. Its column gets the same
+  // background and border, so that they fill the height of a long page.
   return (
     <SidebarProvider
       open={open}
       onOpenChange={(value) => setOpenByMode((modes) => ({ ...modes, [mode]: value }))}
-{% if plan.sidebar_classes %}
-      className="{{ plan.sidebar_classes }}"
-{% endif %}
+      className="{{ (SIDEBAR_COLUMN_CLASSES ~ " " ~ plan.sidebar_classes) | trim }}"
       style={
         {
           "--sidebar-width": "var(--shell-sidebar-width, 16rem)",
