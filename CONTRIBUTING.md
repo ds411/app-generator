@@ -264,6 +264,25 @@ git config core.hooksPath .githooks
   playwright install chromium`). Without it, they use the Chromium of
   the environment at `/opt/pw-browsers/chromium` (cloud sessions have
   one). `PLAYWRIGHT_CHROMIUM_EXECUTABLE` selects another Chromium.
+- The UI tests compare each page in each color mode with its approved
+  screenshot in `ui-tests/approved/<binding>/<mode>/<page>.png`. A page
+  fails when more than 0.1 % of its pixels differ. The tests turn off
+  the animations and fix the date, the locale, and the time zone of the
+  browser. The pages show the mock data (React) or the seed data
+  (Next.js). On a failure, Playwright writes the expected, the actual,
+  and the diff image to `ui-tests/test-results/<binding>/`.
+- When a change to the UI is intended, update the approved screenshots
+  and review the changed images in the pull request:
+
+  ```sh
+  APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-nextjs.sh
+  APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-react.sh
+  git add ui-tests/approved
+  ```
+
+  Make the approved screenshots in a Claude Code cloud session (the
+  Chromium at `/opt/pw-browsers/chromium`). Another Chromium or other
+  fonts can give small differences.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
 - To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.

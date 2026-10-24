@@ -12,8 +12,11 @@ test("the sidebar fills the height of a long page", async ({ page }) => {
   const container = column.locator('[data-slot="sidebar-container"]');
   await expect(container).toBeVisible();
 
-  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
-  expect(pageHeight, "the page is longer than the screen").toBeGreaterThan(400);
+  // The dashboard can render its widgets after the network is idle (for
+  // example under load), so wait until the page is longer than the screen.
+  const scrollHeight = () => page.evaluate(() => document.documentElement.scrollHeight);
+  await expect.poll(scrollHeight, { message: "the page is longer than the screen" }).toBeGreaterThan(400);
+  const pageHeight = await scrollHeight();
 
   // The column with the background is as high as the page.
   const columnBox = await column.boundingBox();

@@ -172,7 +172,8 @@ without a script error, the CSS variable of each color token has the
 value of the mode, the components use the primary color, and the body
 uses the background color and the font size of the tokens. The tests
 save a screenshot of each page in `ui-tests/screenshots/<binding>/<mode>/`,
-which git ignores. Install the browser once:
+which git ignores, and compare it with the approved screenshot in
+`ui-tests/approved/` (see CONTRIBUTING.md). Install the browser once:
 
 ```sh
 pnpm --dir ui-tests install

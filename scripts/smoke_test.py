@@ -44,6 +44,8 @@ Environment variables:
     UV_IMAGE, PYTHON_IMAGE        Build arguments of the FastAPI image.
     APPGEN_DOCKER_BUILD_ARGS      More arguments for `docker build`.
     APPGEN_SMOKE_TIMEOUT          Seconds to wait for an app to start (default 180).
+    APPGEN_UPDATE_SCREENSHOTS     1: write the approved screenshots of the UI tests
+                                  again (ui-tests/approved/).
     PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the UI tests, instead of the one
                                   that Playwright installs. Without both, the tests
                                   use /opt/pw-browsers/chromium if it exists.
@@ -377,7 +379,10 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
         "APPGEN_UI_EXPECTED": str(expected_file),
         "APPGEN_UI_OUTPUT": str((UI_TESTS / "test-results" / binding).resolve()),
     }
-    subprocess.run(["pnpm", "exec", "playwright", "test"], cwd=UI_TESTS, env=env, check=True)
+    command = ["pnpm", "exec", "playwright", "test"]
+    if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
+        command.append("--update-snapshots")
+    subprocess.run(command, cwd=UI_TESTS, env=env, check=True)
 
 
 def check(binding: str, definition: AppDefinition, ui: bool) -> None:
