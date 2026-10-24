@@ -4,22 +4,42 @@
 // operations that the role allows. The session of the browser tab gives
 // the role.{% if react.api %} The API checks each request again.{% endif %}
 
+{% if owner_rules %}
+import { currentRole, currentUserId } from "@/shared/auth";
+import type { PageName } from "@/shared/config/pages";
+import { ownerRuleApplies, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% else %}
 import { currentRole } from "@/shared/auth";
 import type { PageName } from "@/shared/config/pages";
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% endif %}
 
 export type Access = {
   /** Return true if the user may open a page. */
   canOpenPage: (page: PageName) => boolean;
   /** Return true if the user may call an operation. */
   canCall: (operation: string) => boolean;
+{% if owner_rules %}
+  /**
+   * Return the ID of the user if an owner rule of the role applies to the
+   * changes of an entity (ADR 0018), else null. A form then gives a new
+   * record to the user, and does not show the owner.
+   */
+  ownerOf: (entity: string) => string | null;
+{% endif %}
 };
 
 /** Return the permissions of the signed-in user. */
 export function useAccess(): Access {
   const role = currentRole();
+{% if owner_rules %}
+  const userId = currentUserId();
+{% endif %}
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
     canCall: (operation) => roleMayCall(role, operation),
+{% if owner_rules %}
+    ownerOf: (entity) => (userId !== null && ownerRuleApplies(role, entity, "change") ? userId : null),
+{% endif %}
   };
 }

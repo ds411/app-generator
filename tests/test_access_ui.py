@@ -37,7 +37,8 @@ def test_the_nextjs_root_layout_gives_the_role_to_the_ui() -> None:
     layout = app["app/layout.tsx"]
     assert "export default async function RootLayout(" in layout
     assert "const role = await currentRole();" in layout
-    assert "<AccessProvider role={role}>{children}</AccessProvider>" in layout
+    # The example has an owner rule: the forms need the ID of the user too.
+    assert "<AccessProvider role={role} userId={userId}>" in layout
     access = app["src/shared/auth/access.ts"]
     assert "if (!roleMayCall(role, operation)) {" in access
     assert "export async function currentRole(): Promise<string | null> {" in access

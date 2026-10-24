@@ -1,6 +1,7 @@
 // The front ends show only the pages and the operations that the role of
-// the user allows (ADR 0012), a new user can sign up (ADR 0016), and a
-// user can reset the password (ADR 0017).
+// the user allows (ADR 0012), a new user can sign up (ADR 0016), a user
+// can reset the password (ADR 0017), and a user of an owner rule sees
+// only the records of the user (ADR 0018).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -172,3 +173,30 @@ test("the password reset pages ask for a link, and set a new password", async ({
   }
   await signIn(page, reset.username, password);
 });
+
+for (const rule of auth?.ownerRules ?? []) {
+  test(`the role ${rule.role} sees only the ${rule.entity} records of its user`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "light", "The checks do not depend on the color mode.");
+    await signIn(page, rule.username, auth?.password ?? "");
+    await page.goto(rule.listPath);
+    await expect(page.locator("h1").first()).toHaveText(rule.listTitle);
+    for (const title of rule.own) {
+      await expect(page.getByText(title, { exact: true }).first(), title).toBeVisible();
+    }
+    for (const title of rule.others) {
+      await expect(page.getByText(title, { exact: true }), title).toHaveCount(0);
+    }
+    // The form of a new record does not show the owner: the record belongs to the user.
+    if (rule.form) {
+      await page.getByRole("button", { name: rule.form.label, exact: true }).first().click();
+      await expect(page.locator(`#${rule.form.firstId}`)).toBeVisible();
+      await expect(page.locator(`#${rule.form.ownerId}`)).toHaveCount(0);
+    }
+    // A record of the user opens. A record of another user does not exist.
+    await page.goto(rule.ownPath);
+    await expect(page.getByText(rule.ownTitle, { exact: true }).first()).toBeVisible();
+    await page.goto(rule.otherPath);
+    await expect(page.getByText(rule.otherMessage, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(rule.otherTitle, { exact: true })).toHaveCount(0);
+  });
+}

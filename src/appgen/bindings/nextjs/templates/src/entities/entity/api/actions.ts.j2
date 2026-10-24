@@ -7,30 +7,67 @@
 {%- set items = (["changes: true"] if changes else []) + (["public: true"] if kind in public else []) + (["operation: " ~ (ops[kind] | tojson)] if kind in ops and kind not in public else []) -%}
 {%- if items %}, { {{ items | join(", ") }} }{% endif -%}
 {%- endmacro %}
+{% set rule = owner_rules.get(name) %}
+{# The owner rules (ADR 0018) apply to the actions that are not public. #}
+{% set owned = (["list", "read", "create", "update", "delete"] | reject("in", public) | list) if rule else [] %}
+{% macro owner(kind) -%}
+await recordOwner({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "read") else "change") }})
+{%- endmacro %}
 "use server";
 
 import type { ActionResult, ListQuery, ListResult } from "@/shared/api";
 import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
+{% if owned %}
+import { recordOwner } from "@/shared/auth/access";
+{% endif %}
 
 import { {{ var }}InputSchema, {{ var }}PatchSchema } from "../model/schema";
 import type { {{ type }}, {{ type }}Input } from "../model/types";
 import { {{ var }}Repository } from "./{{ name | kebab }}-repository";
 
 // The server actions of the data access of {{ type }}. Each action checks
-// its input, because a browser can call it with any values.
+// its input, because a browser can call it with any values.{% if owned %} A user of an
+// owner rule (ADR 0018) uses only the records of the user: the other
+// records do not exist for the user, and the user owns each new record.
+{{ trace(rule.element_id) }}{% endif +%}
 
 export async function list{{ type }}Action(
   query?: ListQuery<{{ type }}>,
 ): Promise<ActionResult<ListResult<{{ type }}>>> {
+{% if "list" in owned %}
+  return runAction(
+    async () => {{ var }}Repository.list(parseListQuery<{{ type }}>(query), {{ owner("list") }}),
+    {{ opt("list", false)[2:] or "{}" }},
+  );
+{% else %}
   return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)){{ opt("list", false) }});
+{% endif %}
 }
 
 export async function get{{ type }}Action(id: string): Promise<ActionResult<{{ type }}>> {
+{% if "read" in owned %}
+  return runAction(
+    async () => {{ var }}Repository.get(idSchema.parse(id), {{ owner("read") }}),
+    {{ opt("read", false)[2:] or "{}" }},
+  );
+{% else %}
   return runAction(() => {{ var }}Repository.get(idSchema.parse(id)){{ opt("read", false) }});
+{% endif %}
 }
 
 export async function create{{ type }}Action(input: {{ type }}Input): Promise<ActionResult<{{ type }}>> {
+{% if "create" in owned %}
+  return runAction(
+    async () => {
+      const owner = {{ owner("create") }};
+      const values = owner === null ? input : { ...input, {{ rule.key }}: owner };
+      return {{ var }}Repository.create({{ var }}InputSchema.parse(values));
+    },
+    {{ opt("create", true)[2:] }},
+  );
+{% else %}
   return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)){{ opt("create", true) }});
+{% endif %}
 }
 
 export async function update{{ type }}Action(
@@ -38,7 +75,15 @@ export async function update{{ type }}Action(
   patch: Partial<{{ type }}Input>,
 ): Promise<ActionResult<{{ type }}>> {
   return runAction(
+{% if "update" in owned %}
+    async () => {
+      const owner = {{ owner("update") }};
+      const values = owner === null ? patch : { ...patch, {{ rule.key }}: owner };
+      return {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(values), owner);
+    },
+{% else %}
     () => {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(patch)),
+{% endif %}
     {{ opt("update", true)[2:] }},
   );
 }
@@ -46,7 +91,11 @@ export async function update{{ type }}Action(
 export async function remove{{ type }}Action(id: string): Promise<ActionResult<null>> {
   return runAction(
     async () => {
+{% if "delete" in owned %}
+      await {{ var }}Repository.remove(idSchema.parse(id), {{ owner("delete") }});
+{% else %}
       await {{ var }}Repository.remove(idSchema.parse(id));
+{% endif %}
       return null;
     },
     {{ opt("delete", true)[2:] }},

@@ -15,6 +15,9 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   entity: {{ ts_value(name) }},
   table: {{ table.const }},
   defaults: {{ var }}Defaults,
+{% if name in owner_rules %}
+  owner: {{ ts_value(owner_rules[name].key) }}, {{ trace(owner_rules[name].element_id) }}
+{% endif %}
 {% if table.lists %}
   manyToMany: [
 {% for item in table.lists %}

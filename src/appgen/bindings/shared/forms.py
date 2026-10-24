@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from appgen.bindings.shared.auth import owner_rules
 from appgen.bindings.shared.gaps import form_values, gap_spec
 from appgen.bindings.shared.i18n import text_js
 from appgen.bindings.shared.typescript import Member, members
@@ -105,6 +106,8 @@ class FieldPlan:
     gap_name: str | None = None
     classes: str = ""
     """The grid classes of the field: its span, with the responsive overrides."""
+    owner: bool = False
+    """True for the owner of an owner rule (ADR 0018): a user of the rule does not see it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +171,11 @@ class FormPlan:
     """True if a default reads a path parameter of the page."""
     widgets: set[str] = field(default_factory=set[str])
     """The widgets that the form uses."""
+
+    @property
+    def owner(self) -> FieldPlan | None:
+        """Return the field of the owner of an owner rule of the entity (ADR 0018), or None."""
+        return next((f for f in self.fields if f.owner), None)
 
     @property
     def type(self) -> str:
@@ -256,6 +264,7 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
     operation: Operation = definition.operations[form.operation]
     params = operation.params if operation.kind == "custom" else None
     by_name = {m.name: m for m in members(entity, definition.entities[entity])}
+    rule = owner_rules(definition).get(entity) if operation.kind in ("create", "update") else None
     fields: list[FieldPlan] = []
     route_params = False
     for field_name, form_field in form.fields.items():
@@ -273,6 +282,7 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
             plan.gap_module = spec.module + ".gen"
             plan.gap_name = spec.name
         plan.classes = _span_classes(form_field.span, form.grid)
+        plan.owner = rule is not None and field_name == rule.relation
         fields.append(plan)
     by_field = {f.name: f for f in fields}
     sections = [

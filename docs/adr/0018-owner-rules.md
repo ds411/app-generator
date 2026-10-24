@@ -40,6 +40,20 @@ each record.
   record to another user.
 - The rules of the entities (for example "no double booking") still see
   all records.
+- The front ends read the rules from the shared table of the
+  permissions (`src/shared/lib/permissions.ts`, ADR 0012).
+  - Next.js: the repository has the filter (an `owner` argument of
+    `list`, `exists`, `get`, `update`, and `remove`), and the server
+    actions give it the user if a rule of the role applies
+    (`recordOwner`). A create and a change set the owner to the user. A
+    detail page and a custom operation on a record of another user give
+    "not found", as in FastAPI.
+  - React with the FastAPI app: the API applies the rules. React with
+    mock data: the mock store applies them in the browser, as a
+    demonstration, as the other checks of the roles in a mock app.
+  - The forms of a create or a change do not show the owner field to a
+    user of a rule, and set its value to the user (`ownerOf` of the hook
+    `useAccess`). The server sets the owner again.
 
 ## Consequences
 
@@ -50,4 +64,6 @@ each record.
 - An embedded relation (`x-fastapi-embed`) of another entity can still
   show a record of another user. The owner rule applies to the
   endpoints of the entity itself.
-- The front ends apply the rules in a separate story.
+- A user of a rule cannot give a new record to another user in the UI,
+  because the form does not show the owner field. A role without a rule
+  (for example an admin) sees the field.

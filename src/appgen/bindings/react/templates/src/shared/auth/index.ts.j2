@@ -32,7 +32,11 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
+{% if owner_rules %}
+import { ownerRuleApplies, type RecordAction, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% endif %}
 
 {% endif %}
 /** The password of each mock user. */
@@ -135,6 +139,19 @@ export function requireOperation(operation: string): void {
     throw new ForbiddenError();
   }
 }
+{% if owner_rules and not react.api %}
+
+/**
+ * Return the ID of the signed-in user if an owner rule of its role applies
+ * to an action on the records of an entity (ADR 0018), else null. The mock
+ * data then gives only the records of the user, as a demonstration: an app
+ * with a back end applies the rules on the server.
+ */
+export function recordOwner(entity: string, action: RecordAction): string | null {
+  const userId = currentUserId();
+  return userId !== null && ownerRuleApplies(currentRole(), entity, action) ? userId : null;
+}
+{% endif %}
 {% endif %}
 
 /** Return the ID of the signed-in user, or null. */

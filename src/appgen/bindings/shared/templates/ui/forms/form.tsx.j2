@@ -29,6 +29,9 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
 import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
 {% endif %}
+{% if plan.owner %}
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
 {% set form_lib = ["type FormErrors", "schemaErrors", "submitErrors"] %}
 {% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
 import { {{ form_lib | join(", ") }} } from "@/shared/lib/form";
@@ -125,11 +128,20 @@ function subscribeLookups(listener: () => void): () => void {
 {% endif %}
 
 {% set initial_code = plan.fields | map(attribute="initial") | join(" ") %}
+{% if plan.owner %}
+/** The first values: the record, the defaults of the form, or the defaults of the fields. A user of an owner rule is the owner. */
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, owner: string | null): Values {
+{% else %}
 /** The first values: the record, the defaults of the form, or the defaults of the fields. */
 function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined): Values {
+{% endif %}
   return {
 {% for f in plan.fields %}
+{% if f.owner %}
+    {{ f.key }}: {{ "owner" if f.initial == "null" else "owner ?? (" ~ f.initial ~ ")" }},
+{% else %}
     {{ f.key }}: {{ f.initial }},
+{% endif %}
 {% endfor %}
   };
 }
@@ -215,7 +227,11 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
   const lookups = useResource({{ js(name ~ "_form") }}, loadLookups, subscribeLookups);
   const related: Lookups = lookups.status === "success" ? lookups.data : { {% for entity in plan.lookups %}{{ entity | camel }}: new Map(){{ ", " if not loop.last }}{% endfor %} };
 {% endif %}
-  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams));
+{% if plan.owner %}
+  // A user of an owner rule owns the record, and does not choose the owner (ADR 0018).
+  const owner = useAccess().ownerOf({{ js(plan.entity) }});
+{% endif %}
+  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", owner" if plan.owner }}));
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -247,7 +263,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       toast.success({{ tr(js("Saved.")) }});
 {% endif %}
 {% if not close %}
-      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams));
+      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", owner" if plan.owner }}));
       setSubmitted(false);
 {% endif %}
       onSuccess?.();
@@ -281,7 +297,14 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% endif %}
         <div className={{ js(plan.grid) }}>
 {% for f in section.fields %}
+{% if f.owner %}
+          {owner === null && (
+            {{ fm.field(f, 12, name) | trim }}
+          )}
+
+{% else %}
 {{ fm.field(f, 10, name) }}
+{% endif %}
 {% endfor %}
         </div>
       </FieldSet>
@@ -289,7 +312,14 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% if plan.loose %}
       <div className={{ js(plan.grid) }}>
 {% for f in plan.loose %}
+{% if f.owner %}
+        {owner === null && (
+          {{ fm.field(f, 10, name) | trim }}
+        )}
+
+{% else %}
 {{ fm.field(f, 8, name) }}
+{% endif %}
 {% endfor %}
       </div>
 {% endif %}

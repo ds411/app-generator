@@ -1084,6 +1084,13 @@ browser, so they are a demonstration, not a protection.
 The menus, the page search, the links, and the actions of the front
 ends show only the pages and the operations that the role allows. A
 group of a menu without an allowed page does not show.
+The front ends apply the owner rules too. The server actions of the
+Next.js app use only the records of the user, and a detail page of a
+record of another user shows "not found". The React app shows the
+records that the FastAPI app gives, and with mock data the mock store
+applies the rules in the browser, as a demonstration. For a user of an
+owner rule, the create and update forms do not show the owner field,
+and a new record belongs to the user.
 
 ## translations
 

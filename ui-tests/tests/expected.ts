@@ -83,6 +83,28 @@ export type ExpectedAuth = {
     /** The log of the app, with the reset links. */
     serverLog: string;
   };
+  /** The owner rules of `read` (ADR 0018): a user of the role sees only the records of the user. */
+  ownerRules?: {
+    role: string;
+    entity: string;
+    /** The user of the role with the most records. */
+    username: string;
+    /** A page with a list of the records, and its title. */
+    listPath: string;
+    listTitle: string;
+    /** The titles of the records of the user, and of the records of other users. */
+    own: string[];
+    others: string[];
+    /** The detail page of a record of the user, and its title. */
+    ownPath: string;
+    ownTitle: string;
+    /** The detail page of a record of another user, its title, and the message that shows instead. */
+    otherPath: string;
+    otherTitle: string;
+    otherMessage: string;
+    /** The form of a new record on the list page: the label of its button, and the IDs of two widgets. */
+    form: { label: string; firstId: string; ownerId: string } | null;
+  }[];
 };
 
 export type Expected = {

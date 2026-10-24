@@ -7,6 +7,9 @@ import { Providers } from "@/app/providers";
 {% if definition.access %}
 import { currentRole } from "@/shared/auth/access";
 {% endif %}
+{% if owner_rules %}
+import { sessionUserId } from "@/shared/auth/session";
+{% endif %}
 import { appConfig } from "@/shared/config";
 {% if definition.access %}
 import { AccessProvider } from "@/shared/lib/access";
@@ -50,6 +53,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 {% else %}
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
 {% endif %}
+{% if owner_rules %}
+  // The forms give a new record of an owner rule to the user (ADR 0018).
+  const userId = await sessionUserId();
+{% endif %}
 {% set providers = "Providers language={language}" if i18n else "Providers" %}
   return (
     // next-themes sets the class of the color mode before React hydrates.
@@ -57,7 +64,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body className="min-h-svh antialiased">
 {% if definition.access %}
         <{{ providers }}>
+{% if owner_rules %}
+          <AccessProvider role={role} userId={userId}>
+            {children}
+          </AccessProvider>
+{% else %}
           <AccessProvider role={role}>{children}</AccessProvider>
+{% endif %}
         </Providers>
 {% else %}
         <{{ providers }}>{children}</Providers>
