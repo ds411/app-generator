@@ -23,6 +23,7 @@ design.
 - [Invalid traces](#invalid-traces)
 - [Warnings](#warnings)
 - [After a change to the definition](#after-a-change-to-the-definition)
+- [Orphaned extension files](#orphaned-extension-files)
 
 ## Trace format
 
@@ -337,3 +338,42 @@ extension file of the old entity: the generator keeps it, but no
 generated code uses it any more. The developer moves the code to the new
 element (after a rename) and changes its traces, or deletes the code. `tests/test_definition_change.py`
 tests this for each binding.
+
+## Orphaned extension files
+
+`appgen orphans` lists the extension files whose element does not
+exist any more, for example after a rename. For each file, it gives
+the element that most likely replaces the old element (the same rule
+as the "did you mean" hint). The command reads the output manifest, and
+changes no file.
+
+```sh
+uv run appgen orphans <definition> <code-folder> [-f text|json]
+```
+
+After the change scenario, for the FastAPI app:
+
+```text
+Orphaned extension files: 1
+  app/features/comments/validation_ext.py: entities.Comment
+    suggestion: move the code to the element 'entities.Remark'.
+```
+
+```json
+{
+  "version": 1,
+  "orphans": [
+    {
+      "file": "app/features/comments/validation_ext.py",
+      "element_id": "entities.Comment",
+      "suggestion": "entities.Remark"
+    }
+  ]
+}
+```
+
+The exit code is 0. It is 2 if the definition or the manifest is not
+valid, or if the folder has no manifest. Move the code to the
+extension file of the new element, and delete the old file. At the
+next run, the generator removes a deleted extension file from the
+manifest.

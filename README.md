@@ -86,6 +86,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Show the CLI help     | `uv run appgen --help`                                     |
 | Validate a definition | `uv run appgen validate examples/project-tracker/app.yaml` |
 | Check the traces      | `uv run appgen check <definition> <code-folder>`           |
+| List orphaned files   | `uv run appgen orphans <definition> <code-folder>`         |
 | Generate an app       | `uv run appgen generate <definition> -b <binding> -o <dir>`  |
 | Lint                  | `uv run ruff check`                                        |
 | Check the formatting  | `uv run ruff format --check`                               |
@@ -576,5 +577,8 @@ When the definition changes, a new run regenerates the generated files
 and keeps the extension files. A trace in hand-written code to an element
 that the change renames or removes is then an invalid trace, so
 `appgen check` shows the drift until the developer updates the code.
+`appgen orphans <definition> <code-folder>` lists the extension files
+whose element does not exist any more, with the element that most
+likely replaces it.
 `tests/test_definition_change.py` proves this for each binding: it adds a
 field, renames an entity, and removes a page in a copy of the example.

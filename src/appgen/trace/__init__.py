@@ -7,6 +7,7 @@ from appgen.trace.coverage import (
     KindCoverage,
     compute_coverage,
 )
+from appgen.trace.orphans import ORPHANS_VERSION, Orphan, find_orphans, render_orphans
 from appgen.trace.report import (
     REPORT_VERSION,
     CheckReport,
@@ -37,6 +38,7 @@ from appgen.trace.validity import (
 
 __all__ = [
     "DEFAULT_IGNORE",
+    "ORPHANS_VERSION",
     "REPORT_VERSION",
     "TRACE_KINDS",
     "CheckReport",
@@ -44,6 +46,7 @@ __all__ = [
     "CoverageStatus",
     "ElementCoverage",
     "KindCoverage",
+    "Orphan",
     "ReportFormat",
     "ScanResult",
     "Trace",
@@ -52,10 +55,12 @@ __all__ = [
     "comment_openers",
     "compute_coverage",
     "find_invalid_traces",
+    "find_orphans",
     "find_skipped_traces",
     "generated_outside_output",
     "render",
     "render_json",
+    "render_orphans",
     "render_text",
     "scan_folder",
     "scan_text",

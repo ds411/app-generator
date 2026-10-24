@@ -17,10 +17,11 @@ from appgen.gen import (
     UnknownBindingError,
     WriteReport,
     find_binding,
+    read_manifest,
     write_result,
 )
 from appgen.gen import generate as generate_files
-from appgen.trace import DEFAULT_IGNORE, check_traces, render
+from appgen.trace import DEFAULT_IGNORE, check_traces, find_orphans, render, render_orphans
 
 
 class OutputFormat(StrEnum):
@@ -173,6 +174,45 @@ def check(
         raise typer.Exit(code=2) from None
     typer.echo(render(report, "json" if output_format is OutputFormat.JSON else "text"), nl=False)
     raise typer.Exit(code=report.exit_code)
+
+
+@app.command()
+def orphans(
+    definition_file: Annotated[Path, typer.Argument(help="The app definition file (YAML).")],
+    code_folder: Annotated[
+        Path,
+        typer.Argument(help="The folder of the app code.", file_okay=False, exists=True),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="The output format."),
+    ] = OutputFormat.TEXT,
+) -> None:
+    """List the extension files whose element does not exist any more.
+
+    After a rename or a removal in the definition, `appgen generate`
+    keeps the extension files of the old element. The command lists
+    them, with the element that most likely replaces the old element, so
+    that you can move or delete the hand-written code. It changes no
+    file. The exit code is 0, or 2 if the definition or the output
+    manifest is not valid, or if the folder has no output manifest.
+    """
+    definition, diagnostics = check_file(definition_file)
+    if definition is None or diagnostics:
+        for diagnostic in diagnostics:
+            typer.echo(str(diagnostic), err=True)
+        typer.echo(f"{definition_file}: the app definition is not valid.", err=True)
+        raise typer.Exit(code=2)
+    try:
+        manifest = read_manifest(code_folder)
+    except ManifestError as error:
+        typer.echo(f"{code_folder}: {error}", err=True)
+        raise typer.Exit(code=2) from None
+    if manifest is None:
+        typer.echo(f"{code_folder}: the folder has no output manifest of appgen.", err=True)
+        raise typer.Exit(code=2)
+    found = find_orphans(definition, code_folder, manifest)
+    typer.echo(render_orphans(found, output_format.value), nl=False)
 
 
 @app.command()
