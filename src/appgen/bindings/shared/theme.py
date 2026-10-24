@@ -138,6 +138,10 @@ class Theme:
     """The utility of the `typography.body` token, if the definition has it."""
     file_ids: list[str] = field(default_factory=list[str])
     """The IDs of `ui.tokens` and of its groups, for the file traces of the CSS file."""
+    motion: str = "full"
+    """The motion setting: `full`, `reduced`, or `none`."""
+    motion_id: str | None = None
+    """The ID of `ui.tokens.motion`, if the definition has it."""
 
 
 def css_name(path: str) -> str:
@@ -189,6 +193,10 @@ def build_theme(definition: AppDefinition) -> Theme:
     theme.file_ids = [
         e.id for e in iter_elements(definition) if e.kind in ("tokens", "token_group")
     ]
+    motion = definition.ui.tokens.motion if definition.ui and definition.ui.tokens else None
+    if motion is not None:
+        theme.motion = motion.value
+        theme.motion_id = motion.id
     tokens = resolve_tokens(definition)
     named: set[str] = set()
     for token in tokens:

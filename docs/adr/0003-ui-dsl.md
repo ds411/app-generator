@@ -167,6 +167,11 @@ fixed set of top-level groups. Each group sets the type of its tokens:
 | `breakpoint`     | `dimension`   | A minimum screen width with `px`.                            |
 | `duration`       | `duration`    | A number with `ms`, for example `150ms`.                     |
 
+`ui.tokens.motion` (added in M12) is not a group, but one setting:
+`{ $value: full | reduced | none }`. It controls the animations of the
+charts, the dialogs, the menus, and the transitions. `reduced` follows
+the `prefers-reduced-motion` media query of the browser.
+
 A **token** is a mapping with a `$value` key. A **group** is a mapping
 without `$value`. Groups can nest to any depth. Tokens and groups can
 have `$description`. A token can have `$type`, and it must agree with
@@ -426,6 +431,10 @@ progress limit). `card` is the same as for a card list. `move` is an
 operation of kind `update` on the entity, or a `custom` operation with
 a parameter of the `group_by` name. The binding calls it when the user
 moves a card to another column. A board without `move` is read-only.
+`responsive` (added in M12) sets the layout of the columns on screens
+narrower than a breakpoint token: `stack` or `scroll`. Only boards take
+the hint, because tables have `hide_below` and card lists have the grid
+overrides.
 
 #### Detail
 
@@ -620,7 +629,8 @@ defines the mechanism.
 | A widget for a field that the widgets do not suit   | `widget: custom`                              |
 | A validation rule that is not in the list           | A rule with `kind: custom`                    |
 | A custom action                                     | An action with `kind: custom`                 |
-| Animations and transitions                          | Hand-written code in the extension files.     |
+| Animations and transitions beyond `ui.tokens.motion` | Hand-written code in the extension files.    |
+| Responsive behavior beyond `hide_below`, the grid overrides, the layout overrides, and the board `responsive` hint | Hand-written code, or the shadcn component sources. |
 | Pixel-level layout inside a component               | The shadcn component sources, which the app developer can change. |
 | A page layout beyond the order and the columns of its regions | A page with `content: { custom: true }`. |
 | Accessibility beyond the shadcn components          | Hand-written code.                            |

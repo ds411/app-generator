@@ -367,6 +367,11 @@ and groups can have `$description`.
 A value is a literal or a reference to a token of the same type.
 `$modes` gives a token another value in the `light` or the `dark` mode.
 
+`motion` is not a group. It is one setting, `{ $value: <motion> }`,
+for the animations of the charts, the dialogs, the menus, and the
+transitions: `full` (the default), `reduced` (no animations for users
+who ask their system for reduced motion), or `none` (no animations).
+
 ```yaml
 ui:
   tokens:
@@ -528,7 +533,11 @@ and `row_actions` of a table.
 **Board** (`kind: board`): `group_by` (an `enum` field), `columns` (a
 mapping from enum value to `label`, `color`, and `limit`), `card`, and
 `move` (an update or custom operation that runs when a card moves to
-another column).
+another column), and `responsive`. `responsive` has `below` (a
+breakpoint token) and `layout`: on screens narrower than the
+breakpoint, `stack` shows the columns one under the other, and `scroll`
+shows each column almost as wide as the screen, with snap scroll.
+Without `responsive`, the columns scroll sideways.
 
 **Detail** (`kind: detail`): one record, from the path parameter of the
 page. `header` (`title`, `subtitle`, `badges`), `sections` (`title`,

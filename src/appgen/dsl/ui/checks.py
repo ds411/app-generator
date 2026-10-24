@@ -60,6 +60,7 @@ from appgen.dsl.ui.views import (
     SelectFilter,
     TableView,
     View,
+    ViewResponsive,
 )
 
 FORMAT_TYPES: dict[str, frozenset[str] | None] = {
@@ -676,6 +677,8 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
             case Column():
                 if element.hide_below is not None:
                     yield from _check_breakpoint(tokens, element, "hide_below", element.hide_below)
+            case ViewResponsive():
+                yield from _check_breakpoint(tokens, element, "below", element.below)
             case FormAction():
                 forms = ui.forms if ui else {}
                 if element.form not in forms:

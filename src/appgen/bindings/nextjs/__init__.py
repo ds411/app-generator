@@ -244,6 +244,7 @@ BINDING = Binding(
         | {"compare_rule"}
         | {"custom_widget", "custom_rule", "custom_action"}
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
+        | {"view_responsive", "motion"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),

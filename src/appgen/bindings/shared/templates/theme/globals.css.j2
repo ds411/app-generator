@@ -44,6 +44,31 @@
 }
 {{ trace(utility.element_id, "end") }}
 {% endfor %}
+{% if theme.motion_id %}
+
+{{ trace(theme.motion_id, "begin") }}
+{% if theme.motion == "full" %}
+/* The UI animates its charts, dialogs, menus, and transitions. */
+{% else %}
+/* No animations{% if theme.motion == "reduced" %} for users who ask for reduced motion{% endif %}. */
+{% if theme.motion == "reduced" %}
+@media (prefers-reduced-motion: reduce) {
+{% endif %}
+{% set pad = "  " if theme.motion == "reduced" else "" %}
+{{ pad }}*,
+{{ pad }}::before,
+{{ pad }}::after {
+{{ pad }}  animation-duration: 0.01ms !important;
+{{ pad }}  animation-iteration-count: 1 !important;
+{{ pad }}  transition-duration: 0.01ms !important;
+{{ pad }}  scroll-behavior: auto !important;
+{{ pad }}}
+{% if theme.motion == "reduced" %}
+}
+{% endif %}
+{% endif %}
+{{ trace(theme.motion_id, "end") }}
+{% endif %}
 
 @layer base {
   * {

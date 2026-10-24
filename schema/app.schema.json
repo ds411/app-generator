@@ -313,6 +313,17 @@
           ],
           "default": null
         },
+        "responsive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewResponsive"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "row_actions": {
           "additionalProperties": {
             "$ref": "#/$defs/Action"
@@ -2828,6 +2839,40 @@
       ],
       "type": "string"
     },
+    "Motion": {
+      "additionalProperties": false,
+      "description": "The motion of the UI: the animations of charts, dialogs, menus, and transitions.\n\n`full` keeps all animations. `reduced` stops them for users who ask\ntheir system for reduced motion. `none` stops them for all users.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "$value": {
+          "enum": [
+            "full",
+            "reduced",
+            "none"
+          ],
+          "title": "$Value",
+          "type": "string"
+        },
+        "$description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "$value"
+      ],
+      "title": "Motion",
+      "type": "object"
+    },
     "NavigateAction": {
       "additionalProperties": false,
       "description": "Open a page.",
@@ -4335,6 +4380,17 @@
             }
           ],
           "default": null
+        },
+        "motion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Motion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "Tokens",
@@ -4552,6 +4608,32 @@
           "$ref": "#/$defs/DetailView"
         }
       ]
+    },
+    "ViewResponsive": {
+      "additionalProperties": false,
+      "description": "How a view shows on screens narrower than a breakpoint.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "below": {
+          "$ref": "#/$defs/BreakpointName"
+        },
+        "layout": {
+          "enum": [
+            "stack",
+            "scroll"
+          ],
+          "title": "Layout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "below",
+        "layout"
+      ],
+      "title": "ViewResponsive",
+      "type": "object"
     },
     "appgen__dsl__ui__dashboards__Widget": {
       "oneOf": [

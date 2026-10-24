@@ -303,3 +303,12 @@ def test_the_regions_of_a_page_are_unique_and_have_the_content() -> None:
             load_definition_text(BASE.replace(page, hint), "app.yaml")
         [diagnostic] = error.value.diagnostics
         assert (diagnostic.message, diagnostic.element_id) == (message, "pages.tasks.arrangement")
+
+
+def test_the_responsive_hint_of_a_board_needs_a_breakpoint_token() -> None:
+    board = (
+        "ui:\n  views:\n    board:\n      kind: board\n      entity: Task\n      group_by: status\n"
+        "      responsive: { below: md, layout: stack }\n"
+    )
+
+    assert codes(BASE + board) == [("unknown-reference", "ui.views.board.responsive")]

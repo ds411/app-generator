@@ -11,9 +11,8 @@ from appgen.bindings.shared.theme import (
 )
 from appgen.dsl import load_definition_text
 
-DEFINITION = load_definition_text(
-    dedent(
-        """\
+DEFINITION_TEXT = dedent(
+    """\
         version: 0
         app: { name: themed, title: Themed }
         entities:
@@ -50,8 +49,8 @@ DEFINITION = load_definition_text(
                   font_weight: 400
                   line_height: 1.5
         """
-    )
 )
+DEFINITION = load_definition_text(DEFINITION_TEXT)
 
 
 def _values(variables: list[Variable]) -> dict[str, tuple[str, str | None]]:
@@ -105,3 +104,10 @@ def test_typography_tokens_are_utilities() -> None:
     assert ("font-size", "0.875rem") in utility.declarations
     assert theme.body_typography == "typography-body"
     assert "ui.tokens.typography" in theme.file_ids
+
+
+def test_the_motion_setting_goes_to_the_theme() -> None:
+    assert (build_theme(DEFINITION).motion, build_theme(DEFINITION).motion_id) == ("full", None)
+    text = DEFINITION_TEXT.replace("  tokens:\n", "  tokens:\n    motion: { $value: none }\n")
+    theme = build_theme(load_definition_text(text))
+    assert (theme.motion, theme.motion_id) == ("none", "ui.tokens.motion")
