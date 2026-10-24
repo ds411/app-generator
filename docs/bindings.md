@@ -277,9 +277,9 @@ app:
   `scripts/check-react-api.sh` starts both apps, checks each endpoint of
   the client in the OpenAPI document, and loads a page with data from
   the API. The pre-push hook runs it.
-- The list endpoints filter only by equality. The client sends those
-  filters to the API, loads all pages, and searches, sorts, and pages
-  the records in the browser.
+- The client sends the equality filters of the list endpoints to the
+  API, loads all pages, and searches, sorts, and pages the records in
+  the browser.
 - A custom operation calls its endpoint: the FastAPI app runs the
   logic, so the React app has no extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request

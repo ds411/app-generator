@@ -1,0 +1,16 @@
+{{ trace_header("app") }}
+"""The expected order of a sort, for the tests of the sort keys of the list endpoints."""
+
+from typing import Any
+
+
+def expected_order(values: list[tuple[Any, str]], descending: bool = False) -> list[str]:
+    """Return the IDs in the order of a sort by a value. Empty values come last.
+
+    `values` has the value and the ID of each record. Records with the same
+    value come in the order of their IDs, as the list endpoints sort them.
+    """
+    by_id = sorted(values, key=lambda item: item[1])
+    filled = [item for item in by_id if item[0] is not None]
+    filled.sort(key=lambda item: item[0], reverse=descending)
+    return [i for _, i in filled] + [i for value, i in by_id if value is None]

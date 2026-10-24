@@ -118,9 +118,18 @@ generator stops with an error.
 - A second operation of the same kind for one entity gets the path of
   the kind plus its name in kebab case, for example
   `GET /tasks/open-tasks`.
-- List endpoints take `limit`, `offset`, `sort` (field names, a `-`
-  before a name sorts in descending order), and one equality filter for
-  each field that has a simple type.
+- List endpoints take `limit`, `offset`, `sort` (sort keys, a `-`
+  before a key sorts in descending order), and one equality filter for
+  each field that has a simple type. The views of the entity add
+  parameters: a select filter makes the parameter of its field a
+  list, a date range filter adds `<field>_from` and `<field>_to`, and
+  the search filters add `q`, which searches all their fields with
+  `ILIKE` (Postgres) or `LIKE` (SQLite). The sortable columns and the
+  sort of the views add sort keys, also through relations, for example
+  `owner` (the display field of the target) or `project.name`. A field
+  path through relations uses `has()` in a filter, and a correlated
+  subquery in a sort key. Computed fields and relations to many records
+  have no sort key.
 - All errors use the problem details format of RFC 9457
   (`application/problem+json`).
 - Input schemas give a relation as the ID of the target (`project_id`),

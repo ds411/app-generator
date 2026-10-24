@@ -159,11 +159,25 @@ exist gives 404. A change that breaks a unique value or a reference gives
 409. A custom operation without logic gives 501.
 
 List endpoints take `limit` (default 50), `offset`, and `sort`. The
-`sort` value is a list of field names, separated by commas. A `-` before
-a name sorts in descending order, for example `sort=-due_date,title`.
+`sort` value is a list of sort keys, separated by commas. A `-` before
+a key sorts in descending order, for example `sort=-due_date,title`.
+Empty values come last. The sort keys are the fields with a simple type,
+and the sortable columns and the sort of the views, for example `owner`
+(the display field of the related record) or `project.name`.
 List endpoints also take one equality filter for each field with a
-simple type, for example `status=done`. The response has the `items`
-and the `total` number of records.
+simple type, for example `done=true`. The filters of the views add more
+parameters:
+
+| Filter of a view | Parameters | Example |
+| ---------------- | ---------- | ------- |
+| `select`         | The field takes one or more values. | `status=todo&status=done` |
+| `boolean`        | The field takes `true` or `false`. | `active=true` |
+| `date_range`     | `<field>_from` and `<field>_to`: the first and the last day. | `due_date_from=2026-01-01` |
+| `search`         | `q`: each word is in one of the fields of the search filters. | `q=alpha` |
+
+A field path of a view keeps its dots, for example `project.status=active`.
+An unknown parameter, value, or sort key gives 422. The response has the
+`items` and the `total` number of records.
 
 ## Endpoints
 
