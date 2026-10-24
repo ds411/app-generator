@@ -11,7 +11,10 @@ FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install
+# A BuildKit cache keeps the pnpm store between builds, so a new build
+# downloads only the packages that changed.
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --store-dir /pnpm/store
 COPY . .
 RUN pnpm build
 

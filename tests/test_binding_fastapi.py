@@ -379,7 +379,8 @@ def test_the_app_has_a_dockerfile_and_a_compose_file(result: GenerationResult) -
     dockerfile = files["Dockerfile"]
     assert "# @trace app file" in dockerfile
     assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11" in dockerfile
-    assert "RUN uv sync --no-dev" in dockerfile
+    uv_sync = "RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \\\n    uv sync --no-dev\n"
+    assert uv_sync in dockerfile
     assert "USER app" in dockerfile
     assert dockerfile.count("\nFROM ") == 3
     compose = files["compose.yaml"]

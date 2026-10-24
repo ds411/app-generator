@@ -127,7 +127,8 @@ def test_the_dockerfile_builds_with_pnpm_and_serves_with_nginx_as_non_root(
     dockerfile = files["Dockerfile"]
     assert dockerfile.startswith("# syntax=docker/dockerfile:1\n")
     assert "# @trace app file" in dockerfile
-    assert "RUN pnpm install" in dockerfile
+    install = "RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \\\n    pnpm install"
+    assert install + " --store-dir /pnpm/store\n" in dockerfile
     assert "ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:" in dockerfile
     assert "FROM ${NODE_IMAGE} AS build" in dockerfile
     assert "USER nginx" in dockerfile

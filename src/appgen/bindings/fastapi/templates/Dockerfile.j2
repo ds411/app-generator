@@ -17,7 +17,10 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev
+# A BuildKit cache keeps the uv cache between builds, so a new build
+# downloads only the packages that changed.
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+    uv sync --no-dev
 COPY . .
 
 FROM ${PYTHON_IMAGE}
