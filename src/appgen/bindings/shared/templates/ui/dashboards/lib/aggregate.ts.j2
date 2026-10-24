@@ -2,7 +2,12 @@
 {% raw %}
 // The filters, the groups, and the aggregates of the dashboards. The
 // dashboards read all records and apply these functions in the browser.
+{% endraw %}
+{% if i18n %}
 
+import { dateTimeFormat } from "@/shared/lib/format";
+{% endif %}
+{% raw %}
 export type FilterOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
 
 export type Aggregate = "count" | "sum" | "avg" | "min" | "max";
@@ -78,10 +83,16 @@ export function aggregate(values: unknown[], kind: Exclude<Aggregate, "count">):
   }
 }
 
+{% endraw %}
+{% if i18n %}
+/** The format of a month, in the locale of the selected language. */
+const monthFormat = () => dateTimeFormat({ month: "short", year: "numeric" });
+{% else %}
 const monthFormat = new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" });
-
+{% endif %}
+{% raw %}
 function groupLabel(key: string): string {
-  return /^\d{4}-\d{2}$/.test(key) ? monthFormat.format(new Date(`${key}-01T00:00:00`)) : key;
+  return /^\d{4}-\d{2}$/.test(key) ? monthFormat{% endraw %}{{ "()" if i18n }}{% raw %}.format(new Date(`${key}-01T00:00:00`)) : key;
 }
 
 /**

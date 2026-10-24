@@ -12,13 +12,44 @@ import {
 import {
   DayPicker,
   getDefaultClassNames,
-  type DayButton,
-} from "react-day-picker"
+{% endraw %}{% if i18n %}{% raw %}  type DayButton,
+  type Formatters,
+  type Labels,
+{% endraw %}{% else %}{% raw %}  type DayButton,
+{% endraw %}{% endif %}{% raw %}} from "react-day-picker"
 
-import { Button, buttonVariants } from "@/shared/ui/button"
+{% endraw %}{% if i18n %}{% raw %}import { Button, buttonVariants } from "@/shared/ui/button"
+import { dateTimeFormat, firstWeekday } from "@/shared/lib/format"
+import { getLocale } from "@/shared/lib/i18n"
+{% endraw %}{% else %}{% raw %}import { Button, buttonVariants } from "@/shared/ui/button"
+{% endraw %}{% endif %}{% raw %}
+{% endraw %}{% if i18n %}{% raw %}/** The names of the months and the days, in the selected locale. */
+const localeFormatters: Partial<Formatters> = {
+  formatCaption: (month) => dateTimeFormat({ month: "long", year: "numeric" }).format(month),
+  formatMonthDropdown: (month) => dateTimeFormat({ month: "short" }).format(month),
+  formatYearDropdown: (year) => dateTimeFormat({ year: "numeric" }).format(year),
+  formatWeekdayName: (weekday) => dateTimeFormat({ weekday: "short" }).format(weekday),
+}
+
+/** The labels of the calendar, in the selected language. */
+const localeLabels: Partial<Labels> = {
+  labelNav: () => {% endraw %}{{ tr(js("Navigation bar")) }}{% raw %},
+  labelNext: () => {% endraw %}{{ tr(js("Go to the next month")) }}{% raw %},
+  labelPrevious: () => {% endraw %}{{ tr(js("Go to the previous month")) }}{% raw %},
+  labelMonthDropdown: () => {% endraw %}{{ tr(js("Choose the month")) }}{% raw %},
+  labelYearDropdown: () => {% endraw %}{{ tr(js("Choose the year")) }}{% raw %},
+  labelGrid: (month) => dateTimeFormat({ month: "long", year: "numeric" }).format(month),
+  labelWeekday: (weekday) => dateTimeFormat({ weekday: "long" }).format(weekday),
+  labelDayButton: (day, modifiers) => {
+    const date = dateTimeFormat({ dateStyle: "full" }).format(day)
+    const label = modifiers.today ? {% endraw %}{{ js_format("Today, {date}", date="date") }}{% raw %} : date
+    return modifiers.selected ? {% endraw %}{{ js_format("{date}, selected", date="label") }}{% raw %} : label
+  },
+}
 
 function Calendar({
-  className,
+{% endraw %}{% else %}{% raw %}function Calendar({
+{% endraw %}{% endif %}{% raw %}  className,
   classNames,
   showOutsideDays = true,
   captionLayout = "label",
@@ -41,12 +72,16 @@ function Calendar({
         className
       )}
       captionLayout={captionLayout}
-      formatters={{
+{% endraw %}{% if i18n %}{% raw %}      lang={getLocale()}
+      weekStartsOn={firstWeekday()}
+      labels={localeLabels}
+      formatters={{ ...localeFormatters, ...formatters }}
+{% endraw %}{% else %}{% raw %}      formatters={{
         formatMonthDropdown: (date) =>
           date.toLocaleString("default", { month: "short" }),
         ...formatters,
       }}
-      classNames={{
+{% endraw %}{% endif %}{% raw %}      classNames={{
         root: cn("w-fit", defaultClassNames.root),
         months: cn(
           "relative flex flex-col gap-4 md:flex-row",

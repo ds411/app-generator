@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     // next-themes sets the class of the color mode before React hydrates.
-    <html lang="en" suppressHydrationWarning>
+    <html lang={{ (i18n.languages[0].locale if i18n else "en") | tojson }} suppressHydrationWarning>
       <body className="min-h-svh antialiased">
         <Providers>{children}</Providers>
       </body>

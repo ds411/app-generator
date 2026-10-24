@@ -17,9 +17,10 @@ const ATTRIBUTES = ["aria-label", "aria-description", "aria-roledescription", "a
 const TODAY = new Date("2026-01-05T12:00:00Z");
 
 test.skip(!language, "The app has no test language.");
-// The dates and numbers of the Japanese locale have no Latin letters, so
-// the Latin text that is left is UI text or a value of the records.
-test.use({ locale: "ja-JP" });
+// The test language has the Japanese locale: its dates and numbers have
+// no Latin letters, so the Latin text that is left is UI text, a value of
+// the records, or a format that does not use the locale of the language.
+// The browser has the locale en-US.
 
 /** Return the texts and the text attributes of an element and its children. */
 async function textsOf(root: Locator): Promise<string[]> {
@@ -59,9 +60,24 @@ async function samplePath(page: Page, target: ExpectedPage): Promise<string> {
   return href ?? target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
 }
 
+/** Open the first date picker in an element, and return the texts of its calendar. */
+async function checkDatePicker(page: Page, root: Locator): Promise<string[]> {
+  // The label of the field names the button, and the button shows its placeholder.
+  const picker = root.getByRole("button").filter({ hasText: `${MARK}Pick a date⟧` });
+  if ((await picker.count()) === 0) return [];
+  await picker.first().click();
+  const calendar = page.locator("[data-slot=calendar]");
+  await expect(calendar).toBeVisible();
+  const found = await untranslated(calendar);
+  await page.keyboard.press("Escape");
+  await expect(calendar).toBeHidden();
+  return found;
+}
+
 /**
  * Open a dialog or a menu with a button, check its text, and close it.
- * If the button opens another page, check the text of that page.
+ * If the button opens another page, check the text of that page. In a
+ * form, also check its first date picker.
  */
 async function checkPopup(page: Page, button: Locator, role: "dialog" | "menu"): Promise<string[]> {
   if ((await button.count()) === 0) return [];
@@ -71,9 +87,9 @@ async function checkPopup(page: Page, button: Locator, role: "dialog" | "menu"):
   await expect.poll(async () => (await popup.isVisible()) || page.url() !== url).toBe(true);
   if (!(await popup.isVisible())) {
     await page.waitForLoadState("networkidle");
-    return untranslated(page.locator("body"));
+    return [...(await untranslated(page.locator("body"))), ...(await checkDatePicker(page, page.locator("main")))];
   }
-  const found = await untranslated(popup);
+  const found = [...(await untranslated(popup)), ...(await checkDatePicker(page, popup))];
   await page.keyboard.press("Escape");
   await expect(popup).toBeHidden();
   return found;
@@ -88,7 +104,7 @@ for (const target of expected.pages) {
     );
     await page.clock.setFixedTime(TODAY);
     await page.goto(await samplePath(page, target));
-    await expect(page.locator("html")).toHaveAttribute("lang", language.code);
+    await expect(page.locator("html")).toHaveAttribute("lang", language.locale);
     await page.waitForLoadState("networkidle");
     await expect(page.locator("h1").first()).toBeVisible();
     expect(await untranslated(page.locator("body"))).toEqual([]);

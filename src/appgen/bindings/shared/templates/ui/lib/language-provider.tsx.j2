@@ -3,7 +3,7 @@
 
 import { Fragment, type ReactNode, useEffect, useSyncExternalStore } from "react";
 
-import { defaultLanguage, getLanguage, setLanguage, storedLanguage, subscribeLanguage } from "@/shared/lib/i18n";
+import { defaultLanguage, getLanguage, localeOf, setLanguage, storedLanguage, subscribeLanguage } from "@/shared/lib/i18n";
 
 /**
  * Shows the UI in the selected language. When the language changes, the
@@ -14,7 +14,7 @@ export function LanguageProvider({ children }: Readonly<{ children: ReactNode }>
   useEffect(() => {
     const stored = storedLanguage();
     if (stored !== getLanguage()) setLanguage(stored);
-    else document.documentElement.lang = stored;
+    else document.documentElement.lang = localeOf(stored);
   }, []);
   return <Fragment key={language}>{children}</Fragment>;
 }

@@ -1,12 +1,15 @@
 {{ trace_header(i18n.element_id) }}
 // The UI text in more than one language. `t` gives the translation of a
 // text of the definition or of a component in the selected language, or
-// the text itself.
+// the text itself. `getLocale` gives the locale of the dates and numbers.
 
-/** The languages of the app. The first language is the language of the definition. */
+/**
+ * The languages of the app. The first language is the language of the
+ * definition. The locale (BCP 47) gives the format of dates and numbers.
+ */
 export const languages = [
 {% for language in i18n.languages %}
-  { code: {{ js(language.code) }}, label: {{ js(language.label) }} }, {{ trace(language.element_id) }}
+  { code: {{ js(language.code) }}, label: {{ js(language.label) }}, locale: {{ js(language.locale) }} }, {{ trace(language.element_id) }}
 {% endfor %}
 ] as const;
 
@@ -44,6 +47,16 @@ export function getLanguage(): Language {
   return current;
 }
 
+/** The locale of a language (BCP 47): the format of its dates and numbers. */
+export function localeOf(language: Language): string {
+  return languages.find((item) => item.code === language)?.locale ?? language;
+}
+
+/** The locale of the selected language. */
+export function getLocale(): string {
+  return localeOf(current);
+}
+
 /** The language that the user selected before, or the default language. */
 export function storedLanguage(): Language {
   try {
@@ -64,7 +77,7 @@ export function setLanguage(language: Language): void {
   } catch {
     // No storage: the language applies until the page loads again.
   }
-  document.documentElement.lang = language;
+  document.documentElement.lang = localeOf(language);
   for (const listener of listeners) listener();
 }
 

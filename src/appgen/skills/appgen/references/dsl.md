@@ -1019,6 +1019,7 @@ translations:
     en: { label: English }
     de:
       label: Deutsch
+      locale: de-DE
       text:
         Projects: Projekte
         New project: Neues Projekt
@@ -1028,6 +1029,12 @@ translations:
 - `default` is a key of `languages`. The default language has no `text`.
 - `label` is the name of the language in the language itself. The
   language switch of the app shows it.
+- `locale` is a language tag (BCP 47), for example `de-CH` or
+  `ar-EG-u-nu-latn`. It gives the format of the dates and numbers, the
+  first day of the week, and the names of the months and days. The
+  default is the code of the language, so the code must be a language
+  tag when the language has no `locale`. `appgen validate` reports a
+  locale that is not a language tag (`translation-locale`).
 - `text` maps a text of the default language, as the app shows it, to
   its translation. A key can be a text that the definition does not
   give, for example the default label of a field (`Due date` for
@@ -1048,8 +1055,13 @@ default language. The front ends translate each text that they show:
 the titles, labels, and descriptions of pages, menus, views, forms, and
 dashboards, the badge labels, the option labels, the actions, the
 messages of the form rules, the default texts of the generator, and the
-fixed texts of the components (see the list below). The format of dates
-and numbers stays as it is. The back ends do not use the section.
+fixed texts of the components (see the list below). The dates and
+numbers have the format of the locale of the selected language: the
+views, the forms, the filters, the charts, the date pickers, and the
+calendars. The format of a field (`number`, `currency`, `percent`,
+`date`, `datetime`, `relative_time`) and its currency stay the same in
+each language. The `lang` of the page is the locale. The back ends do
+not use the section.
 
 ### Fixed texts
 
@@ -1080,6 +1092,9 @@ use in the app does not show.
   `The column has more than {limit} cards.`, `The card did not move.`,
   `Previous week`, `Next week`, `Previous month`, `Next month`, `Today`,
   `Calendar mode`, `Week`, `Month`.
+- Date pickers: `Navigation bar`, `Go to the next month`,
+  `Go to the previous month`, `Choose the month`, `Choose the year`,
+  `Today, {date}`, `{date}, selected`.
 - Dashboards: `View all`, `No data yet`, `Other`, `None`.
 - Actions and forms: `Cancel`, `Close`, `Saved.`,
   `The action did not succeed.`, `The form did not save.`,

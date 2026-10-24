@@ -36,6 +36,7 @@ same diagnostics if the definition is not valid.
 | `invalid-inverse`      | The `inverse` is not the other side of the relation.                  | Name the `many_to_one` relation of the target that points back to this entity. |
 | `missing-translation`  | A language of `translations` does not translate a key that another language translates. | Give each language the same keys of `text`.             |
 | `translation-values`   | A translation does not have the same values in braces as its key, for example `{count}` in `{count} selected`. | Keep each value of the key in the translation, and add no other value. |
+| `translation-locale`   | The locale of a language, or its code when it has no locale, is not a language tag (BCP 47). | Give a language tag, for example `de` or `pt-BR`, in `locale`. |
 | `invalid-token-value`  | The `$value` of a token does not suit its group, for example `blue` in `color`. | Use a value of the group, for example `#2563eb` for a color. |
 | `token-type-mismatch`  | A token has a type that its group does not have.                      | Move the token to the group of its type, or change its value.       |
 | `token-loop`           | Tokens refer to each other in a loop.                                 | Give one token of the loop a literal value.                         |

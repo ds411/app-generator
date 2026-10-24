@@ -254,3 +254,101 @@ def test_the_docs_list_the_fixed_texts_of_the_templates() -> None:
     listed = set(re.findall(r"`([^`]+)`", section.split("\n\n", 2)[2]))
     assert sorted(templates - listed) == []
     assert sorted(listed - templates) == []
+
+
+def test_a_locale_is_a_language_tag() -> None:
+    text = TRANSLATIONS.replace(
+        "      text: { Tasks: Tâches }", "      text: { Tasks: Tâches, Title: Titre }"
+    )
+    swiss = text.replace("    de:\n", "    de_ch:\n")
+    assert codes(BASE + swiss) == [
+        (
+            "translation-locale",
+            "translations.languages.de_ch",
+            "The code 'de_ch' is not a language tag (BCP 47), and the language has no locale.",
+        )
+    ]
+    definition = load_definition_text(BASE + swiss, "app.yaml")
+    assert [d.hint for d in validate_definition(definition)] == [
+        "Add a locale, for example 'locale: de-CH'."
+    ]
+    with_locale = swiss.replace("label: Deutsch\n", "label: Deutsch\n      locale: de-CH\n")
+    assert codes(BASE + with_locale) == []
+    wrong = text.replace("label: Deutsch\n", "label: Deutsch\n      locale: de_CH\n")
+    assert codes(BASE + wrong) == [
+        (
+            "translation-locale",
+            "translations.languages.de",
+            "The locale 'de_CH' of 'de' is not a language tag (BCP 47).",
+        )
+    ]
+
+
+@pytest.mark.parametrize("binding", [react.BINDING, nextjs.BINDING], ids=["react", "nextjs"])
+def test_the_formats_use_the_locale_of_the_selected_language(binding: Binding) -> None:
+    text = EXAMPLE.read_text().replace(
+        "    de:\n      label: Deutsch\n", "    de:\n      label: Deutsch\n      locale: de-CH\n"
+    )
+    files = {
+        f.path: f.content for f in generate(load_definition_text(text, str(EXAMPLE)), binding).files
+    }
+    i18n = files["src/shared/lib/i18n.ts"]
+    assert '{ code: "en", label: "English", locale: "en" },' in i18n
+    assert '{ code: "de", label: "Deutsch", locale: "de-CH" },' in i18n
+    assert "document.documentElement.lang = localeOf(language);" in i18n
+    formats = files["src/shared/lib/format.ts"]
+    assert 'import { getLocale, t } from "@/shared/lib/i18n";' in formats
+    assert 'return numberFormat({ style: "currency", currency }).format(Number(value));' in formats
+    calendar = files["src/shared/ui/calendar.tsx"]
+    assert "weekStartsOn={firstWeekday()}" in calendar
+    assert 'labelNext: () => t("Go to the next month"),' in calendar
+    assert "item.value.toLocaleString(getLocale())" in files["src/shared/ui/chart.tsx"]
+    plain = {f.path: f.content for f in generate(plain_example(), binding).files}
+    assert (
+        "new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })"
+        in plain["src/shared/lib/format.ts"]
+    )
+    assert (
+        'date.toLocaleString("default", { month: "short" })' in plain["src/shared/ui/calendar.tsx"]
+    )
+    assert "item.value.toLocaleString()" in plain["src/shared/ui/chart.tsx"]
+
+
+@pytest.mark.parametrize("binding", [react.BINDING, nextjs.BINDING], ids=["react", "nextjs"])
+def test_the_calendar_starts_the_week_on_the_first_day_of_the_locale(binding: Binding) -> None:
+    room_booking = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
+    text = room_booking.read_text() + dedent(
+        """\
+        translations:
+          default: en
+          languages:
+            en: { label: English, locale: en-GB }
+            de: { label: Deutsch }
+        """
+    )
+    files = {
+        f.path: f.content for f in generate(load_definition_text(text, "app.yaml"), binding).files
+    }
+    grid = files["src/shared/ui/calendar-grid.tsx"]
+    assert "return addDays(day, -((day.getDay() - firstWeekday() + 7) % 7));" in grid
+    assert "rangeFormat().formatRange(first, addDays(first, 6))" in grid
+    assert "{weekdayFormat().format(day)}" in grid
+    plain = {f.path: f.content for f in generate(load_definition(room_booking), binding).files}
+    assert (
+        "return addDays(day, -((day.getDay() + 6) % 7));"
+        in plain["src/shared/ui/calendar-grid.tsx"]
+    )
+
+
+def test_finish_adds_t_to_an_import_of_the_module(example: AppDefinition) -> None:
+    content = (
+        'import { getLocale } from "@/shared/lib/i18n";\n\nexport const a = t("A") + getLocale();\n'
+    )
+    assert finish("src/a.ts", content, example) == (
+        'import { getLocale, t } from "@/shared/lib/i18n";\n\n'
+        'export const a = t("A") + getLocale();\n'
+    )
+    content = 'import { getLocale } from "@/shared/lib/i18n"\n\nexport const a = t("A")\n'
+    assert finish("src/a.tsx", content, example).startswith(
+        'import { getLocale, t } from "@/shared/lib/i18n"\n'
+    )
