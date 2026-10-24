@@ -128,6 +128,17 @@ class TokenGroup(Element):
         return dict(self.__pydantic_extra__)
 
 
+class Motion(Element):
+    """The motion of the UI: the animations of charts, dialogs, menus, and transitions.
+
+    `full` keeps all animations. `reduced` stops them for users who ask
+    their system for reduced motion. `none` stops them for all users.
+    """
+
+    value: Literal["full", "reduced", "none"] = pydantic.Field(alias="$value")
+    description: Text | None = pydantic.Field(default=None, alias="$description")
+
+
 class Tokens(Element):
     """The design tokens of the app: one group for each kind of token."""
 
@@ -144,6 +155,7 @@ class Tokens(Element):
     shadow: TokenGroup | None = None
     breakpoint: TokenGroup | None = None
     duration: TokenGroup | None = None
+    motion: Motion | None = None
 
 
 @dataclass(frozen=True, slots=True)

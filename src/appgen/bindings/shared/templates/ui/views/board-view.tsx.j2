@@ -89,7 +89,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
       {all.length === 0 ? (
 {{ m.empty_state(plan) | indent(2, true) }}
       ) : (
-        <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-4">
+        <div className={{ js(plan.board_classes) }}>{{ (" " ~ trace(view.responsive.id, jsx=True)) if view.responsive else "" }}
           {COLUMNS.map((column) => {
             const cards = rows.filter((row) => {{ group.expr }} === column.value);
             const over = column.limit !== undefined && cards.length > column.limit;
@@ -99,7 +99,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                 aria-label={column.label}
                 style={column.color ? ({ "--column-color": column.color } as CSSProperties) : undefined}
                 className={cn(
-                  "flex w-72 shrink-0 flex-col gap-2 rounded-xl border bg-muted/40 p-2 transition-colors",
+                  {{ js(plan.column_classes) }},
                   target === column.value && "border-primary bg-primary/5",
                 )}
                 onDragOver={(event) => {

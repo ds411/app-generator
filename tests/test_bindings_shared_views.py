@@ -10,7 +10,7 @@ from appgen.bindings.shared.views import (
     grid_classes,
     lookups_param,
 )
-from appgen.dsl import load_definition
+from appgen.dsl import load_definition, load_definition_text
 from appgen.dsl.ui.common import Grid, GridOverride
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
@@ -155,3 +155,15 @@ def test_a_field_format_applies_to_all_views_of_the_field(example: ViewContext) 
         w for w in example.dashboard_plan("overview").widgets if w.name == "active_projects"
     )
     assert count.format == "number"
+
+
+def test_a_board_with_a_responsive_hint_stacks_its_columns(example: ViewContext) -> None:
+    plan = example.view_plan("task_board")
+    assert plan.board_classes.endswith(" max-md:flex-col max-md:overflow-x-visible")
+    assert plan.column_classes.endswith(" max-md:w-full")
+
+
+def test_a_chart_does_not_animate_without_motion() -> None:
+    text = EXAMPLE.read_text().replace("motion: { $value: reduced }", "motion: { $value: none }")
+    context = ViewContext(load_definition_text(text), forms=True)
+    assert context.dashboard_plan("overview").motion == "none"

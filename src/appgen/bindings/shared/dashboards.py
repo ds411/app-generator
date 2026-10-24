@@ -79,6 +79,8 @@ class DashboardPlan:
 
     name: str
     dashboard: Dashboard
+    motion: str = "full"
+    """The motion setting of `ui.tokens.motion`: `full`, `reduced`, or `none`."""
     entities: list[str] = field(default_factory=list[str])
     """The entities that the dashboard reads, sorted by name."""
     grid: str = ""
@@ -142,6 +144,9 @@ def build_dashboard(ctx: ViewContext, name: str) -> DashboardPlan:
     assert definition.ui is not None
     dashboard = definition.ui.dashboards[name]
     plan = DashboardPlan(name=name, dashboard=dashboard)
+    tokens = ctx.definition.ui.tokens if ctx.definition.ui else None
+    if tokens is not None and tokens.motion is not None:
+        plan.motion = tokens.motion.value
     grid = dashboard.grid
     if grid is None:
         plan.grid = "grid grid-cols-4 gap-4 max-lg:grid-cols-2 max-sm:grid-cols-1"

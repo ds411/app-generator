@@ -169,7 +169,7 @@ export function {{ name | pascal }}Dashboard() {
 {% else %}
       <WidgetCard title={{ jsx_attr(w.label) }}{% if w.href %} href={ {{- w.href }}}{% endif %} className={{ js(w.classes) }}> {{ trace(w.element_id, jsx=True) }}
 {% if w.kind == "chart" %}
-        <DashboardChart kind={{ js(w.chart) }} data={ {{- w.function }}(data)} valueLabel={{ jsx_attr(w.value_label) }} />
+        <DashboardChart kind={{ js(w.chart) }} data={ {{- w.function }}(data)} valueLabel={{ jsx_attr(w.value_label) }}{% if plan.motion == "none" %} animate={false}{% endif %} />
 {% elif w.kind == "list" %}
 {% if w.sort_id %}
         {{ trace(w.sort_id, jsx=True) }}

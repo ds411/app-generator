@@ -211,6 +211,15 @@ class CardsView(ListViewBase):
     grid: Grid | None = None
 
 
+class ViewResponsive(Element):
+    """How a view shows on screens narrower than a breakpoint."""
+
+    below: BreakpointName
+    """A breakpoint token, for example `md`."""
+    layout: Literal["stack", "scroll"]
+    """`stack`: the board columns show one under the other. `scroll`: they scroll sideways."""
+
+
 class BoardView(ViewBase):
     """Cards in columns, one column for each value of an enum field."""
 
@@ -220,6 +229,8 @@ class BoardView(ViewBase):
     card: Card | None = None
     sort: Sort | None = None
     move: MemberName | None = None
+    responsive: ViewResponsive | None = None
+    """The layout on narrow screens. Without it, the columns scroll sideways."""
     """The operation that runs when the user moves a card to another column."""
     row_actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
 

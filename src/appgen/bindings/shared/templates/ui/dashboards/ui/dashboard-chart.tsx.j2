@@ -19,16 +19,22 @@ function colorOf(datum: ChartDatum, index: number): string {
   return datum.color ?? `var(--chart-${(index % 5) + 1})`;
 }
 
-/** A bar, line, or donut chart of the values of groups. */
+/**
+ * A bar, line, or donut chart of the values of groups. With `animate`, the
+ * chart animates unless the system asks for reduced motion.
+ */
 export function DashboardChart({
   kind,
   data,
   valueLabel,
+  animate = true,
 }: {
   kind: "bar" | "line" | "donut";
   data: ChartDatum[];
   valueLabel: string;
+  animate?: boolean;
 }) {
+  const animation = animate ? "auto" : false;
   if (data.length === 0 || data.every((datum) => datum.value === 0)) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No data yet</p>;
   }
@@ -42,7 +48,7 @@ export function DashboardChart({
       <ChartContainer config={config} className="mx-auto aspect-square max-h-72">
         <PieChart>
           <ChartTooltip content={<ChartTooltipContent nameKey="key" hideLabel />} />
-          <Pie data={rows} dataKey="value" nameKey="key" innerRadius="55%" strokeWidth={2} />
+          <Pie data={rows} dataKey="value" nameKey="key" innerRadius="55%" strokeWidth={2} isAnimationActive={animation} />
           <ChartLegend content={<ChartLegendContent nameKey="key" className="flex-wrap gap-2" />} />
         </PieChart>
       </ChartContainer>
@@ -56,7 +62,7 @@ export function DashboardChart({
           <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
           <YAxis tickLine={false} axisLine={false} width={40} />
           <ChartTooltip content={<ChartTooltipContent />} />
-          <Line dataKey="value" stroke="var(--color-value)" strokeWidth={2} type="monotone" dot={false} />
+          <Line dataKey="value" stroke="var(--color-value)" strokeWidth={2} type="monotone" dot={false} isAnimationActive={animation} />
         </LineChart>
       </ChartContainer>
     );
@@ -68,7 +74,7 @@ export function DashboardChart({
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={8} />
         <YAxis tickLine={false} axisLine={false} width={40} />
         <ChartTooltip content={<ChartTooltipContent hideLabel nameKey="key" />} />
-        <Bar dataKey="value" radius={4}>
+        <Bar dataKey="value" radius={4} isAnimationActive={animation}>
           {rows.map((row) => (
             <Cell key={row.key} fill={row.fill} />
           ))}

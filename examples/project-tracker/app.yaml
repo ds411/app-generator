@@ -410,6 +410,7 @@ ui:
     duration:
       fast: { $value: 150ms }
       normal: { $value: 250ms }
+    motion: { $value: reduced }
 
   badges:
     project_status:
@@ -538,6 +539,7 @@ ui:
         in_progress: { label: In progress, color: "{color.status.progress}", limit: 8 }
         in_review: { label: In review, color: "{color.status.review}", limit: 5 }
         done: { label: Done, color: "{color.status.success}" }
+      responsive: { below: md, layout: stack }
       card:
         title: title
         subtitle: project

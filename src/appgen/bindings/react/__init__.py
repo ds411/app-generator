@@ -258,6 +258,7 @@ BINDING = Binding(
         | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
         | {"custom_widget", "custom_rule", "custom_action"}
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
+        | {"view_responsive", "motion"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     context=context,
