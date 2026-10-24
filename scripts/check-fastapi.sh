@@ -3,22 +3,25 @@
 # output: install, lint, format, type check, tests, Docker image,
 # traces, and the smoke test (scripts/smoke_test.py: start the app and
 # request it), in Docker and with SQLite (--local, with the mock server of
-# the third-party APIs, scripts/mock_api.py), and the schema change
-# on a database with data (scripts/check_schema_change.py). Then generate
-# the room booking example, which has the sign-in, the sign-up, and the
-# roles, and check its code and run its tests. The pre-push hook
-# runs this script when a push changes the generator or the FastAPI
-# binding. Run it by hand from the repository root:
+# the third-party APIs, scripts/mock_api.py), the schema change on a
+# database with data (scripts/check_schema_change.py), and the rate limit
+# that two processes share in Redis (scripts/check_shared_rate_limit.py).
+# Then generate the room booking example, which has the sign-in, the
+# sign-up, and the roles, and check its code and run its tests. The
+# pre-push hook runs this script when a push changes the generator or
+# the FastAPI binding. Run it by hand from the repository root:
 #
 #   scripts/check-fastapi.sh [output folder]
 #
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The room booking app goes to the folder
-# "<output folder>-room-booking". The generated tests run on Postgres
+# "<output folder>-room-booking", and the app of the rate limit check to
+# "<output folder>-rate-limit". The generated tests run on Postgres
 # (Docker, or a database in TEST_DATABASE_URL), then on SQLite.
 #
 # Environment variables:
 #   POSTGRES_IMAGE            The Postgres image of the tests and the smoke test.
+#   REDIS_IMAGE               The Redis image of the shared rate limit check.
 #   UV_IMAGE, PYTHON_IMAGE    Build arguments of the Docker image.
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
 
@@ -33,7 +36,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 
@@ -92,6 +95,10 @@ uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
 
 step "schema change"
 uv run --locked scripts/check_schema_change.py "$out"
+
+step "shared rate limit"
+rm -rf "$out-rate-limit"
+uv run --locked scripts/check_shared_rate_limit.py "$out-rate-limit"
 
 step "generate $auth_definition in $auth_out"
 rm -rf "$auth_out"

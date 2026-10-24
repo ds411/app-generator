@@ -115,8 +115,17 @@ variable `POSTGRES_IMAGE` for Compose.
 - Rate limits: `RATE_LIMIT_PER_MINUTE` sets the number of requests that
   each client address can send in each minute (0, the default, sets no
   limit). Over the limit, the API gives 429 with `Retry-After`. The
+{% if py.redis %}
+  counts are in the memory of each process, or in Redis with
+  `RATE_LIMIT_STORE_URL` (for example `redis://localhost:6379/0`): then
+  all replicas share one limit. When Redis is not available, the API
+  logs a warning and lets the requests through, or gives 503 with
+  `RATE_LIMIT_FAIL_CLOSED=true`. Compose starts Redis with
+  `--profile redis`. `/health` has no limit.
+{% else %}
   counts are in the memory of each process, so each replica has its own
   limit. `/health` has no limit.
+{% endif %}
 - Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
   Deployment (2 replicas, a non-root user, a read-only file system), a
   Service, and a Job that runs the migrations. The database is outside

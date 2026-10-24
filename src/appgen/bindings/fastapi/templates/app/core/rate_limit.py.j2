@@ -1,15 +1,33 @@
 {{ trace_header("app") }}
 """A limit on the number of requests of each client in each minute.
 
+{% if py.redis %}
+The counts are in the memory of the process, or in Redis with the setting
+`RATE_LIMIT_STORE_URL`. In memory, each process or replica counts on its
+own, so the limit of the API is the limit of one process times the number
+of processes. In Redis, all processes that use the same Redis share the
+counts, so the limit is the same for any number of replicas.
+{% else %}
 The counts are in the memory of the process. With more than one process
 or replica, each one counts on its own, so the limit of the API is the
 limit of one process times the number of processes.
+{% endif %}
 """
 
+{% if py.redis %}
+import logging
+{% endif %}
 import math
 import time
 from collections.abc import Callable
+{% if py.redis %}
+from typing import Protocol
 
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+{% else %}
+
+{% endif %}
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.errors import PROBLEM_JSON, Problem
@@ -17,10 +35,27 @@ from app.core.errors import PROBLEM_JSON, Problem
 WINDOW_SECONDS = 60
 EXEMPT_PATHS = frozenset({"/health"})
 """The paths without a limit, for the health checks of the platform."""
+{% if py.redis %}
+
+logger = logging.getLogger(__name__)
+
+type Hit = tuple[bool, int, int]
+"""If the request is allowed, the remaining requests, and the seconds until the next window."""
+
+
+class Limiter(Protocol):
+    """A store of the counts of the requests."""
+
+    limit: int
+
+    async def hit(self, client: str) -> Hit | None:
+        """Count one request. Return None if the store is not available."""
+        ...
+{% endif %}
 
 
 class RateLimiter:
-    """Count the requests of each client in fixed windows of one minute."""
+    """Count the requests of each client in fixed windows of one minute{{ ", in memory" if py.redis }}."""
 
     def __init__(self, limit: int, clock: Callable[[], float] = time.monotonic) -> None:
         self.limit = limit
@@ -28,7 +63,7 @@ class RateLimiter:
         self.window = -1
         self.counts: dict[str, int] = {}
 
-    def hit(self, client: str) -> tuple[bool, int, int]:
+    {{ "async " if py.redis }}def hit(self, client: str) -> tuple[bool, int, int]:
         """Count one request. Return if it is allowed, the remaining requests, and the wait."""
         now = self.clock()
         window = math.floor(now / WINDOW_SECONDS)
@@ -39,21 +74,83 @@ class RateLimiter:
         self.counts[client] = count
         wait = math.ceil((window + 1) * WINDOW_SECONDS - now)
         return count <= self.limit, max(self.limit - count, 0), wait
+{% if py.redis %}
+
+
+class RedisRateLimiter:
+    """Count the requests of each client in fixed windows of one minute, in Redis.
+
+    The windows start at the full minutes of the clock, so that all
+    processes use the same windows. One transaction counts a request and
+    sets the end of its count. When Redis is not available, the limiter
+    logs a warning, at most once in each window, and returns None.
+    """
+
+    def __init__(self, limit: int, url: str, clock: Callable[[], float] = time.time) -> None:
+        self.limit = limit
+        self.clock = clock
+        # redis-py does not give the types of the keyword arguments of from_url.
+        self.redis = Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1)  # pyright: ignore[reportUnknownMemberType]
+        self.warned = -1
+
+    async def hit(self, client: str) -> Hit | None:
+        """Count one request. Return None if Redis is not available."""
+        now = self.clock()
+        window = math.floor(now / WINDOW_SECONDS)
+        key = f"rate-limit:{window}:{client}"
+        try:
+            async with self.redis.pipeline(transaction=True) as pipe:
+                pipe.incr(key)
+                pipe.expire(key, WINDOW_SECONDS)
+                count = int((await pipe.execute())[0])
+        except RedisError as error:
+            if self.warned != window:
+                self.warned = window
+                logger.warning("The rate limit store is not available: %s", error)
+            return None
+        wait = math.ceil((window + 1) * WINDOW_SECONDS - now)
+        return count <= self.limit, max(self.limit - count, 0), wait
+{% endif %}
 
 
 class RateLimitMiddleware:
     """Return 429 Too Many Requests when a client sends more than the limit."""
 
+{% if py.redis %}
+    def __init__(self, app: ASGIApp, limiter: Limiter, fail_closed: bool = False) -> None:
+        """Make the middleware. `fail_closed`: give 503 when the store is not available."""
+        self.app = app
+        self.limiter = limiter
+        self.fail_closed = fail_closed
+{% else %}
     def __init__(self, app: ASGIApp, limiter: RateLimiter) -> None:
         self.app = app
         self.limiter = limiter
+{% endif %}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["path"] in EXEMPT_PATHS:
             await self.app(scope, receive, send)
             return
         client = scope.get("client")
+{% if py.redis %}
+        hit = await self.limiter.hit(client[0] if client else "unknown")
+        if hit is None:
+            if not self.fail_closed:
+                await self.app(scope, receive, send)
+                return
+            problem = Problem(
+                title="Service Unavailable",
+                status=503,
+                detail="The store of the rate limit is not available. Try again later.",
+                instance=scope["path"],
+            )
+            await send_problem(send, problem, [])
+            return
+        allowed, remaining, wait = hit
+{% else %}
         allowed, remaining, wait = self.limiter.hit(client[0] if client else "unknown")
+{% endif %}
         limit_headers = [
             (b"x-ratelimit-limit", str(self.limiter.limit).encode()),
             (b"x-ratelimit-remaining", str(remaining).encode()),
@@ -73,6 +170,26 @@ class RateLimitMiddleware:
             detail=f"Send not more than {self.limiter.limit} requests in each minute.",
             instance=scope["path"],
         )
+{% if py.redis %}
+        await send_problem(send, problem, [(b"retry-after", str(wait).encode()), *limit_headers])
+
+
+async def send_problem(send: Send, problem: Problem, headers: list[tuple[bytes, bytes]]) -> None:
+    """Send a response with problem details, and more headers."""
+    body = problem.model_dump_json(exclude_none=True).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": problem.status,
+            "headers": [
+                (b"content-type", PROBLEM_JSON.encode()),
+                (b"content-length", str(len(body)).encode()),
+                *headers,
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+{% else %}
         body = problem.model_dump_json(exclude_none=True).encode()
         await send(
             {
@@ -87,3 +204,4 @@ class RateLimitMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body})
+{% endif %}

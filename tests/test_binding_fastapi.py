@@ -6,14 +6,21 @@ generator only, so that they need no network and no database.
 """
 
 import os
+import re
 from pathlib import Path
 
 import pytest
 
 from appgen.bindings.fastapi.model import python_app
 from appgen.bindings.fastapi.names import attribute, plural, singular
-from appgen.dsl import AppDefinition, load_definition, load_definition_text
+from appgen.dsl import (
+    AppDefinition,
+    load_definition,
+    load_definition_text,
+    validate_definition,
+)
 from appgen.gen import Binding, GenerationResult, find_binding, generate, write_result
+from appgen.gen.extensions import check_extensions
 from appgen.trace import check_traces
 
 TESTS = Path(__file__).parent
@@ -414,6 +421,51 @@ def test_the_app_has_logs_rate_limits_and_kubernetes_files(result: GenerationRes
     }
     assert "readOnlyRootFilesystem: true" in files["deploy/kubernetes/deployment.yaml"]
     assert "deploy/kubernetes/secret.env\n" in files[".gitignore"]
+
+
+def _with_rate_limit_store(store: str) -> AppDefinition:
+    text = re.sub(
+        r"(?m)^app:\n", f"app:\n  x-fastapi-rate-limit-store: {store}\n", FIXTURE.read_text()
+    )
+    return load_definition_text(text)
+
+
+def test_the_redis_store_adds_redis_and_its_settings(fastapi: Binding) -> None:
+    files = _files(generate(_with_rate_limit_store("redis"), fastapi))
+
+    assert '"redis>=' in files["pyproject.toml"]
+    config = files["app/core/config.py"]
+    assert "rate_limit_store_url: str | None = None" in config
+    assert "rate_limit_fail_closed: bool = False" in config
+    rate_limit = files["app/core/rate_limit.py"]
+    assert "class RedisRateLimiter:" in rate_limit
+    assert "pipe.incr(key)" in rate_limit and "pipe.expire(key, WINDOW_SECONDS)" in rate_limit
+    main = files["app/main.py"]
+    assert "RedisRateLimiter(limit, store) if store else RateLimiter(limit)" in main
+    assert "fail_closed=fail_closed" in main
+    compose = files["compose.yaml"]
+    assert "  redis:\n" in compose and "profiles: [redis]" in compose
+    assert "RATE_LIMIT_FAIL_CLOSED=false" in files["deploy/kubernetes/config.env"]
+    assert "RATE_LIMIT_STORE_URL=redis://" in files["deploy/kubernetes/secret.example.env"]
+    tests = files["tests/test_rate_limit.py"]
+    assert "test_without_the_store_and_fail_closed_a_request_gets_503" in tests
+
+
+def test_the_memory_store_gives_the_same_app_as_no_key(
+    result: GenerationResult, fastapi: Binding
+) -> None:
+    files = _files(generate(_with_rate_limit_store("memory"), fastapi))
+
+    assert files == _files(result)
+    assert "redis" not in files["pyproject.toml"]
+    assert "redis" not in files["compose.yaml"]
+
+
+def test_the_rate_limit_store_is_memory_or_redis(fastapi: Binding) -> None:
+    definition = _with_rate_limit_store("memcached")
+    assert validate_definition(definition) == []
+    codes = [d.code for d in check_extensions(definition, [fastapi])]
+    assert codes == ["invalid-value"]
 
 
 NAMING = (
