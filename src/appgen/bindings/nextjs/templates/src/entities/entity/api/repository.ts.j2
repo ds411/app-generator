@@ -47,7 +47,7 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
       field: {{ ts_value(rule_key(element, rule.field)) }},
       op: {{ ts_value(rule.op) }},
       other: {{ ts_value(rule_key(element, rule.other)) }},
-      message: {{ ts_value(rule.message) }},
+      message: {{ text(rule.message) if i18n else ts_value(rule.message) }},
     }, {{ trace(rule.id, scope="end") }}
 {% endfor %}
   ],
@@ -59,7 +59,7 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
       start: {{ ts_value(rule_key(element, rule.start)) }},
       end: {{ ts_value(rule_key(element, rule.end)) }},
       scope: {{ ts_value(rule_keys(element, rule.scope)) }},
-      message: {{ ts_value(rule.message) }},
+      message: {{ text(rule.message) if i18n else ts_value(rule.message) }},
     }, {{ trace(rule.id, scope="end") }}
 {% endfor %}
   ],
@@ -81,7 +81,7 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
       ],
 {% if w.message %}
-      message: {{ ts_value(w.message) }},
+      message: {{ text(w.message) if i18n else ts_value(w.message) }},
 {% endif %}
     }, {{ trace(w.id, scope="end") }}
 {% endfor %}

@@ -1,0 +1,28 @@
+{{ trace_header(i18n.element_id) }}
+// The language of each request on the server: the language cookie, else
+// the Accept-Language header. The texts (`t`) and the formats of the
+// pages, the metadata, and the server actions use it.
+import "server-only";
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import { cookies, headers } from "next/headers";
+
+import { LANGUAGE_COOKIE, type Language, languages, matchLanguage } from "./i18n";
+
+// `t` reads the language of the request from this store (see i18n.ts).
+const store: AsyncLocalStorage<Language> = ((
+  globalThis as { __appLanguage?: AsyncLocalStorage<Language> }
+).__appLanguage ??= new AsyncLocalStorage<Language>());
+
+/** The language of the request: the cookie, else the best language of Accept-Language, else the default language. */
+export async function requestLanguage(): Promise<Language> {
+  const stored = (await cookies()).get(LANGUAGE_COOKIE)?.value;
+  const found = languages.find((language) => language.code === stored);
+  return found ? found.code : matchLanguage((await headers()).get("accept-language"));
+}
+
+/** Run a function in the language of the request: its texts and formats use the language. */
+export async function inRequestLanguage<T>(body: () => T | Promise<T>): Promise<T> {
+  const language = await requestLanguage();
+  return store.run(language, body);
+}

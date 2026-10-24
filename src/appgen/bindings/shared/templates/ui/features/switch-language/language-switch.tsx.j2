@@ -2,12 +2,25 @@
 "use client";
 
 import { LanguagesIcon } from "lucide-react";
+{% if binding.name == "nextjs" %}
+import { useRouter } from "next/navigation";
+{% endif %}
 
 import { type Language, getLanguage, languages, setLanguage } from "@/shared/lib/i18n";
 
+{% if binding.name == "nextjs" %}
+/**
+ * A list of the languages of the app. The selected language applies to all
+ * pages. The server renders the page title and the next pages in it.
+ */
+export function LanguageSwitch() {
+  const router = useRouter();
+  return (
+{% else %}
 /** A list of the languages of the app. The selected language applies to all pages. */
 export function LanguageSwitch() {
   return (
+{% endif %}
     <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
       <LanguagesIcon className="size-4" aria-hidden="true" />
       <span className="sr-only">{{ jsx_text("Language") }}</span>
@@ -15,7 +28,14 @@ export function LanguageSwitch() {
         aria-label={{ jsx_attr("Language") }}
         className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
         value={getLanguage()}
+{% if binding.name == "nextjs" %}
+        onChange={(event) => {
+          setLanguage(event.target.value as Language);
+          router.refresh();
+        }}
+{% else %}
         onChange={(event) => setLanguage(event.target.value as Language)}
+{% endif %}
       >
         {languages.map((language) => (
           <option key={language.code} value={language.code}>

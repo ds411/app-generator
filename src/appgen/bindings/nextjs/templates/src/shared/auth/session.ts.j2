@@ -24,7 +24,7 @@ export const SIGN_IN_PATH = "/sign-in";
 /** An action or a page that needs a signed-in user. */
 export class UnauthorizedError extends Error {
   constructor() {
-    super("Sign in to do this.");
+    super({{ tr(js("Sign in to do this.")) }});
     this.name = "UnauthorizedError";
   }
 }

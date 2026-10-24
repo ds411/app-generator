@@ -5,6 +5,31 @@ import type { ReactNode } from "react";
 import "@/app/styles/globals.css";
 import { Providers } from "@/app/providers";
 import { appConfig } from "@/shared/config";
+{% if i18n %}
+import { localeOf } from "@/shared/lib/i18n";
+import { inRequestLanguage, requestLanguage } from "@/shared/lib/i18n-server";
+
+/** The title and the description of the pages, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({
+    title: { default: {{ tr("appConfig.title") }}, template: `%s · ${ {{- tr("appConfig.title") -}} }` },
+    description: {{ tr("appConfig.description") }},
+  }));
+}
+
+/** The root of the pages, in the language of the request: the language cookie, else Accept-Language. */
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const language = await requestLanguage();
+  return (
+    // next-themes sets the class of the color mode before React hydrates.
+    <html lang={localeOf(language)} suppressHydrationWarning>
+      <body className="min-h-svh antialiased">
+        <Providers language={language}>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+{% else %}
 
 export const metadata: Metadata = {
   title: { default: appConfig.title, template: `%s · ${appConfig.title}` },
@@ -14,10 +39,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     // next-themes sets the class of the color mode before React hydrates.
-    <html lang={{ (i18n.languages[0].locale if i18n else "en") | tojson }} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-svh antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>
   );
 }
+{% endif %}

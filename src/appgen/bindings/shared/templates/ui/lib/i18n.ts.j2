@@ -27,24 +27,47 @@ const messages: Partial<Record<Language, Record<string, string>>> = {
 {% endfor %}
 };
 
+{% if binding.name == "nextjs" %}
+{% set selected = "active()" %}
+/** The cookie that keeps the selected language. The server renders the pages in it. */
+export const LANGUAGE_COOKIE = {{ js(app.name ~ "-language") }};
+
+/** On the server: the language of each request (`src/shared/lib/i18n-server.ts`). */
+type LanguageStore = { getStore(): Language | undefined; enterWith(language: Language): void };
+
+let current: Language = defaultLanguage;
+let started = false;
+const listeners = new Set<() => void>();
+
+function serverStore(): LanguageStore | undefined {
+  return typeof window === "undefined" ? (globalThis as { __appLanguage?: LanguageStore }).__appLanguage : undefined;
+}
+
+/** The selected language: on the server, the language of the request. */
+function active(): Language {
+  return serverStore()?.getStore() ?? current;
+}
+{% else %}
+{% set selected = "current" %}
 const STORAGE_KEY = {{ js(app.name ~ "-language") }};
 
-let current: Language = {{ "storedLanguage()" if binding.name == "react" else "defaultLanguage" }};
+let current: Language = storedLanguage();
 const listeners = new Set<() => void>();
+{% endif %}
 
 /**
  * The translation of a text in the selected language. `values` give the
  * parts of the text in braces, for example `{count}` in `{count} selected`.
  */
 export function t(text: string, values?: Record<string, string | number | undefined>): string {
-  const translation = messages[current]?.[text] ?? text;
+  const translation = messages[{{ selected }}]?.[text] ?? text;
   if (values === undefined) return translation;
   return translation.replace(/\{(\w+)\}/g, (part, name: string) => (name in values ? String(values[name] ?? "") : part));
 }
 
 /** The selected language. */
 export function getLanguage(): Language {
-  return current;
+  return {{ selected }};
 }
 
 /** The locale of a language (BCP 47): the format of its dates and numbers. */
@@ -54,8 +77,63 @@ export function localeOf(language: Language): string {
 
 /** The locale of the selected language. */
 export function getLocale(): string {
-  return localeOf(current);
+  return localeOf({{ selected }});
 }
+{% if binding.name == "nextjs" %}
+
+/**
+ * Start with the language that the server selected for the request: on the
+ * server for the render of each request, and in the browser one time, for
+ * the first render.
+ */
+export function startLanguage(language: Language): void {
+  const store = serverStore();
+  if (store) {
+    store.enterWith(language);
+  } else if (!started) {
+    started = true;
+    current = language;
+  }
+}
+
+/**
+ * The language of a request without the cookie: the first language of the
+ * Accept-Language header (for example `de-CH,de;q=0.9,en;q=0.8`) that the
+ * app has, also with only the same primary language, else the default
+ * language.
+ */
+export function matchLanguage(acceptLanguage: string | null): Language {
+  const ranges = (acceptLanguage ?? "")
+    .split(",")
+    .map((part, index) => {
+      const [range = "", ...params] = part.split(";").map((item) => item.trim());
+      const quality = params.find((param) => param.startsWith("q="));
+      return { range: range.toLowerCase(), weight: quality ? Number(quality.slice(2)) : 1, index };
+    })
+    .filter((item) => item.range && item.weight > 0)
+    .sort((a, b) => b.weight - a.weight || a.index - b.index);
+  const tags = (code: string, locale: string) => [code.toLowerCase().replaceAll("_", "-"), locale.toLowerCase()];
+  for (const { range } of ranges) {
+    if (range === "*") return defaultLanguage;
+    const primary = range.split("-")[0];
+    const exact = languages.find((language) => tags(language.code, language.locale).includes(range));
+    const near = languages.find((language) =>
+      tags(language.code, language.locale).some((tag) => tag.split("-")[0] === primary),
+    );
+    const found = exact ?? near;
+    if (found) return found.code;
+  }
+  return defaultLanguage;
+}
+
+/** Select a language, keep it in the cookie for the next requests, and show the UI in it. */
+export function setLanguage(language: Language): void {
+  current = language;
+  document.cookie = `${LANGUAGE_COOKIE}=${language}; path=/; max-age=31536000; samesite=lax`;
+  document.documentElement.lang = localeOf(language);
+  for (const listener of listeners) listener();
+}
+{% else %}
 
 /** The language that the user selected before, or the default language. */
 export function storedLanguage(): Language {
@@ -80,6 +158,7 @@ export function setLanguage(language: Language): void {
   document.documentElement.lang = localeOf(language);
   for (const listener of listeners) listener();
 }
+{% endif %}
 
 /** Call a function when the language changes. Return a function that stops the calls. */
 export function subscribeLanguage(listener: () => void): () => void {

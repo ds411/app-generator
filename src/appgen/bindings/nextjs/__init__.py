@@ -146,6 +146,11 @@ BINDING = Binding(
         *_APP_SHELL,
         *views.view_rules(),
         *i18n_rules(),
+        Output(
+            template="src/shared/lib/i18n-server.ts.j2",
+            path="src/shared/lib/i18n-server.ts",
+            when="i18n",
+        ),
         *auth_rules(),
         *forms.form_rules(),
         Output(

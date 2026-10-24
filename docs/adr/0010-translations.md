@@ -54,9 +54,25 @@ and data in modules, for example the badge sets and the page titles.
   translates. `scripts/translation_test.py` uses it to make a test
   language that changes each text, and the UI tests find no text of the
   default language on the pages of the React and the Next.js apps.
-- The selected language is in the browser storage. A change renders the
-  pages again. Next.js renders the default language on the server, and
-  the client changes to the stored language after the hydration.
+- The React app keeps the selected language in the browser storage. A
+  change renders the pages again.
+- The Next.js app keeps the selected language in a cookie
+  (`<app name>-language`), and the server renders each request in the
+  language of the request: the cookie, else the first language of
+  `Accept-Language` that the app has (by code or locale, also by the
+  primary language), else the default language
+  (`src/shared/lib/i18n-server.ts`). The root layout sets `html lang` and
+  gives the language to the `LanguageProvider`. On the server, `t` reads
+  the language from an `AsyncLocalStorage`: the metadata and the server
+  actions run in `inRequestLanguage`, and the provider enters the
+  language for the render of the client components, so two requests at
+  the same time keep their languages. In the browser, the first render
+  uses the language of the server, so the hydration matches. A change
+  sets the cookie, renders the pages again, and refreshes the server
+  parts (`router.refresh()`), for example the page title.
+- The server actions of Next.js give their messages in the language of
+  the request: the rules of the entities, the workflows, the sign-in,
+  the access checks, and the errors of the data access.
 - Each language has a locale, a language tag (BCP 47) in
   `translations.languages.<code>.locale`. The default is the code. The
   validator reports a locale that is not a language tag
@@ -90,4 +106,10 @@ and data in modules, for example the badge sets and the page titles.
 - A new fixed text in a template must use a text helper, else it shows
   in the default language. `scripts/untranslated_text.mjs` finds such a
   text in the code, and the test language finds it on the pages.
+- With translations, the routes of the Next.js app are dynamic, because
+  the root layout reads the cookie and the headers of the request.
+- The provider of the language enters the language of the request in the
+  async context of the render (`enterWith`). The translation test sends
+  requests in two languages at the same time to show that each page
+  keeps its language.
 - An app without translations has the same code as before.

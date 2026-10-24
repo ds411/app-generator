@@ -2,8 +2,17 @@
 import type { Metadata } from "next";
 
 import { SignInForm } from "@/features/sign-in";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+/** The title of the page, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js("Sign in")) }} }));
+}
+{% else %}
 
 export const metadata: Metadata = { title: "Sign in" };
+{% endif %}
 
 /** The sign-in page. After the sign-in, the app opens the page in `next`. */
 export default async function Route({ searchParams }: PageProps<"/sign-in">) {

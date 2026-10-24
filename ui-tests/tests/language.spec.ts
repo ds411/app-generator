@@ -2,8 +2,14 @@
 // app keeps the language for the next visit. The example definition
 // (project-tracker) has an English and a German text for the page title
 // and for the label of the switch. The dates and numbers have the format
-// of the locale of the language (ADR 0010).
+// of the locale of the language (ADR 0010). Next.js renders the pages on
+// the server in the language of the cookie, else of Accept-Language.
 import { expect, type Page, test } from "@playwright/test";
+
+import { expected } from "./expected";
+
+/** The cookie of the selected language in Next.js. */
+const LANGUAGE_COOKIE = "project-tracker-language";
 
 /** Return the text of a cell of the first row of the table, in the column with a header. */
 async function firstCell(page: Page, header: string): Promise<string> {
@@ -61,4 +67,28 @@ test("the dates and numbers have the format of the selected language", async ({ 
   expect(await firstCell(page, "Fällig")).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
   expect(await firstCell(page, "Budget")).toMatch(/^\d{1,3}(\.\d{3})*,\d{2}\s\$$/);
   expect(await datePicker(page, "Neues Projekt", "Datum wählen")).toEqual(["Mo", "Jan"]);
+});
+
+test.describe("without JavaScript", () => {
+  test.skip(expected.binding !== "nextjs", "Only the Next.js app renders the pages on the server.");
+  test.use({ javaScriptEnabled: false });
+
+  test("the server renders a page in the language of the cookie", async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: LANGUAGE_COOKIE, value: "de", url: baseURL ?? "" }]);
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { level: 1, name: "Projekte" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Seiten suchen" })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page).toHaveTitle("Projekte · Projekt-Tracker");
+  });
+
+  test.describe("without the cookie", () => {
+    test.use({ locale: "de-DE" });
+
+    test("the server renders a page in the language of Accept-Language", async ({ page }) => {
+      await page.goto("/projects");
+      await expect(page.getByRole("heading", { level: 1, name: "Projekte" })).toBeVisible();
+      await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    });
+  });
 });

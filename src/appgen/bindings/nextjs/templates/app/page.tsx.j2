@@ -16,8 +16,18 @@ import { requirePage } from "@/shared/auth/access";
 {% elif protected %}
 import { requirePageUser } from "@/shared/auth/session";
 {% endif %}
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
 
+{% if i18n %}
+/** The title of the page, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js(element.title)) }} }));
+}
+{% else %}
 export const metadata: Metadata = { title: {{ element.title | tojson }} };
+{% endif %}
 {% if detail %}
 
 /** Show the not-found page (status 404) if the record does not exist. */

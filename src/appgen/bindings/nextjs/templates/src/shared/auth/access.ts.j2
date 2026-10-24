@@ -30,7 +30,7 @@ const PAGES: Record<string, readonly string[]> = {
 /** An operation that the role of the user may not call. */
 export class ForbiddenError extends Error {
   constructor() {
-    super("Your role may not do this operation.");
+    super({{ tr(js("Your role may not do this operation.")) }});
     this.name = "ForbiddenError";
   }
 }

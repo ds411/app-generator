@@ -16,6 +16,9 @@ test proves it for the project tracker:
    page in the test language, with its search, the menu of a record, and
    a form with its date picker. Each text with a Latin letter must have
    ⟦, or be a value of the records.
+5. Next.js: request the pages in the test language and in the default
+   language at the same time. The server must render each page in the
+   language of its request.
 
 Run it from the repository root:
 
@@ -44,6 +47,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -219,6 +223,36 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
     run(*command, "--project", "light", cwd=UI_TESTS, env=env)
 
 
+def check_parallel_requests(definition: AppDefinition) -> None:
+    """Request the pages of Next.js in two languages at the same time: each page has one language.
+
+    The server renders each request in the language of its cookie (ADR
+    0010). Half of the requests have the cookie of the test language.
+    """
+    pages: list[dict[str, Any]] = expected_ui("nextjs", definition)["pages"]
+    paths = [page["path"] for page in pages if not page["params"]]
+    cookie = f"{definition.app.name}-language={CODE}"
+    translations = definition.translations
+    default = translations.default if translations else ""
+    default_locale = translations.languages[default].locale_tag(default) if translations else ""
+
+    def fetch(index: int) -> str | None:
+        path, test = paths[index % len(paths)], index % 2 == 0
+        url = f"http://localhost:{PORTS['nextjs']}{path}"
+        request = urllib.request.Request(url, headers={"Cookie": cookie} if test else {})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            html = response.read().decode()
+        lang = f'<html lang="{LOCALE if test else default_locale}"'
+        if lang in html and ("⟦" in html) == test:
+            return None
+        return f"{path} ({CODE if test else default})"
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        wrong = [item for item in pool.map(fetch, range(4 * 20)) if item]
+    if wrong:
+        raise TranslationTestError(f"Pages in the wrong language: {', '.join(wrong)}.")
+
+
 def translation_test(binding: str, out: Path) -> None:
     definition = load_definition(DEFINITION)
     out.mkdir(parents=True, exist_ok=True)
@@ -248,6 +282,9 @@ def translation_test(binding: str, out: Path) -> None:
         wait_for(binding, f"http://localhost:{PORTS[binding]}/")
         log(binding, "UI test of the test language (Playwright)")
         check_ui(binding, test)
+        if binding == "nextjs":
+            log(binding, "80 requests in two languages at the same time")
+            check_parallel_requests(test)
     log(binding, "passed")
 
 

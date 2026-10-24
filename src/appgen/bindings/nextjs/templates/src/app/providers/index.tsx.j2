@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 
 {% if i18n %}
+import type { Language } from "@/shared/lib/i18n";
 import { LanguageProvider } from "@/shared/lib/language-provider";
 {% endif %}
 import { ThemeProvider } from "@/shared/lib/theme";
@@ -23,8 +24,13 @@ function Toasts() {
 }
 
 {% endif %}
-/** The providers of the app: the color mode{% if i18n %}, the language,{% endif %} and the toasts. */
+{% if i18n %}
+/** The providers of the app: the color mode, the language (the language of the request first), and the toasts. */
+export function Providers({ language, children }: Readonly<{ language: Language; children: ReactNode }>) {
+{% else %}
+/** The providers of the app: the color mode and the toasts. */
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
+{% endif %}
   return (
     <ThemeProvider
       attribute="class"
@@ -33,7 +39,7 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       disableTransitionOnChange
     >
 {% if i18n %}
-      <LanguageProvider>
+      <LanguageProvider language={language}>
         {children}
         <Toasts />
       </LanguageProvider>
