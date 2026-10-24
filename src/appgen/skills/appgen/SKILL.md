@@ -21,6 +21,7 @@ code by hand.
 | ------------------------------------------- | ------------------------------------------------------------ |
 | Validate a definition, generate, and check. | This file.                                                   |
 | Write a new app definition.                 | [references/new-definition.md](references/new-definition.md) |
+| Fill the generation gaps of an app.         | [references/fill-gaps.md](references/fill-gaps.md)           |
 
 Each task uses the CLI loop of this file. Read the file of your task
 before you start it. Two more files help in all tasks:
