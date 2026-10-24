@@ -14,7 +14,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui
 {% endif %}
 import {
   SidebarGroup,
+{% if element.groups %}
   SidebarGroupContent,
+{% endif %}
 {% if has_label %}
   SidebarGroupLabel,
 {% endif %}

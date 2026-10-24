@@ -1,0 +1,293 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The second example: meeting rooms, their amenities, the members of a
+# team, and the bookings of the rooms. It uses the CRUD shorthand with
+# the default views and forms, and a few explicit views of its own.
+version: 0
+
+app:
+  name: room-booking
+  title: Room Booking
+  description: Book meeting rooms for the members of a team.
+
+entities:
+  Room:
+    description: A meeting room that members can book.
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: name
+    fields:
+      name: { type: string, required: true, unique: true, max_length: 80 }
+      floor: { type: integer, required: true, min: -2, max: 40 }
+      capacity: { type: integer, required: true, min: 1, max: 500 }
+      hourly_rate: { type: decimal, min: 0, precision: 8, scale: 2, format: currency }
+      bookable: { type: boolean, default: true }
+    relations:
+      amenities: { kind: many_to_many, target: Amenity, inverse: rooms }
+      bookings: { kind: one_to_many, target: Booking, inverse: room }
+
+  Amenity:
+    description: Equipment of a room, for example a projector.
+    crud:
+      views: [table]
+      forms: [create]
+    display_field: name
+    fields:
+      name: { type: string, required: true, unique: true, max_length: 60 }
+    relations:
+      rooms: { kind: many_to_many, target: Room, inverse: amenities }
+
+  Member:
+    description: A member of the team.
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+      team: { type: enum, values: [design, engineering, sales, support] }
+    relations:
+      bookings: { kind: one_to_many, target: Booking, inverse: organizer }
+
+  Booking:
+    description: A booking of a room for a time range.
+    crud:
+      views: [detail]
+      forms: [update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      starts_at: { type: datetime, required: true }
+      ends_at: { type: datetime, required: true }
+      attendees: { type: integer, min: 1, max: 500 }
+      status:
+        type: enum
+        values: [requested, confirmed, cancelled]
+        default: requested
+    relations:
+      room:
+        kind: many_to_one
+        target: Room
+        required: true
+        on_delete: restrict
+        inverse: bookings
+      organizer:
+        kind: many_to_one
+        target: Member
+        required: true
+        on_delete: restrict
+        inverse: bookings
+
+operations:
+  cancel_booking:
+    kind: custom
+    entity: Booking
+    description: Cancel a booking, and tell the organizer.
+    params:
+      reason: { type: text, max_length: 500 }
+    returns: Booking
+
+pages:
+  dashboard:
+    path: /
+    title: Dashboard
+    content: { dashboard: overview }
+  rooms:
+    path: /rooms
+    title: Rooms
+    entity: Room
+    content: { view: room_table }
+    actions:
+      new_room: { kind: form, form: new_room, label: New room, icon: plus }
+  room_detail:
+    path: "/rooms/{id}"
+    title: Room
+    entity: Room
+    content: { view: room_detail }
+    actions:
+      edit: { kind: form, form: edit_room, label: Edit, icon: pencil, variant: outline }
+  bookings:
+    path: /bookings
+    title: Bookings
+    entity: Booking
+    content: { view: booking_board }
+    actions:
+      new_booking: { kind: form, form: new_booking, label: New booking, icon: calendar-plus }
+  booking_detail:
+    path: "/bookings/{id}"
+    title: Booking
+    entity: Booking
+    content: { view: booking_detail }
+    arrangement: { regions: [title, actions, content] }
+    actions:
+      edit: { kind: form, form: edit_booking, label: Edit, icon: pencil, variant: outline }
+      cancel: { kind: form, form: cancel_booking, label: Cancel, icon: calendar-x, variant: destructive }
+  members:
+    path: /members
+    title: Members
+    entity: Member
+    content: { view: member_table }
+    actions:
+      new_member: { kind: form, form: new_member, label: New member, icon: user-plus }
+  member_detail:
+    path: "/members/{id}"
+    title: Member
+    entity: Member
+    content: { view: member_detail }
+  amenities:
+    path: /amenities
+    title: Amenities
+    entity: Amenity
+    content: { view: amenity_table }
+    actions:
+      new_amenity: { kind: form, form: new_amenity, label: New amenity, icon: plus }
+
+ui:
+  theme:
+    default_mode: system
+    mode_toggle: true
+
+  tokens:
+    color:
+      primary: { $value: "#0f766e", $modes: { dark: "#2dd4bf" } }
+      status:
+        requested: { $value: "#d97706" }
+        confirmed: { $value: "#16a34a" }
+        cancelled: { $value: "#64748b" }
+    spacing:
+      4: { $value: 1rem }
+      6: { $value: 1.5rem }
+    size:
+      sidebar: { $value: 15rem }
+    breakpoint:
+      sm: { $value: 640px }
+      md: { $value: 768px }
+      lg: { $value: 1024px }
+    motion: { $value: reduced }
+
+  badges:
+    booking_status:
+      field: Booking.status
+      values:
+        requested: { label: Requested, color: "{color.status.requested}", icon: clock }
+        confirmed: { label: Confirmed, color: "{color.status.confirmed}", icon: circle-check }
+        cancelled: { label: Cancelled, color: "{color.status.cancelled}", icon: circle-x }
+
+  layouts:
+    app_shell:
+      sidebar:
+        navigation: main
+        title: Room Booking
+        icon: door-open
+        width: "{size.sidebar}"
+      topbar:
+        breadcrumbs: true
+        mode_toggle: true
+      content: { padding: "{spacing.6}" }
+      responsive:
+        md:
+          sidebar: { mode: drawer }
+          content: { padding: "{spacing.4}" }
+
+  navigation:
+    main:
+      items:
+        dashboard: { page: dashboard, icon: layout-dashboard }
+        bookings: { page: bookings, icon: calendar-days }
+        rooms: { page: rooms, icon: door-open }
+        members: { page: members, icon: users }
+        amenities: { page: amenities, icon: projector }
+
+  views:
+    booking_board:
+      kind: board
+      entity: Booking
+      title: Bookings
+      group_by: status
+      move: update_booking
+      responsive: { below: md, layout: stack }
+      card:
+        title: title
+        subtitle: room
+        fields: [starts_at, organizer]
+      sort: { field: starts_at }
+      row_actions:
+        open: { kind: navigate, page: booking_detail, label: Open }
+    upcoming_bookings:
+      kind: table
+      entity: Booking
+      columns:
+        title: { link: booking_detail }
+        room: {}
+        starts_at: { format: datetime }
+        status: { badge: booking_status }
+      sort: { field: starts_at }
+
+  forms:
+    new_booking:
+      entity: Booking
+      operation: create_booking
+      title: New booking
+      fields:
+        title: { placeholder: Weekly planning }
+        room: {}
+        organizer: {}
+        starts_at: {}
+        ends_at: {}
+        attendees: {}
+      rules:
+        ends_after_start:
+          kind: compare
+          field: ends_at
+          op: gt
+          other: starts_at
+          message: The booking must end after it starts.
+
+    cancel_booking:
+      entity: Booking
+      operation: cancel_booking
+      title: Cancel the booking
+      submit_label: Cancel booking
+      fields:
+        reason: { widget: textarea, rows: 3, placeholder: The room is not free. }
+
+  dashboards:
+    overview:
+      title: Overview
+      widgets:
+        rooms:
+          kind: stat
+          label: Bookable rooms
+          entity: Room
+          filter: { bookable: true }
+          icon: door-open
+          link: rooms
+        requested:
+          kind: stat
+          label: Requested bookings
+          entity: Booking
+          filter: { status: requested }
+          icon: clock
+          link: bookings
+        by_status:
+          kind: chart
+          label: Bookings by status
+          chart: donut
+          entity: Booking
+          group_by: status
+          badge: booking_status
+          span: 2
+        upcoming:
+          kind: list
+          label: Upcoming bookings
+          view: upcoming_bookings
+          filter: { starts_at: { gte: $now }, status: { ne: cancelled } }
+          sort: { field: starts_at }
+          limit: 5
+          link: bookings
+          span: 4
+
+  defaults:
+    layout: app_shell
+    page_size: 20

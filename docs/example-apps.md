@@ -60,6 +60,11 @@ elements are open gaps until you write them: 8 for Next.js and React,
 its report shows the kinds `page` and `ui` as excluded. See
 [traces.md](traces.md) for the report format.
 
+The second example, `examples/room-booking/app.yaml`, works the same
+way. Replace `project-tracker` with `room-booking` in the commands. It
+uses the CRUD shorthand with the default views and forms, so its
+definition is short.
+
 Run `appgen generate` again to update an app after you change the
 definition. appgen does not change the extension files.
 
