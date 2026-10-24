@@ -73,6 +73,22 @@ and data in modules, for example the badge sets and the page titles.
 - The server actions of Next.js give their messages in the language of
   the request: the rules of the entities, the workflows, the sign-in,
   the access checks, and the errors of the data access.
+- The FastAPI app gives its messages in the language of the request.
+  `app/core/i18n.py` holds the locales and the translations of the
+  definition. `LanguageMiddleware` takes the first language of
+  `Accept-Language` that the API has, as the Next.js server does, else
+  the default language, and keeps it in a context variable for
+  `t(text, **values)`. Each response has the locale in
+  `Content-Language`, and `Vary: Accept-Language`. The problem details
+  translate their title and their detail: the errors of the input, the
+  rules of the entities, the workflows, the sign-in, the access checks,
+  the data access, the sort keys, and the rate limit. The message of
+  each error of the input is a message of the form fields of the front
+  ends, for example `Enter a value.`, else `The value is not valid.`,
+  and the `type` of the error keeps its kind. `docs/dsl.md` lists the
+  messages.
+- With `x-react-data: api`, the API client of the React app sends the
+  locale of the selected language in `Accept-Language`.
 - Each language has a locale, a language tag (BCP 47) in
   `translations.languages.<code>.locale`. The default is the code. The
   validator reports a locale that is not a language tag
@@ -112,4 +128,11 @@ and data in modules, for example the badge sets and the page titles.
   async context of the render (`enterWith`). The translation test sends
   requests in two languages at the same time to show that each page
   keeps its language.
+- The translations of the FastAPI app hold each text of each language,
+  also the texts of the UI, so that an extension file can translate its
+  own messages with `t`.
+- With translations, the messages of the input errors of the FastAPI
+  app are not the messages of Pydantic, also in the default language.
+- The generated tests of the FastAPI app check the selection of the
+  language, and one message in two languages.
 - An app without translations has the same code as before.

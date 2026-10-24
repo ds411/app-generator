@@ -1,6 +1,12 @@
 {{ trace_header("app") }}
 // The HTTP client of the FastAPI app (`x-react-data: api`). The build
 // variable VITE_API_URL sets the URL of the API.
+{% if i18n %}
+// The requests ask for the selected language (`Accept-Language`), so the
+// messages of the API are in it.
+
+import { getLocale } from "@/shared/lib/i18n";
+{% endif %}
 
 /** The URL of the API, without a slash at the end. */
 export const API_URL: string = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -43,6 +49,9 @@ export class ApiError extends Error {
 /** Send a request to the API, and return the JSON body of the response. */
 export async function apiRequest(method: string, path: string, body?: unknown): Promise<unknown> {
   const headers: Record<string, string> = { Accept: "application/json" };
+{% if i18n %}
+  headers["Accept-Language"] = getLocale();
+{% endif %}
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }

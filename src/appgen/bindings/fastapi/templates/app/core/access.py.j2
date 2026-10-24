@@ -19,6 +19,9 @@ from fastapi import Request
 
 from app.core.auth import CurrentUser
 from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 {% if rules %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
 {% endif %}
@@ -53,7 +56,7 @@ async def check_access(request: Request, user: CurrentUser) -> None:
     """Give a 403 error if the role of the signed-in user may not call the operation."""
     operation = getattr(request.scope.get("route"), "operation_id", None)
     if operation is None or not allows(user.{{ role.attr }}, str(operation)):
-        raise ProblemError(403, "Your role may not do this operation.")
+        raise ProblemError(403, {{ py.message("Your role may not do this operation.") }})
 {% if rules %}
 
 

@@ -1,0 +1,126 @@
+{{ trace_header(i18n.element_id) }}
+"""The messages of the API in more than one language (ADR 0010).
+
+The language of a request is the first language of its `Accept-Language`
+header that the API has, else the default language. `t` gives the
+translation of a text in the language of the request, or the text
+itself. Each response has the locale of the language in the header
+`Content-Language`.
+"""
+
+import re
+from contextvars import ContextVar
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+LOCALES: dict[str, str] = {
+{% for language in i18n.languages %}
+    {{ trace(language.element_id) }}
+    {{ py.string(language.code) }}: {{ py.string(language.locale) }},
+{% endfor %}
+}
+"""The locale (BCP 47) of each language. The first language is the default language."""
+DEFAULT = {{ py.string(i18n.default) }}
+MESSAGES: dict[str, dict[str, str]] = {
+{% for language in i18n.languages if language.text %}
+    {{ trace(language.element_id) }}
+    {{ py.string(language.code) }}: {
+{% for key, value in language.text.items() %}
+        {{ py.string(key) }}: {{ py.string(value) }},
+{% endfor %}
+    },
+{% endfor %}
+}
+"""The translations of each language: the key is a text of the default language."""
+
+_TAGS = {code: {code.lower().replace("_", "-"), locale.lower()} for code, locale in LOCALES.items()}
+_VALUE = re.compile(r"\{(\w+)\}")
+_language: ContextVar[str] = ContextVar("language", default=DEFAULT)
+
+
+def language() -> str:
+    """Return the language of the request."""
+    return _language.get()
+
+
+def t(text: str, **values: object) -> str:
+    """Return the translation of a text in the language of the request, with its values.
+
+    A value in braces, for example `{field}` in `The {field} cannot change.`,
+    gets the argument of the same name.
+    """
+    translation = MESSAGES.get(_language.get(), {}).get(text, text)
+    if not values:
+        return translation
+    return _VALUE.sub(lambda m: str(values[m[1]]) if m[1] in values else m[0], translation)
+
+
+def match_language(accept_language: str | None) -> str:
+    """Return the language of an `Accept-Language` header, or the default language.
+
+    The ranges go in the order of their weight (`q`). A range agrees with
+    a language by its code or its locale, else by the primary language
+    (`de-CH` gives `de`). `*` gives the default language.
+    """
+    ranges: list[tuple[float, int, str]] = []
+    for index, part in enumerate((accept_language or "").split(",")):
+        tag, *params = (item.strip() for item in part.split(";"))
+        weight = 1.0
+        for param in params:
+            if param.startswith("q="):
+                try:
+                    weight = float(param[2:])
+                except ValueError:
+                    weight = 0.0
+        if tag and weight > 0:
+            ranges.append((-weight, index, tag.lower()))
+    for _, _, tag in sorted(ranges):
+        if tag == "*":
+            return DEFAULT
+        primary = tag.split("-")[0]
+        exact = (code for code, tags in _TAGS.items() if tag in tags)
+        near = (
+            code
+            for code, tags in _TAGS.items()
+            if any(item.split("-")[0] == primary for item in tags)
+        )
+        found = next(exact, None) or next(near, None)
+        if found is not None:
+            return found
+    return DEFAULT
+
+
+class LanguageMiddleware:
+    """Select the language of each request, and give the response its `Content-Language`."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        header = next(
+            (
+                value.decode("latin-1")
+                for name, value in scope["headers"]
+                if name == b"accept-language"
+            ),
+            None,
+        )
+        selected = match_language(header)
+        language_headers = [
+            (b"content-language", LOCALES[selected].encode()),
+            (b"vary", b"Accept-Language"),
+        ]
+
+        async def send_with_language(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message["headers"] = [*message.get("headers", []), *language_headers]
+            await send(message)
+
+        token = _language.set(selected)
+        try:
+            await self.app(scope, receive, send_with_language)
+        finally:
+            _language.reset(token)

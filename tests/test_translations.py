@@ -250,7 +250,7 @@ def test_the_docs_list_the_fixed_texts_of_the_templates() -> None:
     }
     docs = (Path(__file__).parent.parent / "docs" / "dsl.md").read_text(encoding="utf-8")
     section = docs[docs.index("### Fixed texts") :]
-    section = section[: section.index("\n## ")]
+    section = section[: section.index("\n### Messages of the FastAPI app")]
     listed = set(re.findall(r"`([^`]+)`", section.split("\n\n", 2)[2]))
     assert sorted(templates - listed) == []
     assert sorted(listed - templates) == []

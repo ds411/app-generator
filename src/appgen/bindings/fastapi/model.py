@@ -14,11 +14,19 @@ from dataclasses import field as dataclass_field
 from decimal import Decimal
 from typing import Any, cast
 
+from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import mocks_imports, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
-from appgen.bindings.fastapi.pysource import call, from_import, import_block
+from appgen.bindings.fastapi.pysource import (
+    call,
+    from_import,
+    import_block,
+    raise_problem,
+    string,
+)
 from appgen.bindings.fastapi.queries import PyListQuery, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
+from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.expressions import (
     Binary,
     Call,
@@ -375,6 +383,8 @@ class PyRule:
     end: str = ""
     scope: list[str] = dataclass_field(default_factory=list[str])
     """no_overlap: the attributes of the scope fields and foreign keys."""
+    translated: bool = False
+    """True if the app has translations: the message goes through `t` (ADR 0010)."""
 
     def unique_constraint(self, prefix: str) -> str:
         """Return the `UniqueConstraint` of a unique rule. The migration uses `prefix="sa."`."""
@@ -383,7 +393,6 @@ class PyRule:
 
     def check_lines(self) -> list[str]:
         """Return the statements of `check_rules` that check a compare or a `no_overlap` rule."""
-        message = json.dumps(self.message)
         if self.kind == "compare":
             test = f'not compare(record.{self.field}, "{self.op}", record.{self.other})'
             status = 422
@@ -391,7 +400,10 @@ class PyRule:
             scope = "[" + ", ".join(f'"{s}"' for s in self.scope) + "]"
             test = f'await overlaps(session, record, "{self.start}", "{self.end}", {scope})'
             status = 409
-        return [f"if {test}:", f"    raise ProblemError({status}, {message})"]
+        statement = raise_problem(status, self.message, {}, indent=8, translated=self.translated)
+        first, *rest = statement.splitlines()
+        # The template indents each line by 4 spaces.
+        return [f"if {test}:", f"    {first}", *(line[4:] for line in rest)]
 
 
 @dataclass(slots=True)
@@ -617,6 +629,8 @@ class PyEntity:
     """The fields of the sign-up form, if the entity holds the users and `auth.sign_up` is set."""
     owner: PyRelation | None = None
     """The relation to the user entity of the owner rules of the entity, if a role has one."""
+    translated: bool = False
+    """True if the app has translations: the messages go through `t` (ADR 0010)."""
 
     @property
     def guard_module(self) -> str:
@@ -733,6 +747,8 @@ class PyEntity:
             lines.add("from app.core.workflows import check_transition")
         if self.owner is not None:
             lines.add("from sqlalchemy import Select")
+        if self.translated:
+            lines.add("from app.core.i18n import t")
         checks = {r.kind for r in self.check_rules}
         if checks:
             names = {"compare"} if "compare" in checks else set[str]()
@@ -970,6 +986,8 @@ class PyApp:
     deploy: tuple[str, ...] = ("kubernetes",)
     """The deployment targets, each with its folder `deploy/<target>/`."""
     providers: list[PyProvider] = field(default_factory=list[PyProvider])
+    translated: bool = False
+    """True if the app has translations: the messages go through `t` (ADR 0010)."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1009,6 +1027,25 @@ class PyApp:
     def call(self, prefix: str, func: str, args: list[str], indent: int = 4) -> str:
         """Return a call on one line if it fits, else with one argument on each line."""
         return call(prefix, func, args, indent)
+
+    def string(self, value: str) -> str:
+        """Return a text as a Python string literal, with the quotes of the Ruff formatter."""
+        return string(value)
+
+    def message(self, text: str) -> str:
+        """Return a message without values: a call of `t` with translations, else a literal."""
+        return f"t({string(text)})" if self.translated else string(text)
+
+    def problem(self, status: int, text: str, indent: int, suffix: str = "", **values: str) -> str:
+        """Return `raise ProblemError(<status>, <message>)`: a call of `t` with translations.
+
+        The values are Python expressions, for example `id="id"`. The
+        suffix follows the raise, for example ` from error`. The result has
+        no indent on its first line.
+        """
+        return raise_problem(
+            status, text, values, indent=indent, translated=self.translated, suffix=suffix
+        )
 
     def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
@@ -1073,6 +1110,10 @@ def python_app(definition: AppDefinition) -> PyApp:
     for entity in entities.values():
         if definition.access is not None:
             entity.guard = "check_access"
+        if definition.translations is not None:
+            entity.translated = True
+            for rule in entity.rules:
+                rule.translated = True
         _place_routes(entity)
         _check_names(entity)
         entity.query = list_query(definition, entity)
@@ -1086,6 +1127,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         redis=definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis",
         deploy=_deploy_targets(definition.app.extensions.get(DEPLOY_KEY)),
         providers=_providers(definition, entities),
+        translated=definition.translations is not None,
     )
 
 
@@ -1778,10 +1820,17 @@ def _check_names(entity: PyEntity) -> None:
 
 
 def binding_context(definition: AppDefinition) -> dict[str, Any]:
-    """Return the values that the binding adds to the context of all templates."""
+    """Return the values that the binding adds to the context of all templates.
+
+    `i18n` is the plan of the languages (ADR 0010), or None without
+    translations. `i18n_test` has the values of the test of the languages.
+    """
     apis = python_apis(definition)
+    plan = i18n_plan(definition)
     return {
         "py": python_app(definition),
         "py_apis": apis,
         "py_api_mocks_imports": mocks_imports(apis),
+        "i18n": plan,
+        "i18n_test": language_test(plan) if plan is not None else None,
     }

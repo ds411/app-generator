@@ -24,5 +24,9 @@ async def validate(session: AsyncSession, record: {{ e.name }}, *, created: bool
     The record has the values of the request. `created` is true for a
     new record. To reject the record, raise
     `app.core.errors.ProblemError(422, "<the reason>")`.
+{% if i18n %}
+    Translate the reason with `app.core.i18n.t("<the reason>")`, so that it
+    is in the language of the request.
+{% endif %}
     """
     # Add the validation rules of the entity {{ e.name }} here, if it has some.

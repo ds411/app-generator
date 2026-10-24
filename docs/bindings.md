@@ -291,6 +291,10 @@ app:
   logic, so the React app has no extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request
   sends the bearer token.
+- With `translations`, each request sends the locale of the selected
+  language in `Accept-Language`, so the messages of the API are in that
+  language. `scripts/check-react-api.sh` opens the page in the second
+  language, and checks the header of each request.
 - The FastAPI app must allow the origin of the React app (`CORS_ORIGINS`).
 
 ## Extension files

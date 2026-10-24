@@ -31,6 +31,9 @@ from redis.exceptions import RedisError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.errors import PROBLEM_JSON, Problem
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
 
 WINDOW_SECONDS = 60
 EXEMPT_PATHS = frozenset({"/health"})
@@ -140,9 +143,15 @@ class RateLimitMiddleware:
                 await self.app(scope, receive, send)
                 return
             problem = Problem(
+{% if i18n %}
+                title=t("Service Unavailable"),
+                status=503,
+                detail=t("The store of the rate limit is not available. Try again later."),
+{% else %}
                 title="Service Unavailable",
                 status=503,
                 detail="The store of the rate limit is not available. Try again later.",
+{% endif %}
                 instance=scope["path"],
             )
             await send_problem(send, problem, [])
@@ -165,9 +174,17 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send_with_headers)
             return
         problem = Problem(
+{% if i18n %}
+            title=t("Too Many Requests"),
+            status=429,
+            detail=t(
+                "Send not more than {limit} requests in each minute.", limit=self.limiter.limit
+            ),
+{% else %}
             title="Too Many Requests",
             status=429,
             detail=f"Send not more than {self.limiter.limit} requests in each minute.",
+{% endif %}
             instance=scope["path"],
         )
 {% if py.redis %}
