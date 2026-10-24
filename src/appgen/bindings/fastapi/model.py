@@ -758,7 +758,8 @@ class PyEntity:
         }
         owner = op is not None and op.owner_action is not None
         lines = {
-            "from typing import Annotated",
+            # Without sort keys, `SORTABLE` is an empty dict with a type.
+            "from typing import Annotated" + ("" if query.sort_keys else ", Any"),
             "from fastapi import APIRouter, Depends, Query"
             if owner
             else "from fastapi import APIRouter, Query",
@@ -933,6 +934,26 @@ class PyEntity:
         return import_block(lines)
 
 
+@dataclass(frozen=True, slots=True)
+class PyProvider:
+    """An OpenID Connect provider of the sign-in (ADR 0020), with the names of its settings."""
+
+    name: str
+    id: str
+    title: str
+    issuer: str
+    client_id_env: str
+    client_secret_env: str
+    scope: str
+    """The scopes, separated by spaces."""
+    username_claim: str
+    create_users: bool
+    default_role: str | None
+    """With `create_users` and `access`: the role of a new user."""
+    claims: list[tuple[PyField, str]]
+    """With `create_users`: the fields of a new user, and the claims that give their values."""
+
+
 @dataclass(slots=True)
 class PyApp:
     """The whole app definition in the terms of the binding."""
@@ -948,6 +969,7 @@ class PyApp:
     """True if the rate limit can count in Redis (`RATE_LIMIT_STORE_URL`), for all replicas."""
     deploy: tuple[str, ...] = ("kubernetes",)
     """The deployment targets, each with its folder `deploy/<target>/`."""
+    providers: list[PyProvider] = field(default_factory=list[PyProvider])
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1063,7 +1085,40 @@ def python_app(definition: AppDefinition) -> PyApp:
         operations=operations,
         redis=definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis",
         deploy=_deploy_targets(definition.app.extensions.get(DEPLOY_KEY)),
+        providers=_providers(definition, entities),
     )
+
+
+def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list[PyProvider]:
+    """Return the OpenID Connect providers of the sign-in, in source order."""
+    auth = definition.auth
+    if auth is None:
+        return []
+    users = definition.entities[auth.user_entity]
+    fields = {f.name: f for f in entities[auth.user_entity].fields}
+    role = definition.access.role_field if definition.access is not None else None
+    found: list[PyProvider] = []
+    for name, provider in auth.providers.items():
+        default_role = provider.default_role
+        if default_role is None and role is not None and provider.create_users:
+            value = users.fields[role].default
+            default_role = str(value) if value is not None else None
+        found.append(
+            PyProvider(
+                name=name,
+                id=provider.id,
+                title=provider.title or name.replace("_", " ").capitalize(),
+                issuer=provider.issuer,
+                client_id_env=provider.client_id_env,
+                client_secret_env=provider.client_secret_env,
+                scope=" ".join(provider.scopes),
+                username_claim=provider.username_claim,
+                create_users=provider.create_users,
+                default_role=default_role,
+                claims=[(fields[f], claim) for f, claim in provider.claims.items()],
+            )
+        )
+    return found
 
 
 def _owner_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:

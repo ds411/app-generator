@@ -918,7 +918,8 @@ ui:
 ## auth
 
 The optional `auth` section closes the apps: the users sign in with a
-user name and a password ([ADR 0011](https://github.com/ds411/app-generator/blob/main/docs/adr/0011-auth.md)).
+user name and a password ([ADR 0011](https://github.com/ds411/app-generator/blob/main/docs/adr/0011-auth.md)), or with an
+OpenID Connect provider ([ADR 0020](https://github.com/ds411/app-generator/blob/main/docs/adr/0020-providers.md)).
 
 ```yaml
 auth:
@@ -933,6 +934,15 @@ auth:
     default_role: member
   password_reset:
     token_minutes: 30
+  providers:
+    company:
+      title: Company account
+      issuer: https://login.example.com
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      create_users: true
+      default_role: member
+      claims: { name: name }
 ```
 
 - `user_entity` is the entity of the users. `username_field` is a
@@ -954,6 +964,24 @@ auth:
   is off by default. `token_minutes` (5 to 1440, default 60) is the
   time that a link stays valid. A link is valid only one time. The
   delivery of the message (for example an email) is a generation gap.
+- `providers` are OpenID Connect providers that the users can sign in
+  with, for example the sign-in of the company
+  ([ADR 0020](https://github.com/ds411/app-generator/blob/main/docs/adr/0020-providers.md)). The name of a provider is a
+  snake case name. `issuer` is the `https` URL of the provider: the apps
+  read its discovery document. `client_id_env` and `client_secret_env`
+  name the environment variables of the client of the app at the
+  provider. `scopes` (default `[openid, email, profile]`) must include
+  `openid`. The claim `username_claim` (default `email`) of the ID
+  token gives the user name. With `email`, the provider must not say
+  that the email address is not verified. Without `create_users`, the
+  user must exist. With `create_users: true`, the first sign-in makes a
+  new user: `claims` gives the other fields of the new user from claims
+  (field name: claim name), and it must give each required field without
+  a default. With `access`, `default_role` is the role of a new user.
+  `title` (default: the name) is the text on the sign-in button.
+- `password: false` turns off the sign-in with a password: the users
+  sign in only with `providers`. It needs a provider, and it cannot
+  have `sign_up` or `password_reset`.
 - No page can use the path `/sign-in`, `/sign-up` with a sign-up, or
   `/forgot-password` and `/reset-password` with a password reset: they
   are the pages of the front ends.
@@ -968,7 +996,18 @@ signed token, and gives 202 also for an unknown user name. `POST
 /auth/password-reset/confirm` sets the new password. A used or an ended
 token gives 400. The extension file `app/core/password_reset_ext.py`
 delivers the link: its stub writes the link to the log with
-`ENVIRONMENT=development`, and gives 501 in production. The Next.js app has the page `/sign-in` and a
+`ENVIRONMENT=development`, and gives 501 in production. With
+`providers`, `GET /auth/providers/<name>/start` sends the browser to the
+provider (the authorization code flow with PKCE), and `GET
+/auth/providers/<name>/callback` checks the ID token (the signature
+with the keys of the provider, the issuer, the audience, the end time,
+and the nonce) and gives a bearer token. With `?return_to=<page>` of a
+front end in `CORS_ORIGINS`, the callback sends the browser to the page
+with the token in the fragment of the URL. The setting
+`<NAME>_ISSUER` changes the issuer of a provider, for example for a
+test provider. With `password: false`, the app has no
+`POST /auth/sign-in`, no `PUT /auth/password`, no table of the password
+hashes, and no `app.cli`. The Next.js app has the page `/sign-in` and a
 session cookie, and its seed gives each user the password in
 `SEED_PASSWORD`. Both need `AUTH_SECRET`. The React app (mock data)
 accepts each mock user with the password `password`. Each front end has

@@ -3,6 +3,7 @@
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
 {% set sign_up = definition.auth.sign_up %}
 {% set reset = definition.auth.password_reset %}
+{% set password = definition.auth.password %}
 {% set access = definition.access %}
 {% if sign_up and access %}
 {% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
@@ -39,14 +40,17 @@ from app.core import auth
 from app.core.auth import Credential, make_reset_token, set_password
 from app.core.config import Settings
 from app.features.{{ u.slice }}.models import {{ u.name }}
-{% else %}
+{% elif password %}
 from app.core.auth import set_password
+{% else %}
+from app.core.auth import make_token
 {% endif %}
 {{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([u.snake ~ "_input"] if sign_up else [])) }}
 from tests.problems import assert_problem
 
 pytestmark = pytest.mark.anyio
 
+{% if password %}
 PASSWORD = "correct-horse-battery"
 
 
@@ -59,6 +63,13 @@ async def _sign_in(client: AsyncClient, session: AsyncSession) -> tuple[str, str
     )
     assert response.status_code == 200, response.text
     return str(user.id), response.json()["access_token"]
+{% else %}
+
+async def _sign_in(client: AsyncClient, session: AsyncSession) -> tuple[str, str]:
+    """Store a user, and return the user ID and a token. `tests/test_providers.py` signs in."""
+    user = await make_{{ u.snake }}(session)
+    return str(user.id), make_token(b"test-secret", user.id)
+{% endif %}
 
 
 async def test_a_user_signs_in_and_reads_their_record(
@@ -70,6 +81,7 @@ async def test_a_user_signs_in_and_reads_their_record(
 
     assert response.status_code == 200, response.text
     assert response.json()["id"] == user_id
+{% if password %}
 
 
 async def test_a_wrong_password_gives_401(
@@ -83,12 +95,14 @@ async def test_a_wrong_password_gives_401(
     )
 
     assert_problem(response, 401)
+{% endif %}
 
 
 async def test_a_token_that_is_not_valid_gives_401(anonymous_client: AsyncClient) -> None:
     response = await anonymous_client.get("/auth/me", headers={"Authorization": "Bearer abc.def"})
 
     assert_problem(response, 401)
+{% if password %}
 
 
 async def test_a_user_changes_their_password(
@@ -104,6 +118,7 @@ async def test_a_user_changes_their_password(
     )
 
     assert response.status_code == 204, response.text
+{% endif %}
 {% if ns.op %}
 
 
@@ -115,9 +130,8 @@ async def test_a_protected_endpoint_needs_a_signed_in_user(
 
     assert_problem(response, 401)
     _, token = await _sign_in(anonymous_client, session)
-    response = await anonymous_client.get(
-        "{{ ns.entity.path }}{{ ns.op.path }}", headers={"Authorization": f"Bearer {token}"}
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await anonymous_client.get("{{ ns.entity.path }}{{ ns.op.path }}", headers=headers)
     assert response.status_code == 200, response.text
 {% endif %}
 {% if sign_up %}

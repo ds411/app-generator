@@ -1,0 +1,402 @@
+{{ trace_header(*(py.providers | map(attribute="id") | list)) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set access = definition.access %}
+{% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
+{% set creates = py.providers | selectattr("create_users") | list %}
+"""The sign-in with OpenID Connect providers (ADR 0020).
+
+The flow is the authorization code flow with PKCE. `GET
+/auth/providers/<name>/start` sends the browser to the provider. The
+provider sends the browser back to `GET /auth/providers/<name>/callback`
+with a code. The app changes the code for an ID token at the provider,
+checks the token, and gives its own bearer token, as the sign-in with a
+password does. A signed cookie holds the state, the nonce, and the PKCE
+verifier of the flow between the two requests.
+
+With `return_to` (a page of a front end in `CORS_ORIGINS`), the callback
+sends the browser back to the page with the token in the fragment of the
+URL: `#access_token=...&token_type=bearer&expires_in=...`, or `#error=...`.
+Without `return_to`, the callback returns the token as JSON.
+"""
+
+import base64
+import hashlib
+import hmac
+import secrets
+import time
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Annotated, Any, Literal
+from urllib.parse import quote, urlencode, urlsplit
+
+import httpx
+import jwt
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel{{ ", ValidationError" if creates }}
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import Token, find_user, make_token, sign, signing_key, unsign
+from app.core.config import Settings
+{% if creates %}
+from app.core.db import SessionDep, commit
+{% else %}
+from app.core.db import SessionDep
+{% endif %}
+from app.core.errors import ProblemError, problem_responses
+{% if creates %}
+from app.features.{{ u.slice }} import repository
+{% endif %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+{% if creates %}
+from app.features.{{ u.slice }}.schemas import {{ u.name }}Create
+{% endif %}
+
+FLOW_SECONDS = 600
+"""The time that a user has for the sign-in at the provider."""
+ALGORITHMS = frozenset(
+    {"ES256", "ES384", "ES512", "EdDSA", "PS256", "PS384", "PS512", "RS256", "RS384", "RS512"}
+)
+"""The signature algorithms of the ID tokens that the app accepts: no symmetric algorithm."""
+LEEWAY_SECONDS = 60
+"""The difference of the clocks of the app and of a provider that the checks accept."""
+
+ProviderName = Literal[{{ py.providers | map(attribute="name") | map("tojson") | join(", ") }}]
+"""The names of the providers."""
+
+
+@dataclass(frozen=True, slots=True)
+class Provider:
+    """A provider of the definition, with the values of its settings."""
+
+    name: str
+    issuer: str
+    client_id: str
+    client_secret: str
+    scope: str
+    username_claim: str
+    create_users: bool = False
+    default_role: str | None = None
+    claims: tuple[tuple[str, str], ...] = ()
+    """The fields of a new user, and the claims that give their values."""
+
+
+def provider_of(settings: Settings, name: ProviderName) -> Provider:
+    """Return a provider with the values of its settings. Give 500 without a client ID."""
+    providers = {
+{% for p in py.providers %}
+        {{ trace(p.id) }}
+        "{{ p.name }}": Provider(
+            name="{{ p.name }}",
+            issuer=settings.{{ p.name }}_issuer,
+            client_id=settings.{{ p.name }}_client_id,
+            client_secret=settings.{{ p.name }}_client_secret,
+            scope={{ p.scope | tojson }},
+            username_claim={{ p.username_claim | tojson }},
+{% if p.create_users %}
+            create_users=True,
+{% if p.default_role and role %}
+            default_role="{{ p.default_role }}",
+{% endif %}
+{% if p.claims %}
+            claims=({% for f, claim in p.claims %}("{{ f.attr }}", {{ claim | tojson }}),{% if not loop.last %} {% endif %}{% endfor %}),
+{% endif %}
+{% endif %}
+        ),
+{% endfor %}
+    }
+    provider = providers[name]
+    if not provider.client_id or not provider.client_secret:
+        raise ProblemError(500, f"The server has no client ID or client secret for {name}.")
+    return provider
+
+
+class ProviderMetadata(BaseModel):
+    """The parts of the discovery document of a provider that the app uses."""
+
+    issuer: str
+    authorization_endpoint: str
+    token_endpoint: str
+    jwks_uri: str
+
+
+class TokenAnswer(BaseModel):
+    """The part of the answer of the token endpoint of a provider that the app uses."""
+
+    id_token: str
+
+
+async def provider_client() -> AsyncIterator[httpx.AsyncClient]:
+    """The HTTP client for the requests to the providers. The tests replace it."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        yield client
+
+
+ProviderClient = Annotated[httpx.AsyncClient, Depends(provider_client)]
+
+
+async def _get_json(client: httpx.AsyncClient, url: str) -> Any:
+    try:
+        response = await client.get(url, headers={"Accept": "application/json"})
+        response.raise_for_status()
+        return response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise ProblemError(502, f"The provider did not answer correctly: {url}") from error
+
+
+async def discover(client: httpx.AsyncClient, provider: Provider) -> ProviderMetadata:
+    """Return the discovery document of a provider. Its issuer must be the issuer of the settings."""
+    url = provider.issuer.rstrip("/") + "/.well-known/openid-configuration"
+    try:
+        metadata = ProviderMetadata.model_validate(await _get_json(client, url))
+    except ValueError as error:
+        raise ProblemError(502, "The discovery document of the provider is not valid.") from error
+    if metadata.issuer != provider.issuer:
+        raise ProblemError(502, "The discovery document of the provider has another issuer.")
+    return metadata
+
+
+async def _exchange(
+    client: httpx.AsyncClient,
+    provider: Provider,
+    metadata: ProviderMetadata,
+    code: str,
+    redirect_uri: str,
+    verifier: str,
+) -> str:
+    """Change the code of the callback for an ID token at the token endpoint of a provider."""
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": verifier,
+    }
+    # RFC 6749: the client ID and the secret of the basic scheme are URL encoded.
+    auth = (quote(provider.client_id, safe=""), quote(provider.client_secret, safe=""))
+    try:
+        response = await client.post(
+            metadata.token_endpoint, data=data, auth=auth, headers={"Accept": "application/json"}
+        )
+    except httpx.HTTPError as error:
+        raise ProblemError(502, "The token endpoint of the provider did not answer.") from error
+    if response.status_code in (400, 401):
+        raise ProblemError(401, "The provider did not accept the code. Start the sign-in again.")
+    try:
+        response.raise_for_status()
+        return TokenAnswer.model_validate(response.json()).id_token
+    except (httpx.HTTPError, ValueError) as error:
+        raise ProblemError(502, "The token endpoint of the provider gave no ID token.") from error
+
+
+async def check_id_token(
+    client: httpx.AsyncClient,
+    provider: Provider,
+    metadata: ProviderMetadata,
+    id_token: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Return the claims of a valid ID token, else give 401.
+
+    The signature must come from a key of the provider (its JWKS), and the
+    token must have the issuer, the audience (the client ID), a time that
+    has not ended, and the nonce of the flow.
+    """
+    try:
+        kid = jwt.get_unverified_header(id_token).get("kid")
+        keys = jwt.PyJWKSet.from_dict(await _get_json(client, metadata.jwks_uri)).keys
+        found = [k for k in keys if kid is None or k.key_id == kid]
+        if len(found) != 1 or found[0].algorithm_name not in ALGORITHMS:
+            raise ProblemError(401, "The ID token is not valid: the provider has no key for it.")
+        claims = jwt.decode(
+            id_token,
+            found[0].key,
+            algorithms=[found[0].algorithm_name],
+            audience=provider.client_id,
+            issuer=provider.issuer,
+            leeway=LEEWAY_SECONDS,
+            options={"require": ["aud", "exp", "iat", "iss", "nonce", "sub"]},
+        )
+    except jwt.PyJWTError as error:
+        raise ProblemError(401, f"The ID token is not valid: {error}") from error
+    if not hmac.compare_digest(str(claims["nonce"]), nonce):
+        raise ProblemError(401, "The ID token is not valid: the nonce is not the one of the flow.")
+    return claims
+
+
+async def user_of(
+    session: AsyncSession,
+    provider: Provider,
+    claims: dict[str, Any],
+) -> {{ u.name }}:
+    """Return the user of the claims of an ID token. With `create_users`, make a new user."""
+    username = claims.get(provider.username_claim)
+    if not isinstance(username, str) or not username:
+        raise ProblemError(401, f"The ID token has no claim '{provider.username_claim}'.")
+    if provider.username_claim == "email" and claims.get("email_verified") in (False, "false"):
+        raise ProblemError(401, "The provider did not verify the email address.")
+    user = await find_user(session, username)
+    if user is not None:
+        return user
+    if not provider.create_users:
+        raise ProblemError(403, f"No user has the user name {username}. Ask an administrator.")
+{% if creates %}
+    values: dict[str, Any] = {attr: claims.get(claim) for attr, claim in provider.claims}
+    values["{{ username.attr }}"] = username
+{% if role %}
+    if provider.default_role is not None:
+        values["{{ role.attr }}"] = provider.default_role
+{% endif %}
+    try:
+        data = {{ u.name }}Create.model_validate(values)
+    except ValidationError as error:
+        raise ProblemError(401, "The claims of the provider do not give a valid user.") from error
+    user = await repository.add(session, data)
+    await commit(session)
+    return user
+{% endif %}
+
+
+def callback_url(request: Request, name: str) -> str:
+    """Return the URL that the provider sends the browser back to."""
+    public_url: str = request.app.state.settings.public_url
+    if public_url:
+        return f"{public_url.rstrip('/')}/auth/providers/{name}/callback"
+    return str(request.url_for("finish_provider_sign_in", name=name))
+
+
+def _cookie(name: str) -> str:
+    return f"provider_flow_{name}"
+
+
+def _check_return_to(request: Request, return_to: str) -> None:
+    origins: list[str] = request.app.state.settings.cors_origins
+    parts = urlsplit(return_to)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if parts.scheme not in ("http", "https") or origin not in {o.rstrip("/") for o in origins}:
+        raise ProblemError(422, "The origin of return_to is not in CORS_ORIGINS.")
+
+
+def _with_fragment(url: str, values: dict[str, Any]) -> str:
+    return f"{url.partition('#')[0]}#{urlencode(values)}"
+
+
+router = APIRouter(prefix="/auth/providers", tags=["Auth"])
+
+
+@router.get(
+    "/{name}/start",
+    status_code=302,
+    response_class=RedirectResponse,
+    responses=problem_responses(422, 500, 502),
+    operation_id="start_provider_sign_in",
+)
+async def start_provider_sign_in(
+    name: ProviderName,
+    request: Request,
+    client: ProviderClient,
+    return_to: Annotated[str | None, Query(max_length=2000)] = None,
+) -> RedirectResponse:
+    """Send the browser to the sign-in page of a provider."""
+    provider = provider_of(request.app.state.settings, name)
+    if return_to is not None:
+        _check_return_to(request, return_to)
+    metadata = await discover(client, provider)
+    state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(3))
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+    redirect_uri = callback_url(request, name)
+    query = {
+        "response_type": "code",
+        "client_id": provider.client_id,
+        "redirect_uri": redirect_uri,
+        "scope": provider.scope,
+        "state": state,
+        "nonce": nonce,
+        "code_challenge": challenge.rstrip(b"=").decode(),
+        "code_challenge_method": "S256",
+    }
+    separator = "&" if "?" in metadata.authorization_endpoint else "?"
+    response = RedirectResponse(
+        f"{metadata.authorization_endpoint}{separator}{urlencode(query)}", status_code=302
+    )
+    flow = {
+        "state": state,
+        "nonce": nonce,
+        "verifier": verifier,
+        "return_to": return_to,
+        "exp": int(time.time()) + FLOW_SECONDS,
+    }
+    response.set_cookie(
+        _cookie(name),
+        sign(signing_key(request), f"provider-flow.{name}", flow),
+        max_age=FLOW_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=redirect_uri.startswith("https://"),
+    )
+    return response
+
+
+async def _sign_in(
+    request: Request,
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    name: ProviderName,
+    flow: dict[str, Any],
+    code: str | None,
+    state: str | None,
+    error: str | None,
+) -> Token:
+    if error is not None:
+        raise ProblemError(401, f"The provider gave the error '{error}'.")
+    if code is None or state is None or not hmac.compare_digest(state, str(flow["state"])):
+        raise ProblemError(400, "The state of the callback is not correct. Sign in again.")
+    provider = provider_of(request.app.state.settings, name)
+    metadata = await discover(client, provider)
+    redirect_uri = callback_url(request, name)
+    verifier = str(flow["verifier"])
+    id_token = await _exchange(client, provider, metadata, code, redirect_uri, verifier)
+    claims = await check_id_token(client, provider, metadata, id_token, str(flow["nonce"]))
+    user = await user_of(session, provider, claims)
+    return Token(access_token=make_token(signing_key(request), user.id))
+
+
+@router.get(
+    "/{name}/callback",
+    response_model=Token,
+    responses={
+        303: {"description": "With return_to: the page, with the token or the error."},
+        **problem_responses(400, 401, 403, 500, 502),
+    },
+    operation_id="finish_provider_sign_in",
+)
+async def finish_provider_sign_in(
+    name: ProviderName,
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    client: ProviderClient,
+    code: Annotated[str | None, Query(max_length=2000)] = None,
+    state: Annotated[str | None, Query(max_length=200)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+) -> Token | RedirectResponse:
+    """Check the answer of a provider, and give a token for the user."""
+    cookie = request.cookies.get(_cookie(name), "")
+    flow = unsign(signing_key(request), f"provider-flow.{name}", cookie)
+    if flow is None:
+        raise ProblemError(400, "The sign-in has no valid flow. Sign in again.")
+    return_to: str | None = flow.get("return_to")
+    try:
+        token = await _sign_in(request, session, client, name, flow, code, state, error)
+    except ProblemError as problem:
+        if return_to is None:
+            raise
+        target = _with_fragment(return_to, {"error": problem.detail or "The sign-in failed."})
+    else:
+        if return_to is None:
+            response.delete_cookie(_cookie(name))
+            return token
+        target = _with_fragment(return_to, token.model_dump())
+    redirect = RedirectResponse(target, status_code=303)
+    redirect.delete_cookie(_cookie(name))
+    return redirect

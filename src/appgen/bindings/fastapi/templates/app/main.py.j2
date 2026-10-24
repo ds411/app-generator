@@ -15,6 +15,9 @@ from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
 from app.core.logging import RequestLogMiddleware, configure_logging
+{% if py.providers %}
+from app.core.providers import router as providers_router
+{% endif %}
 {% if py.redis %}
 from app.core.rate_limit import Limiter, RateLimiter, RateLimitMiddleware, RedisRateLimiter
 {% else %}
@@ -81,6 +84,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% if definition.auth %}
     {{ trace(definition.auth.id) }}
     app.include_router(auth_router)
+{% endif %}
+{% for p in py.providers %}
+    {{ trace(p.id) }}
+{% endfor %}
+{% if py.providers %}
+    app.include_router(providers_router)
 {% endif %}
 {% for e in py.entity_order() %}
     {{ trace(e.id) }}

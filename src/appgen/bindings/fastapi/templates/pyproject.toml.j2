@@ -10,10 +10,13 @@ dependencies = [
     "alembic>=1.20",
     "asyncpg>=0.32",
     "fastapi[standard]>=0.161,<0.162",
-{% if py_apis %}
+{% if py_apis or py.providers %}
     "httpx>=0.28",
 {% endif %}
     "pydantic-settings>=2.16",
+{% if py.providers %}
+    "pyjwt[crypto]>=2.15",
+{% endif %}
 {% if py.redis %}
     "redis>=8.0",
 {% endif %}

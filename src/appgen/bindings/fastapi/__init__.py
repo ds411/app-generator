@@ -95,7 +95,16 @@ BINDING = Binding(
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
-        Output(template="app/cli.py.j2", path="app/cli.py", when="definition.auth"),
+        Output(
+            template="app/cli.py.j2",
+            path="app/cli.py",
+            when="definition.auth and definition.auth.password",
+        ),
+        Output(
+            template="app/core/providers.py.j2",
+            path="app/core/providers.py",
+            when="py.providers",
+        ),
         Output(
             template="app/core/password_reset_ext.py.j2",
             path="app/core/password_reset_ext.py",
@@ -111,6 +120,11 @@ BINDING = Binding(
             when="definition.access",
         ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
+        Output(
+            template="tests/test_providers.py.j2",
+            path="tests/test_providers.py",
+            when="py.providers",
+        ),
         Output(
             template="app/core/workflows.py.j2",
             path="app/core/workflows.py",
@@ -256,7 +270,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "access", "role", "record_rule"}
+        | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
         | {"api", "api_operation"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),

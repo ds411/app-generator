@@ -245,9 +245,13 @@ git config core.hooksPath .githooks
   the output. It also starts two processes of the app with Redis, and
   checks that they share the rate limit, and it validates the
   deployment files of each target against their schemas (it downloads
-  the schemas once). Then it generates the room booking example (sign-in,
-  sign-up, and roles), and runs Ruff, pyright, the generated tests, and
-  `appgen check` on it. It needs Docker. Run it by hand with
+  the schemas once). Then it generates the room booking example
+  (sign-in, sign-up, roles, and a provider) and
+  `tests/fixtures/provider-sign-in.yaml` (only providers), and runs
+  Ruff, pyright, the generated tests, and `appgen check` on them. A
+  browser signs in to both apps through the mock OpenID Connect provider
+  `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). It needs
+  Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
 - When a push changes the generator core, the Next.js binding, or the

@@ -1,6 +1,5 @@
 {{ trace_header(definition.access.id) }}
 {% set u = py.entity(definition.auth.user_entity) %}
-{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
 {% set role_field = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set roles = definition.access.roles %}
 {% set ns = namespace(case=none) %}
@@ -41,7 +40,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access import allows
-from app.core.auth import set_password
+from app.core.auth import make_token
 {% set factories = [] %}
 {% if ns.case %}
 {% set e, op, deny, allow = ns.case %}
@@ -53,13 +52,11 @@ from app.core.auth import set_password
 {% if factories %}
 {{ py.from_import("tests.factories", factories | unique | list) }}
 {% endif %}
-{% if oc.rule %}
+{% if oc.rule and ((reads and "read" in ops) or "update" in ops or "custom" in ops or "delete" in ops) %}
 from tests.problems import assert_problem
 {% endif %}
 
 pytestmark = pytest.mark.anyio
-
-PASSWORD = "correct-horse-battery"
 
 
 def test_each_role_has_its_operations() -> None:
@@ -72,15 +69,10 @@ def test_each_role_has_its_operations() -> None:
 {% if ns.case %}
 
 
-async def _token(client: AsyncClient, session: AsyncSession, role: str) -> str:
-    """Store a user with a role and a password, sign in, and return the token."""
+async def _token(session: AsyncSession, role: str) -> str:
+    """Store a user with a role, and return a token of the user."""
     user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
-    await set_password(session, user, PASSWORD)
-    response = await client.post(
-        "/auth/sign-in", json={"username": user.{{ username.attr }}, "password": PASSWORD}
-    )
-    assert response.status_code == 200, response.text
-    return response.json()["access_token"]
+    return make_token(b"test-secret", user.id)
 
 
 {{ trace(op.id) }}
@@ -88,7 +80,7 @@ async def test_a_role_calls_only_its_operations(
     anonymous_client: AsyncClient, session: AsyncSession
 ) -> None:
     for role, status in (("{{ deny }}", 403), ("{{ allow }}", {{ op.status }})):
-        headers = {"Authorization": f"Bearer {await _token(anonymous_client, session, role)}"}
+        headers = {"Authorization": f"Bearer {await _token(session, role)}"}
 {% if op.kind == "create" %}
         payload = await {{ e.snake }}_input(session)
         response = await anonymous_client.post("{{ e.path }}{{ op.path }}", json=payload, headers=headers)
@@ -103,39 +95,39 @@ async def test_a_role_calls_only_its_operations(
 {% set fk = e.owner.fk_attr %}
 
 
-async def _headers_of(
-    client: AsyncClient,
-    session: AsyncSession,
-    role: str,
-) -> tuple[str, dict[str, str]]:
-    """Store a user with a role and a password, sign in, and return the user ID and the headers."""
+async def _headers_of(session: AsyncSession, role: str) -> tuple[str, dict[str, str]]:
+    """Store a user with a role, and return the user ID and the headers with a token."""
     user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
-    await set_password(session, user, PASSWORD)
-    response = await client.post(
-        "/auth/sign-in", json={"username": user.{{ username.attr }}, "password": PASSWORD}
-    )
-    assert response.status_code == 200, response.text
-    return str(user.id), {"Authorization": f"Bearer {response.json()['access_token']}"}
+    return str(user.id), {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
 
 
 {{ trace(oc.rule.id) }}
 async def test_an_owner_rule_limits_the_role_{{ oc.role }}_to_its_{{ e.slice }}(
     anonymous_client: AsyncClient, session: AsyncSession
 ) -> None:
-    user_id, headers = await _headers_of(anonymous_client, session, "{{ oc.role }}")
-    other_id, _ = await _headers_of(anonymous_client, session, "{{ oc.role }}")
+    user_id, headers = await _headers_of(session, "{{ oc.role }}")
+    other_id, _ = await _headers_of(session, "{{ oc.role }}")
+{% if reads and ("list" in ops or "read" in ops) %}
     mine = await make_{{ e.snake }}(session, {{ fk }}=user_id)
+{% endif %}
+{% if "read" in ops or "update" in ops or "custom" in ops or "delete" in ops %}
     theirs = await make_{{ e.snake }}(session, {{ fk }}=other_id)
+{% endif %}
 {% if reads and "list" in ops %}
 
     response = await anonymous_client.get("{{ e.path }}{{ ops["list"].path }}", headers=headers)
     assert response.status_code == 200, response.text
     assert [item["id"] for item in response.json()["items"]] == [str(mine.id)]
 {% endif %}
-{% if reads and "read" in ops %}
+{% if "read" in ops %}
     path = "{{ e.path }}{{ ops["read"].path | replace('{id}', '') }}"
+{% if reads %}
     assert (await anonymous_client.get(f"{path}{mine.id}", headers=headers)).status_code == 200
     assert_problem(await anonymous_client.get(f"{path}{theirs.id}", headers=headers), 404)
+{% else %}
+    # The rule limits only the changes: the role reads all records.
+    assert (await anonymous_client.get(f"{path}{theirs.id}", headers=headers)).status_code == 200
+{% endif %}
 {% endif %}
 {% if "update" in ops %}
     path = "{{ e.path }}{{ ops["update"].path | replace('{id}', '') }}"
@@ -164,7 +156,7 @@ async def test_an_owner_rule_limits_the_role_{{ oc.role }}_to_its_{{ e.slice }}(
 async def test_the_role_{{ oc.other }}_without_an_owner_rule_sees_all_{{ e.slice }}(
     anonymous_client: AsyncClient, session: AsyncSession
 ) -> None:
-    _, headers = await _headers_of(anonymous_client, session, "{{ oc.other }}")
+    _, headers = await _headers_of(session, "{{ oc.other }}")
     first = await make_{{ e.snake }}(session)
     second = await make_{{ e.snake }}(session)
 

@@ -61,7 +61,7 @@ def upgrade() -> None:
 {% endif %}
 {% endfor %}
 {% endfor %}
-{% if definition.auth %}
+{% if definition.auth and definition.auth.password %}
 {% set u = py.entity(definition.auth.user_entity) %}
     op.create_table(
         "credentials",
@@ -88,7 +88,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
-{% if definition.auth %}
+{% if definition.auth and definition.auth.password %}
     op.drop_table("credentials")
 {% endif %}
 {% for t in py.join_tables | reverse %}
