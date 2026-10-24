@@ -7,11 +7,24 @@ Pages and the UI are out of the scope of the binding.
 """
 
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import JsonValue
+from pydantic import JsonValue, StringConstraints
 
-from appgen.bindings.fastapi.model import EMBED_KEY, EXAMPLE_KEY, binding_context
+from appgen.bindings.fastapi.model import (
+    COLUMN_KEY,
+    EMBED_KEY,
+    EXAMPLE_KEY,
+    PATH_KEY,
+    TABLE_KEY,
+    binding_context,
+)
 from appgen.gen.binding import Binding, ExtensionKey, Output
+
+_SQL_NAME = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
+"""A lower case SQL name that PostgreSQL does not cut (63 bytes at most)."""
+_URL_PREFIX = Annotated[str, StringConstraints(pattern=r"^(/[a-z0-9][a-z0-9._~-]*)+$")]
+"""A URL prefix with one or more segments, for example `/meeting-rooms`."""
 
 _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
@@ -139,6 +152,27 @@ BINDING = Binding(
             kinds=frozenset({"field", "param"}),
             type=JsonValue,
             description="A valid sample value of the field for the generated tests.",
+        ),
+        ExtensionKey(
+            name=PATH_KEY,
+            kinds=frozenset({"entity"}),
+            type=_URL_PREFIX,
+            description="The URL prefix of the router of the entity, for example `/meeting-rooms`.",
+        ),
+        ExtensionKey(
+            name=TABLE_KEY,
+            kinds=frozenset({"entity", "relation"}),
+            type=_SQL_NAME,
+            description="The table of the entity, or the join table of a many-to-many relation.",
+        ),
+        ExtensionKey(
+            name=COLUMN_KEY,
+            kinds=frozenset({"relation"}),
+            type=_SQL_NAME,
+            description=(
+                "The foreign key column of a many-to-one or owning one-to-one relation. "
+                "The API field keeps its name."
+            ),
         ),
     ),
     extension_prefix="x-fastapi-",
