@@ -1,0 +1,15 @@
+{% set plan = ui_forms.sign_up %}
+{{ trace_header(plan.element_id) }}
+import { z } from "zod";
+
+import { {{ plan.entity | camel }}InputSchema } from "@/entities/{{ plan.entity | kebab }}";
+
+/** The lowest number of characters of a new password. */
+export const MIN_PASSWORD_LENGTH = {{ definition.auth.min_password_length }};
+
+/** The rules of the input of a sign-up: the fields of a new user, and the password. */
+export const signUpSchema = {{ plan.schema }}.extend({
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(200),
+});
+
+export type SignUpInput = z.infer<typeof signUpSchema>;

@@ -1,0 +1,153 @@
+{% import "ui/forms/fields.j2" as fm with context %}
+{% set plan = ui_forms.sign_up %}
+{% set widgets = plan.widgets %}
+{% set field_names = ["Field", "FieldDescription", "FieldError", "FieldLabel"] %}
+{{ trace_header(plan.element_id) }}
+"use client";
+
+import { type FormEvent, useState } from "react";
+
+import { type FormErrors, schemaErrors, submitErrors } from "@/shared/lib/form";
+import { Link } from "@/shared/lib/router";
+import { Button } from "@/shared/ui/button";
+{% if "checkbox" in widgets %}
+import { Checkbox } from "@/shared/ui/checkbox";
+{% endif %}
+import { {{ field_names | join(", ") }} } from "@/shared/ui/field";
+import { Input } from "@/shared/ui/input";
+import { Spinner } from "@/shared/ui/spinner";
+{% if "switch" in widgets %}
+import { Switch } from "@/shared/ui/switch";
+{% endif %}
+{% if "textarea" in widgets %}
+import { Textarea } from "@/shared/ui/textarea";
+{% endif %}
+{% if "date" in widgets %}
+import { DateInput } from "@/shared/ui/form-widgets/date-input";
+{% endif %}
+{% if "datetime" in widgets %}
+import { DateTimeInput } from "@/shared/ui/form-widgets/date-time-input";
+{% endif %}
+{% if "number_format" in widgets %}
+import { NumberInput } from "@/shared/ui/form-widgets/number-input";
+{% endif %}
+{% if "radio" in widgets %}
+import { OptionRadio } from "@/shared/ui/form-widgets/option-radio";
+{% endif %}
+{% if "select" in widgets %}
+import { OptionSelect } from "@/shared/ui/form-widgets/option-select";
+{% endif %}
+
+import { signUp } from "../api/sign-up";
+import { MIN_PASSWORD_LENGTH, type SignUpInput, signUpSchema } from "../model/schema";
+
+/** The values of the widgets of the form. */
+type Values = {
+{% for f in plan.fields %}
+  {{ f.key }}: {{ f.value_type }};
+{% endfor %}
+  password: string;
+};
+{% for f in plan.fields if f.options %}
+
+const {{ f.key | snake | upper }}_OPTIONS = {{ f.options }};
+{% endfor %}
+
+const INITIAL_VALUES: Values = {
+{% for f in plan.fields %}
+  {{ f.key }}: {{ f.initial }},
+{% endfor %}
+  password: "",
+};
+
+/** The input of the sign-up: an empty value is null, or no value. */
+function toInput(values: Values) {
+  return {
+{% for f in plan.fields %}
+    {{ f.key }}: {{ f.to_input }},
+{% endfor %}
+    password: values.password,
+  };
+}
+
+/** Check the values with the rules of the fields of the user, and return the input. */
+function validate(values: Values): { input?: SignUpInput; errors: FormErrors } {
+  const errors: FormErrors = {};
+{% for f in plan.fields if f.required and f.kind != "boolean" %}
+{% if f.kind == "text" %}
+  if (values.{{ f.key }}.trim() === "") errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};
+{% else %}
+  if (values.{{ f.key }} === null) errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};
+{% endif %}
+{% endfor %}
+  if (values.password === "") errors.password ??= {{ tr(js("Enter a value.")) }};
+  const result = signUpSchema.safeParse(toInput(values));
+  if (!result.success) schemaErrors(result.error, errors);
+  if (!result.success || Object.keys(errors).length > 0) return { errors };
+  return { input: result.data, errors };
+}
+
+/** The sign-up form: the fields of a new user, and a password. After the sign-up, it opens the page `next`. */
+export function SignUpForm({ next }: { next: string }) {
+  const [values, setValues] = useState<Values>(INITIAL_VALUES);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const change = <K extends keyof Values>(key: K, value: Values[K]) => {
+    const next = { ...values, [key]: value };
+    setValues(next);
+    if (submitted) setErrors(validate(next).errors);
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitted(true);
+    const { input, errors: found } = validate(values);
+    setErrors(found);
+    if (!input) return;
+    setBusy(true);
+    try {
+      await signUp(input);
+      window.location.assign(next);
+    } catch (error) {
+      setErrors(submitErrors(error));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+      <form noValidate onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm"> {{ trace(plan.element_id, jsx=True) }}
+        <h1 className="text-xl font-semibold">{{ jsx_text("Sign up") }}</h1>
+{% for f in plan.fields %}
+{{ fm.field(f, 8, "sign-up") }}
+{% endfor %}
+        <Field data-invalid={Boolean(errors.password)}>
+          <FieldLabel htmlFor="sign-up-password">
+            {{ jsx_text("Password") }}
+            <span aria-hidden className="text-destructive">*</span>
+          </FieldLabel>
+          <Input id="sign-up-password" type="password" autoComplete="new-password" value={values.password} onChange={(event) => change("password", event.target.value)} disabled={busy} aria-invalid={Boolean(errors.password)} />
+          <FieldDescription>{{ jsx_format("Use {count} or more characters.", count="MIN_PASSWORD_LENGTH") }}</FieldDescription>
+          <FieldError>{errors.password}</FieldError>
+        </Field>
+        {errors._form && (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {errors._form}
+          </p>
+        )}
+        <Button type="submit" disabled={busy}>
+          {busy && <Spinner />}
+          {{ jsx_text("Sign up") }}
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          {{ jsx_text("Do you have an account?") }}{" "}
+          <Link href={`/sign-in?next=${encodeURIComponent(next)}`} className="font-medium text-foreground underline underline-offset-4">
+            {{ jsx_text("Sign in") }}
+          </Link>
+        </p>
+      </form>
+    </main>
+  );
+}

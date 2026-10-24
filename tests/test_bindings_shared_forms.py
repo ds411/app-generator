@@ -75,7 +75,7 @@ def test_the_form_rules_write_the_shared_runtime_files_once() -> None:
     paths = [rule.path for rule in form_rules()]
     assert "src/shared/lib/form.ts" in paths
     format_rule = next(r for r in form_rules() if r.path == "src/shared/lib/format.ts")
-    assert format_rule.when == "ui_forms.names and not ui_views.list_views"
+    assert format_rule.when == "ui_forms.used and not ui_views.list_views"
 
 
 def test_a_number_field_with_a_format_shows_the_formatted_value() -> None:

@@ -66,6 +66,16 @@ export type ExpectedAuth = {
   }[];
   /** A public page, and what a user without a session sees. */
   anonymous?: { path: string; title: string; menu: string[]; actions: ExpectedAction[] };
+  /** The sign-up (ADR 0016): the values of the required fields, and the menu of a new user. */
+  signUp?: {
+    /** The IDs of the widgets and their values. `{n}` in a value becomes a unique number. */
+    fields: { id: string; value: string }[];
+    /** The ID of the widget of the user name. */
+    usernameId: string;
+    password: string;
+    /** The labels of the menu items that the role of a new user sees. */
+    menu: string[];
+  };
 };
 
 export type Expected = {

@@ -1017,6 +1017,14 @@ session cookie, and its seed gives each user the password in
 accepts each mock user with the password `password`. Each front end has
 a sign-out button in the top bar.
 
+With `sign_up`, each front end has the public page `/sign-up`, and the
+sign-in page links to it. The form asks for the fields in `fields`,
+with the widgets and the checks of the entity fields, and for a
+password. The Next.js app adds the user and its password in one
+transaction, and starts the session. The React app with
+`x-react-data: api` calls `POST /auth/sign-up`. The React app with mock
+data keeps a new user only in the browser tab.
+
 ## access
 
 The optional `access` section gives each user a role, and each role the
@@ -1148,7 +1156,8 @@ use in the app does not show.
   `Language`, `Switch the color mode`, `Light`, `Dark`, `System`,
   `Toggle Sidebar`, `Sidebar`, `Displays the mobile sidebar.`,
   `breadcrumb`, `More`, `Notifications`, `Close toast`, `Sign in`,
-  `Password`, `Sign out`.
+  `Password`, `Sign out`, `Sign up`, `Do you need an account?`,
+  `Do you have an account?`.
 - The page of an unknown path and the stubs of the generation gaps:
   `This page does not exist`, `Make sure that the address is correct.`,
   `Go to the start page`, `Not available yet.`,
@@ -1190,7 +1199,8 @@ use in the app does not show.
   `Another record has the same value, and the value must be unique.`,
   `Sign in to do this.`, `Your role may not do this operation.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
-  `The browser does not keep the session.`.
+  `The browser does not keep the session.`,
+  `A user with this user name exists.`.
 
 ### Messages of the FastAPI app
 

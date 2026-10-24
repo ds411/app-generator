@@ -202,6 +202,20 @@ class FormPlan:
         return f"@/features/{kebab(self.name)}-form"
 
 
+@dataclass(slots=True)
+class SignUpPlan:
+    """The sign-up form of the front ends (ADR 0016): fields of the user entity, and a password."""
+
+    element_id: str
+    entity: str
+    fields: list[FieldPlan]
+    schema: str
+    """The TypeScript zod schema of the fields, without the password."""
+    role: str | None
+    """The role of a new user, or None without `access`."""
+    widgets: set[str]
+
+
 class FormContext:
     """The form plans of a definition, for the form templates and the actions."""
 
@@ -210,6 +224,7 @@ class FormContext:
         ui = definition.ui
         self.names: list[str] = list(ui.forms) if ui else []
         self._plans: dict[str, FormPlan] = {}
+        self.sign_up = sign_up_plan(definition)
 
     def plan(self, name: str) -> FormPlan:
         """Return the plan of a form."""
@@ -218,9 +233,15 @@ class FormContext:
         return self._plans[name]
 
     @property
+    def used(self) -> bool:
+        """Return True if the app has a form: a form of the UI, or the sign-up form."""
+        return bool(self.names) or self.sign_up is not None
+
+    @property
     def widgets(self) -> set[str]:
         """Return the widgets of all forms, for the runtime files and the components."""
-        return {w for name in self.names for w in self.plan(name).widgets}
+        widgets = {w for name in self.names for w in self.plan(name).widgets}
+        return widgets | (self.sign_up.widgets if self.sign_up else set())
 
     @property
     def relations(self) -> bool:
@@ -331,6 +352,37 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
         navigate=_navigate(definition, form, entity, operation),
         rule_values=form_values(definition, name)[0],
         route_params=route_params,
+        widgets={f.widget for f in fields}
+        | ({"number_format"} if any(f.format for f in fields) else set()),
+    )
+
+
+def sign_up_plan(definition: AppDefinition) -> SignUpPlan | None:
+    """Return the plan of the sign-up form, or None without `auth.sign_up`."""
+    auth = definition.auth
+    if auth is None or auth.sign_up is None:
+        return None
+    entity = auth.user_entity
+    element = definition.entities[entity]
+    by_name = {m.name: m for m in members(entity, element)}
+    fields: list[FieldPlan] = []
+    for name in auth.sign_up.fields:
+        member = by_name[name]
+        plan = _member_field(definition, entity, name, FormField(), member)
+        plan.element_id = element.fields[name].id
+        plan.initial = _initial(plan, None, False, member)
+        fields.append(plan)
+    keys = ", ".join(f"{f.key}: true" for f in fields)
+    role = None
+    if definition.access is not None:
+        role_field = element.fields[definition.access.role_field]
+        role = auth.sign_up.default_role or str(role_field.default)
+    return SignUpPlan(
+        element_id=auth.sign_up.id,
+        entity=entity,
+        fields=fields,
+        schema=f"{camel(entity)}InputSchema.pick({{ {keys} }})",
+        role=role,
         widgets={f.widget for f in fields}
         | ({"number_format"} if any(f.format for f in fields) else set()),
     )
@@ -607,7 +659,7 @@ HELPERS: dict[str, Callable[..., Any]] = {}
 
 _FORM = "src/features/{{ name | kebab }}-form"
 # The view rules write these runtime files when the app has list views.
-_FORMS_ONLY = "ui_forms.names and not ui_views.list_views"
+_FORMS_ONLY = "ui_forms.used and not ui_views.list_views"
 
 
 def form_rules() -> tuple[Output, ...]:
@@ -628,7 +680,7 @@ def form_rules() -> tuple[Output, ...]:
             template="ui/views/lib/query.ts.j2", path="src/shared/lib/query.ts", when=_FORMS_ONLY
         ),
         Output(
-            template="ui/forms/lib/form.ts.j2", path="src/shared/lib/form.ts", when="ui_forms.names"
+            template="ui/forms/lib/form.ts.j2", path="src/shared/lib/form.ts", when="ui_forms.used"
         ),
         *(
             Output(
@@ -637,7 +689,7 @@ def form_rules() -> tuple[Output, ...]:
                 when=when,
             )
             for part, when in (
-                ("option-select", "ui_forms.names"),
+                ("option-select", "ui_forms.used"),
                 ("option-radio", "'radio' in ui_forms.widgets"),
                 ("date-input", "'date' in ui_forms.widgets or 'datetime' in ui_forms.widgets"),
                 ("date-time-input", "'datetime' in ui_forms.widgets"),

@@ -1,0 +1,63 @@
+{#-
+  The widgets and the fields of the forms. A form (form.tsx.j2) and the
+  sign-up form use them. The component of the form has `values`,
+  `errors`, `busy`, and `change`. `prefix` starts the IDs of the widgets.
+-#}
+{% macro widget(f, prefix) -%}
+{% set id = '"' ~ (prefix | kebab) ~ "-" ~ (f.name | kebab) ~ '"' %}
+{% set invalid = "Boolean(errors." ~ f.key ~ ")" %}
+{% set placeholder = (" placeholder=" ~ jsx_attr(f.placeholder)) if f.placeholder else "" %}
+{% set options = (f.key | snake | upper ~ "_OPTIONS") if not f.target else f.options | replace("lookups.", "related.") %}
+{% if f.widget == "custom" %}
+<{{ f.gap_name }} id={{ id }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value ?? {{ f.empty }})} disabled={busy} />
+{%- elif f.kind == "many" %}
+<RelationMultiSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.kind == "one" and f.widget != "select" and f.widget != "radio" %}
+<RelationSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "select" %}
+<OptionSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value as Values[{{ js(f.key) }}])}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "radio" %}
+<OptionRadio id={{ id }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value as Values[{{ js(f.key) }}])} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "checkbox" %}
+<Checkbox id={{ id }} checked={values.{{ f.key }}} onCheckedChange={(value) => change({{ js(f.key) }}, value === true)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.widget == "switch" %}
+<Switch id={{ id }} checked={values.{{ f.key }}} onCheckedChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.widget == "date" %}
+<DateInput id={{ id }}{{ placeholder }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "datetime" %}
+<DateTimeInput id={{ id }}{{ placeholder }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "textarea" %}
+<Textarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- elif f.format %}
+<NumberInput id={{ id }} format={{ js(f.format) }}{% if f.currency %} currency={{ js(f.currency) }}{% endif %}{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "number" or f.kind == "number" %}
+<Input id={{ id }} type="number" inputMode="decimal"{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }} ?? ""} onChange={(event) => change({{ js(f.key) }}, event.target.value === "" ? null : Number(event.target.value))} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- else %}
+<Input id={{ id }} type={{ js(f.input_type) }}{{ placeholder }} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
+{%- endif %}
+{%- endmacro %}
+
+{% macro field(f, indent, prefix) -%}
+{% set id = (prefix | kebab) ~ "-" ~ (f.name | kebab) %}
+{% set horizontal = f.widget in ("checkbox", "switch") %}
+{% filter indent(indent, true) %}
+<Field{% if horizontal %} orientation="horizontal"{% endif %} data-invalid={Boolean(errors.{{ f.key }})}{% if f.classes %} className={{ js(f.classes) }}{% endif %}> {{ trace(f.element_id, jsx=True) }}
+{% if horizontal %}
+  {{ widget(f, prefix) }}
+  <FieldLabel htmlFor={{ js(id) }}>{{ jsx_text(f.label) }}</FieldLabel>
+{% else %}
+  <FieldLabel htmlFor={{ js(id) }}>
+    {{ jsx_text(f.label) }}
+{% if f.required and f.kind != "boolean" %}
+    <span aria-hidden className="text-destructive">*</span>
+{% endif %}
+  </FieldLabel>
+  {{ widget(f, prefix) }}
+{% endif %}
+{% if f.help %}
+  <FieldDescription>{{ jsx_text(f.help) }}</FieldDescription>
+{% endif %}
+  <FieldError>{errors.{{ f.key }}}</FieldError>
+</Field>
+{% endfilter %}
+{%- endmacro %}

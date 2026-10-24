@@ -173,6 +173,11 @@ BINDING = Binding(
             path="src/app/auth/require-auth.tsx",
             when="definition.auth",
         ),
+        Output(
+            template="src/features/sign-up/api/sign-up.ts.j2",
+            path="src/features/sign-up/api/sign-up.ts",
+            when="definition.auth and definition.auth.sign_up",
+        ),
         *forms.form_rules(),
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
@@ -261,7 +266,7 @@ BINDING = Binding(
             template="src/entities/entity/model/schema.ts.j2",
             path=_ENTITY + "/model/schema.ts",
             for_each="entity",
-            when="ui_forms.names",
+            when="ui_forms.used",
         ),
         Output(
             template="src/entities/entity/model/meta.ts.j2",
@@ -335,17 +340,16 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "access", "role"}
+        | {"auth", "sign_up", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
-    # The React app has no sign-up page (#269), no password reset pages
-    # (#270), no owner rules (#273), and no sign-in with a provider (#271)
-    # yet.
+    # The React app has no password reset pages (#270), no owner rules
+    # (#273), and no sign-in with a provider (#271) yet.
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
-        | {"sign_up", "password_reset", "record_rule", "provider"}
+        | {"password_reset", "record_rule", "provider"}
     ),
     context=context,
     warnings=warnings,

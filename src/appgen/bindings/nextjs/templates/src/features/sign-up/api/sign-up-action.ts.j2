@@ -1,0 +1,34 @@
+{% set plan = ui_forms.sign_up %}
+{% set var = plan.entity | camel %}
+{{ trace_header(plan.element_id) }}
+"use server";
+
+import type { ActionResult } from "@/shared/api";
+import { runAction } from "@/shared/api/server";
+import { hashPassword } from "@/shared/auth/password";
+import { startSession } from "@/shared/auth/session";
+import { credentialsTable } from "@/shared/db";
+
+import { {{ var }}Repository } from "@/entities/{{ plan.entity | kebab }}/server";
+
+import { type SignUpInput, signUpSchema } from "../model/schema";
+
+/**
+ * Make a new user with a password, and sign in as the user. The record
+ * and its credential are in one transaction. The repository checks the
+ * rules of {{ plan.entity | pascal }}.{% if plan.role %} A new user gets the role {{ plan.role | tojson }}.{% endif %}
+
+ */
+export async function signUpAction(input: SignUpInput): Promise<ActionResult<null>> {
+  return runAction(
+    async () => {
+      const { password, ...fields } = signUpSchema.parse(input);
+      const user = await {{ var }}Repository.create({{ "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" }}, async (tx, record) => {
+        await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password) });
+      });
+      await startSession(user.id);
+      return null;
+    },
+    { public: true, changes: true },
+  );
+}

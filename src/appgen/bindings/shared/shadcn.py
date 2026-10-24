@@ -153,7 +153,22 @@ def used_components(definition: AppDefinition) -> list[Component]:
         names.update(("skeleton", "spinner", "empty"))
     for page in definition.pages.values():
         names.update(_action_components(page.actions.values()))
+    names.update(_sign_up_components(definition))
     return with_dependencies(names)
+
+
+def _sign_up_components(definition: AppDefinition) -> set[str]:
+    """Return the components of the sign-up form (ADR 0016), with the select of the form widgets."""
+    auth = definition.auth
+    if auth is None or auth.sign_up is None:
+        return set()
+    names = {"field", "label", "spinner", "input", "select"}
+    for name in auth.sign_up.fields:
+        widget = _default_widget(definition, auth.user_entity, name, None)
+        names.update(_WIDGET_COMPONENTS.get(widget or "custom", ()))
+        if widget == "number" and _has_format(definition, auth.user_entity, name, None):
+            names.add("input-group")
+    return names
 
 
 def _action_components(actions: Iterable[Action]) -> set[str]:
