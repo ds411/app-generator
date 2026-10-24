@@ -1093,6 +1093,12 @@ translations:
         Pages: Seiten
         Person: Person
         Pick a date: Datum wählen
+        Plan projects, split them into tasks, and assign the tasks to people.: Planen Sie Projekte, teilen Sie sie in Aufgaben auf, und weisen Sie die Aufgaben Personen zu.
+        '{entity} {id} does not exist.': '{entity} {id} gibt es nicht.'
+        The input is not valid.: Die Eingabe ist nicht gültig.
+        The server could not do the operation.: Der Server konnte die Operation nicht ausführen.
+        The record refers to a record that does not exist, or other records refer to it.: Der Datensatz verweist auf einen Datensatz, den es nicht gibt, oder andere Datensätze verweisen auf ihn.
+        Another record has the same value, and the value must be unique.: Ein anderer Datensatz hat denselben Wert, und der Wert muss eindeutig sein.
         Navigation bar: Navigationsleiste
         Go to the next month: Zum nächsten Monat
         Go to the previous month: Zum vorherigen Monat

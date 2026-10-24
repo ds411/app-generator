@@ -96,12 +96,14 @@ async function checkPopup(page: Page, button: Locator, role: "dialog" | "menu"):
 }
 
 for (const target of expected.pages) {
-  test(`the page ${target.name} shows no text of the default language`, async ({ page }) => {
+  test(`the page ${target.name} shows no text of the default language`, async ({ page, context, baseURL }) => {
     if (!language) return;
+    // The React app keeps the language in the browser storage, and the Next.js app in a cookie.
     await page.addInitScript(
       ([key, code]) => window.localStorage.setItem(key, code),
       [language.storageKey, language.code] as const,
     );
+    await context.addCookies([{ name: language.storageKey, value: language.code, url: baseURL ?? "" }]);
     await page.clock.setFixedTime(TODAY);
     await page.goto(await samplePath(page, target));
     await expect(page.locator("html")).toHaveAttribute("lang", language.locale);

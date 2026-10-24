@@ -9,6 +9,14 @@ import { ForbiddenError, requireOperation } from "@/shared/auth/access";
 {% endif %}
 {% if definition.auth %}
 import { UnauthorizedError, requireUser } from "@/shared/auth/session";
+{% endif %}
+{% if i18n and ui_forms.names %}
+import { issueMessage } from "@/shared/lib/form";
+{% endif %}
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+{% if definition.auth or i18n %}
 
 {% endif %}
 import { type ActionResult, ValidationError } from "./errors";
@@ -43,8 +51,8 @@ export function parseListQuery<T>(query: unknown): ListQuery<T> {
 
 // The messages of the Postgres errors that an input can cause.
 const CONSTRAINT_MESSAGES: Record<string, string> = {
-  "23503": "The record refers to a record that does not exist, or other records refer to it.",
-  "23505": "Another record has the same value, and the value must be unique.",
+  "23503": {{ text("The record refers to a record that does not exist, or other records refer to it.") }},
+  "23505": {{ text("Another record has the same value, and the value must be unique.") }},
 };
 
 /** Return the Postgres error code of an error or of its cause, if it has one. */
@@ -57,16 +65,31 @@ function postgresCode(error: unknown): string | undefined {
   return undefined;
 }
 
+{% set action_options = "{ changes?: boolean" ~ ("; public?: boolean" if definition.auth else "") ~ ("; operation?: string" if definition.access else "") ~ " }" %}
 /**
  * Run the body of a server action, and return its result or its error as
  * data. After a change, the routes of the app get new data.{% if definition.auth %} An action
  * needs a signed-in user, except a public action.{% endif %}
 
+{% if i18n %}
+ * The messages are in the language of the request.
+{% endif %}
  */
+{% if i18n %}
 export async function runAction<T>(
   body: () => Promise<T>,
-  options: { changes?: boolean{% if definition.auth %}; public?: boolean{% endif %}{% if definition.access %}; operation?: string{% endif %} } = {},
+  options: {{ action_options }} = {},
 ): Promise<ActionResult<T>> {
+  return inRequestLanguage(() => attemptAction(body, options));
+}
+
+async function attemptAction<T>(body: () => Promise<T>, options: {{ action_options }}): Promise<ActionResult<T>> {
+{% else %}
+export async function runAction<T>(
+  body: () => Promise<T>,
+  options: {{ action_options }} = {},
+): Promise<ActionResult<T>> {
+{% endif %}
   try {
 {% if definition.auth %}
 {% if definition.access %}
@@ -99,18 +122,18 @@ export async function runAction<T>(
     if (error instanceof z.ZodError) {
       const issues = error.issues.map((issue) => ({
         path: issue.path.join("."),
-        message: issue.message,
+        message: {{ "issueMessage(issue)" if i18n and ui_forms.names else "issue.message" }},
       }));
-      return { ok: false, error: { name: "ValidationError", message: "The input is not valid.", issues } };
+      return { ok: false, error: { name: "ValidationError", message: {{ tr(js("The input is not valid.")) }}, issues } };
     }
     if (error instanceof ValidationError) {
       return { ok: false, error: { name: "ValidationError", message: error.message, issues: error.issues } };
     }
     const message = CONSTRAINT_MESSAGES[postgresCode(error) ?? ""];
     if (message) {
-      return { ok: false, error: { name: "ValidationError", message, issues: [] } };
+      return { ok: false, error: { name: "ValidationError", {{ "message: " ~ tr("message") if i18n else "message" }}, issues: [] } };
     }
     console.error(error);
-    return { ok: false, error: { name: "Error", message: "The server could not do the operation." } };
+    return { ok: false, error: { name: "Error", message: {{ tr(js("The server could not do the operation.")) }} } };
   }
 }

@@ -94,7 +94,7 @@ def test_the_front_ends_translate_the_text_and_cover_the_languages(
     menu = files["src/widgets/navigation/ui/main-menu.tsx"]
     assert 'import { t } from "@/shared/lib/i18n";' in menu
     assert '<span>{t("Projects")}</span>' in menu
-    assert "<LanguageProvider>" in files["src/app/providers/index.tsx"]
+    assert "<LanguageProvider" in files["src/app/providers/index.tsx"]
 
 
 def test_an_app_without_translations_has_the_text_as_it_is(example: AppDefinition) -> None:
@@ -352,3 +352,57 @@ def test_finish_adds_t_to_an_import_of_the_module(example: AppDefinition) -> Non
     assert finish("src/a.tsx", content, example).startswith(
         'import { getLocale, t } from "@/shared/lib/i18n"\n'
     )
+
+
+def test_nextjs_renders_the_language_of_the_request(example: AppDefinition) -> None:
+    files = {f.path: f.content for f in generate(example, nextjs.BINDING).files}
+    layout = files["app/layout.tsx"]
+    assert "const language = await requestLanguage();" in layout
+    assert "<html lang={localeOf(language)} suppressHydrationWarning>" in layout
+    assert "<Providers language={language}>{children}</Providers>" in layout
+    server = files["src/shared/lib/i18n-server.ts"]
+    assert "(await cookies()).get(LANGUAGE_COOKIE)?.value" in server
+    assert 'matchLanguage((await headers()).get("accept-language"))' in server
+    i18n = files["src/shared/lib/i18n.ts"]
+    assert 'export const LANGUAGE_COOKIE = "project-tracker-language";' in i18n
+    assert "store.enterWith(language);" in i18n
+    assert "const translation = messages[active()]?.[text] ?? text;" in i18n
+    route = files["app/(app-shell)/projects/page.tsx"]
+    assert 'return inRequestLanguage(() => ({ title: t("Projects") }));' in route
+    actions = files["src/shared/api/server.ts"]
+    assert "return inRequestLanguage(() => attemptAction(body, options));" in actions
+    assert 'message: t("The server could not do the operation.")' in actions
+    assert "message: issueMessage(issue)," in actions
+    assert "router.refresh();" in files["src/features/switch-language/ui/language-switch.tsx"]
+    react_files = {f.path: f.content for f in generate(example, react.BINDING).files}
+    assert "src/shared/lib/i18n-server.ts" not in react_files
+    assert (
+        "window.localStorage.setItem(STORAGE_KEY, language);"
+        in react_files["src/shared/lib/i18n.ts"]
+    )
+    plain = {f.path: f.content for f in generate(plain_example(), nextjs.BINDING).files}
+    assert '<html lang="en" suppressHydrationWarning>' in plain["app/layout.tsx"]
+    assert "src/shared/lib/i18n-server.ts" not in plain
+
+
+def test_the_nextjs_server_actions_translate_their_messages() -> None:
+    room_booking = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
+    text = room_booking.read_text() + dedent(
+        """\
+        translations:
+          default: en
+          languages:
+            en: { label: English }
+            de: { label: Deutsch }
+        """
+    )
+    definition = load_definition_text(text, str(room_booking))
+    files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+    assert 'super(t("Sign in to do this."));' in files["src/shared/auth/session.ts"]
+    assert 'super(t("Your role may not do this operation."));' in files["src/shared/auth/access.ts"]
+    sign_in = files["src/shared/auth/actions.ts"]
+    assert "await inRequestLanguage(() => t(" in sign_in
+    repository = files["src/shared/db/repository.ts"]
+    assert "throw new ValidationError(t(rule.message));" in repository
+    assert "? t(workflow.message)" in repository
+    assert 't("The state of {entity} cannot change from {before} to {after}.", {' in repository

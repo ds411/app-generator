@@ -241,7 +241,10 @@ and starts the React app and the Next.js app without Docker, and the UI
 test `ui-tests/tests/test-language.spec.ts` opens each page in the test
 language, with the page search, the menu of a record, and a form. A
 Latin text without `⟦` that is not a value of the records fails the
-test. The pre-push hook runs it with `scripts/check-translations.sh`.
+test. For Next.js, it also sends requests in the test language and in
+the default language at the same time, and each page must be in the
+language of its request. The pre-push hook runs it with
+`scripts/check-translations.sh`.
 
 The check scripts reuse caches, so a second run is faster:
 

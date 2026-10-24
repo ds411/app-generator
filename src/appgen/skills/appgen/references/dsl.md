@@ -1064,10 +1064,16 @@ translations:
   of its key (`translation-values`).
 
 The React and Next.js apps have a language switch in the top bar (and
-in the frame of the pages without a layout). The app keeps the selected
-language in the browser. A text without a translation shows in the
-default language. The front ends translate each text that they show:
-the titles, labels, and descriptions of pages, menus, views, forms, and
+in the frame of the pages without a layout). The React app keeps the
+selected language in the browser storage. The Next.js app keeps it in
+the cookie `<app name>-language`, and its server renders the pages, the
+page titles, and the messages of the server actions in it. Without the
+cookie, the server takes the first language of the `Accept-Language`
+header that the app has, by its code or its locale, also with only the
+same primary language (`de-CH` gives `de`), else the default language.
+A text without a translation shows in the default language. The front
+ends translate each text that they show: the titles, labels, and
+descriptions of pages, menus, views, forms, and
 dashboards, the badge labels, the option labels, the actions, the
 messages of the form rules, the default texts of the generator, and the
 fixed texts of the components (see the list below). The dates and
@@ -1121,12 +1127,16 @@ use in the app does not show.
   `Enter a valid URL.`, `Use the correct format.`,
   `Use {count} or more characters.`, `Use {count} or fewer characters.`,
   `Use {count} or more.`, `Use {count} or less.`.
-- The messages of the React app (mock data and API client):
-  `The state of {entity} cannot change from {before} to {after}.`,
+- The messages of the data access and the sign-in (the mock data and
+  the API client of the React app, and the server actions of the Next.js
+  app): `The state of {entity} cannot change from {before} to {after}.`,
   `A new {entity} starts with the state {initial}, not {state}.`,
-  `The API gave the status {status}.`,
-  `Your role may not do this operation.`, `The sign-in failed.`,
-  `The user name or the password is not correct.`,
+  `{entity} {id} does not exist.`, `The API gave the status {status}.`,
+  `The input is not valid.`, `The server could not do the operation.`,
+  `The record refers to a record that does not exist, or other records refer to it.`,
+  `Another record has the same value, and the value must be unique.`,
+  `Sign in to do this.`, `Your role may not do this operation.`,
+  `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`.
 
 ## Extension keys

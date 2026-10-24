@@ -5,6 +5,9 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 
 import type { ActionResult } from "@/shared/api";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
 
 import { SESSION_COOKIE, SESSION_SECONDS, checkPassword, makeToken } from "./session";
 
@@ -15,7 +18,12 @@ export async function signInAction(username: string, password: string): Promise<
   const input = signInSchema.safeParse({ username, password });
   const userId = input.success ? await checkPassword(input.data.username, input.data.password) : null;
   if (userId === null) {
+{% if i18n %}
+    const message = await inRequestLanguage(() => {{ tr(js("The user name or the password is not correct.")) }});
+    return { ok: false, error: { name: "Error", message } };
+{% else %}
     return { ok: false, error: { name: "Error", message: "The user name or the password is not correct." } };
+{% endif %}
   }
   (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
     httpOnly: true,

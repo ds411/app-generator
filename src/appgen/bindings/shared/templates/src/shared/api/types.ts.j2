@@ -56,7 +56,7 @@ export class NotFoundError extends Error {
   readonly id: string;
 
   constructor(entity: string, id: string) {
-    super(`${entity} ${id} does not exist.`);
+    super({{ js_format("{entity} {id} does not exist.", entity="entity", id="id") }});
     this.name = "NotFoundError";
     this.entity = entity;
     this.id = id;
