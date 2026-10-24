@@ -64,6 +64,11 @@ BINDING = Binding(
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
+        Output(
+            template="app/core/compute.py.j2",
+            path="app/core/compute.py",
+            when="py.entities.values() | selectattr('computed') | list",
+        ),
         Output(template="package.py.j2", path="app/features/__init__.py"),
         Output(template="package.py.j2", path=_SLICE + "/__init__.py", for_each="entity"),
         Output(

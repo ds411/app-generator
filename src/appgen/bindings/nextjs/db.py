@@ -232,7 +232,7 @@ def build_tables(definition: AppDefinition) -> list[Table]:
             const=table_const(entity_name),
             name=snake(entity_name),
         )
-        for field_name, spec in entity.fields.items():
+        for field_name, spec in entity.stored_fields.items():
             code, imports, enum_const = column_builder(field_name, spec)
             if enum_const is not None:
                 const = f"{camel(entity_name)}{field_name[0].upper()}{camel(field_name)[1:]}Enum"
@@ -473,7 +473,7 @@ def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTabl
         for record in data[table.entity]:
             row = [("id", json.dumps(record["id"]))]
             link: list[tuple[str, str]] = []
-            for field_name, spec in entity.fields.items():
+            for field_name, spec in entity.stored_fields.items():
                 row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
             for name, relation in entity.relations.items():
                 if relation.kind not in ("many_to_one", "one_to_one"):

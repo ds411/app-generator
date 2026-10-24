@@ -64,6 +64,8 @@ class Field(Element):
     """The display format in all views. A view column can set another format."""
     currency: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")] | None = None
     """The ISO 4217 code of the currency of the `currency` format, for example `EUR`."""
+    computed: Text | None = None
+    """An expression of other fields (see `appgen.dsl.expressions`). The apps compute the value."""
 
 
 class Relation(Element):
@@ -91,6 +93,16 @@ class Entity(Element):
         default=None, json_schema_extra=crud_schema
     )
     """The CRUD shorthand. The loader expands it to operations, views, and forms."""
+
+    @property
+    def stored_fields(self) -> dict[str, Field]:
+        """The fields that the records store: all fields except the computed fields."""
+        return {name: f for name, f in self.fields.items() if f.computed is None}
+
+    @property
+    def computed_fields(self) -> dict[str, Field]:
+        """The computed fields, whose values come from other fields."""
+        return {name: f for name, f in self.fields.items() if f.computed is not None}
 
 
 class Operation(Element):

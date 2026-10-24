@@ -188,7 +188,8 @@ entities:
 | `json`     | A JSON value.                        |                                       |
 
 All fields also take `description`, `label`, `required` (default
-`false`), `unique` (default `false`), `default`, and `format`.
+`false`), `unique` (default `false`), `default`, `format`, and
+`computed` (see [Computed fields](#computed-fields)).
 
 `format` is the display format of the field in all views: the table
 columns, the cards, the detail views, the forms, and the stat widgets of
@@ -219,6 +220,43 @@ fields:
     default: planned
   budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
   fee: { type: decimal, min: 0, format: currency, currency: EUR }
+```
+
+### Computed fields
+
+A computed field gets its value from other fields. `computed` gives the
+expression. The records do not store the value: the apps compute it
+when they show or return a record. A computed field is an `integer` or a
+`decimal` field, without `required`, `unique`, or `default`. A form
+cannot have a computed field, and the default forms of the CRUD
+shorthand leave it out.
+
+An expression has:
+
+| Part                 | Example                         | Meaning                                         |
+| -------------------- | ------------------------------- | ----------------------------------------------- |
+| A number             | `1.2`                           | A literal.                                      |
+| A field path         | `quantity`, `room.hourly_rate`  | An `integer` or a `decimal` field, not a computed field. |
+| `+`, `-`, `*`, `/`   | `price * quantity`              | The operators, with the usual order.            |
+| `( )`                | `(a + b) / 2`                   | A group.                                        |
+| `hours(start, end)`  | `hours(starts_at, ends_at)`     | The hours between two `date` or `datetime` fields. |
+| `days(start, end)`   | `days(start_date, due_date)`    | The days between two `date` or `datetime` fields.  |
+
+An empty operand, or a division by zero, gives an empty value. The apps
+round a `decimal` field to its `scale`, and an `integer` field to a
+whole number. The FastAPI app returns the value in the read schema (a
+property of the model), and the front ends compute it in the views.
+
+```yaml
+Booking:
+  fields:
+    starts_at: { type: datetime, required: true }
+    ends_at: { type: datetime, required: true }
+    cost:
+      type: decimal
+      scale: 2
+      format: currency
+      computed: hours(starts_at, ends_at) * room.hourly_rate
 ```
 
 ### Relations

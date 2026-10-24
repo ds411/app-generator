@@ -32,6 +32,9 @@ import { badges } from "@/shared/config/badges";
 {% if agg %}
 import { {{ agg | join(", ") }} } from "@/shared/lib/aggregate";
 {% endif %}
+{% if "compute." in code %}
+import { compute } from "@/shared/lib/compute";
+{% endif %}
 {% if "stat" in plan.uses or "formatValue(" in code %}
 import { formatValue } from "@/shared/lib/format";
 {% endif %}

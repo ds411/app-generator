@@ -17,7 +17,7 @@ export const {{ name | camel }}Meta = {
 {% if field.description %}
       description: {{ ts_value(field.description) }},
 {% endif %}
-{% for option in ("min_length", "max_length", "pattern", "min", "max", "precision", "scale", "values") if field[option] is not none %}
+{% for option in ("min_length", "max_length", "pattern", "min", "max", "precision", "scale", "values", "computed") if field[option] is not none %}
       {{ option | camel }}: {{ ts_value(field[option]) }},
 {% endfor %}
     }, {{ trace(field.id, scope="end") }}

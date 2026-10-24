@@ -77,13 +77,14 @@ class Member:
 def members(entity_name: str, entity: Entity) -> list[Member]:
     """Return the keys of the TypeScript type of an entity, in source order.
 
-    Fields come first, then the relations that the record stores: the ID
-    of the target for `many_to_one` and `one_to_one`, and the list of IDs
-    for `many_to_many`. A `one_to_many` relation is not stored: the target
+    The stored fields come first (a computed field is not a key), then
+    the relations that the record stores: the ID of the target for
+    `many_to_one` and `one_to_one`, and the list of IDs for
+    `many_to_many`. A `one_to_many` relation is not stored: the target
     stores the other side.
     """
     result: list[Member] = []
-    for name, field in entity.fields.items():
+    for name, field in entity.stored_fields.items():
         ts_type = enum_type(entity_name, name) if field.type == "enum" else _TS_TYPES[field.type]
         has_default = field.default is not None
         result.append(
