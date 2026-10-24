@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from appgen.dsl.access import ALL, RecordRule
-from appgen.dsl.apis import RESERVED_ENV_NAMES
+from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES
 from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
     RESET_PASSWORD_PATH,
@@ -707,6 +707,16 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                     api,
                     at=key,
                     hint="Use a name with the name of the API, for example 'HOLIDAYS_API_URL'.",
+                )
+                continue
+            if key == "security" and env.startswith(PUBLIC_ENV_PREFIXES):
+                yield _error(
+                    "reserved-name",
+                    f"The front-end builds put the variable '{env}' into the code for the "
+                    "browser, so it cannot keep a secret.",
+                    api,
+                    at=key,
+                    hint="Use a name without the prefix NEXT_PUBLIC_ or VITE_.",
                 )
                 continue
             first = envs.setdefault(env, f"{api.id}.{key}")

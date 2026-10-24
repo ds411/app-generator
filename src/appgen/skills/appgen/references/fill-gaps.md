@@ -82,6 +82,11 @@ of the entity in snake case, for example `bookings`.
   change the data with the repositories of
   `@/entities/<entity>/server`, for example `bookingRepository.get(id)`,
   `list()`, `create(input)`, `update(id, patch)`, and `remove(id)`.
+- A third-party API of the definition has a server-only client in
+  `@/shared/api/<api>`, for example `holidaysClient()`, which reads the
+  base URL and the secret from the environment. Call it in an operation
+  or in a new server action (`"use server"`), never in a client
+  component. An error status throws `ApiError` of `@/shared/api/third-party`.
 - The components are React client components. Load data with
   `<entity>Api` of `@/entities/<entity>` (for example
   `bookingApi.list()`), which calls the server actions, and with

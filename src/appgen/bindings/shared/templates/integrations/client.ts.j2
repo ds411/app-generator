@@ -1,0 +1,93 @@
+{% set api = ts_apis[name] %}
+{% set server = binding.name == "nextjs" %}
+{{ trace_header(element_id) }}
+{% if server %}
+import "server-only";
+
+{% endif %}
+import { HttpClient, type ClientOptions } from "@/shared/api/third-party";
+{% set types = api.used_types() %}
+{% if types %}
+
+import type { {{ types | join(", ") }} } from "./types";
+{% endif %}
+
+/** The base URL of the first server of the OpenAPI document. */
+export const {{ api.base_url_const }} = {{ api.base_url | tojson }};
+
+/**
+ * The client of the API `{{ api.name }}` ({{ api.title }}), with one method for each
+ * operation that the app uses.
+{% if api.description %}
+ *
+ * {{ api.description }}
+{% endif %}
+ */
+export class {{ api.client }} {
+  private readonly http: HttpClient;
+
+  constructor(options: ClientOptions = {}) {
+    this.http = new HttpClient({{ api.name | tojson }}, options.baseUrl ?? {{ api.base_url_const }}, {
+{% if api.credentials() %}
+      {{ api.credentials() }}
+{% endif %}
+      timeoutMs: options.timeoutMs,
+      fetch: options.fetch,
+    });
+  }
+
+  /** The time limit of a request, in milliseconds. */
+  get timeoutMs(): number {
+    return this.http.timeoutMs;
+  }
+{% for m in api.methods %}
+
+  {{ trace(m.id) }}
+  /**
+{% for line in m.doc_lines() %}
+   *{{ (" " ~ line) if line }}
+{% endfor %}
+   */
+  async {{ m.name }}({{ m.arguments() }}): Promise<{{ m.returns }}> {
+{% set parts = m.request_lines() %}
+{% set call = "this.http.request(" ~ (m.method.upper() | tojson) ~ ", " ~ (m.path | tojson) %}
+{% if m.result_type %}
+{% if parts %}
+    const data = await {{ call }}, {
+{% for line in parts %}
+      {{ line }}
+{% endfor %}
+    });
+{% else %}
+    const data = await {{ call }});
+{% endif %}
+    return data as {{ m.result_type }};
+{% else %}
+{% if parts %}
+    await {{ call }}, {
+{% for line in parts %}
+      {{ line }}
+{% endfor %}
+    });
+{% else %}
+    await {{ call }});
+{% endif %}
+{% endif %}
+  }
+{% endfor %}
+}
+{% if server %}
+
+/**
+ * Return a client with the settings of the environment: the base URL in
+ * `{{ api.url_env }}`{% if api.secret_env %}, and the secret in `{{ api.secret_env }}`{% endif %}.
+ */
+export function {{ api.factory }}(): {{ api.client }} {
+  return new {{ api.client }}({
+    baseUrl: process.env.{{ api.url_env }} || undefined,
+{% if api.secret_env %}
+    secret: process.env.{{ api.secret_env }},
+{% endif %}
+  });
+}
+{% endif %}

@@ -497,7 +497,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the secret. Without it, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the secret. The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so `env` cannot have it. Without `security`, the requests have no credential. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
 
@@ -512,8 +512,10 @@ apis:
 - The client has only the selected operations and the schemas that they
   use. Each answer has an example: the example of the document, or a
   sample from the schema.
-- A custom operation names the APIs of its logic in `apis`. Its
-  extension file then gets the clients of these APIs.
+- A custom operation names the APIs of its logic in `apis`. In the
+  FastAPI app, its extension function then gets the clients of these
+  APIs as arguments. The Next.js app has a server-only client for each
+  API in `src/shared/api/<api>/`, which the extension file imports.
 - The environment variables of the apps (for example `DATABASE_URL`)
   are reserved. Two keys cannot use the same variable.
 

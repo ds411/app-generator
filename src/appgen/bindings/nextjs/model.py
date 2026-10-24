@@ -13,6 +13,7 @@ from appgen.bindings.nextjs.db import build_tables, seed_tables
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
+from appgen.bindings.shared.integrations import ts_apis
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
@@ -149,6 +150,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     theme = ui.theme if ui is not None else None
     tables = build_tables(definition)
     return {
+        "ts_apis": ts_apis(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,

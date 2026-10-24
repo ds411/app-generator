@@ -1,0 +1,99 @@
+{{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
+{% if binding.name == "nextjs" %}
+import "server-only";
+
+{% endif %}
+/** The time limit of a request to a third-party API, in milliseconds. */
+export const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** An answer of a third-party API with an error status. */
+export class ApiError extends Error {
+  constructor(
+    readonly api: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`The API ${api} answered with the status ${status}.`);
+    this.name = "ApiError";
+  }
+}
+
+/** The settings of a client of a third-party API. */
+export interface ClientOptions {
+  /** The base URL. The default is the first server of the OpenAPI document. */
+  baseUrl?: string;
+{% if binding.name == "nextjs" %}
+  /** The API key or the bearer token of an API with security. */
+  secret?: string;
+{% endif %}
+  /** The time limit of a request, in milliseconds. */
+  timeoutMs?: number;
+  /** The `fetch` function, for example a mock in a test. */
+  fetch?: typeof fetch;
+}
+
+type Value = string | number | boolean | null | undefined;
+
+/** The parameters and the body of a request. */
+export interface RequestParts {
+  path?: Record<string, Value>;
+  query?: Record<string, Value | readonly Value[]>;
+  headers?: Record<string, Value>;
+  body?: unknown;
+}
+
+/** The HTTP part of the clients: it sends JSON requests and reads JSON answers. */
+export class HttpClient {
+  readonly timeoutMs: number;
+
+  constructor(
+    readonly api: string,
+    readonly baseUrl: string,
+    private readonly options: {
+      headers?: Record<string, string>;
+      query?: Record<string, string>;
+      timeoutMs?: number;
+      fetch?: typeof fetch;
+    } = {},
+  ) {
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
+  /**
+   * Send a request, and return the JSON answer, or `null` for an answer
+   * without content. An error status throws an `ApiError`.
+   */
+  async request(method: string, path: string, parts: RequestParts = {}): Promise<unknown> {
+    const filled = path.replace(/\{([^}]+)\}/g, (_match, name: string) =>
+      encodeURIComponent(String(parts.path?.[name] ?? "")),
+    );
+    const url = new URL(this.baseUrl.replace(/\/+$/, "") + filled);
+    for (const [name, value] of Object.entries({ ...this.options.query, ...parts.query })) {
+      const values: readonly Value[] = Array.isArray(value) ? value : [value as Value];
+      for (const item of values) {
+        if (item !== null && item !== undefined) url.searchParams.append(name, String(item));
+      }
+    }
+    const headers = new Headers(this.options.headers);
+    headers.set("Accept", "application/json");
+    for (const [name, value] of Object.entries(parts.headers ?? {})) {
+      if (value !== null && value !== undefined) headers.set(name, String(value));
+    }
+    let body: string | undefined;
+    if (parts.body !== undefined) {
+      headers.set("Content-Type", "application/json");
+      body = JSON.stringify(parts.body);
+    }
+    const send = this.options.fetch ?? fetch;
+    const response = await send(url, {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new ApiError(this.api, response.status, text);
+    return text ? (JSON.parse(text) as unknown) : null;
+  }
+}

@@ -22,7 +22,7 @@ runner = CliRunner()
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI.
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": ["api"],
+    "nextjs": [],
     # The React app has no sign-up page (#269), no password reset pages (#270), and no
     # owner rules (#273) yet.
     "react": [
@@ -51,6 +51,7 @@ CUSTOM_UI = {
     "ui.forms.assign_task.fields.assignee_id",
     "ui.forms.assign_task.rules.active_person",
     "ui.dashboards.overview.widgets.workload",
+    "ui.dashboards.overview.widgets.holidays",
 }
 OPEN_GAPS: dict[str, set[str]] = {
     "nextjs": CUSTOM_OPERATIONS | CUSTOM_UI,
