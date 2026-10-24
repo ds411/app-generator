@@ -1,0 +1,26 @@
+{{ trace_header(definition.auth.id) }}
+"use client";
+
+import { LogOutIcon } from "lucide-react";
+
+import { signOut } from "@/shared/auth";
+import { useNavigate } from "@/shared/lib/router";
+
+/** A button that signs the user out and opens the sign-in page. */
+export function SignOutButton() {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      aria-label={{ jsx_attr("Sign out") }}
+      title={{ jsx_attr("Sign out") }}
+      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      onClick={async () => {
+        await signOut();
+        navigate("/sign-in");
+      }}
+    >
+      <LogOutIcon className="size-4" />
+    </button>
+  );
+}

@@ -104,6 +104,6 @@ def test_reserved_sections_are_not_supported_yet(section: str) -> None:
 
 
 def test_reserved_sections_are_reported_with_other_errors() -> None:
-    diagnostics = errors(BASE.replace("version: 0\n", "") + "auth: {}\n")
+    diagnostics = errors(BASE.replace("version: 0\n", "") + "access: {}\n")
 
     assert [d.code for d in diagnostics] == ["missing-version", "not-supported"]

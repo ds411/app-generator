@@ -1,0 +1,49 @@
+{% set key = definition.auth.username_field | camel %}
+{{ trace_header(definition.auth.id) }}
+// The sign-in of the app with mock data (ADR 0011). The users are the mock
+// records of {{ definition.auth.user_entity }}, and each one signs in with the password
+// MOCK_PASSWORD. The session stays in the browser tab. An app with a back
+// end checks the passwords on the server.
+
+/** The password of each mock user. */
+export const MOCK_PASSWORD = "password";
+
+const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
+
+const users: { id: string; username: string }[] = [
+{% for record in mock[definition.auth.user_entity] %}
+  { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }} },
+{% endfor %}
+];
+
+/** Return the ID of the signed-in user, or null. */
+export function currentUserId(): string | null {
+  try {
+    return window.sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Sign in. Return null, or the message of the error. */
+export async function signIn(username: string, password: string): Promise<string | null> {
+  const user = users.find((item) => item.username === username);
+  if (!user || password !== MOCK_PASSWORD) {
+    return "The user name or the password is not correct.";
+  }
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, user.id);
+  } catch {
+    return "The browser does not keep the session.";
+  }
+  return null;
+}
+
+/** Sign out. */
+export async function signOut(): Promise<void> {
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // No storage: no session to delete.
+  }
+}

@@ -31,6 +31,9 @@ import { ModeToggle } from "@/features/toggle-theme";
 {% if i18n and topbar is not none %}
 import { LanguageSwitch } from "@/features/switch-language";
 {% endif %}
+{% if definition.auth and topbar is not none %}
+import { SignOutButton } from "@/features/sign-out";
+{% endif %}
 {% if sidebar is not none %}
 import {
   Sidebar,
@@ -118,6 +121,9 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
         <div className="{{ plan.mode_toggle.classes('block') }}">
           <ModeToggle />
         </div>
+{% endif %}
+{% if definition.auth %}
+        <SignOutButton />
 {% endif %}
       </div>
     </header>

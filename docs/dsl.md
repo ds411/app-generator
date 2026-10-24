@@ -29,6 +29,7 @@ examples. [ADR 0002](adr/0002-app-definition-dsl-v0.md) and
   - [dashboards](#dashboards)
   - [Grids](#grids)
   - [UI states and defaults](#ui-states-and-defaults)
+- [auth](#auth)
 - [translations](#translations)
 - [Extension keys](#extension-keys)
 - [Reserved sections](#reserved-sections)
@@ -853,6 +854,36 @@ ui:
       error: { title: Something went wrong, icon: triangle-alert, action: retry }
 ```
 
+## auth
+
+The optional `auth` section closes the apps: the users sign in with a
+user name and a password ([ADR 0011](adr/0011-auth.md)).
+
+```yaml
+auth:
+  user_entity: Member
+  username_field: email
+  public_pages: [rooms]
+  public_operations: [list_rooms]
+  session_hours: 12
+```
+
+- `user_entity` is the entity of the users. `username_field` is a
+  required, unique `string` or `email` field of it.
+- `public_pages` and `public_operations` are open without a sign-in.
+  All other pages and operations need a signed-in user.
+- `session_hours` (1 to 720, default 8) is the time of a session.
+- No page can use the path `/sign-in`: it is the sign-in page of the
+  front ends.
+
+The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
+/auth/me`, and `PUT /auth/password`, and `python -m app.cli
+set-password <user name>`. The Next.js app has the page `/sign-in` and a
+session cookie, and its seed gives each user the password in
+`SEED_PASSWORD`. Both need `AUTH_SECRET`. The React app (mock data)
+accepts each mock user with the password `password`. Each front end has
+a sign-out button in the top bar.
+
 ## translations
 
 The optional `translations` section gives the UI text in more than one
@@ -907,10 +938,10 @@ is an error.
 
 ## Reserved sections
 
-These top-level keys are reserved for later versions: `auth` and
-`access`. The validator reports "not
-supported in this version" for each of them. A later version adds them
-as optional sections, so that the definitions that exist stay valid.
+This top-level key is reserved for a later version: `access`. The
+validator reports "not supported in this version" for it. A later
+version adds it as an optional section, so that the definitions that
+exist stay valid.
 [ADR 0002](adr/0002-app-definition-dsl-v0.md#how-the-out-of-scope-features-fit-in-later)
 gives the plan for each one.
 

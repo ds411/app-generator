@@ -4,6 +4,10 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+{% if definition.auth %}
+import { UnauthorizedError, requireUser } from "@/shared/auth/session";
+
+{% endif %}
 import { type ActionResult, ValidationError } from "./errors";
 import { type ListQuery, NotFoundError } from "./types";
 
@@ -52,19 +56,31 @@ function postgresCode(error: unknown): string | undefined {
 
 /**
  * Run the body of a server action, and return its result or its error as
- * data. After a change, the routes of the app get new data.
+ * data. After a change, the routes of the app get new data.{% if definition.auth %} An action
+ * needs a signed-in user, except a public action.{% endif %}
+
  */
 export async function runAction<T>(
   body: () => Promise<T>,
-  options: { changes?: boolean } = {},
+  options: { changes?: boolean{% if definition.auth %}; public?: boolean{% endif %} } = {},
 ): Promise<ActionResult<T>> {
   try {
+{% if definition.auth %}
+    if (!options.public) {
+      await requireUser();
+    }
+{% endif %}
     const data = await body();
     if (options.changes) {
       revalidatePath("/", "layout");
     }
     return { ok: true, data };
   } catch (error) {
+{% if definition.auth %}
+    if (error instanceof UnauthorizedError) {
+      return { ok: false, error: { name: "Error", message: error.message } };
+    }
+{% endif %}
     if (error instanceof NotFoundError) {
       const { message, entity, id } = error;
       return { ok: false, error: { name: "NotFoundError", message, entity, id } };

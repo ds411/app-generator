@@ -64,6 +64,9 @@ BINDING = Binding(
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
+        Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
+        Output(template="app/cli.py.j2", path="app/cli.py", when="definition.auth"),
+        Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
         Output(
             template="app/core/workflows.py.j2",
             path="app/core/workflows.py",
@@ -162,6 +165,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
+        | {"auth"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),

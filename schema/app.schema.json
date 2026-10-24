@@ -64,6 +64,48 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
     },
+    "Auth": {
+      "additionalProperties": false,
+      "description": "The sign-in with a user name and a password (ADR 0011).\n\nThe users are the records of `user_entity`. Each app stores the\npassword hashes apart from the records. All pages and operations need\na signed-in user, except the public ones.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "user_entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "username_field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "public_pages": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Public Pages",
+          "type": "array"
+        },
+        "public_operations": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Public Operations",
+          "type": "array"
+        },
+        "session_hours": {
+          "default": 8,
+          "maximum": 720,
+          "minimum": 1,
+          "title": "Session Hours",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "user_entity",
+        "username_field"
+      ],
+      "title": "Auth",
+      "type": "object"
+    },
     "BadgeRef": {
       "additionalProperties": false,
       "description": "A field that shows as a badge.",
@@ -5281,6 +5323,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/UI"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "auth": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Auth"
         },
         {
           "type": "null"

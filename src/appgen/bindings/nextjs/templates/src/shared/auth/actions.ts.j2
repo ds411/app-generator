@@ -1,0 +1,33 @@
+{{ trace_header(definition.auth.id) }}
+"use server";
+
+import { cookies } from "next/headers";
+import { z } from "zod";
+
+import type { ActionResult } from "@/shared/api";
+
+import { SESSION_COOKIE, SESSION_SECONDS, checkPassword, makeToken } from "./session";
+
+const signInSchema = z.object({ username: z.string().min(1).max(320), password: z.string().min(1).max(200) });
+
+/** Sign in with a user name and a password, and set the session cookie. */
+export async function signInAction(username: string, password: string): Promise<ActionResult<null>> {
+  const input = signInSchema.safeParse({ username, password });
+  const userId = input.success ? await checkPassword(input.data.username, input.data.password) : null;
+  if (userId === null) {
+    return { ok: false, error: { name: "Error", message: "The user name or the password is not correct." } };
+  }
+  (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_SECONDS,
+  });
+  return { ok: true, data: null };
+}
+
+/** Sign out: delete the session cookie. */
+export async function signOutAction(): Promise<void> {
+  (await cookies()).delete(SESSION_COOKIE);
+}

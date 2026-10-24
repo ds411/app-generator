@@ -1,5 +1,6 @@
 {% set info = nextjs.pages[name] %}
 {% set detail = element.entity and info.params and element.content is not none and element.content.view in ui_views.detail_views %}
+{% set protected = definition.auth and name not in definition.auth.public_pages %}
 {{ trace_header(element_id) }}
 import type { Metadata } from "next";
 {% if detail %}
@@ -10,12 +11,18 @@ import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.en
 
 {% endif %}
 import { {{ info.component }} } from "@/pages/{{ info.slice }}";
+{% if protected %}
+import { requirePageUser } from "@/shared/auth/session";
+{% endif %}
 
 export const metadata: Metadata = { title: {{ element.title | tojson }} };
 {% if detail %}
 
 /** Show the not-found page (status 404) if the record does not exist. */
 export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>) {
+{% if protected %}
+  await requirePageUser({{ element.path | tojson }}, await params); {{ trace(definition.auth.id) }}
+{% endif %}
   const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
   if (!(await {{ element.entity | camel }}Repository.exists(id))) {
     notFound();
@@ -24,7 +31,14 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 }
 {% else %}
 
+{% if protected %}
+export default async function Route({% if info.params %}{ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>{% endif %}) {
+  await requirePageUser({{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.auth.id) }}
+  return <{{ info.component }} />;
+}
+{% else %}
 export default function Route() {
   return <{{ info.component }} />;
 }
+{% endif %}
 {% endif %}

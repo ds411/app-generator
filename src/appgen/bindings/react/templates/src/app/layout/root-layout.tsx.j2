@@ -4,6 +4,9 @@ import { Outlet } from "react-router";
 {% if i18n %}
 import { LanguageSwitch } from "@/features/switch-language";
 {% endif %}
+{% if definition.auth %}
+import { SignOutButton } from "@/features/sign-out";
+{% endif %}
 {% if react.mode_toggle %}
 import { ModeToggle } from "@/features/toggle-theme";
 {% endif %}
@@ -15,14 +18,20 @@ export function RootLayout() {
     <div className="min-h-svh bg-background text-foreground">
       <header className="flex items-center justify-between border-b px-6 py-3">
         <span className="font-semibold">{{ "{" ~ tr("appConfig.title") ~ "}" }}</span>
-{% if i18n %}
+{% set extras = i18n or definition.auth %}
+{% if extras %}
         <div className="flex items-center gap-2">
+{% endif %}
+{% if i18n %}
           <LanguageSwitch />
 {% endif %}
 {% if react.mode_toggle %}
-{% if i18n %}  {% endif %}        <ModeToggle />
+{% if extras %}  {% endif %}        <ModeToggle />
 {% endif %}
-{% if i18n %}
+{% if definition.auth %}
+          <SignOutButton />
+{% endif %}
+{% if extras %}
         </div>
 {% endif %}
       </header>

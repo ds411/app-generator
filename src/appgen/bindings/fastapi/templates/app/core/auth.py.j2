@@ -1,0 +1,195 @@
+{{ trace_header(definition.auth.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+"""The sign-in of the users (ADR 0011): password hashes, tokens, and the auth endpoints.
+
+The users are the records of {{ u.name }}. The table `credentials` holds
+the password hash of each user, apart from the records, so that no
+endpoint of {{ u.name }} returns it. A token is a signed text with the ID
+of the user and the end of its time. Set `AUTH_SECRET` to a long random
+text in each environment.
+"""
+
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
+from typing import Annotated, Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+from sqlalchemy import ForeignKey, String, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base, SessionDep, commit
+from app.core.errors import ProblemError, problem_responses
+from app.features.{{ u.slice }}.models import {{ u.name }}
+from app.features.{{ u.slice }}.schemas import {{ u.name }}Read
+
+SESSION_SECONDS = {{ definition.auth.session_hours * 3600 }}
+"""The time after which a token ends: {{ definition.auth.session_hours }} hours."""
+MIN_PASSWORD_LENGTH = 8
+_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+
+
+class Credential(Base):
+    """The password hash of a user."""
+
+    __tablename__ = "credentials"
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("{{ u.table }}.id", ondelete="CASCADE"), primary_key=True
+    )
+    password_hash: Mapped[str] = mapped_column(String(200))
+
+
+def hash_password(password: str) -> str:
+    """Return the scrypt hash of a password, with a random salt."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, **_SCRYPT)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Return True if a password has the stored hash."""
+    _, salt, digest = stored.split("$")
+    found = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), **_SCRYPT)
+    return hmac.compare_digest(found.hex(), digest)
+
+
+def _encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def _key(request: Request) -> bytes:
+    secret: str = request.app.state.settings.auth_secret
+    if not secret:
+        raise ProblemError(500, "The server has no AUTH_SECRET.")
+    return secret.encode()
+
+
+def make_token(request: Request, user_id: UUID) -> str:
+    """Return a signed token for a user."""
+    payload = {"sub": str(user_id), "exp": int(time.time()) + SESSION_SECONDS}
+    body = _encode(json.dumps(payload, separators=(",", ":")).encode())
+    signature = _encode(hmac.new(_key(request), body.encode(), hashlib.sha256).digest())
+    return f"{body}.{signature}"
+
+
+def read_token(request: Request, token: str) -> UUID | None:
+    """Return the user ID of a valid token that has not ended, else None."""
+    body, _, signature = token.partition(".")
+    expected = _encode(hmac.new(_key(request), body.encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        payload: dict[str, Any] = json.loads(_decode(body))
+        if int(payload["exp"]) < time.time():
+            return None
+        return UUID(str(payload["sub"]))
+    except ValueError, KeyError, TypeError:
+        return None
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def current_user(
+    request: Request,
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> {{ u.name }}:
+    """Return the signed-in user. Give a 401 error without a valid token."""
+    user_id = read_token(request, credentials.credentials) if credentials else None
+    user = await session.get({{ u.name }}, user_id) if user_id else None
+    if user is None:
+        raise ProblemError(401, "Sign in to use this endpoint.")
+    return user
+
+
+CurrentUser = Annotated[{{ u.name }}, Depends(current_user)]
+"""The signed-in user, as a parameter of an endpoint."""
+
+
+async def set_password(session: AsyncSession, user: {{ u.name }}, password: str) -> None:
+    """Store the hash of a new password of a user."""
+    credential = await session.get(Credential, user.id)
+    if credential is None:
+        session.add(Credential(user_id=user.id, password_hash=hash_password(password)))
+    else:
+        credential.password_hash = hash_password(password)
+    await commit(session)
+
+
+async def find_user(session: AsyncSession, username: str) -> {{ u.name }} | None:
+    """Return the user with a user name, or None."""
+    result = await session.execute(select({{ u.name }}).where({{ u.name }}.{{ username.attr }} == username))
+    return result.scalar_one_or_none()
+
+
+class SignIn(BaseModel):
+    """The user name and the password of a sign-in."""
+
+    username: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class Token(BaseModel):
+    """A token for the `Authorization: Bearer` header."""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = SESSION_SECONDS
+
+
+class PasswordChange(BaseModel):
+    """The current and the new password of the signed-in user."""
+
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+
+
+router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+@router.post("/sign-in", responses=problem_responses(401, 422), operation_id="sign_in")
+async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
+    """Return a token for a user name and a password."""
+    user = await find_user(session, data.username)
+    credential = await session.get(Credential, user.id) if user else None
+    if (
+        user is None
+        or credential is None
+        or not verify_password(data.password, credential.password_hash)
+    ):
+        raise ProblemError(401, "The user name or the password is not correct.")
+    return Token(access_token=make_token(request, user.id))
+
+
+@router.get("/me", responses=problem_responses(401), operation_id="read_me")
+async def read_me(user: CurrentUser) -> {{ u.name }}Read:
+    """Return the signed-in user."""
+    return {{ u.name }}Read.model_validate(user)
+
+
+@router.put(
+    "/password",
+    status_code=204,
+    responses=problem_responses(401, 422),
+    operation_id="change_password",
+)
+async def change_password(data: PasswordChange, user: CurrentUser, session: SessionDep) -> None:
+    """Change the password of the signed-in user."""
+    credential = await session.get(Credential, user.id)
+    if credential is None or not verify_password(data.current_password, credential.password_hash):
+        raise ProblemError(422, "The current password is not correct.")
+    await set_password(session, user, data.new_password)
