@@ -177,7 +177,18 @@ BINDING = Binding(
             path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}.py",
             for_each="operation",
         ),
+        Output(
+            template="tests/features/slice/test_list_query.py.j2",
+            path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}_query.py",
+            for_each="operation",
+            when="element.kind == 'list' and py.entity(element.entity).query.from_views",
+        ),
         Output(template="tests/factories.py.j2", path="tests/factories.py"),
+        Output(
+            template="tests/ordering.py.j2",
+            path="tests/ordering.py",
+            when="py.entities.values() | map(attribute='query') | selectattr('sort_tests') | list",
+        ),
         Output(template="tests/problems.py.j2", path="tests/problems.py"),
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),

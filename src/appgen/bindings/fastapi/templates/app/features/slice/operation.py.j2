@@ -36,19 +36,27 @@ class {{ op.name | pascal }}Query(PageQuery):
 
     model_config = ConfigDict(extra="forbid")
 
-{% for f in e.filters %}
-    {{ trace(f.id) }}
-    {{ f.filter_declaration() }}
+{% for p in e.query.params %}
+{% for id in p.ids %}
+    {{ trace(id) }}
 {% endfor %}
-{% for r in e.fk_relations %}
-    {{ trace(r.id) }}
-    {{ r.fk_attr }}: UUID | None = None
+    {{ p.declaration() }}
 {% endfor %}
+{% if e.query.aliases %}
+
+
+{% for alias, target in e.query.aliases %}
+{{ alias }} = aliased({{ target }})
+{% endfor %}
+{% endif %}
 
 
 SORTABLE = {
-{% for f in e.sortable %}
-    "{{ f.name }}": {{ e.name }}.{{ f.attr }},
+{% for k in e.query.sort_keys %}
+{% for id in k.ids %}
+    {{ trace(id) }}
+{% endfor %}
+    {{ k.entry() }}
 {% endfor %}
 }
 {% endif %}
@@ -82,13 +90,10 @@ async def {{ op.name }}(
 ) -> Page[{{ e.name }}Read]:
     """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
     statement = select({{ e.name }})
-{% for f in e.filters %}
-    if query.{{ f.attr }} is not None:
-        statement = statement.where({{ e.name }}.{{ f.attr }} == query.{{ f.attr }})
+{% for p in e.query.params %}
+{% for line in p.where_lines() %}
+    {{ line }}
 {% endfor %}
-{% for r in e.fk_relations %}
-    if query.{{ r.fk_attr }} is not None:
-        statement = statement.where({{ e.name }}.{{ r.fk_attr }} == query.{{ r.fk_attr }})
 {% endfor %}
     total = await session.scalar(select(func.count()).select_from(statement.subquery()))
     order = sort_order(query.sort, SORTABLE, {{ e.name }}.id)

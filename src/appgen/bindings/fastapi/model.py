@@ -16,6 +16,7 @@ from typing import Any
 
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import call, from_import, import_block
+from appgen.bindings.fastapi.queries import PyListQuery, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.dsl.expressions import (
     Binary,
@@ -599,6 +600,8 @@ class PyEntity:
     workflows: list[PyWorkflow] = field(default_factory=list[PyWorkflow])
     guard: str = "current_user"
     """The dependency of the protected operations: `current_user`, or `check_access` with roles."""
+    query: PyListQuery = field(default_factory=PyListQuery)
+    """The filters and the sort keys of the list endpoints, from the fields and the views."""
 
     @property
     def guard_module(self) -> str:
@@ -726,28 +729,48 @@ class PyEntity:
 
     def list_imports(self) -> str:
         """Return the import block of a list operation of the entity."""
-        types = {f.read_type for f in self.filters}
+        query = self.query
+        params = query.params
+        types = {p.type.removeprefix("list[").removesuffix("]") for p in params}
+        declarations = [p.declaration() for p in params]
+        code = "\n".join([*(line for p in params for line in p.where_lines()), *declarations])
+        code += "\n".join(k.entry() for k in query.sort_keys)
+        pagination = {"Page", "PageQuery", "sort_order"}
+        pagination |= {
+            n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
+        }
         lines = {
             "from typing import Annotated",
             "from fastapi import APIRouter, Query",
             "from pydantic import ConfigDict"
-            + (", Field" if any(f.aliased for f in self.filters) else ""),
-            "from sqlalchemy import func, select",
+            + (", Field" if any("Field(" in d for d in declarations) else ""),
+            "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
             "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
-            "from app.core.pagination import Page, PageQuery, sort_order",
-            f"from app.features.{self.slice}.models import {self.name}",
+            from_import("app.core.pagination", pagination),
             f"from app.features.{self.slice}.schemas import {self.name}Read",
         }
+        classes = {self.name} | {e.name for e in query.entities()}
+        if query.aliases:
+            # `aliased()` prepares the mappers: all models must be imported first.
+            lines.add("from sqlalchemy.orm import aliased")
+            lines.add(from_import("app.models", classes))
+        else:
+            for entity in [self, *query.entities()]:
+                lines.add(f"from app.features.{entity.slice}.models import {entity.name}")
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
         if "Decimal" in types:
             lines.add("from decimal import Decimal")
-        if self.fk_relations or "UUID" in types:
+        if "UUID" in types:
             lines.add("from uuid import UUID")
-        enums = {e.name for e in self.enums if e.name in types}
-        if enums:
-            lines.add(from_import(f"app.features.{self.slice}.enums", enums))
+        enums: dict[str, set[str]] = {}
+        for p in params:
+            f = p.path.field
+            if f is not None and f.enum is not None and f.enum.name in types:
+                enums.setdefault(p.path.entity.slice, set()).add(f.enum.name)
+        for slice_name, names in enums.items():
+            lines.add(from_import(f"app.features.{slice_name}.enums", names))
         return import_block(lines)
 
     def router_imports(self) -> str:
@@ -989,6 +1012,7 @@ def python_app(definition: AppDefinition) -> PyApp:
             entity.guard = "check_access"
         _place_routes(entity)
         _check_names(entity)
+        entity.query = list_query(definition, entity)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),

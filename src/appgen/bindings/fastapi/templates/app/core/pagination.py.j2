@@ -1,11 +1,12 @@
 {{ trace_header("app") }}
-"""Pagination and sorting of the list endpoints."""
+"""Pagination, sorting, search, and date ranges of the list endpoints."""
 
+import datetime as dt
 from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import UnaryExpression
+from sqlalchemy import ColumnElement, ScalarSelect, UnaryExpression, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.errors import ProblemError
@@ -18,8 +19,8 @@ class PageQuery(BaseModel):
     offset: int = Field(default=0, ge=0, description="The count of items to skip.")
     sort: str | None = Field(
         default=None,
-        description="Field names, with a comma between them. A `-` before a name sorts "
-        "in descending order, for example `-due_date,title`.",
+        description="Sort keys, with a comma between them. A `-` before a key sorts "
+        "in descending order, for example `-due_date,title`. Empty values come last.",
     )
 
 
@@ -35,10 +36,13 @@ class Page[T](BaseModel):
 
 def sort_order(
     sort: str | None,
-    columns: Mapping[str, InstrumentedAttribute[Any]],
+    columns: Mapping[str, InstrumentedAttribute[Any] | ColumnElement[Any]],
     default: InstrumentedAttribute[Any],
 ) -> list[UnaryExpression[Any]]:
-    """Return the ORDER BY terms for a sort parameter. The default column ends the order."""
+    """Return the ORDER BY terms for a sort parameter. The default column ends the order.
+
+    Empty values come last in both directions, on Postgres and on SQLite.
+    """
     terms: list[UnaryExpression[Any]] = []
     for part in (sort or "").split(","):
         name = part.strip()
@@ -49,6 +53,35 @@ def sort_order(
         if column is None:
             names = ", ".join(sorted(columns))
             raise ProblemError(422, f"Cannot sort by '{name}'. Use one of: {names}.")
-        terms.append(column.desc() if descending else column.asc())
+        terms.append((column.desc() if descending else column.asc()).nulls_last())
     terms.append(default.asc())
     return terms
+
+
+def lookup(column: InstrumentedAttribute[Any], *where: ColumnElement[bool]) -> ScalarSelect[Any]:
+    """Return the value of a related record, for a sort key of a field path."""
+    return select(column).where(*where).scalar_subquery()
+
+
+def search_words(text: str | None) -> list[str]:
+    """Return the words of a search. A record must have each word in one of its fields."""
+    return (text or "").split()
+
+
+def contains(column: InstrumentedAttribute[Any], word: str) -> ColumnElement[bool]:
+    """Return a condition: the text column contains the word, in any case.
+
+    The condition is `ILIKE` on Postgres and `LIKE` on SQLite. The `%` and
+    `_` of the word are plain characters.
+    """
+    escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return column.ilike(f"%{escaped}%", escape="\\")
+
+
+def day_start(day: dt.date, days: int = 0) -> dt.datetime:
+    """Return the start of a day in UTC, a number of days later.
+
+    A date range on a date-time field takes the records from the start of
+    the first day to the start of the day after the last day.
+    """
+    return dt.datetime.combine(day + dt.timedelta(days=days), dt.time.min, tzinfo=dt.UTC)

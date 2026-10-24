@@ -1,0 +1,214 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% set query = e.query %}
+{% set url = e.path ~ op.path %}
+{% macro sig(fn, args) %}
+{% set line = "async def " ~ fn ~ "(" ~ args ~ ") -> None:" %}
+{% if line | length <= 100 %}
+{{ line }}
+{% else %}
+async def {{ fn }}(
+    {{ args }}
+) -> None:
+{% endif %}
+{% endmacro %}
+{% set tested = query.params | selectattr("test") | list %}
+{% set sorted_keys = query.view_sort_keys | selectattr("test") | list %}
+{% set selects = query.params | selectattr("kind", "eq", "in") | list %}
+"""The tests of the filters, the search, and the sort of `{{ op.name }}`: GET {{ url }}.
+
+The parameters and the sort keys come from the views of the entity {{ e.name }}.
+"""
+
+{% set ns = namespace(lines=[
+    "from typing import Any",
+    "import pytest",
+    "from httpx import AsyncClient",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+], factories=["make_" ~ e.snake]) %}
+{% for t in (tested | map(attribute="test") | list) + (sorted_keys | map(attribute="test") | list) + ([query.search.hop_test] if query.search and query.search.hop_test else []) %}
+{% if t.parent %}
+{% set ns.factories = ns.factories + ["make_" ~ t.parent.snake] %}
+{% endif %}
+{% if t.target %}
+{% set ns.factories = ns.factories + ["make_" ~ t.target.snake] %}
+{% endif %}
+{% endfor %}
+{% set search_tests = [query.search.test, query.search.hop_test] | select | list if query.search else [] %}
+{% if (tested | map(attribute="test") | selectattr("attr") | list) or search_tests %}
+{% set ns.lines = ns.lines + ["from pydantic_core import to_jsonable_python"] %}
+{% endif %}
+{% if tested | selectattr("kind", "eq", "from") | list %}
+{% set ns.lines = ns.lines + ["import datetime as dt"] %}
+{% endif %}
+{% if sorted_keys %}
+{% set ns.lines = ns.lines + ["from tests.ordering import expected_order"] %}
+{% endif %}
+{% if selects %}
+{% set ns.lines = ns.lines + ["from tests.problems import assert_problem"] %}
+{% endif %}
+{{ py.imports(ns.lines + [py.from_import("tests.factories", ns.factories | unique | list)]) }}
+
+pytestmark = pytest.mark.anyio
+
+
+async def _items(client: AsyncClient, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the items of the first page of the endpoint, in order."""
+    response = await client.get("{{ url }}", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()["items"]
+
+
+async def _ids(client: AsyncClient, params: dict[str, Any]) -> list[str]:
+    """Return the IDs of the items of the first page of the endpoint, in order."""
+    return [item["id"] for item in await _items(client, params)]
+{% macro make_records(t) -%}
+{% if t.parent %}
+    parents = [await make_{{ t.parent.snake }}(session) for _ in range(2)]
+    records = [await make_{{ e.snake }}(session, {{ t.fk }}=str(p.id)) for p in parents]
+    values = [to_jsonable_python(p.{{ t.attr }}) for p in parents]
+{%- elif t.target %}
+    targets = [await make_{{ t.target.snake }}(session) for _ in range(2)]
+{% if t.ids %}
+    records = [await make_{{ e.snake }}(session, {{ t.ids }}=[str(t.id)]) for t in targets]
+{% else %}
+    records = [await make_{{ e.snake }}(session, {{ t.fk }}=str(t.id)) for t in targets]
+{% endif %}
+    values = [str(t.id) for t in targets]
+{%- else %}
+    records = [await make_{{ e.snake }}(session) for _ in range(2)]
+    values = [to_jsonable_python(r.{{ t.attr }}) for r in records]
+{%- endif %}
+{%- endmacro %}
+{% for p in tested if p.kind in ("in", "eq") %}
+
+
+{% for id in p.ids if not id.startswith("entities.") %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_filters_by_" ~ (p.attr | replace("__", "_")), "client: AsyncClient, session: AsyncSession") }}{{ make_records(p.test) }}
+    first = str(records[0].id)
+
+    ids = await _ids(client, {"{{ p.name }}": {{ "[values[0]]" if p.is_list else "values[0]" }}})
+
+    assert first in ids
+    if values[1] != values[0]:
+        assert str(records[1].id) not in ids
+{% if p.is_list %}
+    ids = await _ids(client, {"{{ p.name }}": values})
+    assert {first, str(records[1].id)} <= set(ids)
+{% endif %}
+{% endfor %}
+{% for p in tested if p.kind == "from" %}
+{% set to_name = p.name[:-5] ~ "_to" %}
+
+
+{% for id in p.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_filters_by_a_range_of_" ~ (p.attr[:-5] | replace("__", "_")), "client: AsyncClient, session: AsyncSession") }}{{ make_records(p.test) }}
+    first = str(records[0].id)
+    day = dt.date.fromisoformat(values[0][:10])
+    before = (day - dt.timedelta(days=1)).isoformat()
+    after = (day + dt.timedelta(days=1)).isoformat()
+
+    ids = await _ids(client, {"{{ p.name }}": day.isoformat(), "{{ to_name }}": day.isoformat()})
+
+    assert first in ids
+    if values[1][:10] != values[0][:10]:
+        assert str(records[1].id) not in ids
+    assert first not in await _ids(client, {"{{ to_name }}": before})
+    assert first not in await _ids(client, {"{{ p.name }}": after})
+{% endfor %}
+{% if query.search %}
+{% set s = query.search %}
+{% if s.test %}
+
+
+{% for id in s.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_searches_the_records", "client: AsyncClient, session: AsyncSession") }}{{ make_records(s.test) }}
+    first = str(records[0].id)
+    text = values[0]
+
+    assert first in await _ids(client, {"q": text})
+    assert first in await _ids(client, {"q": text.upper()})
+    assert first not in await _ids(client, {"q": f"{text} no-such-word"})
+    assert await _ids(client, {"q": "%"}) == []
+{% endif %}
+{% if s.hop_test %}
+
+
+{% for id in s.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_searches_the_related_records", "client: AsyncClient, session: AsyncSession") }}{{ make_records(s.hop_test) }}
+
+    ids = await _ids(client, {"q": values[0]})
+
+    assert str(records[0].id) in ids
+{% endif %}
+{% endif %}
+{% set field_keys = sorted_keys | rejectattr("test.parent") | list %}
+{% if field_keys %}
+
+
+@pytest.mark.parametrize(
+    ("key", "attr"),
+    [
+{% for k in field_keys %}
+{% for id in k.ids %}
+        {{ trace(id) }}
+{% endfor %}
+        ("{{ k.name }}", "{{ k.test.attr }}"),
+{% endfor %}
+    ],
+)
+{{ sig("test_" ~ op.name ~ "_sorts_by_a_field", "client: AsyncClient, session: AsyncSession, key: str, attr: str") }}    records = [await make_{{ e.snake }}(session) for _ in range(2)]
+    values = [(getattr(r, attr), str(r.id)) for r in records]
+    wanted = {str(r.id) for r in records}
+
+    ascending = await _ids(client, {"sort": key})
+    descending = await _ids(client, {"sort": f"-{key}"})
+
+    assert [i for i in ascending if i in wanted] == expected_order(values)
+    assert [i for i in descending if i in wanted] == expected_order(values, descending=True)
+{% endif %}
+{% for k in sorted_keys if k.test.parent %}
+
+
+{% for id in k.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_sorts_by_" ~ (k.name | replace(".", "_")), "client: AsyncClient, session: AsyncSession") }}    parents = [await make_{{ k.test.parent.snake }}(session) for _ in range(2)]
+    records = [await make_{{ e.snake }}(session, {{ k.test.fk }}=str(p.id)) for p in parents]
+    values = [(p.{{ k.test.attr }}, str(r.id)) for p, r in zip(parents, records, strict=True)]
+    wanted = {str(r.id) for r in records}
+
+    ascending = await _ids(client, {"sort": "{{ k.name }}"})
+    descending = await _ids(client, {"sort": "-{{ k.name }}"})
+
+    assert [i for i in ascending if i in wanted] == expected_order(values)
+    assert [i for i in descending if i in wanted] == expected_order(values, descending=True)
+{% endfor %}
+{% if selects %}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_a_filter_value_that_is_not_valid", "client: AsyncClient") }}    response = await client.get("{{ url }}", params={"{{ selects[0].name }}": "not-a-value"})
+
+    assert_problem(response, 422)
+{% endif %}
+
+
+async def test_the_openapi_document_lists_the_parameters(client: AsyncClient) -> None:
+    document = (await client.get("/openapi.json")).json()
+
+    parameters = document["paths"]["{{ url }}"]["get"]["parameters"]
+    assert {p["name"] for p in parameters} >= {
+{% for p in query.params %}
+        "{{ p.name }}",
+{% endfor %}
+        "sort",
+    }
