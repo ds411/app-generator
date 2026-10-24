@@ -173,6 +173,8 @@ logic, the test checks that the API gives no server error (#156).
 - One generated migration fits a new database, not a database with
   data. To change the schema of a database with data, the developer
   writes a new migration by hand, for example with
-  `alembic revision --autogenerate`.
+  `alembic revision --autogenerate`. [ADR 0009](0009-fastapi-schema-changes.md)
+  makes this the documented flow: the generator creates the first
+  migration once, and a new run keeps all migrations.
 - The rules for the routes, the foreign keys, and the join tables are
   fixed. An app author cannot change them without a new extension key.

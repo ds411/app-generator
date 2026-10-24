@@ -62,6 +62,26 @@ The database is the file `local.db`. The models and the migrations work
 on both databases. Use Postgres in production: SQLite has one writer at
 a time, and it stores the date and time values in UTC.
 
+## Schema changes
+
+appgen creates the first migration (`migrations/versions/0001_schema.py`)
+once, and a new run of appgen keeps all migrations. To change the schema
+of a database that has data:
+
+1. Change the app definition, and generate the app again into this
+   folder.
+2. Make the next migration from the changed models. Alembic compares
+   the models with the database of `DATABASE_URL`:
+
+   ```sh
+   uv run alembic revision --autogenerate -m "add the phone of a person"
+   ```
+
+3. Review the new file in `migrations/versions/`. Alembic does not find
+   all changes: edit the migration for a rename (Alembic gives a drop
+   and an add) or for a changed enum value.
+4. Apply it: `uv run alembic upgrade head`. The data stays.
+
 ## Tests
 
 The tests need a database. By default, they start Postgres in a container
