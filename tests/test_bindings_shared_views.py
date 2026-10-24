@@ -168,3 +168,23 @@ def test_a_chart_does_not_animate_without_motion() -> None:
     text = EXAMPLE.read_text().replace("motion: { $value: reduced }", "motion: { $value: none }")
     context = ViewContext(load_definition_text(text), forms=True)
     assert context.dashboard_plan("overview").motion == "none"
+
+
+def test_a_page_does_not_show_an_action_that_its_top_bar_has(example: ViewContext) -> None:
+    bar = example.action_bar("pages.project_detail")
+    assert bar.hidden_actions == ["pages.project_detail.actions.new_task"]
+    assert all(a.name != "new_task" for a in bar.actions)
+    # The top bar keeps the action.
+    topbar = example.action_bar("ui.layouts.app_shell.topbar")
+    assert [a.name for a in topbar.actions] == ["new_task"]
+    # Other actions stay on the page.
+    assert [a.name for a in example.action_bar("pages.task_detail").actions] == ["delete"]
+
+
+def test_a_view_does_not_show_an_action_that_the_top_bar_of_its_pages_has(
+    example: ViewContext,
+) -> None:
+    board = example.view_plan("task_board")
+    assert board.hidden_actions == ["ui.views.task_board.actions.new_task"]
+    assert board.actions == []
+    assert [a.name for a in board.row_actions] == ["open", "edit"]

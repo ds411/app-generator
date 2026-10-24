@@ -28,6 +28,11 @@ import { {{ (view or detail) | pascal }}View } from "@/widgets/{{ (view or detai
 import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
 {% endif %}
 
+{% for action_id in ui_views.action_bar(element_id).hidden_actions %}
+// The top bar has the same action, so the page header does not show it.
+{{ trace(action_id) }}
+
+{% endfor %}
 export function {{ name | pascal }}Page() {
 {% if (custom and element.entity) or form %}
   const params = useParams();
