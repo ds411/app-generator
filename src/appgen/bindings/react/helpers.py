@@ -67,7 +67,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     }
     if "table" in ViewContext(definition).features:
         dependencies |= versions.TABLE_PACKAGES
-    if definition.ui is not None and definition.ui.forms:
+    if FormContext(definition).used:
         dependencies |= versions.FORM_PACKAGES
     return {
         "name": definition.app.name,

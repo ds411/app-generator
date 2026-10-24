@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router";
 
 import { SignInForm } from "@/features/sign-in";
+{% if definition.auth.sign_up %}
+import { SignUpForm } from "@/features/sign-up";
+{% endif %}
 {% if definition.access %}
 import { NotFoundPage } from "@/pages/not-found";
 import { canOpenPage, currentUserId } from "@/shared/auth";
@@ -32,3 +35,12 @@ export function SignInRoute() {
   const next = params.get("next");
   return <SignInForm next={next && next.startsWith("/") ? next : "/"} />;
 }
+{% if definition.auth.sign_up %}
+
+/** The sign-up page. After the sign-up, the app opens the page in `next`. */
+export function SignUpRoute() {
+  const [params] = useSearchParams();
+  const next = params.get("next");
+  return <SignUpForm next={next && next.startsWith("/") ? next : "/"} />;
+}
+{% endif %}

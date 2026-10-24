@@ -213,6 +213,17 @@ BINDING = Binding(
                 ("app/sign-in/page.tsx.j2", "app/sign-in/page.tsx"),
             )
         ),
+        *(
+            Output(template=template, path=path, when="definition.auth and definition.auth.sign_up")
+            for template, path in (
+                (
+                    "src/features/sign-up/api/sign-up-action.ts.j2",
+                    "src/features/sign-up/api/sign-up-action.ts",
+                ),
+                ("src/features/sign-up/api/sign-up.ts.j2", "src/features/sign-up/api/sign-up.ts"),
+                ("app/sign-up/page.tsx.j2", "app/sign-up/page.tsx"),
+            )
+        ),
         Output(
             template="src/shared/db/schema/table.ts.j2",
             path="src/shared/db/schema/{{ nextjs.tables_by_entity[name].module }}.ts",
@@ -294,7 +305,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
-        | {"auth", "access", "role"}
+        | {"auth", "sign_up", "access", "role"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),

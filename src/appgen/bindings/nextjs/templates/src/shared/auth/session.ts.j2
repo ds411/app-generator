@@ -48,6 +48,17 @@ export function makeToken(userId: string): string {
   return `${body}.${sign(body)}`;
 }
 
+/** Set the session cookie of a user: the user is signed in. */
+export async function startSession(userId: string): Promise<void> {
+  (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_SECONDS,
+  });
+}
+
 /** Return the user ID of a valid token that has not ended, else null. */
 export function readToken(token: string): string | null {
   const [body = "", signature = ""] = token.split(".");

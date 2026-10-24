@@ -9,7 +9,7 @@ import type { ActionResult } from "@/shared/api";
 import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
 
-import { SESSION_COOKIE, SESSION_SECONDS, checkPassword, makeToken } from "./session";
+import { SESSION_COOKIE, checkPassword, startSession } from "./session";
 
 const signInSchema = z.object({ username: z.string().min(1).max(320), password: z.string().min(1).max(200) });
 
@@ -25,13 +25,7 @@ export async function signInAction(username: string, password: string): Promise<
     return { ok: false, error: { name: "Error", message: "The user name or the password is not correct." } };
 {% endif %}
   }
-  (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: SESSION_SECONDS,
-  });
+  await startSession(userId);
   return { ok: true, data: null };
 }
 

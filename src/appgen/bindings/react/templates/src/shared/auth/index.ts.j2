@@ -1,5 +1,7 @@
 {% set key = definition.auth.username_field | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
+{% set sign_up = definition.auth.sign_up %}
+{% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
 {{ trace_header(definition.auth.id) }}
 {% if react.api %}
 // The sign-in of the app with the FastAPI app (ADR 0011): the API checks
@@ -21,7 +23,9 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 // The sign-in of the app with mock data (ADR 0011). The users are the mock
 // records of {{ definition.auth.user_entity }}, and each one signs in with the password
 // MOCK_PASSWORD. The session stays in the browser tab. An app with a back
-// end checks the passwords on the server.
+// end checks the passwords on the server.{% if sign_up %} A user of the sign-up
+// (ADR 0016) stays in the browser tab too, and signs in with its own password.{% endif %}
+
 
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
@@ -32,12 +36,65 @@ import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 export const MOCK_PASSWORD = "password";
 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
+{% if sign_up %}
+const SIGN_UPS_KEY = {{ (app.name ~ "-sign-ups") | tojson }};
 
-const users: { id: string; username: string{% if role_key %}; role: string | null{% endif %} }[] = [
+/** A mock user. A user of the sign-up has the SHA-256 hash of its password. */
+type MockUser = {{ user_type }};
+
+const users: MockUser[] = [
+{% else %}
+
+const users: {{ user_type }}[] = [
+{% endif %}
 {% for record in mock[definition.auth.user_entity] %}
   { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %} },
 {% endfor %}
 ];
+{% if sign_up %}
+
+/** The users of the sign-up in this browser tab (ADR 0016). */
+function signedUpUsers(): MockUser[] {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(SIGN_UPS_KEY) ?? "[]") as MockUser[];
+  } catch {
+    return [];
+  }
+}
+
+/** Return the mock users and the users of the sign-up. */
+function allUsers(): MockUser[] {
+  return [...users, ...signedUpUsers()];
+}
+
+/** Return the SHA-256 hash of a password, as hexadecimal text. */
+async function passwordHash(password: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** Return true if a password is the password of a mock user. */
+async function passwordMatches(user: MockUser, password: string): Promise<boolean> {
+  return user.passwordHash === undefined ? password === MOCK_PASSWORD : user.passwordHash === (await passwordHash(password));
+}
+
+/**
+ * Add a user of the sign-up for the session of the browser tab, and sign
+ * in as the user. Later, the user signs in with its own password.
+ */
+export async function addMockUser(username: string, password: string): Promise<void> {
+  if (allUsers().some((user) => user.username === username)) {
+    throw new Error({{ tr(js("A user with this user name exists.")) }});
+  }
+  const user: MockUser = { id: crypto.randomUUID(), username{% if role_key %}, role: {{ ui_forms.sign_up.role | tojson }}{% endif %}, passwordHash: await passwordHash(password) };
+  try {
+    window.sessionStorage.setItem(SIGN_UPS_KEY, JSON.stringify([...signedUpUsers(), user]));
+    window.sessionStorage.setItem(STORAGE_KEY, user.id);
+  } catch {
+    throw new Error({{ tr(js("The browser does not keep the session.")) }});
+  }
+}
+{% endif %}
 {% endif %}
 {% if definition.access %}
 
@@ -60,7 +117,7 @@ export function currentRole(): string | null {
   }
 {% else %}
   const id = currentUserId();
-  return users.find((user) => user.id === id)?.role ?? null;
+  return {{ "allUsers()" if sign_up else "users" }}.find((user) => user.id === id)?.role ?? null;
 {% endif %}
 }
 
@@ -87,16 +144,26 @@ export function currentUserId(): string | null {
 }
 
 {% if react.api %}
-/** Sign in with the API. Return null, or the message of the error. */
-export async function signIn(username: string, password: string): Promise<string | null> {
+/** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
+export async function startSession(token: string): Promise<void> {
+  setAccessToken(token);
   try {
-    const token = (await apiRequest("POST", "/auth/sign-in", { username, password })) as { access_token: string };
-    setAccessToken(token.access_token);
     const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
     window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
 {% if role_key %}
     window.sessionStorage.setItem(ROLE_KEY, String(user[{{ definition.access.role_field | tojson }}] ?? ""));
 {% endif %}
+  } catch (error) {
+    setAccessToken(null);
+    throw error;
+  }
+}
+
+/** Sign in with the API. Return null, or the message of the error. */
+export async function signIn(username: string, password: string): Promise<string | null> {
+  try {
+    const token = (await apiRequest("POST", "/auth/sign-in", { username, password })) as { access_token: string };
+    await startSession(token.access_token);
   } catch (error) {
     setAccessToken(null);
     return error instanceof Error ? error.message : {{ tr(js("The sign-in failed.")) }};
@@ -119,8 +186,13 @@ export async function signOut(): Promise<void> {
 {% else %}
 /** Sign in. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
+{% if sign_up %}
+  const user = allUsers().find((item) => item.username === username);
+  if (!user || !(await passwordMatches(user, password))) {
+{% else %}
   const user = users.find((item) => item.username === username);
   if (!user || password !== MOCK_PASSWORD) {
+{% endif %}
     return {{ tr(js("The user name or the password is not correct.")) }};
   }
   try {

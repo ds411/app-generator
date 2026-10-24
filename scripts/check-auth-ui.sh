@@ -2,7 +2,7 @@
 # Check the sign-in and the permissions of the front ends: generate the
 # room booking example for React and Next.js, sign in as a user of each
 # role, and compare the menus, the pages, and the actions with what the
-# role allows (scripts/auth_ui_test.py).
+# role allows. Then sign up a new user (scripts/auth_ui_test.py).
 # The pre-push hook runs this script when a push changes the generator
 # or a front-end binding. Run it by hand from the repository root:
 #

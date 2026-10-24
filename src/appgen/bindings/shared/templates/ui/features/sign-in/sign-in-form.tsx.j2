@@ -6,6 +6,9 @@
 import { type FormEvent, useState } from "react";
 
 import { signIn } from "@/shared/auth";
+{% if definition.auth.sign_up %}
+import { Link } from "@/shared/lib/router";
+{% endif %}
 
 /** The sign-in form: a user name and a password. After the sign-in, it opens the page `next`. */
 export function SignInForm({ next }: { next: string }) {
@@ -61,6 +64,14 @@ export function SignInForm({ next }: { next: string }) {
         >
           {{ jsx_text("Sign in") }}
         </button>
+{% if definition.auth.sign_up %}
+        <p className="text-sm text-muted-foreground"> {{ trace(definition.auth.sign_up.id, jsx=True) }}
+          {{ jsx_text("Do you need an account?") }}{" "}
+          <Link href={`/sign-up?next=${encodeURIComponent(next)}`} className="font-medium text-foreground underline underline-offset-4">
+            {{ jsx_text("Sign up") }}
+          </Link>
+        </p>
+{% endif %}
       </form>
     </main>
   );

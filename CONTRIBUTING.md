@@ -279,8 +279,8 @@ git config core.hooksPath .githooks
   shared binding code, or the room booking example, the hook also runs
   `scripts/check-auth-ui.sh`. The script builds the room booking example
   with React and Next.js, signs in as a user of each role, and checks
-  the menus, the pages, and the actions of the role
-  (`scripts/auth_ui_test.py`). It needs pnpm, but not Docker. Update its
+  the menus, the pages, and the actions of the role. It also signs up
+  a new user (`scripts/auth_ui_test.py`). It needs pnpm, but not Docker. Update its
   approved screenshots with `APPGEN_UPDATE_SCREENSHOTS=1
   scripts/check-auth-ui.sh`.
 - Each check script ends with the smoke test of its app

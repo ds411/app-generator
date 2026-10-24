@@ -38,6 +38,19 @@ without a user record, is not useful.
 - The sign-up uses the validation of the entity (the field rules, the
   entity rules, and `validation_ext.py`), because it calls the
   repository of the slice.
+- The front ends have the public page `/sign-up`, and the sign-in page
+  links to it. The form asks for the fields of `fields`, with the
+  default widgets and the zod schema of the user entity, and for a
+  password of `min_password_length` or more characters.
+  - Next.js: a server action checks the input again, and adds the user
+    record and its credential in one transaction of the repository of
+    the user entity. Then it sets the session cookie.
+  - React with `x-react-data: api`: the page calls `POST /auth/sign-up`,
+    and keeps the token as the sign-in does.
+  - React with mock data: the page adds the user to the session storage
+    of the browser tab, with a SHA-256 hash of the password. This is a
+    demonstration, as the mock sign-in is. A reload of the page does not
+    delete the user, but the mock records do not show it.
 
 ## Consequences
 
@@ -46,4 +59,5 @@ without a user record, is not useful.
 - The apps do not check that a user owns the email address. A password
   reset (a message to the user) or an external identity provider can
   add a check later.
-- The front ends add the sign-up page in separate stories.
+- The sign-up form has the default widgets of the fields. A form of
+  `ui.forms` cannot replace it.

@@ -1,0 +1,32 @@
+{% set plan = ui_forms.sign_up %}
+{{ trace_header(plan.element_id) }}
+{% if react.api %}
+import { apiRequest } from "@/shared/api";
+import { startSession } from "@/shared/auth";
+
+import type { SignUpInput } from "../model/schema";
+
+/** Make a new user with the API (`POST /auth/sign-up`), and sign in as the user. */
+export async function signUp(input: SignUpInput): Promise<void> {
+  const token = (await apiRequest("POST", "/auth/sign-up", {
+{% for f in plan.fields %}
+    {{ f.name }}: input.{{ f.key }},
+{% endfor %}
+    password: input.password,
+  })) as { access_token: string };
+  await startSession(token.access_token);
+}
+{% else %}
+import { addMockUser } from "@/shared/auth";
+
+import type { SignUpInput } from "../model/schema";
+
+/**
+ * Add a mock user for the session of the browser tab, and sign in as the
+ * user. With mock data, the app keeps the user name, {% if plan.role %}the role, {% endif %}and the hash
+ * of the password of the user, but not the other fields.
+ */
+export async function signUp(input: SignUpInput): Promise<void> {
+  await addMockUser(input.{{ definition.auth.username_field | camel }}, input.password);
+}
+{% endif %}

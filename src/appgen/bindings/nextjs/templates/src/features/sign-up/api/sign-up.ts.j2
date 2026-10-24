@@ -1,0 +1,10 @@
+{{ trace_header(ui_forms.sign_up.element_id) }}
+import { unwrap } from "@/shared/api";
+
+import type { SignUpInput } from "../model/schema";
+import { signUpAction } from "./sign-up-action";
+
+/** Make a new user, and sign in as the user. An input that is not valid throws a ValidationError. */
+export async function signUp(input: SignUpInput): Promise<void> {
+  unwrap(await signUpAction(input));
+}

@@ -1,0 +1,12 @@
+{{ trace_header(definition.auth.sign_up.id) }}
+import type { Metadata } from "next";
+
+import { SignUpForm } from "@/features/sign-up";
+
+export const metadata: Metadata = { title: "Sign up" };
+
+/** The sign-up page. After the sign-up, the app opens the page in `next`. */
+export default async function Route({ searchParams }: PageProps<"/sign-up">) {
+  const { next } = await searchParams;
+  return <SignUpForm next={typeof next === "string" && next.startsWith("/") ? next : "/"} />;
+}

@@ -23,7 +23,7 @@ import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{
 
 {% endif %}
 {% if definition.auth %}
-import { RequireAuth, SignInRoute } from "./auth/require-auth";
+import { RequireAuth, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
@@ -33,6 +33,9 @@ import { RootLayout } from "./layout/root-layout";
 export const router = createBrowserRouter([
 {% if definition.auth %}
   { path: "/sign-in", element: <SignInRoute /> }, {{ trace(definition.auth.id) }}
+{% endif %}
+{% if definition.auth and definition.auth.sign_up %}
+  { path: "/sign-up", element: <SignUpRoute /> }, {{ trace(definition.auth.sign_up.id) }}
 {% endif %}
 {% for layout_name in used_layouts %}
   {

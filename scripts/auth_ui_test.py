@@ -13,7 +13,9 @@ test proves it for the room booking example (`examples/room-booking`):
    compares the menu with the menu that the definition allows and with
    an approved screenshot. It also opens the pages that the role may not
    open ("not found"), and checks the page actions. Without a session,
-   the menu of a public page shows only the public pages.
+   the menu of a public page shows only the public pages. Last, it
+   compares the sign-up page with an approved screenshot, and signs up a
+   new user (ADR 0016).
 
 Run it from the repository root:
 
@@ -54,6 +56,7 @@ from appgen.bindings.shared.views import label
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.access import ALL
 from appgen.dsl.ui.common import FormAction, NavigateAction, OperationAction
+from appgen.gen.naming import kebab
 
 DEFINITION = Path("examples/room-booking/app.yaml")
 UI_TESTS = Path("ui-tests")
@@ -146,6 +149,31 @@ def page_actions(definition: AppDefinition, allowed: Permissions) -> list[dict[s
     return found
 
 
+def expected_sign_up(definition: AppDefinition) -> dict[str, Any] | None:
+    """Return the values of the sign-up: the required fields, and the menu of a new user."""
+    auth, access = definition.auth, definition.access
+    assert auth is not None and access is not None
+    if auth.sign_up is None:
+        return None
+    entity = definition.entities[auth.user_entity]
+    fields: list[dict[str, str]] = []
+    for name in auth.sign_up.fields:
+        field = entity.fields[name]
+        if not field.required or field.default is not None:
+            continue
+        values = {"email": "new.user.{n}@example.com", "url": "https://example.com/{n}"}
+        if field.type not in ("string", "text", *values):
+            raise AuthUiTestError(f"The test cannot fill the required sign-up field {name!r}.")
+        fields.append({"id": f"sign-up-{kebab(name)}", "value": values.get(field.type, "New {n}")})
+    role = auth.sign_up.default_role or str(entity.fields[access.role_field].default)
+    return {
+        "fields": fields,
+        "usernameId": f"sign-up-{kebab(auth.username_field)}",
+        "password": "a-new-password-for-the-test",
+        "menu": menu_labels(definition, Permissions(definition, role)),
+    }
+
+
 def expected_auth(binding: str, definition: AppDefinition) -> dict[str, Any]:
     """Return the values of the UI test: the users, and what each role sees."""
     auth, access = definition.auth, definition.access
@@ -184,6 +212,7 @@ def expected_auth(binding: str, definition: AppDefinition) -> dict[str, Any]:
             "menu": menu_labels(definition, anonymous),
             "actions": [a for a in page_actions(definition, anonymous) if a["path"] == public.path],
         },
+        "signUp": expected_sign_up(definition),
     }
 
 

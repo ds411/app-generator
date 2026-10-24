@@ -16,7 +16,7 @@ export {
 export { {{ var }}MockData } from "./api/{{ name | kebab }}-mock-data";
 {% endif %}
 export { {{ var }}Meta } from "./model/meta";
-{% if ui_forms.names %}
+{% if ui_forms.used %}
 {% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
 export {
   {{ var }}InputSchema,

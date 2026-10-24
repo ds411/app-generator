@@ -230,7 +230,15 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return record as T;
   }
 
+{% if definition.auth and definition.auth.sign_up %}
+  /**
+   * Add a record. `then` writes more rows in the same transaction, for
+   * example the credential of a new user (ADR 0016).
+   */
+  async create(input: TInput, then?: (tx: Transaction, record: T) => Promise<void>): Promise<T> {
+{% else %}
   async create(input: TInput): Promise<T> {
+{% endif %}
     const values: Row = { ...this.defaults, ...input };
     return getDb().transaction(async (tx) => {
       const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
@@ -239,6 +247,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
       await this.checkRules(tx, row);
       await this.writeLinks(tx, String(row.id), values);
       const [record] = await this.toRecords(tx, rows);
+{% if definition.auth and definition.auth.sign_up %}
+      await then?.(tx, record as T);
+{% endif %}
       return record as T;
     });
   }

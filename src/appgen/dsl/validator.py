@@ -600,6 +600,13 @@ def _check_sign_up(
                 at="fields",
                 hint="A new user gets the role 'default_role'." if name == role_field else None,
             )
+        elif found.type == "json":
+            yield _error(
+                "unsuitable-field",
+                f"The sign-up form has no widget for the 'json' field '{name}'.",
+                sign_up,
+                at="fields",
+            )
     for name, field in entity.stored_fields.items():
         if (
             field.required
