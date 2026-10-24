@@ -21,6 +21,14 @@ class {{ e.name }}(Record):
     """{{ (e.description or ("A record of the entity " ~ e.name ~ ".")) | replace('"', "'") }}"""
 
     __tablename__ = "{{ e.table }}"
+{% if e.unique_rules %}
+    __table_args__ = (
+{% for r in e.unique_rules %}
+        {{ trace(r.id) }}
+        {{ r.unique_constraint("") }},
+{% endfor %}
+    )
+{% endif %}
 
 {% for f in e.fields %}
     {{ trace(f.id) }}

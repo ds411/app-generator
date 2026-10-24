@@ -1615,6 +1615,16 @@
           "title": "Relations",
           "type": "object"
         },
+        "rules": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EntityRule"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Rules",
+          "type": "object"
+        },
         "crud": {
           "anyOf": [
             {
@@ -1648,9 +1658,134 @@
       "title": "Entity",
       "type": "object"
     },
+    "EntityCompareRule": {
+      "additionalProperties": false,
+      "description": "A rule that compares two fields of a record, for example `ends_at` after `starts_at`.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "compare",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "op": {
+          "$ref": "#/$defs/CompareOp"
+        },
+        "other": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "message": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "kind",
+        "field",
+        "op",
+        "other",
+        "message"
+      ],
+      "title": "EntityCompareRule",
+      "type": "object"
+    },
     "EntityName": {
       "pattern": "^[A-Z][A-Za-z0-9]*$",
       "type": "string"
+    },
+    "EntityOverlapRule": {
+      "additionalProperties": false,
+      "description": "A rule that the time ranges of two records with the same scope do not overlap.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "no_overlap",
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "end": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "scope": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Scope",
+          "type": "array"
+        },
+        "message": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "kind",
+        "start",
+        "end",
+        "message"
+      ],
+      "title": "EntityOverlapRule",
+      "type": "object"
+    },
+    "EntityRule": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EntityCompareRule"
+        },
+        {
+          "$ref": "#/$defs/EntityUniqueRule"
+        },
+        {
+          "$ref": "#/$defs/EntityOverlapRule"
+        }
+      ]
+    },
+    "EntityUniqueRule": {
+      "additionalProperties": false,
+      "description": "A rule that no two records have the same values in a set of fields and relations.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "unique",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minItems": 2,
+          "title": "Fields",
+          "type": "array"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "EntityUniqueRule",
+      "type": "object"
     },
     "Field": {
       "additionalProperties": false,

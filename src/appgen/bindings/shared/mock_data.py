@@ -17,13 +17,16 @@ An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
 """
 
+import operator
 import random
 import re
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from appgen.dsl.model import AppDefinition, Entity, Field
+from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 
 DEFAULT_COUNT = 12
 MOCK_COUNT_KEY = "x-mock-count"
@@ -137,8 +140,52 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
                     chosen = rng.sample(range(len(targets)), size)
                     record[relation_name] = [targets[i] for i in sorted(chosen)]
             records.append(record)
+        _fit_rules(entity, records)
         data[name] = records
     return data
+
+
+def _fit_rules(entity: Entity, records: list[Record]) -> None:
+    """Change the mock records so that they keep the compare and the unique rules of the entity.
+
+    A record that breaks an order rule (`lt`, `lte`, `gt`, `gte`) gets the
+    two values swapped. A record that repeats the values of a unique rule
+    gets a number at the end of a string field of the rule. The mock data
+    does not keep the `no_overlap` rules.
+    """
+    for rule in entity.rules.values():
+        if isinstance(rule, EntityCompareRule) and rule.op in _SWAPS:
+            for record in records:
+                a, b = record.get(rule.field), record.get(rule.other)
+                if a is not None and b is not None and not _SWAPS[rule.op](a, b):
+                    record[rule.field], record[rule.other] = b, a
+        elif isinstance(rule, EntityUniqueRule):
+            texts = [
+                f for f in rule.fields if f in entity.fields and entity.fields[f].type in _TEXTS
+            ]
+            seen: set[str] = set()
+            for record in records:
+                key = repr([record.get(f) for f in rule.fields])
+                if key in seen and texts:
+                    field = entity.fields[texts[0]]
+                    base = str(record.get(texts[0]) or "")
+                    for number in range(2, 1000):
+                        suffix = f" {number}"
+                        limit = (field.max_length or 255) - len(suffix)
+                        record[texts[0]] = base[:limit] + suffix
+                        key = repr([record.get(f) for f in rule.fields])
+                        if key not in seen:
+                            break
+                seen.add(key)
+
+
+_SWAPS: dict[str, Callable[[Any, Any], bool]] = {
+    "lt": operator.lt,
+    "lte": operator.le,
+    "gt": operator.gt,
+    "gte": operator.ge,
+}
+_TEXTS = frozenset({"string", "text"})
 
 
 def _count(entity: Entity) -> int:

@@ -11,6 +11,7 @@ route renders the page of its slice in `src/pages`.
 from pathlib import Path
 
 from appgen.bindings import shared
+from appgen.bindings.nextjs import db
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
@@ -242,6 +243,7 @@ BINDING = Binding(
         | {"form", "form_section", "form_field", "form_on_success"}
         | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
         | {"compare_rule"}
+        | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"custom_widget", "custom_rule", "custom_action"}
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
         | {"view_responsive", "motion"}
@@ -250,6 +252,9 @@ BINDING = Binding(
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     filters={"json": typescript.to_json},
-    helpers=typescript.HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
+    helpers=typescript.HELPERS
+    | ui.HELPERS
+    | views.HELPERS
+    | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys},
     stub_markers=("TODO(appgen)", "Not implemented yet"),
 )

@@ -48,6 +48,9 @@ def upgrade() -> None:
 {% for r in e.fk_relations if r.unique %}
         sa.UniqueConstraint("{{ r.fk }}", name="uq_{{ e.table }}_{{ r.fk }}"),
 {% endfor %}
+{% for r in e.unique_rules %}
+        {{ r.unique_constraint("sa.") }},
+{% endfor %}
     )
 {% endfor %}
 {% for e in py.entity_order() %}

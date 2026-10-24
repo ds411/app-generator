@@ -62,6 +62,23 @@ export type InverseOne = {
   foreignKey: string;
 };
 
+/** A rule that compares two fields of a record, for example `endsAt` after `startsAt`. */
+export type CompareRule = {
+  field: string;
+  op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte";
+  other: string;
+  message: string;
+};
+
+/** A rule that the time ranges of two records with the same scope do not overlap. */
+export type OverlapRule = {
+  start: string;
+  end: string;
+  /** The keys that two records must share to overlap, for example `roomId`. */
+  scope: string[];
+  message: string;
+};
+
 type JoinTable = ManyToMany & { owner: PgColumn; target: PgColumn };
 type ForeignKey = InverseOne & { column: PgColumn };
 
@@ -72,7 +89,41 @@ export type RepositoryOptions<T> = {
   defaults: Partial<Omit<T, "id">>;
   manyToMany?: ManyToMany[];
   inverseOne?: InverseOne[];
+  /** The compare rules of the entity. A broken rule gives a ValidationError. */
+  compare?: CompareRule[];
+  /** The `no_overlap` rules of the entity. A broken rule gives a ValidationError. */
+  noOverlap?: OverlapRule[];
 };
+
+/** Return a value of a row as a number or a text that `compareValues` can order. */
+function orderValue(value: unknown): number | string {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  const text = String(value);
+  return text.trim() !== "" && Number.isFinite(Number(text)) ? Number(text) : text;
+}
+
+/** Return True if `a op b`. An empty value passes, as the rules of the fields check it. */
+function compareValues(a: unknown, op: CompareRule["op"], b: unknown): boolean {
+  if (a === null || a === undefined || b === null || b === undefined) return true;
+  const x = orderValue(a);
+  const y = orderValue(b);
+  const order = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+  switch (op) {
+    case "eq":
+      return order === 0;
+    case "ne":
+      return order !== 0;
+    case "lt":
+      return order < 0;
+    case "lte":
+      return order <= 0;
+    case "gt":
+      return order > 0;
+    case "gte":
+      return order >= 0;
+  }
+}
 
 function escapeLike(text: string): string {
   return text.replace(/[\\%_]/g, (match) => `\\${match}`);
@@ -107,12 +158,16 @@ export class Repository<T extends EntityRecord, TInput extends object>
   private readonly defaults: Partial<Omit<T, "id">>;
   private readonly manyToMany: JoinTable[];
   private readonly inverseOne: ForeignKey[];
+  private readonly compare: CompareRule[];
+  private readonly noOverlap: OverlapRule[];
 
   constructor(options: RepositoryOptions<T>) {
     this.entity = options.entity;
     this.table = options.table;
     this.columns = getTableColumns(options.table);
     this.defaults = options.defaults;
+    this.compare = options.compare ?? [];
+    this.noOverlap = options.noOverlap ?? [];
     this.manyToMany = (options.manyToMany ?? []).map((relation) => {
       const columns = getTableColumns(relation.table);
       return {
@@ -166,6 +221,7 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return getDb().transaction(async (tx) => {
       const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
       const [row] = rows as [Row];
+      await this.checkRules(tx, row);
       await this.writeLinks(tx, String(row.id), values);
       const [record] = await this.toRecords(tx, rows);
       return record as T;
@@ -180,6 +236,7 @@ export class Repository<T extends EntityRecord, TInput extends object>
           ? await tx.update(this.table).set(values).where(eq(this.table.id, id)).returning()
           : await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
       this.found(rows, id);
+      await this.checkRules(tx, rows[0] as Row);
       await this.writeLinks(tx, id, patch);
       const [record] = await this.toRecords(tx, rows);
       return record as T;
@@ -192,6 +249,37 @@ export class Repository<T extends EntityRecord, TInput extends object>
       .where(eq(this.table.id, id))
       .returning({ id: this.table.id });
     this.found(rows, id);
+  }
+
+  /** Check the rules of the entity on a stored row. A broken rule rolls back the transaction. */
+  private async checkRules(tx: Transaction, row: Row): Promise<void> {
+    for (const rule of this.compare) {
+      if (!compareValues(row[rule.field], rule.op, row[rule.other])) {
+        throw new ValidationError(rule.message);
+      }
+    }
+    for (const rule of this.noOverlap) {
+      const start = row[rule.start];
+      const end = row[rule.end];
+      if (start === null || start === undefined || end === null || end === undefined) continue;
+      const conditions: SQL[] = [
+        lt(this.column(rule.start), end),
+        gt(this.column(rule.end), start),
+        ne(this.table.id, String(row.id)),
+      ];
+      for (const key of rule.scope) {
+        const value = row[key];
+        conditions.push(value === null || value === undefined ? isNull(this.column(key)) : eq(this.column(key), value));
+      }
+      const found = await tx
+        .select({ id: this.table.id })
+        .from(this.table)
+        .where(and(...conditions))
+        .limit(1);
+      if (found.length > 0) {
+        throw new ValidationError(rule.message);
+      }
+    }
   }
 
   private found(rows: Row[], id: string): Row[] {

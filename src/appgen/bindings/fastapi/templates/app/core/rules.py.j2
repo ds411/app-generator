@@ -1,0 +1,49 @@
+{{ trace_header("app") }}
+"""The checks of the rules of the entities: compare rules and `no_overlap` rules."""
+
+import operator
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+_OPS: dict[str, Callable[[Any, Any], bool]] = {
+    "eq": operator.eq,
+    "ne": operator.ne,
+    "lt": operator.lt,
+    "lte": operator.le,
+    "gt": operator.gt,
+    "gte": operator.ge,
+}
+
+
+def compare(a: object, op: str, b: object) -> bool:
+    """Return True if `a op b`. An empty value passes, as the rules of the fields check it."""
+    if a is None or b is None:
+        return True
+    return _OPS[op](a, b)
+
+
+async def overlaps(
+    session: AsyncSession, record: Any, start: str, end: str, scope: Sequence[str]
+) -> bool:
+    """Return True if another record with the same scope has a time range that overlaps.
+
+    The ranges are half-open: a range that ends when another starts does
+    not overlap it.
+    """
+    begins, ends = getattr(record, start), getattr(record, end)
+    if begins is None or ends is None:
+        return False
+    model: Any = record.__class__
+    conditions: list[Any] = [getattr(model, start) < ends, getattr(model, end) > begins]
+    for name in scope:
+        value = getattr(record, name)
+        column = getattr(model, name)
+        conditions.append(column.is_(None) if value is None else column == value)
+    if record.id is not None:
+        conditions.append(model.id != record.id)
+    with session.no_autoflush:
+        found = await session.execute(select(model.id).where(*conditions).limit(1))
+    return found.first() is not None

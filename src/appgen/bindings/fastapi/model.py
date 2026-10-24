@@ -10,6 +10,7 @@ deterministic.
 import json
 import math
 from dataclasses import dataclass, field
+from dataclasses import field as dataclass_field
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +27,7 @@ from appgen.dsl.expressions import (
     parse_expression,
 )
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
+from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.gen.naming import constant, kebab, pascal, snake
 from appgen.gen.render import GenerationError
 
@@ -346,6 +348,45 @@ class PyComputed:
 
 
 @dataclass(slots=True)
+class PyRule:
+    """A rule of an entity: a compare, a unique, or a `no_overlap` rule."""
+
+    name: str
+    id: str
+    kind: str
+    message: str
+    field: str = ""
+    """compare: the attribute of the field."""
+    op: str = ""
+    other: str = ""
+    columns: list[str] = dataclass_field(default_factory=list[str])
+    """unique: the columns of the table."""
+    constraint: str = ""
+    """unique: the name of the constraint."""
+    start: str = ""
+    end: str = ""
+    scope: list[str] = dataclass_field(default_factory=list[str])
+    """no_overlap: the attributes of the scope fields and foreign keys."""
+
+    def unique_constraint(self, prefix: str) -> str:
+        """Return the `UniqueConstraint` of a unique rule. The migration uses `prefix="sa."`."""
+        args = [*(f'"{c}"' for c in self.columns), f'name="{self.constraint}"']
+        return f"{prefix}UniqueConstraint({', '.join(args)})"
+
+    def check_lines(self) -> list[str]:
+        """Return the statements of `check_rules` that check a compare or a `no_overlap` rule."""
+        message = json.dumps(self.message)
+        if self.kind == "compare":
+            test = f'not compare(record.{self.field}, "{self.op}", record.{self.other})'
+            status = 422
+        else:
+            scope = "[" + ", ".join(f'"{s}"' for s in self.scope) + "]"
+            test = f'await overlaps(session, record, "{self.start}", "{self.end}", {scope})'
+            status = 409
+        return [f"if {test}:", f"    raise ProblemError({status}, {message})"]
+
+
+@dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
 
@@ -486,6 +527,7 @@ class PyEntity:
     operations: list[PyOperation] = field(default_factory=list[PyOperation])
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
     computed: list[PyComputed] = field(default_factory=list[PyComputed])
+    rules: list[PyRule] = field(default_factory=list[PyRule])
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
 
@@ -556,7 +598,20 @@ class PyEntity:
     @property
     def has_unique_input(self) -> bool:
         """True if two records with the same input break a unique constraint."""
-        return any(f.unique for f in self.fields) or any(r.unique for r in self.fk_relations)
+        return (
+            any(f.unique for f in self.fields)
+            or any(r.unique for r in self.fk_relations)
+            or bool(self.unique_rules)
+        )
+
+    @property
+    def unique_rules(self) -> list[PyRule]:
+        return [r for r in self.rules if r.kind == "unique"]
+
+    @property
+    def check_rules(self) -> list[PyRule]:
+        """The rules that the repository checks before it stores a record."""
+        return [r for r in self.rules if r.kind != "unique"]
 
     def target(self, rel: PyRelation) -> PyEntity:
         return self.app_entities[rel.target]
@@ -580,6 +635,11 @@ class PyEntity:
         if self.m2m_relations:
             core.add("load_all")
         lines.add(from_import("app.core.db", core))
+        checks = {r.kind for r in self.check_rules}
+        if checks:
+            names = {"compare"} if "compare" in checks else set[str]()
+            names |= {"overlaps"} if "no_overlap" in checks else set[str]()
+            lines.add(from_import("app.core.rules", names))
         for rel in self.input_relations:
             target = self.target(rel)
             if target.name != self.name:
@@ -649,6 +709,8 @@ class PyEntity:
             sqlalchemy.add("ForeignKey")
         if self.join_tables:
             sqlalchemy |= {"Column", "ForeignKey", "Table", "Uuid"}
+        if self.unique_rules:
+            sqlalchemy.add("UniqueConstraint")
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
         orm = {"Mapped", "mapped_column"}
@@ -827,6 +889,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     for name, entity in definition.entities.items():
         _relations(definition, entities, name, entity)
     _computed(definition, entities)
+    _rules(definition, entities)
     _check_extensions(definition, entities)
     _check_embed_cycles(entities)
     operations: dict[str, PyOperation] = {}
@@ -890,6 +953,50 @@ def _computed(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
                     source=f.computed,
                 )
             )
+
+
+def _rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Add the rules to the entities, with the Python names of their fields."""
+    for name, entity in definition.entities.items():
+        py_entity = entities[name]
+        fields = {f.name: (f.attr, f.name) for f in py_entity.fields}
+        fields |= {r.name: (str(r.fk_attr), str(r.fk)) for r in py_entity.fk_relations}
+
+        def attr(member: str, fields: dict[str, tuple[str, str]] = fields) -> str:
+            return fields[member][0]
+
+        def column(member: str, fields: dict[str, tuple[str, str]] = fields) -> str:
+            return fields[member][1]
+
+        for rule_name, rule in entity.rules.items():
+            py_rule = PyRule(name=rule_name, id=rule.id, kind=rule.kind, message="")
+            if isinstance(rule, EntityCompareRule):
+                py_rule.field, py_rule.other = attr(rule.field), attr(rule.other)
+                py_rule.op, py_rule.message = rule.op, rule.message
+                later = {"gt": rule.field, "gte": rule.field, "lt": rule.other, "lte": rule.other}
+                if rule.op in later:
+                    _later_sample(next(f for f in py_entity.fields if f.name == later[rule.op]))
+            elif isinstance(rule, EntityUniqueRule):
+                py_rule.columns = [column(m) for m in rule.fields]
+                py_rule.constraint = f"uq_{py_entity.table}_{rule_name}"
+                py_rule.message = rule.message or ""
+            else:
+                py_rule.start, py_rule.end = attr(rule.start), attr(rule.end)
+                py_rule.scope = [attr(m) for m in rule.scope]
+                py_rule.message = rule.message
+            py_entity.rules.append(py_rule)
+
+
+def _later_sample(f: PyField) -> None:
+    """Make the test sample of a date or a date-time field later than the samples of others.
+
+    The other samples of the same `n` start at 00:00 (date-time) or in
+    January (date), so that a compare rule `gt` holds in the tests.
+    """
+    if f.type == "datetime":
+        f.sample = f.sample.replace(":00:00Z", ":30:00Z")
+    elif f.type == "date":
+        f.sample = f.sample.replace("2026-01-", "2026-02-")
 
 
 def _render_computed(

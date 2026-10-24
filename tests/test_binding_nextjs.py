@@ -630,3 +630,13 @@ def test_a_detail_page_for_an_unknown_id_is_not_found(result: GenerationResult) 
     assert "async exists(id: string): Promise<boolean> {" in files["src/shared/db/repository.ts"]
     # A list page needs no record.
     assert "notFound" not in files["app/(app-shell)/projects/page.tsx"]
+
+
+def test_the_rules_of_an_entity_are_checks_and_constraints() -> None:
+    definition = load_definition(Path(__file__).parent.parent / "examples/room-booking/app.yaml")
+    files = {f.path: f.content for f in generate(definition, find_binding("nextjs")).files}
+    repository = files["src/entities/booking/api/booking-repository.ts"]
+    assert '      field: "endsAt",\n      op: "gt",\n      other: "startsAt",\n' in repository
+    assert '      scope: ["roomId"],\n' in repository
+    table = files["src/shared/db/schema/room.ts"]
+    assert '  unique("uq_room_unique_name_per_floor").on(t.floor, t.name),\n' in table

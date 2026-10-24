@@ -192,7 +192,9 @@ binding:
 - **Excluded** (`excludes`): out of the scope of the binding by design.
   The generator makes no gap for these elements, or for the elements
   under them, and `appgen check` does not count them. The FastAPI
-  binding excludes `page` and `ui`.
+  binding excludes `page` and `ui`. The React binding excludes the
+  rules of the entities (`entity_compare_rule`, `entity_unique_rule`,
+  and `entity_overlap_rule`), because it has no back end.
 - **Gaps**: all other kinds. The generator renders the `gap_rule` for
   each element, an extension file with a gap trace and a
   `TODO(appgen):` comment. Without a gap rule, the gaps are only listed.
