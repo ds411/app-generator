@@ -48,6 +48,8 @@ def change(text: str) -> str:
         ),
     )
     text = re.sub(r"\bComment\b", "Remark", text)
+    # The CRUD shorthand names the operations after the entity (ADR 0008).
+    text = re.sub(r"\b(create|delete)_comment\b", r"\1_remark", text)
     for block in (
         "  people:\n    path: /people\n    title: People\n    entity: Person\n"
         "    content: { view: person_cards }\n",

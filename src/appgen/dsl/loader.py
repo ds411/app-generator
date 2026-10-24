@@ -8,6 +8,7 @@ from typing import Annotated, TypeAliasType, cast, get_args, get_origin
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 
+from appgen.dsl.crud import expand_crud
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.ids import element_id, index_elements, walk_elements
 from appgen.dsl.model import DSL_VERSION, RESERVED_SECTIONS, AppDefinition, is_extension_key
@@ -60,6 +61,7 @@ def _load(document: YamlDocument) -> AppDefinition:
             if section in RESERVED_SECTIONS
         ]
         data = {k: v for k, v in sections.items() if k not in RESERVED_SECTIONS}
+    data = expand_crud(data, source_map)
     definition: AppDefinition | None = None
     try:
         definition = AppDefinition.model_validate(data)

@@ -12,6 +12,7 @@ app:
 
 entities:
   Person:
+    crud: true
     description: A member of the team.
     label: Person
     plural_label: People
@@ -29,6 +30,7 @@ entities:
       assigned_tasks: { kind: one_to_many, target: Task, inverse: assignee }
 
   Project:
+    crud: true
     description: A body of work with a goal and a due date.
     display_field: name
     fields:
@@ -58,6 +60,7 @@ entities:
       members: { kind: many_to_many, target: Person }
 
   Task:
+    crud: true
     description: A piece of work in a project.
     display_field: title
     fields:
@@ -89,6 +92,7 @@ entities:
       comments: { kind: one_to_many, target: Comment, inverse: task }
 
   Comment:
+    crud: [create, list, delete]
     description: A note on a task.
     fields:
       body: { type: text, required: true, max_length: 10000 }
@@ -103,28 +107,12 @@ entities:
       author: { kind: many_to_one, target: Person, required: true, on_delete: restrict }
 
 operations:
-  create_person: { kind: create, entity: Person }
-  read_person: { kind: read, entity: Person }
-  update_person: { kind: update, entity: Person }
-  delete_person: { kind: delete, entity: Person }
-  list_people: { kind: list, entity: Person }
-
-  create_project: { kind: create, entity: Project }
-  read_project: { kind: read, entity: Project }
-  update_project: { kind: update, entity: Project }
-  delete_project: { kind: delete, entity: Project }
-  list_projects: { kind: list, entity: Project }
   archive_project:
     kind: custom
     entity: Project
     description: Set the project to done and close all its open tasks.
     returns: Project
 
-  create_task: { kind: create, entity: Task }
-  read_task: { kind: read, entity: Task }
-  update_task: { kind: update, entity: Task }
-  delete_task: { kind: delete, entity: Task }
-  list_tasks: { kind: list, entity: Task }
   assign_task:
     kind: custom
     entity: Task
@@ -138,10 +126,6 @@ operations:
     entity: Task
     description: Set the task to done and record the time.
     returns: Task
-
-  create_comment: { kind: create, entity: Comment }
-  list_comments: { kind: list, entity: Comment }
-  delete_comment: { kind: delete, entity: Comment }
 
 pages:
   dashboard:
