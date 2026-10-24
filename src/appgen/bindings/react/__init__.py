@@ -267,6 +267,7 @@ BINDING = Binding(
         | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
         | {"view_responsive", "motion"}
         | {"translations", "language"}
+        | {"workflow", "transition"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.

@@ -3,6 +3,17 @@
 """The data access of the slice `{{ e.slice }}`, which its operations share."""
 
 {{ e.repository_imports() }}
+{% for w in e.workflows %}
+
+{{ trace(w.id) }}
+{{ w.constant }}: frozenset[tuple[str, str]] = frozenset(
+    {
+{% for before, after, tid in w.transitions %}
+        ("{{ before }}", "{{ after }}"),  {{ trace(tid) }}
+{% endfor %}
+    }
+)
+{% endfor %}
 
 
 async def get(session: AsyncSession, id: UUID) -> {{ e.name }}:
@@ -17,6 +28,9 @@ async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }
     """Validate and store a new record, and return it."""
     record = {{ e.name }}()
     await _apply(session, record, data.model_dump(by_alias=False))
+{% if e.workflows %}
+    check_workflows(record, None)
+{% endif %}
 {% if e.check_rules %}
     await check_rules(session, record)
 {% endif %}
@@ -28,7 +42,13 @@ async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }
 
 async def update(session: AsyncSession, record: {{ e.name }}, data: {{ e.name }}Update) -> {{ e.name }}:
     """Change the fields that the request gives, validate the record, and return it."""
+{% if e.workflows %}
+    before = { {%- for w in e.workflows %}"{{ w.attr }}": record.{{ w.attr }}{{ ", " if not loop.last }}{% endfor -%} }
+{% endif %}
     await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
+{% if e.workflows %}
+    check_workflows(record, before)
+{% endif %}
 {% if e.check_rules %}
     await check_rules(session, record)
 {% endif %}
@@ -49,6 +69,18 @@ async def check_rules(session: AsyncSession, record: {{ e.name }}) -> None:
 {% for r in e.check_rules %}
     {{ trace(r.id) }}
 {% for line in r.check_lines() %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+
+
+{% endif %}
+{% if e.workflows %}
+def check_workflows(record: {{ e.name }}, before: dict[str, Any] | None) -> None:
+    """Check the workflows of {{ e.name }}. `before` is None for a new record."""
+{% for w in e.workflows %}
+    {{ trace(w.id) }}
+{% for line in w.check_lines() %}
     {{ line }}
 {% endfor %}
 {% endfor %}

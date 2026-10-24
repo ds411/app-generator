@@ -410,6 +410,53 @@ def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
 
 
+def check_workflows(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A workflow uses a stored enum field of its entity, and its states are values of the field."""
+    seen: dict[tuple[str, str], str] = {}
+    for workflow in definition.workflows.values():
+        entity = definition.entities.get(workflow.entity)
+        if entity is None:
+            yield _missing(workflow, "entity", "entity", workflow.entity, definition.entities)
+            continue
+        found = _rule_field(workflow, "field", workflow.field, entity.stored_fields)
+        if isinstance(found, Diagnostic):
+            yield found
+            continue
+        if found.type != "enum" or not found.values:
+            yield _error(
+                "unsuitable-field",
+                f"The field of a workflow must be an enum, not a '{found.type}'.",
+                workflow,
+                at="field",
+            )
+            continue
+        first = seen.setdefault((workflow.entity, workflow.field), workflow.id)
+        if first != workflow.id:
+            yield _error(
+                "duplicate-name",
+                f"The field '{workflow.entity}.{workflow.field}' has two workflows.",
+                workflow,
+                at="field",
+                hint=f"The other workflow is '{first}'.",
+            )
+        values = found.values
+        if workflow.initial is not None and workflow.initial not in values:
+            yield _missing(workflow, "initial", "value", workflow.initial, values)
+        for transition in workflow.transitions.values():
+            for value in transition.from_:
+                if value not in values:
+                    yield _missing(transition, "from", "value", value, values)
+            if transition.to not in values:
+                yield _missing(transition, "to", "value", transition.to, values)
+            elif transition.to in transition.from_:
+                yield _error(
+                    "invalid-value",
+                    f"A transition cannot change the field from '{transition.to}' to itself.",
+                    transition,
+                    at="to",
+                )
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -419,6 +466,7 @@ CHECKS: list[Check] = [
     check_computed,
     check_rules,
     check_translations,
+    check_workflows,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

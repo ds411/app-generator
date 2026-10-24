@@ -1,0 +1,39 @@
+{{ trace_header("app") }}
+"""The checks of the workflows: the allowed changes of the state of a record."""
+
+from collections.abc import Set
+
+from app.core.errors import ProblemError
+
+
+def _state(value: object) -> object:
+    """Return the value of an enum member, or the value itself."""
+    return getattr(value, "value", value)
+
+
+def check_transition(
+    field: str,
+    before: object,
+    after: object,
+    allowed: Set[tuple[str, str]],
+    *,
+    created: bool,
+    initial: str | None,
+    message: str | None = None,
+) -> None:
+    """Give a 422 error for a change of state that no transition allows.
+
+    A new record must start in the initial state. A change to the same
+    state, and a change from or to no state, pass.
+    """
+    old, new = _state(before), _state(after)
+    if created:
+        if initial is not None and new is not None and new != initial:
+            raise ProblemError(
+                422, message or f"A new record starts with the {field} '{initial}', not '{new}'."
+            )
+        return
+    if old is None or new is None or old == new:
+        return
+    if (old, new) not in allowed:
+        raise ProblemError(422, message or f"The {field} cannot change from '{old}' to '{new}'.")

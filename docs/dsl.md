@@ -16,6 +16,7 @@ examples. [ADR 0002](adr/0002-app-definition-dsl-v0.md) and
 - [entities](#entities)
 - [operations](#operations)
 - [pages](#pages)
+- [workflows](#workflows)
 - [ui](#ui)
   - [theme](#theme)
   - [tokens](#tokens)
@@ -426,6 +427,37 @@ pages:
         confirm: { title: "Delete the task?", confirm_label: Delete }
         on_success: { toast: The task is deleted., navigate: task_board }
 ```
+
+## workflows
+
+A workflow is a state machine on an enum field of an entity. The values
+of the field are the states. The apps reject a change of the field that
+no transition allows:
+
+```yaml
+workflows:
+  booking_status:
+    entity: Booking
+    field: status
+    initial: requested
+    message: This change of the booking status is not allowed.
+    transitions:
+      confirm: { from: [requested], to: confirmed, label: Confirm }
+      cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }
+```
+
+- `field` is a stored enum field of `entity`. A field has one workflow.
+- `initial` (optional) is the state of a new record. Without it, a new
+  record can have any state.
+- Each transition allows a change from each value in `from` to `to`.
+  `to` is not in `from`.
+- `message` (optional) is the error message of a change that no
+  transition allows.
+- A change to the same state, and a change from or to no value, pass.
+
+The FastAPI app gives a 422 error, the Next.js app a `ValidationError`,
+and the React app (mock data) a `TransitionError`. The FastAPI app has a
+test of each workflow.
 
 ## ui
 
@@ -875,8 +907,8 @@ is an error.
 
 ## Reserved sections
 
-These top-level keys are reserved for later versions: `auth`,
-`access`, and `workflows`. The validator reports "not
+These top-level keys are reserved for later versions: `auth` and
+`access`. The validator reports "not
 supported in this version" for each of them. A later version adds them
 as optional sections, so that the definitions that exist stay valid.
 [ADR 0002](adr/0002-app-definition-dsl-v0.md#how-the-out-of-scope-features-fit-in-later)

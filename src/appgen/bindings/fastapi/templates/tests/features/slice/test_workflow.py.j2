@@ -1,0 +1,55 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(element.entity) %}
+{% set w = e.workflows | selectattr("name", "eq", name) | first %}
+"""The tests of the workflow `{{ name }}`: the allowed changes of `{{ w.field }}`."""
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import ProblemError
+from app.features.{{ e.slice }} import repository
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Create, {{ e.name }}Update
+from tests.factories import {{ w.entity }}_input, make_{{ w.entity }}
+
+pytestmark = pytest.mark.anyio
+{% if w.allowed_case %}
+
+
+async def test_{{ name }}_allows_a_transition(
+    session: AsyncSession,
+) -> None:
+    record = await make_{{ w.entity }}(session, {{ w.field }}="{{ w.allowed_case[0] }}")
+
+    changes = {{ e.name }}Update.model_validate({"{{ w.field }}": "{{ w.allowed_case[1] }}"})
+    record = await repository.update(session, record, changes)
+
+    assert record.{{ w.attr }} == "{{ w.allowed_case[1] }}"
+{% endif %}
+{% if w.forbidden_case %}
+
+
+async def test_{{ name }}_rejects_a_change_that_no_transition_allows(
+    session: AsyncSession,
+) -> None:
+    record = await make_{{ w.entity }}(session, {{ w.field }}="{{ w.forbidden_case[0] }}")
+
+    changes = {{ e.name }}Update.model_validate({"{{ w.field }}": "{{ w.forbidden_case[1] }}"})
+    with pytest.raises(ProblemError) as error:
+        await repository.update(session, record, changes)
+
+    assert error.value.status == 422
+{% endif %}
+{% if w.other_state %}
+
+
+async def test_{{ name }}_starts_a_new_record_in_the_initial_state(
+    session: AsyncSession,
+) -> None:
+    values = await {{ w.entity }}_input(session, {{ w.field }}="{{ w.other_state }}")
+    data = {{ e.name }}Create.model_validate(values)
+
+    with pytest.raises(ProblemError) as error:
+        await repository.create(session, data)
+
+    assert error.value.status == 422
+{% endif %}

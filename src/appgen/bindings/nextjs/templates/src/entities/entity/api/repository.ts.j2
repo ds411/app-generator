@@ -64,4 +64,27 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   ],
 {% endif %}
+{% set workflows = definition.workflows.values() | selectattr("entity", "eq", name) | list %}
+{% if workflows %}
+  workflows: [
+{% for w in workflows %}
+    { {{ trace(w.id, scope="begin") }}
+      field: {{ ts_value(rule_key(element, w.field)) }},
+{% if w.initial %}
+      initial: {{ ts_value(w.initial) }},
+{% endif %}
+      transitions: [
+{% for t in w.transitions.values() %}
+{% for before in t.from_ %}
+        [{{ ts_value(before) }}, {{ ts_value(t.to) }}], {{ trace(t.id) }}
+{% endfor %}
+{% endfor %}
+      ],
+{% if w.message %}
+      message: {{ ts_value(w.message) }},
+{% endif %}
+    }, {{ trace(w.id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
 });

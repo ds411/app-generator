@@ -17,6 +17,29 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
   {{ ts_value(name) }},
   {{ var }}MockData,
   {{ var }}Defaults,
+{% set workflows = definition.workflows.values() | selectattr("entity", "eq", name) | list %}
+{% if workflows %}
+  [
+{% for w in workflows %}
+    { {{ trace(w.id, scope="begin") }}
+      field: {{ ts_value((members(name, element) | selectattr("name", "eq", w.field) | first).key) }},
+{% if w.initial %}
+      initial: {{ ts_value(w.initial) }},
+{% endif %}
+      transitions: [
+{% for t in w.transitions.values() %}
+{% for before in t.from_ %}
+        [{{ ts_value(before) }}, {{ ts_value(t.to) }}], {{ trace(t.id) }}
+{% endfor %}
+{% endfor %}
+      ],
+{% if w.message %}
+      message: {{ ts_value(w.message) }},
+{% endif %}
+    }, {{ trace(w.id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
 );
 {% for op_name, op in ops %}
 

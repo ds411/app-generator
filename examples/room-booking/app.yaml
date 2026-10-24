@@ -344,3 +344,15 @@ ui:
   defaults:
     layout: app_shell
     page_size: 20
+
+# A booking starts as a request. An admin confirms or cancels it. A
+# cancelled booking stays cancelled.
+workflows:
+  booking_status:
+    entity: Booking
+    field: status
+    initial: requested
+    message: This change of the booking status is not allowed.
+    transitions:
+      confirm: { from: [requested], to: confirmed, label: Confirm }
+      cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }

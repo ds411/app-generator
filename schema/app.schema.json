@@ -4908,6 +4908,43 @@
       "title": "TopbarOverride",
       "type": "object"
     },
+    "Transition": {
+      "additionalProperties": false,
+      "description": "An allowed change of state: from one of the `from` values to the `to` value.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "from": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minItems": 1,
+          "title": "From",
+          "type": "array"
+        },
+        "to": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Transition",
+      "type": "object"
+    },
     "Translations": {
       "additionalProperties": false,
       "description": "The languages of the UI. The text of the definition is in the default language.",
@@ -5096,6 +5133,72 @@
       "title": "ViewResponsive",
       "type": "object"
     },
+    "Workflow": {
+      "additionalProperties": false,
+      "description": "A state machine on an enum field of an entity.\n\nThe apps reject a change of the field that no transition allows. A\nchange to the same value is not a transition.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "initial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "transitions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Transition"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Transitions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity",
+        "field",
+        "transitions"
+      ],
+      "title": "Workflow",
+      "type": "object"
+    },
     "appgen__dsl__ui__dashboards__Widget": {
       "oneOf": [
         {
@@ -5195,6 +5298,16 @@
         }
       ],
       "default": null
+    },
+    "workflows": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Workflow"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Workflows",
+      "type": "object"
     }
   },
   "required": [

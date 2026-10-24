@@ -387,6 +387,72 @@ class PyRule:
 
 
 @dataclass(slots=True)
+class PyWorkflow:
+    """A workflow on an enum field: the allowed changes of the field."""
+
+    name: str
+    id: str
+    attr: str
+    """The attribute of the field."""
+    field: str
+    """The name of the field in the API."""
+    initial: str | None
+    message: str | None
+    transitions: list[tuple[str, str, str]]
+    """The allowed changes: the value before, the value after, and the transition ID."""
+    states: list[str]
+    """The values of the field."""
+    start: str
+    """The state of the records of the tests: the initial state, or the first state of a change."""
+    entity: str = ""
+    """The name of the entity in snake case, for the factories of the tests."""
+
+    @property
+    def allowed_case(self) -> tuple[str, str] | None:
+        """An allowed change from the start state, for the tests."""
+        return next(((b, a) for b, a, _ in self.transitions if b == self.start), None)
+
+    @property
+    def forbidden_case(self) -> tuple[str, str] | None:
+        """A change from the start state that no transition allows, for the tests."""
+        allowed = {(b, a) for b, a, _ in self.transitions}
+        return next(
+            (
+                (self.start, s)
+                for s in self.states
+                if s != self.start and (self.start, s) not in allowed
+            ),
+            None,
+        )
+
+    @property
+    def other_state(self) -> str | None:
+        """A state that is not the initial state, for the tests of a new record."""
+        if self.initial is None:
+            return None
+        return next((s for s in self.states if s != self.initial), None)
+
+    @property
+    def constant(self) -> str:
+        """The name of the module constant with the allowed changes."""
+        return f"{self.name.upper()}_TRANSITIONS"
+
+    def check_lines(self) -> list[str]:
+        """Return the statements of `check_workflows` for the workflow."""
+        args = [
+            f'"{self.field}"',
+            f'None if before is None else before["{self.attr}"]',
+            f"record.{self.attr}",
+            self.constant,
+            "created=before is None",
+            f"initial={json.dumps(self.initial) if self.initial is not None else 'None'}",
+        ]
+        if self.message is not None:
+            args.append(f"message={json.dumps(self.message)}")
+        return ["check_transition(", *(f"    {arg}," for arg in args), ")"]
+
+
+@dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
 
@@ -528,6 +594,7 @@ class PyEntity:
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
     computed: list[PyComputed] = field(default_factory=list[PyComputed])
     rules: list[PyRule] = field(default_factory=list[PyRule])
+    workflows: list[PyWorkflow] = field(default_factory=list[PyWorkflow])
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
 
@@ -635,6 +702,8 @@ class PyEntity:
         if self.m2m_relations:
             core.add("load_all")
         lines.add(from_import("app.core.db", core))
+        if self.workflows:
+            lines.add("from app.core.workflows import check_transition")
         checks = {r.kind for r in self.check_rules}
         if checks:
             names = {"compare"} if "compare" in checks else set[str]()
@@ -890,6 +959,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         _relations(definition, entities, name, entity)
     _computed(definition, entities)
     _rules(definition, entities)
+    _workflows(definition, entities)
     _check_extensions(definition, entities)
     _check_embed_cycles(entities)
     operations: dict[str, PyOperation] = {}
@@ -985,6 +1055,36 @@ def _rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
                 py_rule.scope = [attr(m) for m in rule.scope]
                 py_rule.message = rule.message
             py_entity.rules.append(py_rule)
+
+
+def _workflows(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Add the workflows to the entities.
+
+    The test sample of the field is the initial state, or else the first
+    state that a transition leaves, so that the tests create valid records.
+    """
+    for name, workflow in definition.workflows.items():
+        py_entity = entities[workflow.entity]
+        py_field = next(f for f in py_entity.fields if f.name == workflow.field)
+        transitions = [
+            (before, t.to, t.id) for t in workflow.transitions.values() for before in t.from_
+        ]
+        start = workflow.initial or transitions[0][0]
+        py_field.sample = json.dumps(start)
+        py_entity.workflows.append(
+            PyWorkflow(
+                name=name,
+                id=workflow.id,
+                attr=py_field.attr,
+                field=py_field.name,
+                initial=workflow.initial,
+                message=workflow.message,
+                transitions=transitions,
+                states=[v for _, v in py_field.enum.members] if py_field.enum else [],
+                start=start,
+                entity=py_entity.snake,
+            )
+        )
 
 
 def _later_sample(f: PyField) -> None:
