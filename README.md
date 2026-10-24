@@ -97,6 +97,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
 | Update the skill DSL reference | `uv run scripts/update_skill_references.py` |
+| Install the agent skill | `uv run appgen skills install` |
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 
@@ -139,15 +140,45 @@ A relative path to `schema/app.schema.json` also works.
 
 `src/appgen/skills/appgen/` is an agent skill in the Agent Skills
 format, for Claude Code, Codex, and other agents. It tells an agent how
-to use the CLI: validate a definition, fix the diagnostics, generate an
-app, and check its traces. The skill is a part of the package, so each
-version of appgen has its own skill. The reference files of the skill
-tell how to write a new definition, and give the DSL and the diagnostic
-codes. `references/dsl.md` is a copy of `docs/dsl.md` with links to
-GitHub: after a change to `docs/dsl.md`, run
+to use the CLI (validate a definition, fix the diagnostics, generate an
+app, and check its traces), how to write a new definition, how to change
+a definition, and how to fill the generation gaps. The skill is a part
+of the package, so each version of appgen has its own skill.
+[ADR 0015](docs/adr/0015-agent-skills.md) describes the design.
+
+Install the skill into the folders that your agents read:
+
+```sh
+appgen skills install                 # ./.agents/skills/ and ./.claude/skills/
+appgen skills install --scope user    # ~/.agents/skills/ and ~/.claude/skills/
+appgen skills list                    # the installed version in each folder
+appgen skills uninstall               # remove the files that appgen installed
+```
+
+| Target   | Scope     | Folder                                                    |
+| -------- | --------- | --------------------------------------------------------- |
+| `claude` | `project` | `<project>/.claude/skills/` (Claude Code)                 |
+| `claude` | `user`    | `~/.claude/skills/`                                       |
+| `claude` | `system`  | `/etc/claude-code/.claude/skills/` on Linux, `/Library/Application Support/ClaudeCode/.claude/skills/` on macOS |
+| `agents` | `project` | `<project>/.agents/skills/` (Codex and other agents)      |
+| `agents` | `user`    | `~/.agents/skills/`                                       |
+| `agents` | `system`  | `/etc/codex/skills/`                                      |
+
+`--target` (repeat it for more), `--scope`, and `--project-dir <folder>`
+select the folders, and `--path <folder>` gives another skills folder.
+The system scope is for shared machines and container images, and needs
+root. Each installed copy has a record file (`.appgen-skill.json`) with
+the appgen version and the hash of each file. A second install of the
+same version changes no file, and an install of another version updates
+the files. `install` and `uninstall` do not overwrite or remove a file
+that a person changed, unless `--force`. `--dry-run` shows the changes
+and writes no file.
+
+`references/dsl.md` is a copy of `docs/dsl.md` with links to GitHub:
+after a change to `docs/dsl.md`, run
 `uv run scripts/update_skill_references.py`. Tests fail if the skill does
-not agree with the CLI, the DSL, or the diagnostic codes. [ADR 0015](docs/adr/0015-agent-skills.md) describes the
-design.
+not agree with the CLI, the DSL, the diagnostic codes, or the extension
+files of the bindings.
 
 ## One definition, three apps
 

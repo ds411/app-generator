@@ -70,6 +70,34 @@ More options:
   values.
 - `appgen schema --out <file>` writes the JSON Schema to a file.
 
+## Install the skill
+
+`appgen skills` copies this skill into the folders that agents read, at
+the version of the installed appgen:
+
+| Command                            | Use                                                              |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `appgen skills install`            | Write the skill to `./.agents/skills/` and `./.claude/skills/`.  |
+| `appgen skills list --format json` | Show each target and scope with the installed version and the status (`up to date`, `out of date`, `changed`, or `not installed`). |
+| `appgen skills uninstall`          | Remove the files that appgen installed.                          |
+
+The options of `install` and `uninstall`:
+
+- `--target claude` (Claude Code, `.claude/skills/`) or `--target agents`
+  (Codex and other agents, `.agents/skills/`). Repeat it for both, the
+  default.
+- `--scope project` (the default: the folder of `--project-dir <folder>`,
+  or the current folder), `--scope user` (the home folder), or
+  `--scope system` (a system folder, which needs root).
+- `--path <folder>`: another skills folder, instead of `--target` and
+  `--scope`. `appgen skills list --path <folder>` shows it too.
+- `--dry-run`: show the changes, and write no file.
+- `--force`: also overwrite or remove the files that a person changed.
+  Without it, the command names these files and stops.
+
+After an update of appgen, run `appgen skills install` again. A second
+install of the same version changes no file.
+
 ## Bindings
 
 | Binding   | App                                                         | Tools          |
