@@ -19,9 +19,14 @@ import { useResource } from "@/shared/lib/use-resource";
 
 import { recordLabels } from "../model/record-labels";
 
+/** The label of a record. It loads again when a record of the entity changes, for example after an edit. */
 function RecordLabel({ entity, id, fallback }: { entity: string; id: string; fallback: string }) {
-  const load = recordLabels[entity];
-  const label = useResource(`${entity}:${id}`, () => (load ? load(id) : Promise.resolve(fallback)));
+  const source = recordLabels[entity];
+  const label = useResource(
+    `${entity}:${id}`,
+    () => (source ? source.load(id) : Promise.resolve(fallback)),
+    source?.subscribe,
+  );
   if (label.status === "loading") return <Skeleton className="h-4 w-24" />;
   return <span className="block max-w-48 truncate">{label.status === "success" ? label.data : fallback}</span>;
 }

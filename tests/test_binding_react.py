@@ -205,8 +205,12 @@ def test_the_breadcrumbs_show_the_parent_pages_and_the_record(result: Generation
 
     assert 'parent: "projects",\n    recordEntity: "Project",\n    recordParam: "id",' in pages
     assert "parent: null,\n    recordEntity: null," in pages
-    assert '"Project": async (id) => {' in labels
-    assert '"Task": async (id) => {' in labels
+    assert '"Project": {\n    load: async (id) => {' in labels
+    assert '"Task": {\n    load: async (id) => {' in labels
+    # The label loads again after a change of a record, for example an edit.
+    assert "subscribe: (listener) => projectApi.subscribe(listener)," in labels
+    crumbs = files["src/widgets/page-breadcrumbs/ui/page-breadcrumbs.tsx"]
+    assert "source?.subscribe," in crumbs
     assert "export function PageSearch(" in files["src/features/search-pages/ui/page-search.tsx"]
 
 
