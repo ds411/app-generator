@@ -140,6 +140,16 @@ a long random text in each environment.
 - `POST /auth/sign-up` makes a new user with a password, and gives a
   token. A user name that exists gives 409.
 {% endif %}
+{% if definition.auth.password_reset %}
+- `POST /auth/password-reset` sends a reset link to a user, and gives
+  202 also for an unknown user name. `POST /auth/password-reset/confirm`
+  sets a new password with the token of the link. A link is valid for
+  {{ definition.auth.password_reset.token_minutes }} minutes and one time. `PASSWORD_RESET_URL` is the page of
+  the front end in the link. Write the delivery of the link (for example
+  an email) in `app/core/password_reset_ext.py`. Until then, the link
+  goes to the log with `ENVIRONMENT=development`, and the endpoint
+  gives 501 in production.
+{% endif %}
 - `uv run python -m app.cli set-password <user name>` sets the password
   of a user.
 

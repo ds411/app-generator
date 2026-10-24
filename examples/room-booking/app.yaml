@@ -361,7 +361,8 @@ workflows:
 
 # The members sign in with their email address and a password. Anyone
 # can see the list of rooms. A new member signs up with a name, an
-# email address, and a team, and gets the role `member`.
+# email address, and a team, and gets the role `member`. A member who
+# forgets the password gets a reset link that is valid for 30 minutes.
 auth:
   user_entity: Member
   username_field: email
@@ -372,6 +373,8 @@ auth:
   sign_up:
     fields: [name, email, team]
     default_role: member
+  password_reset:
+    token_minutes: 30
 
 # An admin may do all. A member may read all data, and book rooms, but
 # may not change the rooms, the amenities, or the members.

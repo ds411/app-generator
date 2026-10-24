@@ -33,4 +33,5 @@ gives the rules.
 | 0014   | [API client of the React app](0014-react-api-client.md)               | Accepted |
 | 0015   | [Agent skills](0015-agent-skills.md)                                   | Accepted |
 | 0016   | [Sign-up of new users](0016-sign-up.md)                                | Accepted |
+| 0017   | [Password reset](0017-password-reset.md)                               | Accepted |
 | 0019   | [Third-party APIs from OpenAPI documents](0019-third-party-apis.md)    | Accepted |

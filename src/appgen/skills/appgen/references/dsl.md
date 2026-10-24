@@ -929,6 +929,8 @@ auth:
   sign_up:
     fields: [name, email, team]
     default_role: member
+  password_reset:
+    token_minutes: 30
 ```
 
 - `user_entity` is the entity of the users. `username_field` is a
@@ -945,14 +947,26 @@ auth:
   have the role field or a computed field. With `access`,
   `default_role` is the role of a new user. Without it, a new user gets
   the default of the role field.
-- No page can use the path `/sign-in`, or `/sign-up` with a sign-up:
-  they are the pages of the front ends.
+- `password_reset` lets a user who forgot the password set a new one
+  with a link in a message ([ADR 0017](https://github.com/ds411/app-generator/blob/main/docs/adr/0017-password-reset.md)). It
+  is off by default. `token_minutes` (5 to 1440, default 60) is the
+  time that a link stays valid. A link is valid only one time. The
+  delivery of the message (for example an email) is a generation gap.
+- No page can use the path `/sign-in`, `/sign-up` with a sign-up, or
+  `/forgot-password` and `/reset-password` with a password reset: they
+  are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
 set-password <user name>`. With `sign_up`, the public endpoint `POST
 /auth/sign-up` makes the user and its password in one transaction, and
-gives a bearer token. A user name that exists gives 409. The Next.js app has the page `/sign-in` and a
+gives a bearer token. A user name that exists gives 409. With
+`password_reset`, `POST /auth/password-reset` sends a reset link with a
+signed token, and gives 202 also for an unknown user name. `POST
+/auth/password-reset/confirm` sets the new password. A used or an ended
+token gives 400. The extension file `app/core/password_reset_ext.py`
+delivers the link: its stub writes the link to the log with
+`ENVIRONMENT=development`, and gives 501 in production. The Next.js app has the page `/sign-in` and a
 session cookie, and its seed gives each user the password in
 `SEED_PASSWORD`. Both need `AUTH_SECRET`. The React app (mock data)
 accepts each mock user with the password `password`. Each front end has

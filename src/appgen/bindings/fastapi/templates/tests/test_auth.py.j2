@@ -2,6 +2,7 @@
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
 {% set sign_up = definition.auth.sign_up %}
+{% set reset = definition.auth.password_reset %}
 {% set access = definition.access %}
 {% if sign_up and access %}
 {% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
@@ -13,22 +14,34 @@
 {% if ns.op is none %}
 {% set ns.op, ns.entity = op, e %}
 {% endif %}
-{% if ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
+{% if sign_up and ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
 {% set ns.new_op, ns.new_entity = op, e %}
 {% endif %}
 {% endfor %}
 {% endfor %}
 """The tests of the sign-in: tokens, the auth endpoints, and the protected endpoints."""
 
+{% if reset %}
+import time
+{% endif %}
 {% if sign_up %}
 from typing import Any
+{% endif %}
+{% if sign_up or reset %}
 
 {% endif %}
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+{% if reset %}
+from app.core import auth
+from app.core.auth import Credential, make_reset_token, set_password
+from app.core.config import Settings
+from app.features.{{ u.slice }}.models import {{ u.name }}
+{% else %}
 from app.core.auth import set_password
+{% endif %}
 {{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([u.snake ~ "_input"] if sign_up else [])) }}
 from tests.problems import assert_problem
 
@@ -166,4 +179,107 @@ async def test_a_sign_up_needs_a_long_password(
     response = await anonymous_client.post("/auth/sign-up", json=body)
 
     assert_problem(response, 422)
+{% endif %}
+{% if reset %}
+
+
+{{ trace(reset.id) }}
+@pytest.fixture
+def reset_links(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The reset links that the app sends. The tests do not use the delivery of the app."""
+    links: list[str] = []
+
+    async def deliver(settings: Settings, user: {{ u.name }}, link: str) -> None:
+        links.append(link)
+
+    monkeypatch.setattr(auth, "deliver_password_reset", deliver)
+    return links
+
+
+async def _reset_token(client: AsyncClient, username: str, links: list[str]) -> str:
+    """Ask for a reset link, and return the token of the link."""
+    response = await client.post("/auth/password-reset", json={"username": username})
+    assert response.status_code == 202, response.text
+    return links[-1].partition("?token=")[2]
+
+
+{{ trace(reset.id) }}
+async def test_a_user_resets_a_forgotten_password(
+    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    await set_password(session, user, PASSWORD)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+
+    response = await anonymous_client.post(
+        "/auth/password-reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert response.status_code == 204, response.text
+    credentials = {"username": user.{{ username.attr }}, "password": "a-new-password"}
+    assert (await anonymous_client.post("/auth/sign-in", json=credentials)).status_code == 200
+    credentials["password"] = PASSWORD
+    assert_problem(await anonymous_client.post("/auth/sign-in", json=credentials), 401)
+
+
+{{ trace(reset.id) }}
+async def test_a_used_reset_token_gives_400(
+    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    await set_password(session, user, PASSWORD)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+    body = {"token": token, "new_password": "a-new-password"}
+    first = await anonymous_client.post("/auth/password-reset/confirm", json=body)
+    assert first.status_code == 204, first.text
+
+    response = await anonymous_client.post("/auth/password-reset/confirm", json=body)
+
+    assert_problem(response, 400)
+
+
+{{ trace(reset.id) }}
+async def test_a_new_password_makes_the_earlier_reset_tokens_invalid(
+    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    await set_password(session, user, PASSWORD)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+    await set_password(session, user, "another-password")
+
+    response = await anonymous_client.post(
+        "/auth/password-reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert_problem(response, 400)
+
+
+{{ trace(reset.id) }}
+async def test_an_expired_reset_token_gives_400(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    await set_password(session, user, PASSWORD)
+    credential = await session.get(Credential, user.id)
+    assert credential is not None
+    ended = int(time.time()) - 1
+    token = make_reset_token(b"test-secret", user.id, credential.password_hash, ended)
+
+    response = await anonymous_client.post(
+        "/auth/password-reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert_problem(response, 400)
+
+
+{{ trace(reset.id) }}
+async def test_a_reset_for_an_unknown_user_name_gives_202(
+    anonymous_client: AsyncClient, reset_links: list[str]
+) -> None:
+    response = await anonymous_client.post(
+        "/auth/password-reset", json={"username": "nobody@example.com"}
+    )
+
+    assert response.status_code == 202, response.text
+    assert reset_links == []
 {% endif %}

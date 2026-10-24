@@ -80,6 +80,12 @@ BINDING = Binding(
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
         Output(template="app/cli.py.j2", path="app/cli.py", when="definition.auth"),
         Output(
+            template="app/core/password_reset_ext.py.j2",
+            path="app/core/password_reset_ext.py",
+            when="definition.auth and definition.auth.password_reset",
+            extension=True,
+        ),
+        Output(
             template="app/core/access.py.j2", path="app/core/access.py", when="definition.access"
         ),
         Output(
@@ -199,7 +205,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "access", "role"}
+        | {"auth", "sign_up", "password_reset", "access", "role"}
     ),
     # The clients of the third-party APIs come with #263.
     excludes=frozenset({"page", "ui", "translations", "api"}),
