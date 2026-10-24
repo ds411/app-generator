@@ -110,3 +110,14 @@ def test_the_fastapi_app_has_a_sign_up_endpoint() -> None:
         "async def test_a_sign_up_with_a_user_name_that_exists_gives_409("
         in files["tests/test_auth.py"]
     )
+
+
+def test_the_fastapi_app_of_roles_without_a_sign_up_has_no_sign_up_tests() -> None:
+    text = BASE.replace("  sign_up:\n    fields: [email, name]\n    default_role: viewer\n", "")
+    definition = load_definition_text(text, "app.yaml")
+    assert definition.auth is not None and definition.auth.sign_up is None
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    assert "/sign-up" not in files["app/core/auth.py"]
+    tests = files["tests/test_auth.py"]
+    assert "async def test_a_protected_endpoint_needs_a_signed_in_user(" in tests
+    assert "sign_up" not in tests

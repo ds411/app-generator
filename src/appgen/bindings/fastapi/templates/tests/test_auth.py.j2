@@ -14,7 +14,7 @@
 {% if ns.op is none %}
 {% set ns.op, ns.entity = op, e %}
 {% endif %}
-{% if ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
+{% if sign_up and ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
 {% set ns.new_op, ns.new_entity = op, e %}
 {% endif %}
 {% endfor %}
