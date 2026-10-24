@@ -31,6 +31,11 @@ entities:
         inverse: rooms
         x-fastapi-table: room_amenity
       bookings: { kind: one_to_many, target: Booking, inverse: room }
+    rules:
+      unique_name_per_floor:
+        kind: unique
+        fields: [floor, name]
+        message: A room on this floor has the same name.
 
   Amenity:
     description: Equipment of a room, for example a projector.
@@ -93,6 +98,19 @@ entities:
         inverse: bookings
         # The column name of the database. The API field stays `organizer_id`.
         x-fastapi-column: organizer_member_id
+    rules:
+      ends_after_start:
+        kind: compare
+        field: ends_at
+        op: gt
+        other: starts_at
+        message: The end must be after the start.
+      no_double_booking:
+        kind: no_overlap
+        start: starts_at
+        end: ends_at
+        scope: [room]
+        message: The room has another booking at this time.
 
 operations:
   cancel_booking:

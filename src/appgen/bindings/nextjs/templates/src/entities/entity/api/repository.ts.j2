@@ -38,4 +38,30 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   ],
 {% endif %}
+{% set compares = element.rules.values() | selectattr("kind", "eq", "compare") | list %}
+{% set overlaps = element.rules.values() | selectattr("kind", "eq", "no_overlap") | list %}
+{% if compares %}
+  compare: [
+{% for rule in compares %}
+    { {{ trace(rule.id, scope="begin") }}
+      field: {{ ts_value(rule_key(element, rule.field)) }},
+      op: {{ ts_value(rule.op) }},
+      other: {{ ts_value(rule_key(element, rule.other)) }},
+      message: {{ ts_value(rule.message) }},
+    }, {{ trace(rule.id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
+{% if overlaps %}
+  noOverlap: [
+{% for rule in overlaps %}
+    { {{ trace(rule.id, scope="begin") }}
+      start: {{ ts_value(rule_key(element, rule.start)) }},
+      end: {{ ts_value(rule_key(element, rule.end)) }},
+      scope: {{ ts_value(rule_keys(element, rule.scope)) }},
+      message: {{ ts_value(rule.message) }},
+    }, {{ trace(rule.id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
 });

@@ -105,6 +105,7 @@ ID ([traces.md](traces.md)).
 | Entity       | `entities.Task`                            |
 | Field        | `entities.Task.fields.title`               |
 | Relation     | `entities.Task.relations.project`          |
+| Entity rule  | `entities.Booking.rules.ends_after_start`  |
 | Operation    | `operations.complete_task`                 |
 | Param        | `operations.assign_task.params.note`       |
 | Page         | `pages.task_board`                         |
@@ -139,6 +140,7 @@ the React app.
 | `label`, `plural_label` | No | Display names. The default comes from the entity name.  |
 | `display_field` | No       | The field that names a record in lists and references.    |
 | `crud`          | No       | The CRUD shorthand: operations, views, and forms (see below). |
+| `rules`         | No       | Rules over more than one field or record (see [Entity rules](#entity-rules)). |
 
 ### The CRUD shorthand
 
@@ -257,6 +259,44 @@ Booking:
       scale: 2
       format: currency
       computed: hours(starts_at, ends_at) * room.hourly_rate
+```
+
+### Entity rules
+
+`rules` is a mapping from rule name to rule. A rule checks more than
+one field of a record, or more than one record. The back ends (FastAPI
+and Next.js) check the rules when they create or change a record. The
+React app has mock data and no back end, so it does not check them.
+
+| `kind`       | Keys                                   | Check                                         | Error |
+| ------------ | -------------------------------------- | --------------------------------------------- | ----- |
+| `compare`    | `field`, `op`, `other`, `message`      | `field op other`. `op` is `eq`, `ne`, `lt`, `lte`, `gt`, or `gte`. | 422 |
+| `unique`     | `fields` (two or more), `message`      | No two records have the same values. The table has a unique constraint. | 409 |
+| `no_overlap` | `start`, `end`, `scope`, `message`     | The ranges `[start, end)` of two records with the same `scope` values do not overlap. | 409 |
+
+The fields of a rule are stored fields of the entity. `unique` and
+`scope` also take `many_to_one` and `one_to_one` relations (their
+foreign keys). A compare rule compares two numbers, two dates, two
+date-times, or two texts. The start and the end of a `no_overlap` rule
+are two `date` or two `datetime` fields. An empty value passes a
+compare rule and a `no_overlap` rule: `required` checks it. The mock
+data keeps the compare and the unique rules.
+
+```yaml
+Booking:
+  rules:
+    ends_after_start:
+      kind: compare
+      field: ends_at
+      op: gt
+      other: starts_at
+      message: The end must be after the start.
+    no_double_booking:
+      kind: no_overlap
+      start: starts_at
+      end: ends_at
+      scope: [room]
+      message: The room has another booking at this time.
 ```
 
 ### Relations

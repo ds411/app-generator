@@ -24,7 +24,16 @@ export const {{ table.const }} = pgTable({{ table.name | tojson }}, {
   {{ trace(column.element_id) }}
   {{ column.key }}: {{ column.builder }},
 {% endfor %}
+{% if table.unique_rules %}
+}, (t) => [
+{% for rule in table.unique_rules %}
+  {{ trace(rule.element_id) }}
+  unique({{ rule.name | tojson }}).on({{ rule.columns }}),
+{% endfor %}
+]);
+{% else %}
 });
+{% endif %}
 {% for join in table.join_tables %}
 
 {{ trace(join.element_id) }}

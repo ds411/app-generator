@@ -65,6 +65,11 @@ BINDING = Binding(
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(
+            template="app/core/rules.py.j2",
+            path="app/core/rules.py",
+            when="py.entities.values() | selectattr('check_rules') | list",
+        ),
+        Output(
             template="app/core/compute.py.j2",
             path="app/core/compute.py",
             when="py.entities.values() | selectattr('computed') | list",
@@ -143,7 +148,10 @@ BINDING = Binding(
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
     ),
-    covers=frozenset({"app", "entity", "field", "relation", "operation", "param"}),
+    covers=frozenset(
+        {"app", "entity", "field", "relation", "operation", "param"}
+        | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
+    ),
     excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,

@@ -10,6 +10,7 @@ from pydantic import BeforeValidator, JsonValue, PrivateAttr, StringConstraints
 from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
+from appgen.dsl.rules import EntityRule
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
@@ -89,6 +90,8 @@ class Entity(Element):
     display_field: MemberName | None = None
     fields: Annotated[dict[MemberName, Field], pydantic.Field(min_length=1)]
     relations: dict[MemberName, Relation] = pydantic.Field(default_factory=dict[str, Relation])
+    rules: dict[MemberName, EntityRule] = pydantic.Field(default_factory=dict[str, EntityRule])
+    """Rules over more than one field, or over more than one record."""
     crud: Annotated[Crud | None, BeforeValidator(crud_input)] = pydantic.Field(
         default=None, json_schema_extra=crud_schema
     )

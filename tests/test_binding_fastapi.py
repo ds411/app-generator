@@ -476,3 +476,22 @@ def test_a_computed_field_is_a_property_of_the_model_and_a_read_field(fastapi: B
     assert "cost" not in files["migrations/versions/0001_schema.py"]
     assert "app/core/compute.py" in files
     assert "app/core/compute.py" not in _files(generate(load_definition(FIXTURE), fastapi))
+
+
+def test_the_rules_of_an_entity_are_checks_and_constraints(fastapi: Binding) -> None:
+    definition = load_definition(EXAMPLES / "room-booking" / "app.yaml")
+    files = _files(generate(definition, fastapi))
+    repository = files["app/features/bookings/repository.py"]
+    assert repository.count("    await check_rules(session, record)\n") == 2
+    assert '    if not compare(record.ends_at, "gt", record.starts_at):\n' in repository
+    assert (
+        '    if await overlaps(session, record, "starts_at", "ends_at", ["room_id"]):\n'
+        in repository
+    )
+    assert "from app.core.rules import compare, overlaps\n" in repository
+    constraint = 'UniqueConstraint("floor", "name", name="uq_rooms_unique_name_per_floor")'
+    assert f"        {constraint},\n" in files["app/features/rooms/models.py"]
+    assert f"        sa.{constraint},\n" in files["migrations/versions/0001_schema.py"]
+    payloads = files["tests/payloads.py"]
+    assert '"ends_at": f"2026-01-01T{n % 24:02d}:30:00Z",' in payloads
+    assert '"starts_at": f"2026-01-01T{n % 24:02d}:00:00Z",' in payloads

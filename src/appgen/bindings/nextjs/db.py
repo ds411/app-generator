@@ -12,8 +12,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from appgen.bindings.shared.mock_data import mock_data
-from appgen.dsl.model import AppDefinition, Field, Relation
+from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.rules import EntityUniqueRule
 from appgen.gen.naming import camel, snake
+from appgen.gen.render import GenerationError
 
 _ON_DELETE = {"restrict": "restrict", "cascade": "cascade", "set_null": "set null"}
 
@@ -29,6 +31,22 @@ class Column:
     element_id: str
     imports: tuple[str, ...]
     """The builders that the column imports from `drizzle-orm/pg-core`."""
+
+
+@dataclass(frozen=True, slots=True)
+class UniqueRule:
+    """A unique rule of an entity: a unique constraint of its table."""
+
+    element_id: str
+    name: str
+    """The name of the constraint, for example `uq_room_floor_name`."""
+    keys: tuple[str, ...]
+    """The TypeScript keys of the columns."""
+
+    @property
+    def columns(self) -> str:
+        """The columns of the constraint, of the table callback `t`, for example `t.a, t.b`."""
+        return ", ".join(f"t.{key}" for key in self.keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +156,8 @@ class Table:
     """The `many_to_many` relations of the record, for the data access."""
     inverse_ones: list[InverseOne] = field(default_factory=list[InverseOne])
     """The `one_to_one` relations whose foreign key is on the target, for the data access."""
+    unique_rules: list[UniqueRule] = field(default_factory=list[UniqueRule])
+    """The unique rules of the entity: unique constraints over more than one column."""
 
     @property
     def pg_imports(self) -> list[str]:
@@ -148,6 +168,8 @@ class Table:
             names.add("pgEnum")
         if self.join_tables:
             names.add("primaryKey")
+        if self.unique_rules:
+            names.add("unique")
         return sorted(names, key=lambda name: name.removeprefix("type "))
 
     @property
@@ -248,8 +270,32 @@ def build_tables(definition: AppDefinition) -> list[Table]:
             table.columns.append(Column(camel(field_name), code, spec.id, imports))
         for relation_name, relation in entity.relations.items():
             _add_relation(definition, table, entity_name, relation_name, relation)
+        for rule_name, rule in entity.rules.items():
+            if isinstance(rule, EntityUniqueRule):
+                keys = tuple(rule_key(table, entity, m) for m in rule.fields)
+                table.unique_rules.append(UniqueRule(rule.id, f"uq_{table.name}_{rule_name}", keys))
         tables.append(table)
     return tables
+
+
+def record_key(entity: Entity, member: str) -> str:
+    """Return the key of a field or a single relation of a rule in a record: `dueDate`, `roomId`."""
+    return camel(member) if member in entity.fields else f"{camel(member)}Id"
+
+
+def record_keys(entity: Entity, members: list[str]) -> list[str]:
+    """Return the keys of the fields and the single relations of a rule in a record."""
+    return [record_key(entity, m) for m in members]
+
+
+def rule_key(table: Table, entity: Entity, member: str) -> str:
+    """Return the TypeScript key of the column of a field or a relation of a rule."""
+    key = record_key(entity, member)
+    if key not in {c.key for c in table.columns}:
+        raise GenerationError(
+            f"The rule of '{table.entity}' uses '{member}', which has no column in its table."
+        )
+    return key
 
 
 def _inverse(definition: AppDefinition, relation: Relation) -> tuple[str, Relation] | None:

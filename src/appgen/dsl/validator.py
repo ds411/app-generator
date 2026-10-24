@@ -26,6 +26,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Field
+from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
     check_ui_dashboards,
@@ -298,6 +299,84 @@ def _check_expression(
             pass
 
 
+_COMPARE_GROUPS = (
+    NUMBER_TYPES,
+    frozenset({"date"}),
+    frozenset({"datetime"}),
+    frozenset({"string", "text", "email", "url", "enum"}),
+)
+"""The groups of field types that a compare rule can compare with each other."""
+
+
+def check_rules(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The rules of an entity refer to its stored fields, and the fields suit the rule."""
+    for entity in definition.entities.values():
+        stored = entity.stored_fields
+        singles = {n for n, r in entity.relations.items() if r.kind in SINGLE_KINDS}
+        for rule in entity.rules.values():
+            if isinstance(rule, EntityCompareRule):
+                found = [
+                    _rule_field(rule, key, getattr(rule, key), stored) for key in ("field", "other")
+                ]
+                for diagnostic in found:
+                    if isinstance(diagnostic, Diagnostic):
+                        yield diagnostic
+                a, b = found
+                if (
+                    isinstance(a, Field)
+                    and isinstance(b, Field)
+                    and not any(a.type in g and b.type in g for g in _COMPARE_GROUPS)
+                ):
+                    yield _error(
+                        "unsuitable-field",
+                        f"A compare rule cannot compare a '{a.type}' with a '{b.type}'.",
+                        rule,
+                        at="other",
+                    )
+            elif isinstance(rule, EntityUniqueRule):
+                yield from _rule_members(rule, "fields", rule.fields, stored, singles)
+            else:
+                ends = [
+                    _rule_field(rule, key, getattr(rule, key), stored) for key in ("start", "end")
+                ]
+                for key, found in zip(("start", "end"), ends, strict=True):
+                    if isinstance(found, Diagnostic):
+                        yield found
+                    elif found.type not in ("date", "datetime"):
+                        yield _error(
+                            "unsuitable-field",
+                            f"The {key} of a 'no_overlap' rule must be a date or a date-time.",
+                            rule,
+                            at=key,
+                        )
+                a, b = ends
+                if isinstance(a, Field) and isinstance(b, Field) and a.type != b.type:
+                    yield _error(
+                        "unsuitable-field",
+                        "The start and the end of a 'no_overlap' rule must have the same type.",
+                        rule,
+                        at="end",
+                    )
+                yield from _rule_members(rule, "scope", rule.scope, stored, singles)
+
+
+def _rule_field(rule: Element, key: str, name: str, stored: dict[str, Field]) -> Field | Diagnostic:
+    found = stored.get(name)
+    if found is None:
+        return _missing(rule, key, "field", name, stored)
+    return found
+
+
+def _rule_members(
+    rule: Element, key: str, names: list[str], stored: dict[str, Field], singles: set[str]
+) -> Iterator[Diagnostic]:
+    if len(set(names)) != len(names):
+        yield _error("duplicate-name", f"The names in '{key}' must be unique.", rule, at=key)
+    for name in names:
+        if name not in stored and name not in singles:
+            yield _missing(rule, key, "field or relation", name, [*stored, *singles])
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -305,6 +384,7 @@ CHECKS: list[Check] = [
     check_operations,
     check_fields,
     check_computed,
+    check_rules,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

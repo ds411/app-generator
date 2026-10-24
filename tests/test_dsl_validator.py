@@ -418,3 +418,41 @@ def test_a_computed_field_has_no_stored_options_and_no_nested_computed_fields() 
 def test_a_param_cannot_be_computed() -> None:
     text = BASE.replace("reason: { type: text }", "reason: { type: integer, computed: '1' }")
     assert codes(text) == [("invalid-option", "operations.close_task.params.reason")]
+
+
+def test_the_rules_of_an_entity_refer_to_its_stored_fields() -> None:
+    relations = "    relations:\n      project: { kind: many_to_one"
+    rules = (
+        "    rules:\n"
+        "      after: { kind: compare, field: estimate, op: gt, other: estimate, message: M }\n"
+        "      one_title: { kind: unique, fields: [title, project] }\n"
+        "      no_clash: { kind: no_overlap, start: due, end: due, scope: [project], message: M }\n"
+    )
+    text = BASE.replace("      estimate:", "      due: { type: date }\n      estimate:").replace(
+        relations, rules + relations
+    )
+    assert "no_clash" in text
+    assert codes(text) == []
+
+    for old, new, code in (
+        ("field: estimate, op", "field: missing, op", "unknown-reference"),
+        ("other: estimate", "other: title", "unsuitable-field"),
+        ("[title, project]", "[title, title]", "duplicate-name"),
+        ("[title, project]", "[title, tasks]", "unknown-reference"),
+        ("start: due", "start: estimate", "unsuitable-field"),
+    ):
+        diagnostics = check(text.replace(old, new))
+        assert [d.code for d in diagnostics][:1] == [code], (new, diagnostics)
+        element_id = diagnostics[0].element_id
+        assert element_id is not None
+        assert element_id.startswith("entities.Task.rules.")
+
+
+def test_a_unique_rule_has_two_or_more_fields() -> None:
+    relations = "    relations:\n      project: { kind: many_to_one"
+    text = BASE.replace(
+        relations, "    rules:\n      one: { kind: unique, fields: [title] }\n" + relations
+    )
+    assert "one: {" in text
+    with pytest.raises(DefinitionError):
+        load_definition_text(text, "app.yaml")

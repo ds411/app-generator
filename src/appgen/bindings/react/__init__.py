@@ -265,6 +265,8 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
+    # The rules of the entities are rules of the back end. The React app has mock data.
+    excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
     context=context,
     filters={"json": to_json},
     helpers=HELPERS | ui.HELPERS | views.HELPERS | {"gap_spec": gap_spec},
