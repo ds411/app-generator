@@ -1,0 +1,25 @@
+{{ trace_header(definition.access.id) }}
+// The permissions of the signed-in user in the browser (ADR 0012): the
+// menus, the links, and the actions show only the pages and the
+// operations that the role allows. The session of the browser tab gives
+// the role.{% if react.api %} The API checks each request again.{% endif %}
+
+import { currentRole } from "@/shared/auth";
+import type { PageName } from "@/shared/config/pages";
+import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+
+export type Access = {
+  /** Return true if the user may open a page. */
+  canOpenPage: (page: PageName) => boolean;
+  /** Return true if the user may call an operation. */
+  canCall: (operation: string) => boolean;
+};
+
+/** Return the permissions of the signed-in user. */
+export function useAccess(): Access {
+  const role = currentRole();
+  return {
+    canOpenPage: (page) => roleMayOpenPage(role, page),
+    canCall: (operation) => roleMayCall(role, operation),
+  };
+}

@@ -35,6 +35,11 @@ _APP_SHELL = (
     Output(template="ui/lib/use-resource.ts.j2", path="src/shared/lib/use-resource.ts"),
     Output(template="src/shared/lib/router.tsx.j2", path="src/shared/lib/router.tsx"),
     Output(
+        template="src/shared/lib/access.tsx.j2",
+        path="src/shared/lib/access.tsx",
+        when="definition.access",
+    ),
+    Output(
         template="ui/widgets/layout/layout.tsx.j2",
         path="src/widgets/layouts/ui/{{ name | kebab }}-layout.tsx",
         for_each="layout",

@@ -1064,6 +1064,9 @@ and a create sets the owner to the user.
 The Next.js app shows "not found" for a page, and gives an error for a
 server action. The React app (mock data) does the same checks in the
 browser, so they are a demonstration, not a protection.
+The menus, the page search, the links, and the actions of the front
+ends show only the pages and the operations that the role allows. A
+group of a menu without an allowed page does not show.
 
 ## translations
 

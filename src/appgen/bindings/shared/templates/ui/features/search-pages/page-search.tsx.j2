@@ -14,6 +14,9 @@ import {
   CommandList,
 } from "@/shared/ui/command";
 import { type PageName, pages } from "@/shared/config/pages";
+{% if definition.access %}
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
 import { pageHref } from "@/shared/lib/pages";
 import { useNavigate } from "@/shared/lib/router";
 import { cn } from "@/shared/lib/utils";
@@ -21,10 +24,13 @@ import { cn } from "@/shared/lib/utils";
 /** The pages that the search finds: the pages without path parameters. */
 const searchPages = (Object.keys(pages) as PageName[]).filter((name) => !pages[name].path.includes("{"));
 
-/** A search button that opens a list of the pages. Ctrl+K or Cmd+K opens it too. */
+/** A search button that opens a list of the pages{{ " that the user may open" if definition.access }}. Ctrl+K or Cmd+K opens it too. */
 export function PageSearch({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+{% if definition.access %}
+  const { canOpenPage } = useAccess(); {{ trace(definition.access.id) }}
+{% endif %}
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -53,7 +59,7 @@ export function PageSearch({ className }: { className?: string }) {
         <CommandList{{ " label=" ~ jsx_attr("Suggestions") if i18n }}>
           <CommandEmpty>{{ jsx_text("No page has this title.") }}</CommandEmpty>
           <CommandGroup heading={{ jsx_attr("Pages") }}>
-            {searchPages.map((name) => (
+            {searchPages{{ ".filter((name) => canOpenPage(name))" if definition.access }}.map((name) => (
               <CommandItem
                 key={name}
                 value={{ '{' ~ tr('pages[name].title') ~ '}' }}

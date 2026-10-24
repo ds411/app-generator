@@ -42,5 +42,33 @@ DSL does not have one for this.
 - There is no rule on single records. A custom operation or a custom
   rule (ADR 0005) can add one. ADR 0018 adds owner rules.
 - The menus of the front ends still show all pages. A page that the
-  role may not open shows "not found".
+  role may not open shows "not found". (The update below changes this.)
 - The checks of the React app are a demonstration, not a protection.
+
+### Update for M17: the front ends show only what the role allows
+
+The front ends now hide the pages and the operations that the role of
+the user does not allow (#274):
+
+- One table of the permissions, `src/shared/lib/permissions.ts`, has
+  the roles and the public parts. The checks of the pages and the
+  operations and the UI read it. The pages have their names in the UI
+  code (`roomDetail`).
+- The hook `useAccess` gives the permissions of the signed-in user. The
+  Next.js root layout reads the role on the server and gives it to the
+  UI. The React app reads it from the session of the browser tab.
+- A menu item shows only if the role may open its page or the page of
+  one of its sub-items. A group of a menu shows only if one of its items
+  shows. The page search shows only the pages that the role may open.
+- A link to a page that the role may not open shows only its content,
+  for example the title of a record in a table, without the link.
+- An action shows only if the role may open its page and call its
+  operation, for example the button of a form. A board does not move
+  the cards for a role that may not call the update operation.
+- A user without a session sees only the public pages and operations.
+- A direct URL of a page that the role may not open still shows "not
+  found", and the server (Next.js and FastAPI) checks each operation
+  again.
+- `scripts/check-auth-ui.sh` builds the room booking example with
+  both front ends, signs in as a user of each role, and compares the
+  menus with approved screenshots in the light and the dark mode.

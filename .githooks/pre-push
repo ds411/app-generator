@@ -178,6 +178,14 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     apps="$apps translations"
 fi
 
+if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
+    'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/nextjs/*' \
+    'src/appgen/bindings/shared/*' 'examples/room-booking/*' 'scripts/check-auth-ui.sh' \
+    'scripts/auth_ui_test.py' 'scripts/smoke_test.py' 'ui-tests/*' \
+    'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
+    apps="$apps auth-ui"
+fi
+
 run_apps
 
 if [ "$failed" -ne 0 ]; then

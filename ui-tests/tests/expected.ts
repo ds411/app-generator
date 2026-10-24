@@ -39,6 +39,35 @@ export type ExpectedTestLanguage = {
   ignore: string[];
 };
 
+/** An action of a page, and if the role sees it. */
+export type ExpectedAction = {
+  path: string;
+  /** The title of the page. */
+  title: string;
+  label: string;
+  shown: boolean;
+};
+
+/** The sign-in and the permissions of scripts/auth_ui_test.py. */
+export type ExpectedAuth = {
+  /** The name of the app, for the folder of the approved screenshots. */
+  app: string;
+  /** The password of each user. */
+  password: string;
+  roles: {
+    role: string;
+    /** The user name of a user with the role. */
+    username: string;
+    /** The labels of the menu items that the role sees. */
+    menu: string[];
+    /** The paths of the pages that the role may not open. */
+    deniedPaths: string[];
+    actions: ExpectedAction[];
+  }[];
+  /** A public page, and what a user without a session sees. */
+  anonymous?: { path: string; title: string; menu: string[]; actions: ExpectedAction[] };
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -48,6 +77,8 @@ export type Expected = {
   bodyFontSize: Record<Mode, string>;
   /** Only for the test of the test language. */
   testLanguage?: ExpectedTestLanguage;
+  /** Only for the test of the sign-in and the permissions. */
+  auth?: ExpectedAuth;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

@@ -5,7 +5,7 @@
 {% set use_root = bare_pages or not default_layout %}
 {% macro page_element(info) -%}
 {% if definition.auth and info.name not in definition.auth.public_pages -%}
-<RequireAuth{% if definition.access %} page={{ info.name | tojson }}{% endif %}><{{ info.name | pascal }}Page /></RequireAuth>
+<RequireAuth{% if definition.access %} page={{ info.name | camel | tojson }}{% endif %}><{{ info.name | pascal }}Page /></RequireAuth>
 {%- else -%}
 <{{ info.name | pascal }}Page />
 {%- endif %}

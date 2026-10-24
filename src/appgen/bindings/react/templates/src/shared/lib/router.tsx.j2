@@ -9,11 +9,31 @@ import {
   useNavigate as useRouterNavigate,
   useParams as useRouterParams,
 } from "react-router";
+{% if definition.access %}
 
+import { useAccess } from "@/shared/lib/access";
+import { matchPage } from "@/shared/lib/pages";
+{% endif %}
+
+{% if definition.access %}
+export type LinkProps = Omit<ComponentProps<typeof RouterLink>, "to"> & {
+  href: string;
+  /** Show the link also if the user may not open its page, for example the link to the start page. */
+  always?: boolean;
+};
+{% else %}
 export type LinkProps = Omit<ComponentProps<typeof RouterLink>, "to"> & { href: string };
+{% endif %}
 
-/** A link to a path of the app. */
-export function Link({ href, ...props }: LinkProps) {
+/** A link to a path of the app.{% if definition.access %} A link to a page that the user may not open shows only its content.{% endif %} */
+export function Link({ href, {% if definition.access %}always = false, {% endif %}...props }: LinkProps) {
+{% if definition.access %}
+  const { canOpenPage } = useAccess(); {{ trace(definition.access.id) }}
+  const page = always ? undefined : matchPage(href.split(/[?#]/)[0] ?? "")?.name;
+  if (page !== undefined && !canOpenPage(page)) {
+    return <span className={props.className}>{props.children}</span>;
+  }
+{% endif %}
   return <RouterLink to={href} {...props} />;
 }
 

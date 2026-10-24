@@ -275,6 +275,14 @@ git config core.hooksPath .githooks
   fixed text in a template must use a text helper of
   `src/appgen/bindings/shared/i18n.py`, for example `jsx_text("Close")`,
   else the check fails.
+- When a push changes the generator core, a front-end binding, the
+  shared binding code, or the room booking example, the hook also runs
+  `scripts/check-auth-ui.sh`. The script builds the room booking example
+  with React and Next.js, signs in as a user of each role, and checks
+  the menus, the pages, and the actions of the role
+  (`scripts/auth_ui_test.py`). It needs pnpm, but not Docker. Update its
+  approved screenshots with `APPGEN_UPDATE_SCREENSHOTS=1
+  scripts/check-auth-ui.sh`.
 - Each check script ends with the smoke test of its app
   (`scripts/smoke_test.py`): it starts the Docker image that the script
   built, and requests one page for each entity (Next.js and React) or
@@ -299,6 +307,7 @@ git config core.hooksPath .githooks
   ```sh
   APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-nextjs.sh
   APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-react.sh
+  APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-auth-ui.sh
   git add ui-tests/approved
   ```
 

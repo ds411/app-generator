@@ -1,0 +1,39 @@
+{{ trace_header(definition.access.id) }}
+"use client";
+
+// The permissions of the signed-in user in the browser (ADR 0012): the
+// menus, the links, and the actions show only the pages and the
+// operations that the role allows. The root layout reads the role on the
+// server. The server checks each page and each operation again.
+import { createContext, type ReactNode, useContext, useMemo } from "react";
+
+import type { PageName } from "@/shared/config/pages";
+import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+
+export type Access = {
+  /** Return true if the user may open a page. */
+  canOpenPage: (page: PageName) => boolean;
+  /** Return true if the user may call an operation. */
+  canCall: (operation: string) => boolean;
+};
+
+function accessOf(role: string | null): Access {
+  return {
+    canOpenPage: (page) => roleMayOpenPage(role, page),
+    canCall: (operation) => roleMayCall(role, operation),
+  };
+}
+
+// Without a provider, the user has no role: only the public pages and operations.
+const AccessContext = createContext<Access>(accessOf(null));
+
+/** Give the role of the signed-in user to the UI: null without a session or a role. */
+export function AccessProvider({ role, children }: { role: string | null; children: ReactNode }) {
+  const access = useMemo(() => accessOf(role), [role]);
+  return <AccessContext value={access}>{children}</AccessContext>;
+}
+
+/** Return the permissions of the signed-in user. */
+export function useAccess(): Access {
+  return useContext(AccessContext);
+}
