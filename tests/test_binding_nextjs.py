@@ -616,3 +616,15 @@ def test_the_seed_of_the_edge_cases_inserts_a_target_first(nextjs: Binding) -> N
     assert seed.index("tx.insert(profileTable)") < seed.index("tx.insert(ownerTable)")
     # Item refers to itself with an optional foreign key: a link.
     assert "seed.itemSeedLinks" in seed
+
+
+def test_a_detail_page_for_an_unknown_id_is_not_found(result: GenerationResult) -> None:
+    files = _files(result)
+    route = files["app/(app-shell)/projects/[id]/page.tsx"]
+    assert 'import { notFound } from "next/navigation";' in route
+    assert 'export default async function Route({ params }: PageProps<"/projects/[id]">) {' in route
+    assert "  const { id } = await params;" in route
+    assert "if (!(await projectRepository.exists(id))) {\n    notFound();" in route
+    assert "async exists(id: string): Promise<boolean> {" in files["src/shared/db/repository.ts"]
+    # A list page needs no record.
+    assert "notFound" not in files["app/(app-shell)/projects/page.tsx"]

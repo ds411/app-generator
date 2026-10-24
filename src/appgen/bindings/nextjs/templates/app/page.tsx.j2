@@ -1,11 +1,30 @@
 {% set info = nextjs.pages[name] %}
+{% set detail = element.entity and info.params and element.content is not none and element.content.view in ui_views.detail_views %}
 {{ trace_header(element_id) }}
 import type { Metadata } from "next";
+{% if detail %}
+import { notFound } from "next/navigation";
 
+import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.entity | kebab }}/server";
+{% else %}
+
+{% endif %}
 import { {{ info.component }} } from "@/pages/{{ info.slice }}";
 
 export const metadata: Metadata = { title: {{ element.title | tojson }} };
+{% if detail %}
+
+/** Show the not-found page (status 404) if the record does not exist. */
+export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>) {
+  const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
+  if (!(await {{ element.entity | camel }}Repository.exists(id))) {
+    notFound();
+  }
+  return <{{ info.component }} />;
+}
+{% else %}
 
 export default function Route() {
   return <{{ info.component }} />;
 }
+{% endif %}
