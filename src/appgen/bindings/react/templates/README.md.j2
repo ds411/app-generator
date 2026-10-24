@@ -16,7 +16,11 @@ and never changes.
 - React 19 and TypeScript in strict mode
 - Vite and React Router
 - Feature-Sliced Design (FSD)
+{% if react.api %}
+- The data of the FastAPI app of the same definition (`x-react-data: api`)
+{% else %}
 - Mock data in memory (no back end)
+{% endif %}
 - pnpm
 
 ## Commands
@@ -30,6 +34,30 @@ and never changes.
 | Build                  | `pnpm build`     |
 | Preview the build      | `pnpm preview`   |
 
+{% if react.api %}
+## API
+
+The app reads and changes the data with the REST API of the FastAPI app
+that appgen generates from the same definition. `src/shared/api/` has
+the client: `http.ts` sends the requests, and `http-store.ts` maps the
+JSON names of the API to the keys of the TypeScript types. The build
+variable `VITE_API_URL` sets the URL of the API (default
+`http://localhost:8000`):
+
+```sh
+VITE_API_URL=http://localhost:8000 pnpm dev
+```
+
+The API must allow the origin of the app: set `CORS_ORIGINS` of the
+FastAPI app, for example `["http://localhost:5173"]`. The list endpoints
+filter only by equality, so the app loads all records of a list, and
+searches, sorts, and pages them in the browser.
+{% if definition.auth %}
+The sign-in uses `POST /auth/sign-in` of the API, and each request sends
+the token.
+{% endif %}
+
+{% endif %}
 ## Layout
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

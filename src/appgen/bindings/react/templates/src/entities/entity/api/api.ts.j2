@@ -9,16 +9,32 @@
   requireOperation({{ op_name | tojson }}); {{ trace(definition.access.id) }}
 {% endif %}
 {%- endmacro %}
+{% set store = "HttpStore" if react.api else "MockStore" %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
-import { type EntityApi, type ListQuery, type ListResult, MockStore } from "@/shared/api";
+import { {% if not react.api %}type EntityApi, {% endif %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
 {% else %}
-import { type EntityApi, MockStore } from "@/shared/api";
+import { {% if not react.api %}type EntityApi, {% endif %}{{ store }} } from "@/shared/api";
 {% endif %}
 
 {% if guarded %}
 import { requireOperation } from "@/shared/auth";
 
 {% endif %}
+{% if react.api %}
+{% set api = api_entities[name] %}
+import type { {{ type }}, {{ type }}Input } from "../model/types";
+
+/** The data access of {{ type }}: the endpoints {{ api.path }} of the FastAPI app. */
+export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_value(name) }}, {{ api.path | tojson }}, {
+  keys: {
+{% for json, key in api.keys.items() %}
+    {{ json | tojson }}: {{ key | tojson }},
+{% endfor %}
+  },
+  numbers: {{ api.numbers | tojson }},
+  filters: {{ api.filters | tojson }},
+});
+{% else %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";
 
@@ -51,6 +67,7 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
   ],
 {% endif %}
 );
+{% endif %}
 {% for op_name, op in ops %}
 
 {% if op.description %}

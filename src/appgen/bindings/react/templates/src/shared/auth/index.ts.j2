@@ -1,6 +1,19 @@
 {% set key = definition.auth.username_field | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
 {{ trace_header(definition.auth.id) }}
+{% if react.api %}
+// The sign-in of the app with the FastAPI app (ADR 0011): the API checks
+// the password, and gives a bearer token. The session stays in the
+// browser tab.{% if role_key %} The checks of the roles in the browser only hide what the
+// API refuses: the API checks each request.{% endif %}
+
+import { apiRequest, setAccessToken } from "@/shared/api";
+
+const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
+{% if role_key %}
+const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
+{% endif %}
+{% else %}
 // The sign-in of the app with mock data (ADR 0011). The users are the mock
 // records of {{ definition.auth.user_entity }}, and each one signs in with the password
 // MOCK_PASSWORD. The session stays in the browser tab. An app with a back
@@ -16,6 +29,7 @@ const users: { id: string; username: string{% if role_key %}; role: string | nul
   { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %} },
 {% endfor %}
 ];
+{% endif %}
 {% if definition.access %}
 
 // The permissions of the roles (ADR 0012). `*` stands for all operations or pages.
@@ -42,8 +56,17 @@ export class ForbiddenError extends Error {
 }
 
 function roleNames(table: Record<string, readonly string[]>): readonly string[] {
+{% if react.api %}
+  let role: string | null;
+  try {
+    role = window.sessionStorage.getItem(ROLE_KEY);
+  } catch {
+    role = null;
+  }
+{% else %}
   const id = currentUserId();
   const role = users.find((user) => user.id === id)?.role;
+{% endif %}
   return (role && table[role]) || [];
 }
 
@@ -71,6 +94,37 @@ export function currentUserId(): string | null {
   }
 }
 
+{% if react.api %}
+/** Sign in with the API. Return null, or the message of the error. */
+export async function signIn(username: string, password: string): Promise<string | null> {
+  try {
+    const token = (await apiRequest("POST", "/auth/sign-in", { username, password })) as { access_token: string };
+    setAccessToken(token.access_token);
+    const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
+    window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
+{% if role_key %}
+    window.sessionStorage.setItem(ROLE_KEY, String(user[{{ definition.access.role_field | tojson }}] ?? ""));
+{% endif %}
+  } catch (error) {
+    setAccessToken(null);
+    return error instanceof Error ? error.message : "The sign-in failed.";
+  }
+  return null;
+}
+
+/** Sign out. */
+export async function signOut(): Promise<void> {
+  setAccessToken(null);
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+{% if role_key %}
+    window.sessionStorage.removeItem(ROLE_KEY);
+{% endif %}
+  } catch {
+    // No storage: no session to delete.
+  }
+}
+{% else %}
 /** Sign in. Return null, or the message of the error. */
 export async function signIn(username: string, password: string): Promise<string | null> {
   const user = users.find((item) => item.username === username);
@@ -93,3 +147,4 @@ export async function signOut(): Promise<void> {
     // No storage: no session to delete.
   }
 }
+{% endif %}

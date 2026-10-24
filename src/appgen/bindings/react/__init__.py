@@ -6,11 +6,12 @@ Feature-Sliced Design (FSD): the layers `app`, `pages`, `widgets`,
 """
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pydantic
 
 from appgen.bindings import shared
+from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
 from appgen.bindings.shared import forms, shadcn, ui, views
@@ -191,7 +192,20 @@ BINDING = Binding(
         *_SHADCN,
         *_HOOKS,
         Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
-        Output(template="src/shared/api/mock-store.ts.j2", path="src/shared/api/mock-store.ts"),
+        Output(template="src/shared/api/query.ts.j2", path="src/shared/api/query.ts"),
+        Output(
+            template="src/shared/api/mock-store.ts.j2",
+            path="src/shared/api/mock-store.ts",
+            when="not react.api",
+        ),
+        Output(
+            template="src/shared/api/http.ts.j2", path="src/shared/api/http.ts", when="react.api"
+        ),
+        Output(
+            template="src/shared/api/http-store.ts.j2",
+            path="src/shared/api/http-store.ts",
+            when="react.api",
+        ),
         Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
         Output(
             template="src/entities/entity/index.ts.j2",
@@ -223,6 +237,7 @@ BINDING = Binding(
             template="src/entities/entity/api/mock-data.ts.j2",
             path=_ENTITY + "/api/{{ name | kebab }}-mock-data.ts",
             for_each="entity",
+            when="not react.api",
         ),
         Output(
             template="src/pages/page/index.ts.j2",
@@ -250,7 +265,7 @@ BINDING = Binding(
             template="gap/function.ext.ts.j2",
             path=_GAP + ".ext.ts",
             for_each="operation",
-            when=_CUSTOM_OP,
+            when=_CUSTOM_OP + " and not react.api",
             extension=True,
         ),
         *(
@@ -296,6 +311,13 @@ BINDING = Binding(
             kinds=frozenset({"entity"}),
             type=Annotated[int, pydantic.Field(ge=1)],
             description="The number of mock records of the entity (default: 12).",
+        ),
+        ExtensionKey(
+            name=DATA_KEY,
+            kinds=frozenset({"app"}),
+            type=Literal["mock", "api"],
+            description="The data of the app: `mock` (default) or `api`, the FastAPI app "
+            "of the same definition.",
         ),
     ),
 )

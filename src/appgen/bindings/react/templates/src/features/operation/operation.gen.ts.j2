@@ -16,18 +16,34 @@ import {
 {% if definition.access and name not in definition.auth.public_operations %}
 import { requireOperation } from "@/shared/auth";
 {% endif %}
+{% if not react.api %}
 
 import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
+{% endif %}
 
+{% set where = "The FastAPI app runs the logic." if react.api else "The logic is in the extension file." %}
 {% if element.description %}
-/** {{ element.description }} The logic is in the extension file. */
+/** {{ element.description }} {{ where }} */
 {% else %}
-/** The operation {{ name }}. The logic is in the extension file. */
+/** The operation {{ name }}. {{ where }} */
 {% endif %}
 export async function {{ spec.name }}(id: string{% if element.params %}, params: {{ name | pascal }}Params{% endif %}): {{ spec.returns }} {
 {% if definition.access and name not in definition.auth.public_operations %}
   requireOperation({{ name | tojson }}); {{ trace(definition.access.id) }}
 {% endif %}
+{% if react.api %}
+{% set endpoint = api_entities[entity].endpoints | selectattr("operation", "eq", name) | first %}
+  // The FastAPI app runs the logic: {{ endpoint.method }} {{ endpoint.path }}.
+  {{ "const json = " if element.returns == entity else "" }}await {{ entity | camel }}Api.call({{ endpoint.method | tojson }}, {{ endpoint.path.split("{id}")[1] | tojson }}, id, {
+{% for param in element.params %}
+    {{ param | tojson }}: params.{{ param | camel }},
+{% endfor %}
+  });
+{% if element.returns == entity %}
+  return {{ entity | camel }}Api.fromJson(json);
+{% endif %}
+{% else %}
   const record = await {{ entity | camel }}Api.get(id);
   return {{ spec.name }}Ext(record{% if element.params %}, params{% endif %});
+{% endif %}
 }

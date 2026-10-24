@@ -1,2 +1,13 @@
 {{ trace_header("app") }}
 /// <reference types="vite/client" />
+{% if react.api %}
+
+interface ImportMetaEnv {
+  /** The URL of the FastAPI app, for example `http://localhost:8000`. */
+  readonly VITE_API_URL?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+{% endif %}

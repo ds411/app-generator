@@ -1,0 +1,73 @@
+{{ trace_header("app") }}
+import type { Filter, ListQuery, ListResult, Sort } from "./types";
+
+function compare(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  return String(a).localeCompare(String(b));
+}
+
+function matches<T>(record: T, filter: Filter<T>): boolean {
+  const value: unknown = record[filter.field];
+  const target = filter.value;
+  switch (filter.op) {
+    case "eq":
+      return value === target;
+    case "ne":
+      return value !== target;
+    case "lt":
+      return value !== null && compare(value, target) < 0;
+    case "lte":
+      return value !== null && compare(value, target) <= 0;
+    case "gt":
+      return value !== null && compare(value, target) > 0;
+    case "gte":
+      return value !== null && compare(value, target) >= 0;
+    case "in":
+      return Array.isArray(target) && target.includes(value);
+    case "not_in":
+      return Array.isArray(target) && !target.includes(value);
+    case "contains":
+      return Array.isArray(value)
+        ? value.includes(target)
+        : String(value ?? "").toLowerCase().includes(String(target).toLowerCase());
+  }
+}
+
+function sortRecords<T>(records: T[], sort: Sort<T>[]): T[] {
+  return [...records].sort((a, b) => {
+    for (const { field, direction } of sort) {
+      const result = compare(a[field], b[field]);
+      if (result !== 0) return direction === "asc" ? result : -result;
+    }
+    return 0;
+  });
+}
+
+/** Filter, search, sort, and page records in memory. Return copies of the records. */
+export function applyQuery<T>(records: readonly T[], query: ListQuery<T> = {}): ListResult<T> {
+  let items = [...records];
+  for (const filter of query.filters ?? []) {
+    items = items.filter((record) => matches(record, filter));
+  }
+  const search = query.search;
+  if (search && search.text.trim()) {
+    const text = search.text.trim().toLowerCase();
+    items = items.filter((record) =>
+      search.fields.some((field) => String(record[field] ?? "").toLowerCase().includes(text)),
+    );
+  }
+  if (query.sort?.length) {
+    items = sortRecords(items, query.sort);
+  }
+  const total = items.length;
+  const pageSize = query.pageSize ?? (total || 1);
+  const page = query.page ?? 1;
+  if (query.page !== undefined) {
+    items = items.slice((page - 1) * pageSize, page * pageSize);
+  }
+  return { items: items.map((record) => ({ ...record })), total, page, pageSize };
+}

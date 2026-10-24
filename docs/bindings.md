@@ -252,6 +252,39 @@ The keys of the bindings of this repository:
 | `fastapi` | `x-fastapi-table` | `entity`, `relation` | The table name of the entity, or the join table of a `many_to_many` relation. |
 | `fastapi` | `x-fastapi-column` | `relation`      | The foreign key column of a `many_to_one` or owning `one_to_one` relation. |
 | `react`   | `x-mock-count`    | `entity`         | An integer, 1 or more.        |
+| `react`   | `x-react-data`    | `app`            | `mock` (default) or `api`.    |
+
+### The React app with the FastAPI app
+
+With `x-react-data: api` in the `app` section, the React app uses the
+REST API of the FastAPI app of the same definition, and has no mock
+data ([ADR 0014](adr/0014-react-api-client.md)):
+
+```yaml
+app:
+  name: project-tracker
+  title: Project Tracker
+  x-react-data: api
+```
+
+- `src/shared/api/http.ts` sends the requests to `VITE_API_URL`
+  (default `http://localhost:8000`), and `http-store.ts` implements the
+  same `EntityApi` interface as the mock store. It maps the JSON names
+  of the API (`due_date`, `owner_id`) to the keys of the TypeScript
+  types (`dueDate`, `ownerId`).
+- The paths, the methods, and the JSON names come from the model of the
+  FastAPI binding, which also makes the OpenAPI document of the API.
+  `scripts/check-react-api.sh` starts both apps, checks each endpoint of
+  the client in the OpenAPI document, and loads a page with data from
+  the API. The pre-push hook runs it.
+- The list endpoints filter only by equality. The client sends those
+  filters to the API, loads all pages, and searches, sorts, and pages
+  the records in the browser.
+- A custom operation calls its endpoint: the FastAPI app runs the
+  logic, so the React app has no extension file for it.
+- With `auth`, the sign-in uses `POST /auth/sign-in`, and each request
+  sends the bearer token.
+- The FastAPI app must allow the origin of the React app (`CORS_ORIGINS`).
 
 ## Extension files
 
