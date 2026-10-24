@@ -45,6 +45,7 @@ def import_block(lines: set[str]) -> str:
     in each group.
     """
     stdlib = {"collections", "datetime", "decimal", "enum", "itertools", "os", "typing", "uuid"}
+    stdlib |= {"json", "pathlib", "re", "types", "urllib"}
     groups: list[list[str]] = [[], [], []]
     for line in lines:
         module = line.split()[1]

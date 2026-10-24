@@ -16,7 +16,13 @@ With `--local`, the script runs the Next.js app or the FastAPI app on the
 machine, without Docker and without a Postgres server: the Next.js app
 with PGlite (`pnpm start`), and the FastAPI app with SQLite (`uv run
 fastapi run`). The app must be installed, and the Next.js app must be
-built (`pnpm build`). Then the script does the same checks.
+built (`pnpm build`). Then the script does the same checks. The
+third-party APIs of the app point to a mock server
+(`scripts/mock_api.py`), and the FastAPI check also runs the custom
+operation `schedule_task`, which calls the holidays API through it.
+The operation needs the hand-written code of the example
+(`examples/project-tracker/extensions/`), which the script copies into
+an app that it generates.
 
 With `--ui`, the script also runs the Playwright UI tests in `ui-tests/`
 on a front-end app, while the app runs: each page in the light and the
@@ -57,6 +63,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -70,11 +77,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from mock_api import MockApi
+
 from appgen.bindings.shared.theme import css_value, css_var
 from appgen.dsl import AppDefinition, load_definition
 from appgen.gen.tokens import resolve_tokens
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+EXTENSIONS = DEFINITION.parent / "extensions"
 UI_TESTS = Path("ui-tests")
 BINDINGS = ("nextjs", "fastapi", "react")
 BUILD_ARGS = {
@@ -114,6 +124,20 @@ def get(url: str) -> Response:
         return Response(error.code, error.read().decode(errors="replace"))
 
 
+def post(binding: str, url: str, body: object) -> dict[str, object]:
+    """Send a JSON body, and return the JSON answer. A status that is not 2xx is an error."""
+    data = json.dumps(body).encode()
+    call = urllib.request.Request(
+        url, data=data, method="POST", headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(call, timeout=30) as response:
+            return cast(dict[str, object], json.loads(response.read()))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        raise SmokeError(f"{binding}: POST {url} gave the status {error.code}: {detail}") from None
+
+
 def wait_for(binding: str, url: str) -> None:
     """Wait until a URL answers with 200."""
     timeout = float(os.environ.get("APPGEN_SMOKE_TIMEOUT", "180"))
@@ -133,6 +157,10 @@ def wait_for(binding: str, url: str) -> None:
 
 def generate(binding: str, out: Path) -> None:
     log(binding, f"generate {DEFINITION} in {out}")
+    # The hand-written code of the example: appgen keeps an extension file
+    # that exists.
+    if (EXTENSIONS / binding).is_dir():
+        shutil.copytree(EXTENSIONS / binding, out, dirs_exist_ok=True)
     args = ["uv", "run", "--locked", "appgen", "generate", str(DEFINITION), "-b", binding]
     subprocess.run([*args, "-o", str(out)], check=True, stdout=subprocess.DEVNULL)
 
@@ -189,9 +217,12 @@ def started(binding: str, app: Path, image: str, temp: Path) -> Generator[None]:
 
 
 @contextmanager
-def started_local(binding: str, app: Path, temp: Path) -> Generator[None]:
-    """Start the app on the machine with its local database, and stop it at the end."""
-    env = {**os.environ, "PORT": str(PORTS[binding])}
+def started_local(binding: str, app: Path, temp: Path, apis: dict[str, str]) -> Generator[None]:
+    """Start the app on the machine with its local database, and stop it at the end.
+
+    `apis` holds the environment variables of the base URLs of the APIs.
+    """
+    env = {**os.environ, "PORT": str(PORTS[binding]), **apis}
     if binding == "nextjs":
         if not (app / "drizzle").is_dir():
             log(binding, "pnpm db:generate")
@@ -317,6 +348,30 @@ def check_api(binding: str, definition: AppDefinition) -> None:
         )
 
 
+def check_api_operation(binding: str, mock: MockApi) -> None:
+    """Run the custom operation `schedule_task`, which calls the holidays API.
+
+    The operation sets the due date of a task to a number of working days
+    from today. Its code gets the public holidays from the mock server.
+    """
+    base = f"http://localhost:{PORTS[binding]}"
+    person = post(binding, base + "/people", {"name": "Ada Smoke", "email": "ada@example.com"})
+    project = post(
+        binding, base + "/projects", {"name": "Smoke", "key": "SMK", "owner_id": person["id"]}
+    )
+    task = post(binding, base + "/tasks", {"title": "Smoke task", "project_id": project["id"]})
+    path = f"/tasks/{task['id']}/schedule-task"
+    result = post(binding, base + path, {"working_days": 5, "country_code": "DE"})
+    due = result.get("due_date")
+    calls = mock.calls("holidays", "getPublicHolidays")
+    if not isinstance(due, str) or not calls:
+        raise SmokeError(
+            f"{binding}: POST {path} gave the due date {due!r} with {len(calls)} calls "
+            "of the holidays API."
+        )
+    log(binding, f"POST {path} is OK: due {due}, with {len(calls)} calls of the holidays API")
+
+
 def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
     """Return the values that the UI tests expect: the pages and the design tokens."""
     tokens = resolve_tokens(definition)
@@ -412,9 +467,12 @@ def smoke_test_local(binding: str, app: Path, ui: bool = False) -> None:
     definition = load_definition(DEFINITION)
     with (
         tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp,
-        started_local(binding, app, Path(temp)),
+        MockApi(definition) as mock,
+        started_local(binding, app, Path(temp), mock.env()),
     ):
         check(binding, definition, ui)
+        if binding == "fastapi":
+            check_api_operation(binding, mock)
     log(binding, "passed with the local database")
 
 

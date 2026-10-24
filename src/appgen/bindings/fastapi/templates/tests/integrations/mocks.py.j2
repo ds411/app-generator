@@ -1,0 +1,69 @@
+{{ trace_header(*(py_apis.values() | map(attribute="id"))) }}
+"""The mock answers of the third-party APIs: the examples of their OpenAPI documents.
+
+The tests call the clients with `httpx.MockTransport`, without the network.
+The tests of the operations get clients with these transports.
+"""
+
+{{ py.imports(py_api_mocks_imports) }}
+
+_FOLDER = Path(__file__).parent
+
+
+def _examples(module: str) -> dict[str, object]:
+    return json.loads((_FOLDER / f"{module}_examples.json").read_text(encoding="utf-8"))
+
+
+EXAMPLES: dict[str, dict[str, object]] = {
+{% for api in py_apis.values() %}
+    {{ trace(api.id) }}
+    {{ api.name | tojson }}: _examples({{ api.module | tojson }}),
+{% endfor %}
+}
+"""The example answer of each operation, by API and operation ID."""
+
+_ROUTES: dict[str, list[tuple[str, str, int, str]]] = {
+{% for api in py_apis.values() %}
+    {{ trace(api.id) }}
+    {{ api.name | tojson }}: [
+{% for line in api.route_lines() %}
+        {{ line }}
+{% endfor %}
+    ],
+{% endfor %}
+}
+"""The method, the path pattern, the status, and the operation ID of each operation."""
+
+
+def mock_transport(
+    api: str, requests: list[httpx.Request] | None = None, status: int | None = None
+) -> httpx.MockTransport:
+    """Return a transport that answers each operation of an API with its example.
+
+    The transport adds each request to `requests`. With `status`, it answers
+    each request with this status and the body `mock error`.
+    """
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if requests is not None:
+            requests.append(request)
+        if status is not None:
+            return httpx.Response(status, text="mock error")
+        for method, pattern, code, operation in _ROUTES[api]:
+            if request.method == method and re.match(pattern, request.url.path):
+                if code == 204:
+                    return httpx.Response(204)
+                return httpx.Response(code, json=EXAMPLES[api][operation])
+        return httpx.Response(404, json={"message": "The mock has no such operation."})
+
+    return httpx.MockTransport(handle)
+{% for api in py_apis.values() %}
+
+
+{{ trace(api.id) }}
+async def mock_{{ api.module }}_client() -> AsyncIterator[{{ api.client }}]:
+    """A client of the API `{{ api.name }}` that answers with the examples (a FastAPI dependency)."""
+    {{ api.mock_construction() }}
+    async with client:
+        yield client
+{% endfor %}

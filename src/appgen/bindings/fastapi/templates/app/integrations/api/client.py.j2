@@ -1,0 +1,75 @@
+{{ trace_header(element_id) }}
+{% set api = py_apis[name] %}
+"""The client of the API `{{ api.name }}`: {{ api.title }}.
+
+{% if api.description %}
+{{ api.description }}
+
+{% endif %}
+An endpoint gets a client with the settings of the app as a dependency
+(`{{ api.dependency_type }}`). Other code creates one with `{{ api.client }}(...)`
+and closes it after use (`async with`).
+"""
+
+{{ py.imports(api.client_imports()) }}
+
+BASE_URL = {{ api.base_url | tojson }}
+"""The base URL of the first server of the OpenAPI document."""
+{% for m in api.methods %}
+{% if m.result_type %}
+{{ m.adapter }} = pydantic.TypeAdapter({{ m.result_type }})
+{% endif %}
+{% if m.body_type %}
+{{ m.body_adapter }} = pydantic.TypeAdapter({{ m.body_type }})
+{% endif %}
+{% endfor %}
+
+
+class {{ api.client }}(ApiClient):
+    """The client of the API `{{ api.name }}`, with one method for each operation that the app uses."""
+
+    api = {{ api.name | tojson }}
+
+    def __init__(
+        self,
+        base_url: str = BASE_URL,
+{% if api.credential %}
+        {{ api.secret_arg }}: str = "",
+{% endif %}
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+{% if api.credential == "bearer" %}
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        super().__init__(base_url, timeout=timeout, headers=headers, transport=transport)
+{% elif api.credential == "header" %}
+        headers = {{ "{" }}{{ api.credential_name | tojson }}: api_key} if api_key else None
+        super().__init__(base_url, timeout=timeout, headers=headers, transport=transport)
+{% elif api.credential == "query" %}
+        params = {{ "{" }}{{ api.credential_name | tojson }}: api_key} if api_key else None
+        super().__init__(base_url, timeout=timeout, params=params, transport=transport)
+{% else %}
+        super().__init__(base_url, timeout=timeout, transport=transport)
+{% endif %}
+{% for m in api.methods %}
+
+    {{ trace(m.id) }}
+    {{ m.signature() }}
+        {{ m.docstring() | join("\n") | indent(8) }}
+{% for line in m.body_lines() %}
+        {{ line }}
+{% endfor %}
+{% endfor %}
+
+
+async def {{ api.dependency }}(request: Request) -> AsyncIterator[{{ api.client }}]:
+    """Give an endpoint a client with the settings of the app (a FastAPI dependency)."""
+    settings: Settings = request.app.state.settings
+    {{ api.construction() }}
+    async with client:
+        yield client
+
+
+{{ api.dependency_type }} = Annotated[{{ api.client }}, Depends({{ api.dependency }})]
+"""The type of an endpoint parameter that gets the client."""

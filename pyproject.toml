@@ -39,7 +39,9 @@ dev = [
 line-length = 100
 target-version = "py314"
 # The golden files are the output of the bindings, with their own config.
-extend-exclude = ["tests/golden"]
+# The hand-written code of the examples belongs to the generated apps,
+# which lint it with their own settings.
+extend-exclude = ["tests/golden", "examples/*/extensions"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]

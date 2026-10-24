@@ -168,6 +168,9 @@ the code of the feature.
 | `app/core/`             | Code that all slices share: settings, database, errors, pagination, health, and schema bases. |
 | `migrations/`           | The Alembic migrations.                              |
 | `app/features/<slice>/` | One slice for each entity.                           |
+{% if py_apis %}
+| `app/integrations/<api>/` | The client and the models of a third-party API.    |
+{% endif %}
 | `tests/`                | The tests, with one folder for each slice.           |
 
 A slice has these modules:
@@ -184,6 +187,31 @@ A slice has these modules:
 | `<operation>_ext.py` | The logic of a custom operation. Write it here.            |
 | `validation_ext.py` | The custom validation of the entity. Write it here.        |
 
+{% if py_apis %}
+## Third-party APIs
+
+Each API of the definition has a package in `app/integrations/`: the
+Pydantic models of its schemas (`models.py`) and an async client with one
+method for each operation that the app uses (`client.py`). An answer
+with an error status raises `ApiError`, with the status and the body.
+Each request stops after 10 seconds, unless the client gets another
+`timeout`. The settings read the base URL and the secret from the
+environment.
+
+| API | Client | Base URL | Secret |
+| --- | ------ | -------- | ------ |
+{% for api in py_apis.values() %}
+| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+{% endfor %}
+
+An endpoint gets a client as a dependency, for example
+`client: {{ (py_apis.values() | first).dependency_type }}`. A custom operation with `apis` in the
+definition gets its clients as arguments of its function in the
+`_ext.py` file. The tests do not call the APIs: `tests/integrations/`
+has a mock transport that answers with the examples of the OpenAPI
+documents, and the tests of the operations get clients with it.
+
+{% endif %}
 ## Errors and pages
 
 All errors use the problem details format of RFC 9457, with the media

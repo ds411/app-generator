@@ -34,3 +34,12 @@ class Settings(BaseSettings):
     environment: Literal["development", "production"] = "production"
     """`development` for a local run: the stub of the reset delivery writes the link to the log."""
 {% endif %}
+{% for api in py_apis.values() %}
+    {{ trace(api.id) }}
+    {{ api.url_setting }}: str = {{ api.base_url | tojson }}
+    """The base URL of the API `{{ api.name }}` ({{ api.title }}): `{{ api.url_env }}`."""
+{% if api.secret_setting %}
+    {{ api.secret_setting }}: str = ""
+    """The secret of the API `{{ api.name }}`: `{{ api.secret_env }}`. Keep it out of the code."""
+{% endif %}
+{% endfor %}

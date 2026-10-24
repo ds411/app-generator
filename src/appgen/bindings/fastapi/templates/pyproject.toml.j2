@@ -10,6 +10,9 @@ dependencies = [
     "alembic>=1.20",
     "asyncpg>=0.32",
     "fastapi[standard]>=0.161,<0.162",
+{% if py_apis %}
+    "httpx>=0.28",
+{% endif %}
     "pydantic-settings>=2.16",
     "sqlalchemy[asyncio]>=2.1",
 ]

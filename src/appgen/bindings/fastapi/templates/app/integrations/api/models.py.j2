@@ -1,0 +1,18 @@
+{{ trace_header(element_id) }}
+{% set api = py_apis[name] %}
+"""The schemas of the API `{{ api.name }}` ({{ api.title }}) that the client uses.
+
+The models keep the JSON names of the API as aliases. They ignore the
+properties that the document does not give.
+"""
+
+{{ py.imports(api.model_imports()) }}
+{% for model in api.models %}
+{% if not loop.first or model.fields is not none %}
+
+{% endif %}
+
+{% for line in model.lines() %}
+{{ line }}
+{% endfor %}
+{% endfor %}

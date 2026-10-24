@@ -21,6 +21,12 @@
 {% if op.params %}
 {% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ op.params_class] %}
 {% endif %}
+{% set ns = namespace(lines=lines) %}
+{% for api_name in op.apis %}
+{% set api = py_apis[api_name] %}
+{% set ns.lines = ns.lines + ["from app.integrations." ~ api.module ~ ".client import " ~ api.client] %}
+{% endfor %}
+{% set lines = ns.lines %}
 {{ py.imports(lines) }}
 
 
@@ -30,12 +36,21 @@ async def {{ op.name }}(
 {% if op.params %}
     params: {{ op.params_class }},
 {% endif %}
+{% for api_name in op.apis %}
+    {{ py_apis[api_name].param }}: {{ py_apis[api_name].client }},
+{% endfor %}
 ) -> {{ r.name if r else "None" }}:
     """Run the operation on a record{{ ", with the params of the request" if op.params }}.
 
     The generated endpoint commits the session after this function.
 {% if r %}
     Return the {{ r.name }} record that the endpoint returns.
+{% endif %}
+{% if op.apis %}
+
+{% for api_name in op.apis %}
+    `{{ py_apis[api_name].param }}` calls the API {{ api_name }} ({{ py_apis[api_name].title }}).
+{% endfor %}
 {% endif %}
     """
     # TODO(appgen): write the logic of the operation {{ op.name }}.

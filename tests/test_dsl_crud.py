@@ -128,8 +128,8 @@ def _explicit(text: str) -> str:
 @pytest.mark.parametrize("binding", ["react", "fastapi"])
 def test_the_shorthand_and_the_explicit_form_generate_the_same_code(binding: str) -> None:
     text = EXAMPLE.read_text()
-    shorthand = load_definition_text(text)
-    explicit = load_definition_text(_explicit(text))
+    shorthand = load_definition_text(text, str(EXAMPLE))
+    explicit = load_definition_text(_explicit(text), str(EXAMPLE))
     assert [e for e in explicit.elements] == [e for e in shorthand.elements]
 
     first = generate(shorthand, find_binding(binding))
