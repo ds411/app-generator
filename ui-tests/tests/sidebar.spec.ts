@@ -1,0 +1,30 @@
+// The sidebar fills the height of a page that is longer than the screen:
+// it stays on the screen when the user scrolls, and its background fills
+// the full height of the page. The test uses a short screen, so that the
+// dashboard is longer than the screen.
+import { expect, test } from "@playwright/test";
+
+test("the sidebar fills the height of a long page", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  const column = page.locator('[data-slot="sidebar"]').first();
+  const container = column.locator('[data-slot="sidebar-container"]');
+  await expect(container).toBeVisible();
+
+  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+  expect(pageHeight, "the page is longer than the screen").toBeGreaterThan(400);
+
+  // The column with the background is as high as the page.
+  const columnBox = await column.boundingBox();
+  expect(columnBox?.height ?? 0).toBeGreaterThanOrEqual(pageHeight - 1);
+  const inner = column.locator('[data-slot="sidebar-inner"]');
+  const background = await inner.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await expect(column).toHaveCSS("background-color", background);
+
+  // After a scroll to the end, the sidebar is still on the screen, at its full height.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const box = await container.boundingBox();
+  expect(box?.y ?? -1).toBe(0);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(400);
+});
