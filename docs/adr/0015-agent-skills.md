@@ -60,8 +60,8 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
 - `appgen skills install` copies the skill into the folders that the
   agents read: `.claude/skills/` (Claude Code) and `.agents/skills/`
   (Codex and other agents), in a project, in the home folder, or in a
-  system folder. A file in each installed copy records the appgen
-  version and the hash of each file, as the output manifest of the
+  system folder. A file in each installed copy (`.appgen-skill.json`)
+  records the appgen version and the hash of each file, as the output manifest of the
   generator does (ADR 0005).
 - Tests keep the skill in agreement with the code. A test fails if the
   skill names a command or an option that the CLI does not have, or if
