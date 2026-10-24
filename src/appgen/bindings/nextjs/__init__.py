@@ -243,7 +243,7 @@ BINDING = Binding(
         | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
         | {"compare_rule"}
         | {"custom_widget", "custom_rule", "custom_action"}
-        | {"page_content", "navigate_action", "form_action", "operation_action"}
+        | {"page_content", "page_arrangement", "navigate_action", "form_action", "operation_action"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),

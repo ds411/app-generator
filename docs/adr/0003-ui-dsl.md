@@ -321,6 +321,12 @@ The new page keys:
 - `breadcrumb`: the label of the page in the breadcrumbs. Default: the
   title. For a page with an `entity` and a path parameter, the default
   is the `display_field` of the record.
+- `arrangement` (added in M12): layout hints for the page. `regions`
+  gives the order of the title, the actions, and the content, and
+  `columns` gives the grid columns. The key is not `layout`, because
+  `layout` already names the app shell of the page. The hints stay
+  small: a page has one content, so the hints only place the header
+  parts around it. Without hints, the page keeps the default header.
 
 **Breadcrumbs.** The breadcrumbs come from the route structure. The
 parent of a page is the page whose path is the longest prefix of the
@@ -616,6 +622,7 @@ defines the mechanism.
 | A custom action                                     | An action with `kind: custom`                 |
 | Animations and transitions                          | Hand-written code in the extension files.     |
 | Pixel-level layout inside a component               | The shadcn component sources, which the app developer can change. |
+| A page layout beyond the order and the columns of its regions | A page with `content: { custom: true }`. |
 | Accessibility beyond the shadcn components          | Hand-written code.                            |
 | Authentication, roles, and translations of the UI   | Later sections (ADR 0002).                    |
 

@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 
 from appgen.bindings.shared.ui import (
+    RegionPlan,
     css_class_var,
     css_var,
     jsx_attr,
     jsx_text,
     menu_icons,
+    page_grid,
+    page_regions,
     ui_plan,
 )
 from appgen.dsl import load_definition
@@ -85,3 +88,25 @@ def test_the_plan_has_the_pages_menus_and_record_breadcrumbs() -> None:
 def test_the_typography_class_falls_back_without_its_token() -> None:
     assert ui_plan(load_definition(EXAMPLE)).text_class("heading", "x") == "typography-heading"
     assert ui_plan(load_definition(LAYOUTS)).text_class("heading", "x") == "x"
+
+
+def test_the_regions_of_a_page_fill_the_grid_in_their_order() -> None:
+    definition = load_definition(EXAMPLE)
+    page = definition.pages["project_detail"]
+    assert page.arrangement is not None
+    assert page_grid(page) == "grid gap-4 md:grid-cols-2"
+    assert page_regions(page, has_actions=True) == [
+        RegionPlan("title", "min-w-0"),
+        RegionPlan("actions", "flex flex-wrap items-start gap-2 md:justify-end"),
+        RegionPlan("content", "min-w-0 md:col-span-2"),
+    ]
+    # A page without actions has no actions region.
+    assert [r.name for r in page_regions(page, has_actions=False)] == ["title", "content"]
+    one = page.model_copy(
+        update={"arrangement": page.arrangement.model_copy(update={"columns": 1})}
+    )
+    assert page_grid(one) == "grid gap-4"
+    assert [r.classes for r in page_regions(one, has_actions=True)][1] == (
+        "flex flex-wrap items-start gap-2"
+    )
+    assert page_regions(definition.pages["projects"], has_actions=True) == []
