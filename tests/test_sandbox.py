@@ -32,3 +32,12 @@ def test_contributing_lists_the_values_of_the_sandbox_env_file() -> None:
 def test_the_sandbox_env_file_keeps_the_values_of_the_environment() -> None:
     values = _sandbox_variables({"PATH": "/usr/bin:/bin", "POSTGRES_IMAGE": "postgres:18"})
     assert values["POSTGRES_IMAGE"] == "postgres:18"
+
+
+def test_the_sandbox_env_file_removes_the_deprecated_uv_variable() -> None:
+    script = f'. "{SANDBOX_ENV}"; echo "${{UV_NATIVE_TLS-unset}}"'
+    environment = {"PATH": "/usr/bin:/bin", "UV_NATIVE_TLS": "true"}
+    output = subprocess.run(
+        ["sh", "-c", script], env=environment, capture_output=True, text=True, check=True
+    )
+    assert output.stdout.strip() == "unset"

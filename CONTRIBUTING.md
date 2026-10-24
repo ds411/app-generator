@@ -292,13 +292,19 @@ manual steps.
   the pre-push hook loads it in cloud sessions. A variable that the
   environment settings already set keeps its value.
 
-| Variable         | Value in the sandbox                                    |
-| ---------------- | ------------------------------------------------------- |
-| `POSTGRES_IMAGE` | `mirror.gcr.io/library/postgres:18-alpine`              |
-| `UV_IMAGE`       | `mirror.gcr.io/astral/uv:0.11`                          |
-| `PYTHON_IMAGE`   | `mirror.gcr.io/library/python:3.14-slim`                |
-| `NGINX_IMAGE`    | `mirror.gcr.io/nginxinc/nginx-unprivileged:1.29-alpine` |
-| `NODE_IMAGE`     | `localhost/appgen-node:24-alpine`                       |
+| Variable          | Value in the sandbox                                    |
+| ----------------- | ------------------------------------------------------- |
+| `POSTGRES_IMAGE`  | `mirror.gcr.io/library/postgres:18-alpine`              |
+| `UV_IMAGE`        | `mirror.gcr.io/astral/uv:0.11`                          |
+| `PYTHON_IMAGE`    | `mirror.gcr.io/library/python:3.14-slim`                |
+| `NGINX_IMAGE`     | `mirror.gcr.io/nginxinc/nginx-unprivileged:1.29-alpine` |
+| `NODE_IMAGE`      | `localhost/appgen-node:24-alpine`                       |
+| `UV_SYSTEM_CERTS` | `true`                                                  |
+
+`UV_SYSTEM_CERTS` makes uv trust the system certificates, which hold
+the CA of the session proxy. The file also removes `UV_NATIVE_TLS`,
+because uv warns that it is deprecated. Do not set `UV_NATIVE_TLS` in
+the environment settings.
 
 To use the values in a shell that the hook did not prepare, run
 `. scripts/sandbox.env`.
