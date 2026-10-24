@@ -325,9 +325,14 @@ in `params` has the kind `param`.
 
 `appgen generate <definition> --binding <name> --out <folder>`
 validates the definition, generates the app, and prints a summary: the
-files written and deleted, and the gaps created. If the definition is
-not valid, it writes no file and the exit code is 1. `--force`
-overwrites generated files that have manual edits.
+files written and deleted, the gaps created, the other extension files
+created, and the orphaned extension files. `Gaps created` lists each
+element of a gap trace in an extension file that the run created, with
+its file: the elements that the binding cannot generate, and the stubs
+of the custom elements. A second run keeps the files, so it counts
+them under `Gaps kept`. If the definition is not valid, it writes no
+file and the exit code is 1. `--force` overwrites generated files that
+have manual edits.
 
 A binding can declare a `gap_rule`: an output rule that the generator
 renders once for each element of a kind that the binding does not

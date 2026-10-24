@@ -12,6 +12,7 @@ from appgen.dsl import Diagnostic, check_file
 from appgen.dsl.schema import json_schema_text
 from appgen.gen import (
     GenerationError,
+    GenerationResult,
     ManifestError,
     ManualEditsError,
     UnknownBindingError,
@@ -36,7 +37,14 @@ from appgen.skills.install import (
     skills_folder,
     status,
 )
-from appgen.trace import DEFAULT_IGNORE, check_traces, find_orphans, render, render_orphans
+from appgen.trace import (
+    DEFAULT_IGNORE,
+    check_traces,
+    find_orphans,
+    render,
+    render_orphans,
+    scan_text,
+)
 
 
 class OutputFormat(StrEnum):
@@ -296,7 +304,7 @@ def generate(
     except (UnknownBindingError, GenerationError, ManifestError, ManualEditsError) as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=1) from None
-    gap_files = {gap.path: gap.element_id for gap in result.gaps if gap.path}
+    gap_files = _gap_files(result)
     unfilled = [gap.element_id for gap in result.gaps if not gap.path]
     typer.echo(f"Generated '{definition.app.name}' with the binding '{binding.name}' in {out}.")
     _echo_summary(report, gap_files, unfilled)
@@ -306,7 +314,39 @@ def generate(
             typer.echo(f"  {warning}")
 
 
-def _echo_summary(report: WriteReport, gap_files: dict[str, str], unfilled: list[str]) -> None:
+def _gap_files(result: GenerationResult) -> dict[str, list[str]]:
+    """Return the gap elements of each extension file that has gaps, by path.
+
+    The gaps of a file are the elements of its gap rule, and the elements
+    of the gap traces in its content: a stub of a custom element is an
+    extension file with a gap trace (ADR 0005).
+    """
+    gaps: dict[str, list[str]] = {}
+    for gap in result.gaps:
+        if gap.path:
+            gaps.setdefault(gap.path, []).append(gap.element_id)
+    for file in result.files:
+        if file.kind != "extension":
+            continue
+        traces, _ = scan_text(file.content, file.path)
+        for trace in traces:
+            if trace.kind == "gap" and trace.element_id not in gaps.get(file.path, []):
+                gaps.setdefault(file.path, []).append(trace.element_id)
+    return gaps
+
+
+def _gaps_in(paths: list[str], gap_files: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Return the files of each gap element of a list of extension files."""
+    gaps: dict[str, list[str]] = {}
+    for path in paths:
+        for element_id in gap_files.get(path, []):
+            gaps.setdefault(element_id, []).append(path)
+    return gaps
+
+
+def _echo_summary(
+    report: WriteReport, gap_files: dict[str, list[str]], unfilled: list[str]
+) -> None:
     def section(title: str, paths: list[str]) -> None:
         typer.echo(f"{title}: {len(paths)}")
         for path in paths:
@@ -315,11 +355,11 @@ def _echo_summary(report: WriteReport, gap_files: dict[str, str], unfilled: list
     section("Files written", report.written)
     typer.echo(f"Files unchanged: {len(report.unchanged)}")
     section("Files deleted", report.deleted)
-    created = [p for p in report.created_extensions if p in gap_files]
+    created = _gaps_in(report.created_extensions, gap_files)
     typer.echo(f"Gaps created: {len(created)}")
-    for path in created:
-        typer.echo(f"  {gap_files[path]} -> {path}")
-    kept = [p for p in report.kept_extensions if p in gap_files]
+    for element_id, paths in created.items():
+        typer.echo(f"  {element_id} -> {', '.join(paths)}")
+    kept = [e for e in _gaps_in(report.kept_extensions, gap_files) if e not in created]
     if kept:
         typer.echo(f"Gaps kept (extension files exist): {len(kept)}")
     other = [p for p in report.created_extensions if p not in gap_files]

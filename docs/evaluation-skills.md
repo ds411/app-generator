@@ -296,6 +296,7 @@ generated front ends, and the missing `test` script.
 - The runs used the FastAPI and Next.js apps. The React binding has the
   same front-end API as the Next.js binding, and the same extension
   files.
-- The summary of `appgen generate` shows `Gaps created: 0` for the
-  custom operations of all bindings. A fix of the CLI is a follow-up:
-  count each created extension file with a `@trace:gap` trace.
+- In the runs, the summary of `appgen generate` showed `Gaps created: 0`
+  for the custom operations of all bindings. #310 fixed the CLI after
+  the runs: the summary lists each element of a `@trace:gap` trace in an
+  extension file that the run created, with its file.

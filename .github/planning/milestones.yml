@@ -337,3 +337,19 @@
     **Demo:** The project tracker in its second language, in the Next.js app and the React app.
 
     **Depends on:** M13.
+
+- title: "M20: Correct gap count"
+  description: |
+    **Goal:** The summary of `appgen generate` counts all the gaps that a run creates, the stubs of the custom elements included.
+
+    **Scope**
+    - In: the count and the list of the gaps in the summary of `appgen generate`, and the skill and the docs that describe the summary.
+    - Out: The report of `appgen check`, which already lists all open gaps. A JSON format for the summary.
+
+    **Exit criteria**
+    - [ ] After a first run of each binding, the elements under `Gaps created` are the open gaps of `appgen check`.
+    - [ ] A second run gives `Gaps created: 0`.
+
+    **Demo:** `appgen generate tests/fixtures/project-tracker.yaml -b fastapi -o out`, then `appgen check tests/fixtures/project-tracker.yaml out`.
+
+    **Depends on:** M15.
