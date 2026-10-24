@@ -360,13 +360,18 @@ workflows:
       cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }
 
 # The members sign in with their email address and a password. Anyone
-# can see the list of rooms.
+# can see the list of rooms. A new member signs up with a name, an
+# email address, and a team, and gets the role `member`.
 auth:
   user_entity: Member
   username_field: email
   public_pages: [rooms]
   public_operations: [list_rooms]
   session_hours: 12
+  min_password_length: 10
+  sign_up:
+    fields: [name, email, team]
+    default_role: member
 
 # An admin may do all. A member may read all data, and book rooms, but
 # may not change the rooms, the amenities, or the members.

@@ -602,6 +602,8 @@ class PyEntity:
     """The dependency of the protected operations: `current_user`, or `check_access` with roles."""
     query: PyListQuery = field(default_factory=PyListQuery)
     """The filters and the sort keys of the list endpoints, from the fields and the views."""
+    sign_up_fields: list[PyField] | None = None
+    """The fields of the sign-up form, if the entity holds the users and `auth.sign_up` is set."""
 
     @property
     def guard_module(self) -> str:
@@ -699,7 +701,7 @@ class PyEntity:
         """Return the import block of the repository module of the slice."""
         lines: set[str] = {
             "from typing import Any",
-            "from uuid import UUID",
+            "from uuid import UUID, uuid4",
             "from sqlalchemy.ext.asyncio import AsyncSession",
             "from app.core.errors import ProblemError",
             f"from app.features.{self.slice}.models import {self.name}",
@@ -885,6 +887,9 @@ class PyEntity:
         for name in ("AwareDatetime", "EmailStr", "JsonValue"):
             if name in types:
                 pydantic.add(name)
+        if self.sign_up_fields is not None:
+            # The password of the sign-up schema has a minimum length.
+            pydantic.add("Field")
         if self.not_null:
             pydantic.add("model_validator")
             lines.add("from typing import Self")
@@ -1000,13 +1005,17 @@ def python_app(definition: AppDefinition) -> PyApp:
     _workflows(definition, entities)
     _check_extensions(definition, entities)
     _check_embed_cycles(entities)
+    auth = definition.auth
     operations: dict[str, PyOperation] = {}
     for name, operation in definition.operations.items():
         py_operation = _operation(name, operation, entities)
-        auth = definition.auth
         py_operation.protected = auth is not None and name not in auth.public_operations
         operations[name] = py_operation
         entities[operation.entity].operations.append(py_operation)
+    if auth is not None and auth.sign_up is not None:
+        users = entities[auth.user_entity]
+        by_name = {f.name: f for f in users.fields}
+        users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
     for entity in entities.values():
         if definition.access is not None:
             entity.guard = "check_access"

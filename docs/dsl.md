@@ -867,6 +867,10 @@ auth:
   public_pages: [rooms]
   public_operations: [list_rooms]
   session_hours: 12
+  min_password_length: 10
+  sign_up:
+    fields: [name, email, team]
+    default_role: member
 ```
 
 - `user_entity` is the entity of the users. `username_field` is a
@@ -874,12 +878,23 @@ auth:
 - `public_pages` and `public_operations` are open without a sign-in.
   All other pages and operations need a signed-in user.
 - `session_hours` (1 to 720, default 8) is the time of a session.
-- No page can use the path `/sign-in`: it is the sign-in page of the
-  front ends.
+- `min_password_length` (8 to 128, default 8) is the lowest number of
+  characters of a new password: at a sign-up and at each change.
+- `sign_up` lets new users make their own accounts
+  ([ADR 0016](adr/0016-sign-up.md)). It is off by default. `fields`
+  names the fields of the user entity that the sign-up form asks for.
+  It must have each required field without a default, and it cannot
+  have the role field or a computed field. With `access`,
+  `default_role` is the role of a new user. Without it, a new user gets
+  the default of the role field.
+- No page can use the path `/sign-in`, or `/sign-up` with a sign-up:
+  they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
-set-password <user name>`. The Next.js app has the page `/sign-in` and a
+set-password <user name>`. With `sign_up`, the public endpoint `POST
+/auth/sign-up` makes the user and its password in one transaction, and
+gives a bearer token. A user name that exists gives 409. The Next.js app has the page `/sign-in` and a
 session cookie, and its seed gives each user the password in
 `SEED_PASSWORD`. Both need `AUTH_SECRET`. The React app (mock data)
 accepts each mock user with the password `password`. Each front end has

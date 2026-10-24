@@ -199,7 +199,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "access", "role"}
+        | {"auth", "sign_up", "access", "role"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),

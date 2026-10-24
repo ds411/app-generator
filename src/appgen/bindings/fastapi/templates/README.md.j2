@@ -125,6 +125,27 @@ variable `POSTGRES_IMAGE` for Compose.
   run `kubectl delete job {{ app.name }}-migrate --ignore-not-found` and
   `kubectl apply -k deploy/kubernetes`.
 
+{% if definition.auth %}
+## Sign-in
+
+Each endpoint needs a bearer token (`Authorization: Bearer <token>`),
+except `/health`, the sign-in{{ " and the sign-up" if definition.auth.sign_up }}, and the public
+operations of the definition. `AUTH_SECRET` signs the tokens: set it to
+a long random text in each environment.
+
+- `POST /auth/sign-in` gives a token for a user name and a password.
+- `GET /auth/me` gives the signed-in user, and `PUT /auth/password`
+  changes the password.
+{% if definition.auth.sign_up %}
+- `POST /auth/sign-up` makes a new user with a password, and gives a
+  token. A user name that exists gives 409.
+{% endif %}
+- `uv run python -m app.cli set-password <user name>` sets the password
+  of a user.
+
+A new password needs {{ definition.auth.min_password_length }} or more characters.
+
+{% endif %}
 ## Layout
 
 Each entity of the definition is a vertical slice: one folder with all

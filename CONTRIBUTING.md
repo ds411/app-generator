@@ -242,7 +242,9 @@ git config core.hooksPath .githooks
   hook also runs `scripts/check-fastapi.sh`. The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
-  the output. It needs Docker. Run it by hand with
+  the output. Then it generates the room booking example (sign-in,
+  sign-up, and roles), and runs Ruff, pyright, the generated tests, and
+  `appgen check` on it. It needs Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
 - When a push changes the generator core, the Next.js binding, or the
