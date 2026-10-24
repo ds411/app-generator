@@ -3,7 +3,6 @@ from textwrap import dedent
 import pytest
 
 from appgen.dsl import AppDefinition, DefinitionError, Diagnostic, load_definition_text
-from appgen.dsl.model import RESERVED_SECTIONS
 
 BASE = dedent(
     """\
@@ -92,18 +91,24 @@ def test_extension_key_in_a_mapping_of_names_is_an_error_with_a_hint() -> None:
     assert diagnostic.hint == "Put extension keys in an element, not in a mapping of names."
 
 
-@pytest.mark.parametrize("section", RESERVED_SECTIONS)
-def test_reserved_sections_are_not_supported_yet(section: str) -> None:
-    [diagnostic] = errors(BASE + f"{section}:\n  anything: 1\n")
+@pytest.fixture
+def reserved(monkeypatch: pytest.MonkeyPatch) -> str:
+    """A reserved section. Version 0 has none left, so the test reserves one."""
+    monkeypatch.setattr("appgen.dsl.loader.RESERVED_SECTIONS", ("later",))
+    return "later"
+
+
+def test_reserved_sections_are_not_supported_yet(reserved: str) -> None:
+    [diagnostic] = errors(BASE + f"{reserved}:\n  anything: 1\n")
 
     assert diagnostic.code == "not-supported"
     assert diagnostic.message == (
-        f"The section '{section}' is not supported in this version of the DSL."
+        f"The section '{reserved}' is not supported in this version of the DSL."
     )
     assert str(diagnostic.location) == "app.yaml:7:1"
 
 
-def test_reserved_sections_are_reported_with_other_errors() -> None:
-    diagnostics = errors(BASE.replace("version: 0\n", "") + "access: {}\n")
+def test_reserved_sections_are_reported_with_other_errors(reserved: str) -> None:
+    diagnostics = errors(BASE.replace("version: 0\n", "") + f"{reserved}: {{}}\n")
 
     assert [d.code for d in diagnostics] == ["missing-version", "not-supported"]

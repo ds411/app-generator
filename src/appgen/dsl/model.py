@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 import pydantic
 from pydantic import BeforeValidator, JsonValue, PrivateAttr, StringConstraints
 
+from appgen.dsl.access import Access
 from appgen.dsl.auth import Auth
 from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
@@ -21,11 +22,11 @@ from appgen.dsl.workflows import Workflow
 
 DSL_VERSION = 0
 """The DSL version that this loader reads."""
-RESERVED_SECTIONS: tuple[str, ...] = ("access",)
+RESERVED_SECTIONS: tuple[str, ...] = ()
 """Top-level sections that a later DSL version adds (ADR 0002).
 
-ADR 0003 adds `ui`. The sections `translations`, `workflows`, and `auth` are now part of
-the DSL.
+ADR 0003 adds `ui`. The sections `translations`, `workflows`, `auth`, and `access` that
+ADR 0002 reserved are now part of the DSL. The loader keeps the check for a later section.
 """
 
 type FieldType = Literal[
@@ -164,6 +165,8 @@ class AppDefinition(Element):
     ui: UI | None = None
     auth: Auth | None = None
     """The sign-in of the users (ADR 0011)."""
+    access: Access | None = None
+    """The roles of the users and their permissions (ADR 0012)."""
     translations: Translations | None = None
     """The languages of the UI text (the front ends)."""
     workflows: dict[MemberName, Workflow] = pydantic.Field(default_factory=dict[str, Workflow])

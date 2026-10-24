@@ -3,15 +3,25 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router";
 
 import { SignInForm } from "@/features/sign-in";
+{% if definition.access %}
+import { NotFoundPage } from "@/pages/not-found";
+import { canOpenPage, currentUserId } from "@/shared/auth";
+{% else %}
 import { currentUserId } from "@/shared/auth";
+{% endif %}
 
-/** Show a page that needs a signed-in user, or go to the sign-in page. */
-export function RequireAuth({ children }: { children: ReactNode }) {
+/** Show a page that needs a signed-in user, or go to the sign-in page.{% if definition.access %} A page that the role may not open shows as not found.{% endif %} */
+export function RequireAuth({ {% if definition.access %}page, {% endif %}children }: { {% if definition.access %}page: string; {% endif %}children: ReactNode }) {
   const location = useLocation();
   if (currentUserId() === null) {
     const next = location.pathname + location.search;
     return <Navigate to={`/sign-in?next=${encodeURIComponent(next)}`} replace />;
   }
+{% if definition.access %}
+  if (!canOpenPage(page)) {
+    return <NotFoundPage />;
+  }
+{% endif %}
   return children;
 }
 

@@ -1,0 +1,66 @@
+{% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set role = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.access.role_field].id) | first %}
+{{ trace_header(definition.access.id) }}
+import "server-only";
+
+import { eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
+
+import { getDb, {{ table.const }} } from "@/shared/db";
+
+import { requirePageUser, requireUser } from "./session";
+
+// The permissions of the roles (ADR 0012). The field `{{ definition.access.role_field }}` of
+// {{ definition.auth.user_entity }} gives the role of a user. `*` stands for all operations or pages.
+
+const ALL = "*";
+
+const OPERATIONS: Record<string, readonly string[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: {{ r.operations | list | tojson }}, {{ trace(r.id) }}
+{% endfor %}
+};
+
+const PAGES: Record<string, readonly string[]> = {
+{% for name, r in definition.access.roles.items() %}
+  {{ name | tojson }}: {{ r.pages | list | tojson }}, {{ trace(r.id) }}
+{% endfor %}
+};
+
+/** An operation that the role of the user may not call. */
+export class ForbiddenError extends Error {
+  constructor() {
+    super("Your role may not do this operation.");
+    this.name = "ForbiddenError";
+  }
+}
+
+async function roleOf(userId: string): Promise<string | null> {
+  const rows = await getDb()
+    .select({ role: {{ table.const }}.{{ role.key }} })
+    .from({{ table.const }})
+    .where(eq({{ table.const }}.id, userId))
+    .limit(1);
+  return rows[0]?.role ?? null;
+}
+
+function allows(names: readonly string[] | undefined, name: string): boolean {
+  return names !== undefined && (names.includes(ALL) || names.includes(name));
+}
+
+/** Throw a ForbiddenError if the signed-in user may not call an operation. */
+export async function requireOperation(operation: string): Promise<void> {
+  const role = await roleOf(await requireUser());
+  if (role === null || !allows(OPERATIONS[role], operation)) {
+    throw new ForbiddenError();
+  }
+}
+
+/** Go to the sign-in page without a session. Show the not-found page if the role may not open the page. */
+export async function requirePage(page: string, path: string, params: Record<string, string | string[] | undefined> = {}): Promise<void> {
+  await requirePageUser(path, params);
+  const role = await roleOf(await requireUser());
+  if (role === null || !allows(PAGES[role], page)) {
+    notFound();
+  }
+}

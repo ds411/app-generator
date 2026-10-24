@@ -1,0 +1,72 @@
+{{ trace_header(definition.access.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set role_field = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+{% set roles = definition.access.roles %}
+{% set ns = namespace(case=none) %}
+{% for e in py.entity_order() %}
+{% for op in e.operations if op.protected and op.kind in ("list", "create") and ns.case is none %}
+{% set deny = [] %}
+{% set allow = [] %}
+{% for role_name, r in roles.items() %}
+{% if r.allows_operation(op.name) %}{% set _ = allow.append(role_name) %}{% else %}{% set _ = deny.append(role_name) %}{% endif %}
+{% endfor %}
+{% if deny and allow %}
+{% set ns.case = (e, op, deny[0], allow[0]) %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+"""The tests of the roles: an operation that the role of the user may not call gives 403."""
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.access import allows
+from app.core.auth import set_password
+{% if ns.case %}
+{% set e, op, deny, allow = ns.case %}
+{{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([e.snake ~ "_input"] if op.kind == "create" else [])) }}
+{% endif %}
+
+pytestmark = pytest.mark.anyio
+
+PASSWORD = "correct-horse-battery"
+
+
+def test_each_role_has_its_operations() -> None:
+{% for name, r in roles.items() %}
+{% for op_name in definition.operations %}
+    assert allows("{{ name }}", "{{ op_name }}") is {{ r.allows_operation(op_name) }}  {{ trace(r.id) }}
+{% endfor %}
+{% endfor %}
+    assert allows("no-such-role", "{{ definition.operations | first }}") is False
+{% if ns.case %}
+
+
+async def _token(client: AsyncClient, session: AsyncSession, role: str) -> str:
+    """Store a user with a role and a password, sign in, and return the token."""
+    user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
+    await set_password(session, user, PASSWORD)
+    response = await client.post(
+        "/auth/sign-in", json={"username": user.{{ username.attr }}, "password": PASSWORD}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["access_token"]
+
+
+{{ trace(op.id) }}
+async def test_a_role_calls_only_its_operations(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    for role, status in (("{{ deny }}", 403), ("{{ allow }}", {{ op.status }})):
+        headers = {"Authorization": f"Bearer {await _token(anonymous_client, session, role)}"}
+{% if op.kind == "create" %}
+        payload = await {{ e.snake }}_input(session)
+        response = await anonymous_client.post("{{ e.path }}{{ op.path }}", json=payload, headers=headers)
+{% else %}
+        response = await anonymous_client.get("{{ e.path }}{{ op.path }}", headers=headers)
+{% endif %}
+
+        assert response.status_code == status, response.text
+{% endif %}

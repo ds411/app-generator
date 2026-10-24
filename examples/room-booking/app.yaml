@@ -58,6 +58,8 @@ entities:
       name: { type: string, required: true, max_length: 120 }
       email: { type: email, required: true, unique: true }
       team: { type: enum, values: [design, engineering, sales, support] }
+      # The role of the member in the app (see `access`).
+      role: { type: enum, values: [admin, member], default: member }
     relations:
       bookings: { kind: one_to_many, target: Booking, inverse: organizer }
 
@@ -365,3 +367,27 @@ auth:
   public_pages: [rooms]
   public_operations: [list_rooms]
   session_hours: 12
+
+# An admin may do all. A member may read all data, and book rooms, but
+# may not change the rooms, the amenities, or the members.
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+      pages: ["*"]
+    member:
+      label: Member
+      operations:
+        - read_room
+        - list_amenities
+        - read_amenity
+        - list_members
+        - read_member
+        - list_bookings
+        - read_booking
+        - create_booking
+        - update_booking
+        - cancel_booking
+      pages: [dashboard, room_detail, bookings, booking_calendar, booking_detail, members, member_detail, amenities]

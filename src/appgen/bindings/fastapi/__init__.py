@@ -66,6 +66,14 @@ BINDING = Binding(
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
         Output(template="app/cli.py.j2", path="app/cli.py", when="definition.auth"),
+        Output(
+            template="app/core/access.py.j2", path="app/core/access.py", when="definition.access"
+        ),
+        Output(
+            template="tests/test_access.py.j2",
+            path="tests/test_access.py",
+            when="definition.access",
+        ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
         Output(
             template="app/core/workflows.py.j2",
@@ -165,7 +173,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth"}
+        | {"auth", "access", "role"}
     ),
     excludes=frozenset({"page", "ui", "translations"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),

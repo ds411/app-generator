@@ -28,3 +28,4 @@ gives the rules.
 | 0009   | [Schema changes of the FastAPI app](0009-fastapi-schema-changes.md)    | Accepted |
 | 0010   | [Translations of the UI text](0010-translations.md)                    | Accepted |
 | 0011   | [Sign-in of the generated apps](0011-auth.md)                          | Accepted |
+| 0012   | [Roles and permissions](0012-access.md)                                | Accepted |

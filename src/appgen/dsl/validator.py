@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
+from appgen.dsl.access import ALL
 from appgen.dsl.auth import SIGN_IN_PATH
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
@@ -494,6 +495,47 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
 
 
+def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The roles need `auth`, the role field is an enum of the user entity, and the names exist."""
+    access = definition.access
+    if access is None:
+        return
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "missing-key",
+            "The section 'access' needs the section 'auth'.",
+            access,
+            hint="Add 'auth' with the user entity.",
+        )
+        return
+    entity = definition.entities.get(auth.user_entity)
+    if entity is None:
+        return
+    found = _rule_field(access, "role_field", access.role_field, entity.stored_fields)
+    if isinstance(found, Diagnostic):
+        yield found
+    elif found.type != "enum" or not found.values:
+        yield _error(
+            "unsuitable-field",
+            f"The role field must be an enum field of '{auth.user_entity}'.",
+            access,
+            at="role_field",
+        )
+    else:
+        for name, role in access.roles.items():
+            if name not in found.values:
+                yield _missing(role, "", "role value", name, found.values)
+    for role in access.roles.values():
+        for key, names, known, what in (
+            ("operations", role.operations, definition.operations, "operation"),
+            ("pages", role.pages, definition.pages, "page"),
+        ):
+            for name in names:
+                if name != ALL and name not in known:
+                    yield _missing(role, key, what, name, known)
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -505,6 +547,7 @@ CHECKS: list[Check] = [
     check_translations,
     check_workflows,
     check_auth,
+    check_access,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

@@ -30,6 +30,7 @@ examples. [ADR 0002](adr/0002-app-definition-dsl-v0.md) and
   - [Grids](#grids)
   - [UI states and defaults](#ui-states-and-defaults)
 - [auth](#auth)
+- [access](#access)
 - [translations](#translations)
 - [Extension keys](#extension-keys)
 - [Reserved sections](#reserved-sections)
@@ -884,6 +885,39 @@ session cookie, and its seed gives each user the password in
 accepts each mock user with the password `password`. Each front end has
 a sign-out button in the top bar.
 
+## access
+
+The optional `access` section gives each user a role, and each role the
+operations and pages that it may use ([ADR 0012](adr/0012-access.md)).
+It needs `auth`.
+
+```yaml
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+      pages: ["*"]
+    member:
+      label: Member
+      operations: [list_bookings, read_booking, create_booking]
+      pages: [bookings, booking_detail]
+```
+
+- `role_field` is an `enum` field of the user entity. Each key of
+  `roles` is a value of that field.
+- `operations` and `pages` name the operations and pages of the role.
+  `*` stands for all of them.
+- The public operations and pages of `auth` stay open to all users. A
+  user without a role, or with a role that is not in `roles`, may use
+  only the public parts.
+
+The FastAPI app gives 403 for an operation that the role may not call.
+The Next.js app shows "not found" for a page, and gives an error for a
+server action. The React app (mock data) does the same checks in the
+browser, so they are a demonstration, not a protection.
+
 ## translations
 
 The optional `translations` section gives the UI text in more than one
@@ -938,12 +972,11 @@ is an error.
 
 ## Reserved sections
 
-This top-level key is reserved for a later version: `access`. The
-validator reports "not supported in this version" for it. A later
-version adds it as an optional section, so that the definitions that
-exist stay valid.
+No top-level key is reserved now. The sections that
 [ADR 0002](adr/0002-app-definition-dsl-v0.md#how-the-out-of-scope-features-fit-in-later)
-gives the plan for each one.
+reserved (`auth` and `access`) are optional sections. A new section of
+a later version is optional too, so that the definitions that exist
+stay valid.
 
 ## Validation
 
