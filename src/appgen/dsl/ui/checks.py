@@ -688,8 +688,19 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
                     yield _missing(element, "form", "form", element.form, forms)
             case OperationAction():
                 operations = definition.operations
-                if element.operation not in operations:
+                operation = operations.get(element.operation)
+                if operation is None:
                     yield _missing(element, "operation", "operation", element.operation, operations)
+                elif operation.kind == "custom" and operation.params:
+                    yield _error(
+                        "unsuitable-operation",
+                        f"The operation '{element.operation}' needs params, so an action "
+                        "cannot run it without a form.",
+                        element,
+                        at="operation",
+                        hint="Use a form action with a form for the operation: "
+                        f"{{ kind: form, form: <a form of '{element.operation}'> }}.",
+                    )
             case NavigateAction():
                 page = definition.pages.get(element.page)
                 params = _path_params(page.path) if page else set[str]()
