@@ -197,7 +197,8 @@ def write_result(
         target.write_bytes(data)
         report.written.append(path)
 
-    for path in sorted(set(old.generated) - set(generated)):
+    # A file that a rule now creates once (an extension file) stays.
+    for path in sorted(set(old.generated) - set(generated) - set(extensions)):
         target = out_dir / path
         if target.is_file():
             target.unlink()

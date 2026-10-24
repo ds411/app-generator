@@ -49,9 +49,12 @@ BINDING = Binding(
         Output(template="alembic.ini.j2", path="alembic.ini"),
         Output(template="migrations/env.py.j2", path="migrations/env.py"),
         Output(template="migrations/script.py.mako.j2", path="migrations/script.py.mako"),
+        # The first migration is created once: appgen never changes it, so
+        # that a database with data can get the next migrations (ADR 0009).
         Output(
             template="migrations/versions/0001_schema.py.j2",
             path="migrations/versions/0001_schema.py",
+            extension=True,
         ),
         Output(template="app/models.py.j2", path="app/models.py"),
         Output(template="app/core/config.py.j2", path="app/core/config.py"),

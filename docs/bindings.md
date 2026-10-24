@@ -272,6 +272,31 @@ element ID only in a development build (`process.env.NODE_ENV` in
 Next.js, `import.meta.env.DEV` in React). A production build shows the
 neutral text "Not available yet.".
 
+A rule with `extension=True` can also write a file that is not a stub
+but that belongs to the app after the first run. Give it a manual trace
+(`trace("app", scope="file", kind="manual")`), not a gap trace. The
+FastAPI binding writes its first migration in this way.
+
+### Schema changes of the FastAPI app
+
+The FastAPI app creates the first migration
+(`migrations/versions/0001_schema.py`) once, and a new run keeps all
+migrations ([ADR 0009](adr/0009-fastapi-schema-changes.md)). To change
+the schema of a database that has data:
+
+1. Change the app definition, and generate the app again into the same
+   folder: `uv run appgen generate app.yaml -b fastapi -o <app>`.
+2. In the app folder, make the next migration from the changed models:
+   `uv run alembic revision --autogenerate -m "<change>"`. Alembic
+   compares the models with the database of `DATABASE_URL`.
+3. Review the new file in `migrations/versions/`. Edit it for the
+   changes that Alembic does not find, for example a rename or a
+   changed enum value.
+4. Apply it: `uv run alembic upgrade head`. The data stays.
+
+`scripts/check_schema_change.py` runs these steps on a copy of the
+project tracker with SQLite, and checks that a record stays.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

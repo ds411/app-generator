@@ -1,9 +1,15 @@
-{{ trace_header("app") }}
+# Created by appgen once. appgen never changes or deletes this file.
+{# A manual trace, not a gap: after the first run, the file belongs to the app developer. #}
+{{ trace("app", scope="file", kind="manual") }}
 """Create the schema of the app definition `{{ app.name }}`.
 
-appgen generates this migration from the current definition. To change
-the schema of a database that has data, write a new migration by hand,
-for example with `alembic revision --autogenerate`.
+appgen creates this migration once, from the definition of the first
+run, and never changes it. After a change to the definition, generate
+the app again, and make the next migration with
+`uv run alembic revision --autogenerate -m "<change>"` (ADR 0009). The
+models carry the traces to the definition elements. This file has
+only the trace of the app, so it does not get invalid when an element
+of the definition goes away.
 
 Revision ID: 0001
 Revises:
@@ -26,16 +32,13 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Create the tables, then the foreign keys, so that the order of the tables is free."""
 {% for e in py.entity_order() %}
-    {{ trace(e.id) }}
     op.create_table(
         "{{ e.table }}",
         sa.Column("id", sa.Uuid(), nullable=False),
 {% for f in e.fields %}
-        {{ trace(f.id) }}
         {{ f.migration_column() }}
 {% endfor %}
 {% for r, column in e.fk_columns %}
-        {{ trace(r.id) }}
         {{ column }}
 {% endfor %}
         sa.PrimaryKeyConstraint("id", name="pk_{{ e.table }}"),
@@ -49,7 +52,6 @@ def upgrade() -> None:
 {% endfor %}
 {% for e in py.entity_order() %}
 {% for r in e.fk_relations %}
-    {{ trace(r.id) }}
     {{ py.foreign_key_call(e, r) }}
 {% if not r.unique %}
     op.create_index("ix_{{ e.table }}_{{ r.fk }}", "{{ e.table }}", ["{{ r.fk }}"])
@@ -57,7 +59,6 @@ def upgrade() -> None:
 {% endfor %}
 {% endfor %}
 {% for t in py.join_tables %}
-    {{ trace(t.relation_id) }}
     op.create_table(
         "{{ t.name }}",
 {% for line in t.migration_lines() %}

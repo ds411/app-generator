@@ -25,3 +25,4 @@ gives the rules.
 | 0006   | [FastAPI binding](0006-fastapi-binding.md)                             | Accepted |
 | 0007   | [Local database without a Postgres server](0007-local-database.md)     | Accepted |
 | 0008   | [CRUD shorthand](0008-crud-shorthand.md)                               | Accepted |
+| 0009   | [Schema changes of the FastAPI app](0009-fastapi-schema-changes.md)    | Accepted |

@@ -2,7 +2,8 @@
 # Generate the project tracker with the FastAPI binding, and check the
 # output: install, lint, format, type check, tests, Docker image,
 # traces, and the smoke test (scripts/smoke_test.py: start the app and
-# request it), in Docker and with SQLite (--local). The pre-push hook
+# request it), in Docker and with SQLite (--local), and the schema change
+# on a database with data (scripts/check_schema_change.py). The pre-push hook
 # runs this script when a push changes the generator or the FastAPI
 # binding. Run it by hand from the repository root:
 #
@@ -79,5 +80,8 @@ uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-
 
 step "smoke test with the local database"
 uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
+
+step "schema change"
+uv run --locked scripts/check_schema_change.py "$out"
 
 step "passed"

@@ -10,6 +10,7 @@ invalid, until the app developer updates them.
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -155,3 +156,48 @@ def test_the_orphans_command_lists_the_old_extension_file_and_the_new_element(
     manifest = read_manifest(tmp_path)
     assert manifest is not None
     assert render_orphans(find_orphans(changed, tmp_path, manifest), "text") == text.output
+
+
+def test_a_new_run_keeps_the_migrations_of_the_fastapi_app(
+    tmp_path: Path, changed: AppDefinition
+) -> None:
+    binding = find_binding("fastapi")
+    original = load_definition_text(EXAMPLE.read_text(), str(EXAMPLE))
+    report = write_result(generate(original, binding), tmp_path, "fastapi")
+    first = tmp_path / "migrations" / "versions" / "0001_schema.py"
+    assert "migrations/versions/0001_schema.py" in report.created_extensions
+    schema = first.read_text()
+    # The app developer makes the next migration (alembic revision --autogenerate).
+    second = tmp_path / "migrations" / "versions" / "0002_project_priority.py"
+    second.write_text('"""Add the priority of a project."""\n')
+
+    report = write_result(generate(changed, binding), tmp_path, "fastapi")
+
+    # The first migration keeps the schema of the first run, and the next one stays.
+    assert "migrations/versions/0001_schema.py" in report.kept_extensions
+    assert first.read_text() == schema
+    assert second.read_text() == '"""Add the priority of a project."""\n'
+    # The models follow the changed definition.
+    assert "priority" in (tmp_path / "app" / "features" / "projects" / "models.py").read_text()
+    # The first migration has no traces of elements, so the changes make none invalid.
+    invalid = check_traces(changed, tmp_path).invalid
+    assert [p for p in invalid if p.file.startswith("migrations/")] == []
+
+
+def test_a_generated_first_migration_of_an_older_run_stays(tmp_path: Path) -> None:
+    """Before ADR 0009, the first migration was a generated file. A new run keeps it."""
+    binding = find_binding("fastapi")
+    original = load_definition_text(EXAMPLE.read_text(), str(EXAMPLE))
+    result = generate(original, binding)
+    old = [
+        replace(f, kind="generated") if f.path.endswith("0001_schema.py") else f
+        for f in result.files
+    ]
+    write_result(replace(result, files=old), tmp_path, "fastapi")
+    first = tmp_path / "migrations" / "versions" / "0001_schema.py"
+    first.write_text(first.read_text() + "# The schema of the first run.\n")
+
+    report = write_result(result, tmp_path, "fastapi", force=True)
+
+    assert "migrations/versions/0001_schema.py" not in report.deleted
+    assert first.read_text().endswith("# The schema of the first run.\n")

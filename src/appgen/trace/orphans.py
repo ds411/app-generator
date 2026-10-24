@@ -44,7 +44,9 @@ def find_orphans(
     root = Path(code_folder)
     orphans: list[Orphan] = []
     for path, entry in sorted(manifest.extensions.items()):
-        known = entry.element_id is not None and entry.element_id in definition.elements
+        # A file of the whole app (no element, for example the first migration
+        # of the FastAPI app) is orphaned only when the manifest marks it.
+        known = entry.element_id is None or entry.element_id in definition.elements
         if (known and not entry.orphaned) or not (root / path).is_file():
             continue
         suggestion = None
