@@ -356,3 +356,12 @@ workflows:
     transitions:
       confirm: { from: [requested], to: confirmed, label: Confirm }
       cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }
+
+# The members sign in with their email address and a password. Anyone
+# can see the list of rooms.
+auth:
+  user_entity: Member
+  username_field: email
+  public_pages: [rooms]
+  public_operations: [list_rooms]
+  session_hours: 12

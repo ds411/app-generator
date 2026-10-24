@@ -1,0 +1,13 @@
+{{ trace_header(definition.auth.id) }}
+import { signInAction, signOutAction } from "./actions";
+
+/** Sign in. Return null, or the message of the error. */
+export async function signIn(username: string, password: string): Promise<string | null> {
+  const result = await signInAction(username, password);
+  return result.ok ? null : result.error.message;
+}
+
+/** Sign out. */
+export async function signOut(): Promise<void> {
+  await signOutAction();
+}

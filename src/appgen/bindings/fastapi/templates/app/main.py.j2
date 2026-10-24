@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+{% if definition.auth %}
+from app.core.auth import router as auth_router
+{% endif %}
 from app.core.config import Settings
 from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
@@ -49,6 +52,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     add_problem_handlers(app)
     app.include_router(health_router)
+{% if definition.auth %}
+    {{ trace(definition.auth.id) }}
+    app.include_router(auth_router)
+{% endif %}
 {% for e in py.entity_order() %}
     {{ trace(e.id) }}
     app.include_router({{ e.slice }}_router)

@@ -14,3 +14,7 @@ class Settings(BaseSettings):
     aiosqlite driver for local runs, for example `sqlite+aiosqlite:///./local.db`."""
     cors_origins: list[str] = []
     """The origins of the browser apps that can call the API."""
+{% if definition.auth %}
+    auth_secret: str = ""
+    """The secret key that signs the sign-in tokens: a long random text (`AUTH_SECRET`)."""
+{% endif %}

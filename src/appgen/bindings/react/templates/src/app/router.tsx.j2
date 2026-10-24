@@ -3,6 +3,13 @@
 {% set used_layouts = ui_plan.layouts | select("in", ui_plan.pages.values() | map(attribute="layout") | list + [default_layout]) | list %}
 {% set bare_pages = ui_plan.pages_of(none) %}
 {% set use_root = bare_pages or not default_layout %}
+{% macro page_element(info) -%}
+{% if definition.auth and info.name not in definition.auth.public_pages -%}
+<RequireAuth><{{ info.name | pascal }}Page /></RequireAuth>
+{%- else -%}
+<{{ info.name | pascal }}Page />
+{%- endif %}
+{%- endmacro %}
 import { createBrowserRouter{% if used_layouts %}, Outlet{% endif %} } from "react-router";
 
 {% for page_name in definition.pages %}
@@ -12,13 +19,21 @@ import { NotFoundPage } from "@/pages/not-found";
 {% if used_layouts %}
 import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{ ", " if not loop.last }}{% endfor %} } from "@/widgets/layouts";
 {% endif %}
-{% if use_root %}
+{% if use_root or definition.auth %}
 
+{% endif %}
+{% if definition.auth %}
+import { RequireAuth, SignInRoute } from "./auth/require-auth";
+{% endif %}
+{% if use_root %}
 import { RootLayout } from "./layout/root-layout";
 {% endif %}
 
 // The pages, grouped by layout. Each layout shows its pages in the outlet.
 export const router = createBrowserRouter([
+{% if definition.auth %}
+  { path: "/sign-in", element: <SignInRoute /> }, {{ trace(definition.auth.id) }}
+{% endif %}
 {% for layout_name in used_layouts %}
   {
     element: (
@@ -28,7 +43,7 @@ export const router = createBrowserRouter([
     ),
     children: [
 {% for info in ui_plan.pages_of(layout_name) %}
-      { path: {{ route_path(info.page.path) | tojson }}, element: <{{ info.name | pascal }}Page /> }, {{ trace(info.page.id) }}
+      { path: {{ route_path(info.page.path) | tojson }}, element: {{ page_element(info) }} }, {{ trace(info.page.id) }}
 {% endfor %}
 {% if layout_name == default_layout %}
       { path: "*", element: <NotFoundPage /> },
@@ -41,7 +56,7 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
 {% for info in bare_pages %}
-      { path: {{ route_path(info.page.path) | tojson }}, element: <{{ info.name | pascal }}Page /> }, {{ trace(info.page.id) }}
+      { path: {{ route_path(info.page.path) | tojson }}, element: {{ page_element(info) }} }, {{ trace(info.page.id) }}
 {% endfor %}
 {% if not default_layout %}
       { path: "*", element: <NotFoundPage /> },

@@ -542,6 +542,8 @@ class PyOperation:
     """The module of the operation in its slice, for example `create_task`."""
     slice: str
     """The slice of the entity of the operation."""
+    protected: bool = False
+    """True if the operation needs a signed-in user (the `auth` section)."""
 
     @property
     def custom(self) -> bool:
@@ -744,6 +746,12 @@ class PyEntity:
     def router_imports(self) -> str:
         """Return the import block of the router module of the slice."""
         lines = {"from fastapi import APIRouter"}
+        if any(o.protected for o in self.operations):
+            lines |= {
+                "from fastapi import APIRouter, Depends",
+                "from app.core.auth import current_user",
+            }
+            lines.discard("from fastapi import APIRouter")
         if self.operations:
             lines.add(
                 from_import(f"app.features.{self.slice}", {o.module for o in self.operations})
@@ -965,6 +973,8 @@ def python_app(definition: AppDefinition) -> PyApp:
     operations: dict[str, PyOperation] = {}
     for name, operation in definition.operations.items():
         py_operation = _operation(name, operation, entities)
+        auth = definition.auth
+        py_operation.protected = auth is not None and name not in auth.public_operations
         operations[name] = py_operation
         entities[operation.entity].operations.append(py_operation)
     for entity in entities.values():

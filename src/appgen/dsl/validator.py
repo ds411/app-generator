@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
+from appgen.dsl.auth import SIGN_IN_PATH
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.expressions import (
@@ -457,6 +458,42 @@ def check_workflows(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
 
 
+def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The user entity has a required, unique user name, and the public parts exist."""
+    auth = definition.auth
+    if auth is None:
+        return
+    entity = definition.entities.get(auth.user_entity)
+    if entity is None:
+        yield _missing(auth, "user_entity", "entity", auth.user_entity, definition.entities)
+    else:
+        found = _rule_field(auth, "username_field", auth.username_field, entity.stored_fields)
+        if isinstance(found, Diagnostic):
+            yield found
+        elif found.type not in ("string", "email") or not found.required or not found.unique:
+            yield _error(
+                "unsuitable-field",
+                "The user name must be a required, unique 'string' or 'email' field.",
+                auth,
+                at="username_field",
+            )
+    for name in auth.public_pages:
+        if name not in definition.pages:
+            yield _missing(auth, "public_pages", "page", name, definition.pages)
+    for name in auth.public_operations:
+        if name not in definition.operations:
+            yield _missing(auth, "public_operations", "operation", name, definition.operations)
+    for page in definition.pages.values():
+        if page.path == SIGN_IN_PATH:
+            yield _error(
+                "duplicate-name",
+                f"The path '{SIGN_IN_PATH}' is the sign-in page of the apps.",
+                page,
+                at="path",
+                hint="Give the page another path.",
+            )
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -467,6 +504,7 @@ CHECKS: list[Check] = [
     check_rules,
     check_translations,
     check_workflows,
+    check_auth,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,

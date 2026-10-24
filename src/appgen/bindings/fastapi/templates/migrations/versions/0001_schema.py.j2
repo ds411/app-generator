@@ -61,6 +61,21 @@ def upgrade() -> None:
 {% endif %}
 {% endfor %}
 {% endfor %}
+{% if definition.auth %}
+{% set u = py.entity(definition.auth.user_entity) %}
+    op.create_table(
+        "credentials",
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("password_hash", sa.String(length=200), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["{{ u.table }}.id"],
+            name="fk_credentials_user_id_{{ u.table }}",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("user_id", name="pk_credentials"),
+    )
+{% endif %}
 {% for t in py.join_tables %}
     op.create_table(
         "{{ t.name }}",
@@ -73,6 +88,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
+{% if definition.auth %}
+    op.drop_table("credentials")
+{% endif %}
 {% for t in py.join_tables | reverse %}
     op.drop_table("{{ t.name }}")
 {% endfor %}

@@ -14,6 +14,7 @@ from appgen.bindings import shared
 from appgen.bindings.react.gaps import gap_spec
 from appgen.bindings.react.helpers import HELPERS, context, to_json
 from appgen.bindings.shared import forms, shadcn, ui, views
+from appgen.bindings.shared.auth import auth_rules
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
 from appgen.gen.binding import Binding, ExtensionKey, Output
@@ -154,6 +155,17 @@ BINDING = Binding(
         *_APP_SHELL,
         *views.view_rules(),
         *i18n_rules(),
+        *auth_rules(),
+        Output(
+            template="src/shared/auth/index.ts.j2",
+            path="src/shared/auth/index.ts",
+            when="definition.auth",
+        ),
+        Output(
+            template="src/app/auth/require-auth.tsx.j2",
+            path="src/app/auth/require-auth.tsx",
+            when="definition.auth",
+        ),
         *forms.form_rules(),
         Output(template="src/vite-env.d.ts.j2", path="src/vite-env.d.ts"),
         Output(template="src/layer.md.j2", path="src/widgets/README.md"),
@@ -268,6 +280,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
+        | {"auth"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.

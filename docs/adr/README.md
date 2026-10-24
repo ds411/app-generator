@@ -27,3 +27,4 @@ gives the rules.
 | 0008   | [CRUD shorthand](0008-crud-shorthand.md)                               | Accepted |
 | 0009   | [Schema changes of the FastAPI app](0009-fastapi-schema-changes.md)    | Accepted |
 | 0010   | [Translations of the UI text](0010-translations.md)                    | Accepted |
+| 0011   | [Sign-in of the generated apps](0011-auth.md)                          | Accepted |

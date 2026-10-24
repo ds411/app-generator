@@ -1,0 +1,112 @@
+{% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set username = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.auth.username_field].id) | first %}
+{{ trace_header(definition.auth.id) }}
+import "server-only";
+
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+import { eq } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+
+import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
+
+import { hashPassword, verifyPassword } from "./password";
+
+// The sign-in of the users (ADR 0011). A session is a cookie with a
+// signed text: the ID of the user and the end of its time. Set
+// AUTH_SECRET to a long random text in each environment.
+
+export const SESSION_COOKIE = "session";
+export const SESSION_SECONDS = {{ definition.auth.session_hours * 3600 }};
+export const SIGN_IN_PATH = "/sign-in";
+
+/** An action or a page that needs a signed-in user. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Sign in to do this.");
+    this.name = "UnauthorizedError";
+  }
+}
+
+function secret(): string {
+  const value = process.env.AUTH_SECRET;
+  if (!value) {
+    throw new Error("Set AUTH_SECRET to sign the sessions.");
+  }
+  return value;
+}
+
+function sign(body: string): string {
+  return createHmac("sha256", secret()).update(body).digest("base64url");
+}
+
+/** Return a signed session token for a user. */
+export function makeToken(userId: string): string {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  const body = Buffer.from(JSON.stringify({ sub: userId, exp })).toString("base64url");
+  return `${body}.${sign(body)}`;
+}
+
+/** Return the user ID of a valid token that has not ended, else null. */
+export function readToken(token: string): string | null {
+  const [body = "", signature = ""] = token.split(".");
+  const expected = sign(body);
+  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as { sub?: unknown; exp?: unknown };
+    if (typeof payload.sub !== "string" || typeof payload.exp !== "number") return null;
+    return payload.exp * 1000 > Date.now() ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Return the ID of the signed-in user, or null. */
+export async function sessionUserId(): Promise<string | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  return token ? readToken(token) : null;
+}
+
+/** Return the ID of the signed-in user. Throw an UnauthorizedError without a session. */
+export async function requireUser(): Promise<string> {
+  const userId = await sessionUserId();
+  if (userId === null) {
+    throw new UnauthorizedError();
+  }
+  return userId;
+}
+
+/**
+ * Go to the sign-in page if no user is signed in. After the sign-in, the
+ * app opens the page again: `path` with the values of its parameters.
+ */
+export async function requirePageUser(path: string, params: Record<string, string | string[] | undefined> = {}): Promise<void> {
+  if ((await sessionUserId()) === null) {
+    const next = path.replace(/\{(\w+)\}/g, (_, key: string) => encodeURIComponent(String(params[key] ?? "")));
+    redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(next)}`);
+  }
+}
+
+/** Return the ID of the user with a user name and a password, or null. */
+export async function checkPassword(username: string, password: string): Promise<string | null> {
+  const rows = await getDb()
+    .select({ id: {{ table.const }}.id, passwordHash: credentialsTable.passwordHash })
+    .from({{ table.const }})
+    .innerJoin(credentialsTable, eq(credentialsTable.userId, {{ table.const }}.id))
+    .where(eq({{ table.const }}.{{ username.key }}, username))
+    .limit(1);
+  const [row] = rows;
+  return row && verifyPassword(password, row.passwordHash) ? row.id : null;
+}
+
+/** Store the hash of a new password of a user. */
+export async function setPassword(userId: string, password: string): Promise<void> {
+  const passwordHash = hashPassword(password);
+  await getDb()
+    .insert(credentialsTable)
+    .values({ userId, passwordHash })
+    .onConflictDoUpdate({ target: credentialsTable.userId, set: { passwordHash } });
+}

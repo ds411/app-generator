@@ -1,0 +1,48 @@
+{{ trace_header(definition.auth.id) }}
+"""Commands of the app: `uv run python -m app.cli set-password <user name>`.
+
+The command reads the new password from the terminal, or from the
+environment variable `APP_PASSWORD`, and stores its hash.
+"""
+
+import asyncio
+import getpass
+import os
+import sys
+
+from app.core.auth import MIN_PASSWORD_LENGTH, find_user, set_password
+from app.core.config import Settings
+from app.core.db import make_engine, make_sessions
+from app.models import configure_models
+
+
+async def _set_password(username: str, password: str) -> int:
+    configure_models()
+    engine = make_engine(Settings().database_url)
+    try:
+        async with make_sessions(engine)() as session:
+            user = await find_user(session, username)
+            if user is None:
+                print(f"No user has the user name {username}.", file=sys.stderr)
+                return 1
+            await set_password(session, user, password)
+    finally:
+        await engine.dispose()
+    print(f"The password of {username} is set.")
+    return 0
+
+
+def main(args: list[str]) -> int:
+    """Run a command. Return the exit code."""
+    if len(args) != 2 or args[0] != "set-password":
+        print("Usage: python -m app.cli set-password <user name>", file=sys.stderr)
+        return 2
+    password = os.environ.get("APP_PASSWORD") or getpass.getpass("New password: ")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        print(f"The password needs {MIN_PASSWORD_LENGTH} or more characters.", file=sys.stderr)
+        return 1
+    return asyncio.run(_set_password(args[1], password))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

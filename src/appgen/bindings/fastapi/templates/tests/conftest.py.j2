@@ -13,6 +13,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
+{% if definition.auth %}
+from app.core.auth import current_user
+{% endif %}
 from app.core.config import Settings
 from app.core.db import Base
 from app.main import create_app
@@ -84,6 +87,28 @@ async def session(migrated_url: str) -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
+{% if definition.auth %}
+@pytest.fixture
+async def anonymous_client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """An HTTP client that calls the app in the same process, without a signed-in user."""
+    app = create_app(Settings(database_url=migrated_url, auth_secret="test-secret"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    await app.state.engine.dispose()
+
+
+@pytest.fixture
+async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """An HTTP client that calls the app in the same process, as a signed-in user.
+
+    The tests of the operations do not test the sign-in: `tests/test_auth.py` does.
+    """
+    app = create_app(Settings(database_url=migrated_url, auth_secret="test-secret"))
+    app.dependency_overrides[current_user] = lambda: None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    await app.state.engine.dispose()
+{% else %}
 @pytest.fixture
 async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """An HTTP client that calls the app in the same process, with the test database."""
@@ -91,3 +116,4 @@ async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[Asyn
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await app.state.engine.dispose()
+{% endif %}

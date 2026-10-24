@@ -1,6 +1,7 @@
 {% set type = name | pascal %}
 {% set var = name | camel %}
 {{ trace_header(element_id) }}
+{% set public = public_kinds(definition, name) %}
 "use server";
 
 import type { ActionResult, ListQuery, ListResult } from "@/shared/api";
@@ -16,15 +17,15 @@ import { {{ var }}Repository } from "./{{ name | kebab }}-repository";
 export async function list{{ type }}Action(
   query?: ListQuery<{{ type }}>,
 ): Promise<ActionResult<ListResult<{{ type }}>>> {
-  return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)));
+  return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)){% if "list" in public %}, { public: true }{% endif %});
 }
 
 export async function get{{ type }}Action(id: string): Promise<ActionResult<{{ type }}>> {
-  return runAction(() => {{ var }}Repository.get(idSchema.parse(id)));
+  return runAction(() => {{ var }}Repository.get(idSchema.parse(id)){% if "read" in public %}, { public: true }{% endif %});
 }
 
 export async function create{{ type }}Action(input: {{ type }}Input): Promise<ActionResult<{{ type }}>> {
-  return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)), { changes: true });
+  return runAction(() => {{ var }}Repository.create({{ var }}InputSchema.parse(input)), { changes: true{% if "create" in public %}, public: true{% endif %} });
 }
 
 export async function update{{ type }}Action(
@@ -33,7 +34,7 @@ export async function update{{ type }}Action(
 ): Promise<ActionResult<{{ type }}>> {
   return runAction(
     () => {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(patch)),
-    { changes: true },
+    { changes: true{% if "update" in public %}, public: true{% endif %} },
   );
 }
 
@@ -43,6 +44,6 @@ export async function remove{{ type }}Action(id: string): Promise<ActionResult<n
       await {{ var }}Repository.remove(idSchema.parse(id));
       return null;
     },
-    { changes: true },
+    { changes: true{% if "delete" in public %}, public: true{% endif %} },
   );
 }

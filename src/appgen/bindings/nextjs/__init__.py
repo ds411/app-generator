@@ -14,6 +14,7 @@ from appgen.bindings import shared
 from appgen.bindings.nextjs import db
 from appgen.bindings.nextjs.model import FSD_LAYERS, context
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
+from appgen.bindings.shared.auth import auth_rules, public_kinds
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.gen.binding import Binding, Output
@@ -144,6 +145,7 @@ BINDING = Binding(
         *_APP_SHELL,
         *views.view_rules(),
         *i18n_rules(),
+        *auth_rules(),
         *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
@@ -184,6 +186,17 @@ BINDING = Binding(
         Output(template="src/shared/db/seed-data.ts.j2", path="src/shared/db/seed-data.ts"),
         Output(template="src/shared/db/run-seed.ts.j2", path="src/shared/db/run-seed.ts"),
         Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
+        *(
+            Output(template=template, path=path, when="definition.auth")
+            for template, path in (
+                ("src/shared/db/schema/credentials.ts.j2", "src/shared/db/schema/credentials.ts"),
+                ("src/shared/auth/session.ts.j2", "src/shared/auth/session.ts"),
+                ("src/shared/auth/password.ts.j2", "src/shared/auth/password.ts"),
+                ("src/shared/auth/actions.ts.j2", "src/shared/auth/actions.ts"),
+                ("src/shared/auth/index.ts.j2", "src/shared/auth/index.ts"),
+                ("app/sign-in/page.tsx.j2", "app/sign-in/page.tsx"),
+            )
+        ),
         Output(
             template="src/shared/db/schema/table.ts.j2",
             path="src/shared/db/schema/{{ nextjs.tables_by_entity[name].module }}.ts",
@@ -252,6 +265,7 @@ BINDING = Binding(
         | {"view_responsive", "motion"}
         | {"translations", "language"}
         | {"workflow", "transition"}
+        | {"auth"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
@@ -261,6 +275,7 @@ BINDING = Binding(
     helpers=typescript.HELPERS
     | ui.HELPERS
     | views.HELPERS
+    | {"public_kinds": public_kinds}
     | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys},
     stub_markers=("TODO(appgen)", "Not implemented yet"),
 )

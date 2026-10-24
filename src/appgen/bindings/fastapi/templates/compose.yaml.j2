@@ -33,6 +33,10 @@ services:
     image: {{ app.name }}-api
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+{% if definition.auth %}
+      # Set AUTH_SECRET in the shell or in .env: a long random text.
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+{% endif %}
     ports:
       - "8000:8000"
     depends_on:

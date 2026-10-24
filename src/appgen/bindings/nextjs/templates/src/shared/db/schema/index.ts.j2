@@ -3,3 +3,6 @@
 {% for table in nextjs.tables %}
 export * from "./{{ table.module }}"; {{ trace(table.element_id) }}
 {% endfor %}
+{% if definition.auth %}
+export * from "./credentials"; {{ trace(definition.auth.id) }}
+{% endif %}

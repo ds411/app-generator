@@ -23,6 +23,11 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/{{ app.name | snake }}
       DATABASE_MIGRATE: "true"
       DATABASE_SEED: "true"
+{% if definition.auth %}
+      # Set AUTH_SECRET in the shell or in .env: a long random text.
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+{% endif %}
     ports:
       - "3000:3000"
     depends_on:
