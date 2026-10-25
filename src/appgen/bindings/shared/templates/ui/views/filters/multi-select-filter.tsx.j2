@@ -38,7 +38,7 @@ export function MultiSelectFilter({
           <PlusCircleIcon />
           {label}
           {names.length > 0 && (
-            <span className="ml-1 rounded-sm bg-secondary px-1.5 text-xs font-normal">
+            <span className="ms-1 rounded-sm bg-secondary px-1.5 text-xs font-normal">
               {names.length > 2 ? {{ js_format("{count} chosen", count="names.length") }} : names.join(", ")}
             </span>
           )}

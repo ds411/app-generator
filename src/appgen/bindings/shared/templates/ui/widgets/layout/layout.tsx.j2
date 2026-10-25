@@ -1,4 +1,4 @@
-{% set SIDEBAR_COLUMN_CLASSES = "[&>[data-slot=sidebar]]:bg-sidebar [&>[data-slot=sidebar][data-side=left]]:border-r [&>[data-slot=sidebar][data-side=right]]:border-l [&>[data-slot=sidebar][data-collapsible=offcanvas]]:border-0" %}
+{% set SIDEBAR_COLUMN_CLASSES = "[&>[data-slot=sidebar]]:bg-sidebar [&>[data-slot=sidebar][data-side=left]]:border-e [&>[data-slot=sidebar][data-side=right]]:border-s [&>[data-slot=sidebar][data-collapsible=offcanvas]]:border-0" %}
 {{ trace_header(element_id) }}
 {% set plan = ui_plan.layouts[name] %}
 {% set sidebar = element.sidebar %}
@@ -94,18 +94,18 @@ export function {{ name | pascal }}Layout({ children }: { children: ReactNode })
 {% if sidebar is not none and can_hide %}
       {mode !== "hidden" && (
         <>
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+          <SidebarTrigger className="-ms-1" />
+          <Separator orientation="vertical" className="me-2 data-[orientation=vertical]:h-4" />
         </>
       )}
 {% elif sidebar is not none %}
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+      <SidebarTrigger className="-ms-1" />
+      <Separator orientation="vertical" className="me-2 data-[orientation=vertical]:h-4" />
 {% endif %}
 {% if breadcrumbs %}
       <PageBreadcrumbs className="{{ plan.breadcrumbs.classes('block') }} min-w-0 overflow-hidden" />
 {% endif %}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ms-auto flex shrink-0 items-center gap-2">
 {% if topbar_actions %}
         <{{ name | pascal }}TopbarActions />
 {% endif %}

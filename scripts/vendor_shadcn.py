@@ -5,7 +5,9 @@ the generated apps. To keep the generation deterministic and without
 network, the component sources are templates in the repository. This
 script fetches them once from a fixed commit of the shadcn/ui repository,
 changes their imports to the FSD paths of the generated apps, changes
-their fixed text to calls of the text helpers (`TEXTS`), and writes:
+their fixed text to calls of the text helpers (`TEXTS`), changes the
+classes of a side to logical classes and turns the icons of a direction
+in `rtl` (`DIRECTION`, `appgen.bindings.shared.sides`), and writes:
 
 - `src/appgen/bindings/shared/templates/shadcn/<name>.tsx.j2`: one
   template for each component, with a trace header.
@@ -21,6 +23,8 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
+
+from appgen.bindings.shared.sides import logical_classes
 
 COMMIT = "3d98900e"
 """The commit of shadcn-ui/ui that the templates come from."""
@@ -147,7 +151,7 @@ LOCALE: dict[str, tuple[tuple[str, str], ...]] = {
             'import { Button, buttonVariants } from "@/shared/ui/button"\n',
             'import { Button, buttonVariants } from "@/shared/ui/button"\n'
             'import { dateTimeFormat, firstWeekday } from "@/shared/lib/format"\n'
-            'import { getLocale } from "@/shared/lib/i18n"\n',
+            'import { getDirection, getLocale } from "@/shared/lib/i18n"\n',
         ),
         localized("  type DayButton,\n", "  type DayButton,\n  type Formatters,\n  type Labels,\n"),
         localized("function Calendar({\n", _CALENDAR_LOCALE + "function Calendar({\n"),
@@ -159,6 +163,7 @@ LOCALE: dict[str, tuple[tuple[str, str], ...]] = {
       }}
 """,
             """      lang={getLocale()}
+      dir={getDirection()}
       weekStartsOn={firstWeekday()}
       labels={localeLabels}
       formatters={{ ...localeFormatters, ...formatters }}
@@ -205,13 +210,50 @@ TEXTS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
+def turned(icon: str) -> tuple[str, str]:
+    """An icon of a direction, for example `<ChevronRightIcon />`, that turns in `rtl`."""
+    return f"<{icon} />", f'<{icon} className="rtl:rotate-180" />'
+
+
+def moved(classes: str, rtl: str) -> tuple[str, str]:
+    """Classes that move an element to a side, and the classes of the move in `rtl`."""
+    return f" {classes} ", f" {classes} {rtl} "
+
+
+# The changes for a language from right to left (ADR 0010), in addition
+# to the logical classes: the icons of a direction turn, and a move to
+# the side goes to the other side.
+DIRECTION: dict[str, tuple[tuple[str, str], ...]] = {
+    "breadcrumb": (turned("ChevronRight"),),
+    "dropdown-menu": (
+        (
+            '<ChevronRightIcon className="ml-auto size-4" />',
+            '<ChevronRightIcon className="ml-auto size-4 rtl:rotate-180" />',
+        ),
+    ),
+    "pagination": (turned("ChevronLeftIcon"), turned("ChevronRightIcon")),
+    "sidebar": (
+        turned("PanelLeftIcon"),
+        moved("w-4 -translate-x-1/2", "rtl:translate-x-1/2"),
+        moved("translate-x-px flex-col", "rtl:-translate-x-px"),
+        moved("-translate-x-px items-center", "rtl:translate-x-px"),
+    ),
+    "switch": (
+        moved(
+            "data-[state=checked]:translate-x-[calc(100%-2px)]",
+            "rtl:data-[state=checked]:-translate-x-[calc(100%-2px)]",
+        ),
+    ),
+}
+
+
 def translate(name: str, source: str) -> str:
-    """Change the fixed text of a component to calls of the text helpers, and its formats."""
-    for old, new in (*TEXTS.get(name, ()), *LOCALE.get(name, ())):
+    """Change the fixed text of a component to calls of the text helpers, its formats and sides."""
+    for old, new in (*DIRECTION.get(name, ()), *TEXTS.get(name, ()), *LOCALE.get(name, ())):
         if old not in source:
             raise ValueError(f"The component {name} has no text {old!r}.")
         source = source.replace(old, new)
-    return source
+    return logical_classes(source)
 
 
 def fetch(path: str) -> str:

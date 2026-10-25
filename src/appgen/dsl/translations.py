@@ -1,6 +1,7 @@
 """The translations of the UI text: more than one language for the front ends."""
 
 import re
+from typing import Literal
 
 import pydantic
 
@@ -15,6 +16,31 @@ LOCALE = re.compile(
 )
 """A language tag (BCP 47), for example `de`, `de-CH`, or `ar-EG-u-nu-latn`."""
 
+type Direction = Literal["ltr", "rtl"]
+
+RTL_LANGUAGES = frozenset(
+    {"ar", "arc", "azb", "ckb", "dv", "fa", "he", "iw", "ks", "lrc", "mzn", "nqo", "ps", "sd"}
+    | {"syr", "ug", "ur", "yi"}
+)
+"""The primary languages (ISO 639) that a script from right to left writes by default."""
+RTL_SCRIPTS = frozenset({"adlm", "arab", "hebr", "mand", "nkoo", "rohg", "syrc", "thaa", "yezi"})
+"""The scripts (ISO 15924) from right to left, for example `Arab` in `ha-Arab`."""
+
+
+def locale_direction(locale: str) -> Direction:
+    """Return the direction of the text of a locale (BCP 47): `rtl` or `ltr`.
+
+    A script subtag decides first (`az-Arab` is `rtl`, `ur-Latn` is `ltr`),
+    else the primary language (`ar`, `fa`, `he`, and `ur` are `rtl`).
+    """
+    language, *subtags = locale.lower().replace("_", "-").split("-")
+    for subtag in subtags:
+        if len(subtag) == 4 and subtag.isalpha():
+            return "rtl" if subtag in RTL_SCRIPTS else "ltr"
+        if len(subtag) == 1:
+            break
+    return "rtl" if language in RTL_LANGUAGES else "ltr"
+
 
 class Language(Element):
     """A language of the UI, with the translation of each text."""
@@ -28,10 +54,19 @@ class Language(Element):
 
     The default is the code of the language.
     """
+    direction: Direction | None = None
+    """The direction of the text: `ltr` (left to right) or `rtl` (right to left).
+
+    The default comes from the locale, for example `rtl` for `ar`, `fa`, `he`, and `ur`.
+    """
 
     def locale_tag(self, code: str) -> str:
         """Return the locale of the language: `locale`, or the code."""
         return self.locale or code
+
+    def text_direction(self, code: str) -> Direction:
+        """Return the direction of the text: `direction`, or the direction of the locale."""
+        return self.direction or locale_direction(self.locale_tag(code))
 
 
 class Translations(Element):

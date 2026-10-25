@@ -7,6 +7,8 @@ import pytest
 from appgen.bindings import nextjs, react
 from appgen.bindings.shared.i18n import app_texts, finish, text_helpers
 from appgen.dsl import AppDefinition, load_definition, load_definition_text, validate_definition
+from appgen.dsl.diagnostics import DefinitionError
+from appgen.dsl.translations import locale_direction
 from appgen.gen.binding import Binding
 from appgen.gen.generator import generate
 
@@ -293,8 +295,8 @@ def test_the_formats_use_the_locale_of_the_selected_language(binding: Binding) -
         f.path: f.content for f in generate(load_definition_text(text, str(EXAMPLE)), binding).files
     }
     i18n = files["src/shared/lib/i18n.ts"]
-    assert '{ code: "en", label: "English", locale: "en" },' in i18n
-    assert '{ code: "de", label: "Deutsch", locale: "de-CH" },' in i18n
+    assert '{ code: "en", label: "English", locale: "en", dir: "ltr" },' in i18n
+    assert '{ code: "de", label: "Deutsch", locale: "de-CH", dir: "ltr" },' in i18n
     assert "document.documentElement.lang = localeOf(language);" in i18n
     formats = files["src/shared/lib/format.ts"]
     assert 'import { getLocale, t } from "@/shared/lib/i18n";' in formats
@@ -358,7 +360,9 @@ def test_nextjs_renders_the_language_of_the_request(example: AppDefinition) -> N
     files = {f.path: f.content for f in generate(example, nextjs.BINDING).files}
     layout = files["app/layout.tsx"]
     assert "const language = await requestLanguage();" in layout
-    assert "<html lang={localeOf(language)} suppressHydrationWarning>" in layout
+    assert (
+        "<html lang={localeOf(language)} dir={dirOf(language)} suppressHydrationWarning>" in layout
+    )
     assert "<Providers language={language}>{children}</Providers>" in layout
     server = files["src/shared/lib/i18n-server.ts"]
     assert "(await cookies()).get(LANGUAGE_COOKIE)?.value" in server
@@ -406,3 +410,62 @@ def test_the_nextjs_server_actions_translate_their_messages() -> None:
     assert "throw new ValidationError(t(rule.message));" in repository
     assert "? t(workflow.message)" in repository
     assert 't("The state of {entity} cannot change from {before} to {after}.", {' in repository
+
+
+RTL = dedent(
+    """\
+    translations:
+      default: en
+      languages:
+        en: { label: English }
+        ar: { label: العربية, text: { Tasks: المهام } }
+        ur: { label: اردو, locale: ur-Latn, text: { Tasks: Kaam } }
+        he: { label: עברית, direction: ltr, text: { Tasks: משימות } }
+    """
+)
+
+
+def test_the_direction_of_a_language_comes_from_its_locale() -> None:
+    definition = load_definition_text(BASE + RTL, "app.yaml")
+    assert validate_definition(definition) == []
+    assert definition.translations is not None
+    languages = definition.translations.languages
+    assert {code: language.text_direction(code) for code, language in languages.items()} == {
+        "en": "ltr",
+        "ar": "rtl",
+        "ur": "ltr",
+        "he": "ltr",
+    }
+    assert [locale_direction(tag) for tag in ("fa", "he-IL", "az-Arab", "ar-EG-u-nu-latn")] == [
+        "rtl"
+    ] * 4
+    assert [locale_direction(tag) for tag in ("de", "ja", "ur-Latn", "x-test")] == ["ltr"] * 4
+    wrong = (BASE + RTL).replace("direction: ltr", "direction: up")
+    with pytest.raises(DefinitionError, match="Expected 'ltr' or 'rtl'"):
+        load_definition_text(wrong, "app.yaml")
+
+
+@pytest.mark.parametrize("binding", [react.BINDING, nextjs.BINDING], ids=["react", "nextjs"])
+def test_the_html_element_has_the_direction_of_the_selected_language(binding: Binding) -> None:
+    text = EXAMPLE.read_text().replace(
+        "    de:\n      label: Deutsch\n", "    de:\n      label: Deutsch\n      direction: rtl\n"
+    )
+    files = {
+        f.path: f.content for f in generate(load_definition_text(text, str(EXAMPLE)), binding).files
+    }
+    i18n = files["src/shared/lib/i18n.ts"]
+    assert '{ code: "de", label: "Deutsch", locale: "de", dir: "rtl" },' in i18n
+    assert "document.documentElement.dir = dirOf(language);" in i18n
+    provider = files["src/shared/lib/language-provider.tsx"]
+    assert 'import { Direction } from "radix-ui";' in provider
+    assert "<Direction.Provider dir={dirOf(" in provider
+    assert "dir={getDirection()}" in files["src/shared/ui/calendar.tsx"]
+    if binding is react.BINDING:
+        assert '<html lang="en" dir="ltr">' in files["index.html"]
+        assert "else showLanguage(stored);" in provider
+    else:
+        layout = files["app/layout.tsx"]
+        assert "<html lang={localeOf(language)} dir={dirOf(language)}" in layout
+    plain = {f.path: f.content for f in generate(plain_example(), binding).files}
+    assert "dir=" not in plain.get("index.html", plain.get("app/layout.tsx", ""))
+    assert "getDirection" not in plain["src/shared/ui/calendar.tsx"]

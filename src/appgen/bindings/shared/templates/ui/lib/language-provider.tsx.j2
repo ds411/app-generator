@@ -2,37 +2,55 @@
 "use client";
 
 {% if binding.name == "nextjs" %}
+import { Direction } from "radix-ui";
 import { Fragment, type ReactNode, useSyncExternalStore } from "react";
 
-import { getLanguage, type Language, startLanguage, subscribeLanguage } from "@/shared/lib/i18n";
+import { dirOf, getLanguage, type Language, startLanguage, subscribeLanguage } from "@/shared/lib/i18n";
 
 /**
  * Shows the UI in the selected language: first in the language that the
  * server selected for the request (the cookie, else Accept-Language), then
  * in the language that the user selects. When the language changes, the
- * pages render again with the new text.
+ * pages render again with the new text and the direction of the language.
  */
 export function LanguageProvider({ language, children }: Readonly<{ language: Language; children: ReactNode }>) {
   startLanguage(language);
   const selected = useSyncExternalStore(subscribeLanguage, getLanguage, () => language);
-  return <Fragment key={selected}>{children}</Fragment>;
+  return (
+    <Direction.Provider dir={dirOf(selected)}>
+      <Fragment key={selected}>{children}</Fragment>
+    </Direction.Provider>
+  );
 }
 {% else %}
+import { Direction } from "radix-ui";
 import { Fragment, type ReactNode, useEffect, useSyncExternalStore } from "react";
 
-import { defaultLanguage, getLanguage, localeOf, setLanguage, storedLanguage, subscribeLanguage } from "@/shared/lib/i18n";
+import {
+  defaultLanguage,
+  dirOf,
+  getLanguage,
+  setLanguage,
+  showLanguage,
+  storedLanguage,
+  subscribeLanguage,
+} from "@/shared/lib/i18n";
 
 /**
  * Shows the UI in the selected language. When the language changes, the
- * pages render again with the new text.
+ * pages render again with the new text and the direction of the language.
  */
 export function LanguageProvider({ children }: Readonly<{ children: ReactNode }>) {
   const language = useSyncExternalStore(subscribeLanguage, getLanguage, () => defaultLanguage);
   useEffect(() => {
     const stored = storedLanguage();
     if (stored !== getLanguage()) setLanguage(stored);
-    else document.documentElement.lang = localeOf(stored);
+    else showLanguage(stored);
   }, []);
-  return <Fragment key={language}>{children}</Fragment>;
+  return (
+    <Direction.Provider dir={dirOf(language)}>
+      <Fragment key={language}>{children}</Fragment>
+    </Direction.Provider>
+  );
 }
 {% endif %}

@@ -1,6 +1,10 @@
 {{ trace_header("app") }}
 <!doctype html>
-<html lang="{{ i18n.languages[0].locale if i18n else "en" }}">
+{% if i18n %}
+<html lang="{{ i18n.languages[0].locale }}" dir="{{ i18n.languages[0].direction }}">
+{% else %}
+<html lang="en">
+{% endif %}
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

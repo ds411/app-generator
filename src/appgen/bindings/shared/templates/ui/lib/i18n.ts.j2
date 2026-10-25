@@ -1,15 +1,17 @@
 {{ trace_header(i18n.element_id) }}
 // The UI text in more than one language. `t` gives the translation of a
 // text of the definition or of a component in the selected language, or
-// the text itself. `getLocale` gives the locale of the dates and numbers.
+// the text itself. `getLocale` gives the locale of the dates and numbers,
+// and `getDirection` the direction of the text.
 
 /**
  * The languages of the app. The first language is the language of the
- * definition. The locale (BCP 47) gives the format of dates and numbers.
+ * definition. The locale (BCP 47) gives the format of dates and numbers,
+ * and `dir` the direction of the text: `ltr` or `rtl`.
  */
 export const languages = [
 {% for language in i18n.languages %}
-  { code: {{ js(language.code) }}, label: {{ js(language.label) }}, locale: {{ js(language.locale) }} }, {{ trace(language.element_id) }}
+  { code: {{ js(language.code) }}, label: {{ js(language.label) }}, locale: {{ js(language.locale) }}, dir: {{ js(language.direction) }} }, {{ trace(language.element_id) }}
 {% endfor %}
 ] as const;
 
@@ -79,6 +81,22 @@ export function localeOf(language: Language): string {
 export function getLocale(): string {
   return localeOf({{ selected }});
 }
+
+/** The direction of the text of a language: `ltr` (left to right) or `rtl` (right to left). */
+export function dirOf(language: Language): "ltr" | "rtl" {
+  return languages.find((item) => item.code === language)?.dir ?? "ltr";
+}
+
+/** The direction of the text of the selected language. */
+export function getDirection(): "ltr" | "rtl" {
+  return dirOf({{ selected }});
+}
+
+/** Show the page in a language: its locale in `lang`, and the direction of its text in `dir`. */
+export function showLanguage(language: Language): void {
+  document.documentElement.lang = localeOf(language);
+  document.documentElement.dir = dirOf(language);
+}
 {% if binding.name == "nextjs" %}
 
 /**
@@ -130,7 +148,7 @@ export function matchLanguage(acceptLanguage: string | null): Language {
 export function setLanguage(language: Language): void {
   current = language;
   document.cookie = `${LANGUAGE_COOKIE}=${language}; path=/; max-age=31536000; samesite=lax`;
-  document.documentElement.lang = localeOf(language);
+  showLanguage(language);
   for (const listener of listeners) listener();
 }
 {% else %}
@@ -155,7 +173,7 @@ export function setLanguage(language: Language): void {
   } catch {
     // No storage: the language applies until the page loads again.
   }
-  document.documentElement.lang = localeOf(language);
+  showLanguage(language);
   for (const listener of listeners) listener();
 }
 {% endif %}
