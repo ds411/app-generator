@@ -1,0 +1,78 @@
+{{ trace_header(*py.message_elements) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if definition.address_field() else none %}
+{% set reset = definition.auth.password_reset %}
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+"""The messages of the sign-in to the users (ADR 0023): a subject, a text, and a link.
+
+The app makes each message in the language of the request. The delivery
+hook `app/core/messages_ext.py` sends it.
+"""
+
+from dataclasses import dataclass
+from typing import Literal
+
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+
+APP_TITLE = {{ py.string(app.title) }}
+"""The title of the app in the messages."""
+
+type MessageKind = Literal[{% if reset %}"password-reset"{% endif %}{% if reset and verify %}, {% endif %}{% if verify %}"email-verification"{% endif %}]
+"""The kinds of the messages: {% if reset %}a password reset link{% endif %}{% if reset and verify %}, and {% endif %}{% if verify %}a link that confirms the email address{% endif %}."""
+
+
+@dataclass(frozen=True, slots=True)
+class Message:
+    """A message of the sign-in to a user, with a link."""
+
+    kind: MessageKind
+    user: {{ u.name }}
+    to: str
+    """The address of the user: {% if address %}the email address (`{{ address.attr }}`){% else %}the user name{% endif %}."""
+    subject: str
+    """The subject, with the title of the app."""
+    text: str
+    """The text of the message. It holds the link."""
+    link: str
+
+
+def _message(
+    kind: MessageKind,
+    user: {{ u.name }},
+    subject: str,
+    lines: list[str],
+    link: str,
+) -> Message:
+    """Return a message with a subject, a text of two lines with the link between them."""
+    text = f"{lines[0]}\n\n{link}\n\n{lines[1]}\n"
+    to = user.{{ (address or username).attr }}
+    return Message(kind, user, to, f"{APP_TITLE}: {subject}", text, link)
+{% if reset %}
+
+
+{{ trace(reset.id) }}
+def password_reset_message(user: {{ u.name }}, link: str) -> Message:
+    """Return the message with the reset link of a user."""
+    lines = [
+        {{ py.message("Open the link to set a new password. The link is valid one time.") }},
+        {{ py.message("If you did not ask for a new password, ignore this message.") }},
+    ]
+    return _message("password-reset", user, {{ py.message("Reset the password") }}, lines, link)
+{% endif %}
+{% if verify %}
+
+
+{{ trace(verify.id) }}
+def email_verification_message(user: {{ u.name }}, link: str) -> Message:
+    """Return the message with the link that confirms the email address of a new user."""
+    lines = [
+        {{ py.message("Open the link to confirm the email address of your new account.") }},
+        {{ py.message("If you did not make an account, ignore this message.") }},
+    ]
+    subject = {{ py.message("Confirm the email address") }}
+    return _message("email-verification", user, subject, lines, link)
+{% endif %}

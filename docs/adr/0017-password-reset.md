@@ -53,7 +53,8 @@ without new packages and with no table except `credentials`.
   `auth.password_reset` (ADR 0005). Its stub writes the link to the log
   with `ENVIRONMENT=development`, and raises `NotImplementedError`
   (501) in production, so that a production app does not hide a missing
-  delivery.
+  delivery. (Update for ADR 0023: one hook delivers the messages of all
+  kinds, `app/core/messages_ext.py` in the FastAPI app.)
 
 ## Consequences
 

@@ -4,6 +4,9 @@
 {% set sign_up = definition.auth.sign_up %}
 {% set reset = definition.auth.password_reset %}
 {% set password = definition.auth.password %}
+{% set verify = sign_up.verify_email if sign_up else none %}
+{% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
+{% set default_role = none %}
 {% if sign_up and definition.access %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set default_role = sign_up.default_role or (definition.entities[u.name].fields[role.name].default) %}
@@ -35,12 +38,18 @@ import json
 import secrets
 {% endif %}
 import time
+{% if verify %}
+from datetime import UTC, datetime
+{% endif %}
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-{% if password %}
+{% if verify %}
+from pydantic import BaseModel, Field
+from sqlalchemy import DateTime, ForeignKey, String, func, null, select
+{% elif password %}
 from pydantic import BaseModel, Field
 from sqlalchemy import ForeignKey, String, select
 {% else %}
@@ -63,8 +72,9 @@ from app.core.errors import ProblemError, problem_responses
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
-{% if reset %}
-from app.core.password_reset_ext import deliver_password_reset
+{% if py.message_elements %}
+{{ py.from_import("app.core.messages", (["password_reset_message"] if reset else []) + (["email_verification_message"] if verify else [])) }}
+from app.core.messages_ext import deliver_message
 {% endif %}
 {% if sign_up %}
 from app.features.{{ u.slice }} import repository
@@ -82,12 +92,16 @@ MIN_PASSWORD_LENGTH = {{ definition.auth.min_password_length }}
 RESET_SECONDS = {{ reset.token_minutes * 60 }}
 """The time that a password reset link stays valid: {{ reset.token_minutes }} minutes."""
 {% endif %}
+{% if verify %}
+VERIFY_SECONDS = {{ verify.token_minutes * 60 }}
+"""The time that a link that confirms an email address stays valid: {{ verify.token_minutes }} minutes."""
+{% endif %}
 {% if password %}
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
 class Credential(Base):
-    """The password hash of a user."""
+    """The password hash of a user{{ ", and the time of the verification of the email address" if verify }}."""
 
     __tablename__ = "credentials"
 
@@ -95,6 +109,15 @@ class Credential(Base):
         ForeignKey("{{ u.table }}.id", ondelete="CASCADE"), primary_key=True
     )
     password_hash: Mapped[str] = mapped_column(String(200))
+{% if verify %}
+    {{ trace(verify.id) }}
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    """The time of the verification of the email address, or None before it. Without a value,
+    the database sets the current time, so that the users of the administrator and the users
+    that exist before the verification are verified (ADR 0023)."""
+{% endif %}
 
 
 def hash_password(password: str) -> str:
@@ -192,6 +215,33 @@ def read_reset_token(key: bytes, token: str) -> tuple[UUID, str] | None:
     except ValueError, KeyError:
         return None
 {% endif %}
+{% if verify %}
+
+
+{{ trace(verify.id) }}
+def address_tag(address: str) -> str:
+    """Return a short hash of an email address. Another address gives another tag."""
+    return hashlib.sha256(address.encode()).hexdigest()[:32]
+
+
+def make_verification_token(key: bytes, user_id: UUID, address: str, expires: int) -> str:
+    """Return a signed token that confirms the email address of a user until the time `expires`.
+
+    The token holds the tag of the address, so that it does not confirm
+    another address of the user.
+    """
+    payload = {"sub": str(user_id), "exp": expires, "adr": address_tag(address)}
+    return sign(key, "email-verification", payload)
+
+
+def read_verification_token(key: bytes, token: str) -> tuple[UUID, str] | None:
+    """Return the user ID and the address tag of a valid verification token that has not ended."""
+    payload = unsign(key, "email-verification", token)
+    try:
+        return (UUID(str(payload["sub"])), str(payload["adr"])) if payload else None
+    except ValueError, KeyError:
+        return None
+{% endif %}
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -230,6 +280,33 @@ async def find_user(session: AsyncSession, username: str) -> {{ u.name }} | None
     """Return the user with a user name, or None."""
     result = await session.execute(select({{ u.name }}).where({{ u.name }}.{{ username.attr }} == username))
     return result.scalar_one_or_none()
+{% if verify %}
+
+
+{{ trace(verify.id) }}
+async def remove_unverified_password(session: AsyncSession, user: {{ u.name }}) -> None:
+    """Remove the password of a user whose email address is not verified.
+
+    A provider calls it when it verifies the address. Nobody proved that
+    the person who chose the password at the sign-up owns the address, so
+    the password must not give access to the account. The user can set a
+    new password with a reset link.
+    """
+    credential = await session.get(Credential, user.id)
+    if credential is not None and credential.email_verified_at is None:
+        await session.delete(credential)
+        await commit(session)
+
+
+{{ trace(verify.id) }}
+async def send_verification(request: Request, user: {{ u.name }}) -> None:
+    """Send a user the message with the link that confirms the email address."""
+    settings = request.app.state.settings
+    expires = int(time.time()) + VERIFY_SECONDS
+    token = make_verification_token(signing_key(request), user.id, user.{{ address.attr }}, expires)
+    link = f"{settings.email_verify_url}?token={token}"
+    await deliver_message(settings, email_verification_message(user, link))
+{% endif %}
 
 
 {% if password %}
@@ -277,6 +354,26 @@ class PasswordReset(BaseModel):
     token: str = Field(min_length=1, max_length=1000)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
 {% endif %}
+{% if verify %}
+
+
+class VerificationRequested(BaseModel):
+    """The answer to a sign-up or to a request for a new link: the user gets a message."""
+
+    detail: str
+
+
+class VerificationLinkRequest(BaseModel):
+    """The user name of a user who needs a new link that confirms the email address."""
+
+    username: str = Field(min_length=1, max_length=320)
+
+
+class EmailVerification(BaseModel):
+    """The token of a link that confirms an email address."""
+
+    token: str = Field(min_length=1, max_length=1000)
+{% endif %}
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -294,17 +391,35 @@ async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
         or not verify_password(data.password, credential.password_hash)
     ):
         raise ProblemError(401, {{ py.message("The user name or the password is not correct.") }})
+{% if verify %}
+    {{ trace(verify.id) }}
+    if credential.email_verified_at is None:
+        {{ py.problem(403, "Confirm the email address first: open the link in the message.", 8) }}
+{% endif %}
     return Token(access_token=make_token(signing_key(request), user.id))
 {% endif %}
 {% if sign_up %}
 
 
 {{ trace(sign_up.id) }}
+{% if verify %}
+@router.post(
+    "/sign-up", status_code=202, responses=problem_responses(409, 422), operation_id="sign_up"
+)
+async def sign_up(
+    data: {{ u.name }}SignUp, request: Request, session: SessionDep
+) -> VerificationRequested:
+    """Make a new user with a password, and send the link that confirms the email address.
+
+    The user can sign in after the user opens the link. A user name that exists gives 409.
+    """
+{% else %}
 @router.post(
     "/sign-up", status_code=201, responses=problem_responses(409, 422), operation_id="sign_up"
 )
 async def sign_up(data: {{ u.name }}SignUp, request: Request, session: SessionDep) -> Token:
     """Make a new user with a password, and return a token. A user name that exists gives 409."""
+{% endif %}
     values = data.model_dump(by_alias=False, exclude={"password"})
 {% if default_role %}
     values["{{ role.attr }}"] = "{{ default_role }}"
@@ -313,9 +428,23 @@ async def sign_up(data: {{ u.name }}SignUp, request: Request, session: SessionDe
     # The record and its credential are in one transaction. The record
     # must be in the database before its credential.
     await flush(session)
+{% if verify %}
+    {{ trace(verify.id) }}
+    # The new user is not verified. Without a value, the database would set the time.
+    password_hash = hash_password(data.password)
+    session.add(Credential(user_id=user.id, password_hash=password_hash, email_verified_at=null()))
+    await flush(session)
+    # A failed delivery rolls back the new user, so that the user can sign up again.
+    await send_verification(request, user)
+    await commit(session)
+    return VerificationRequested(
+        detail={{ py.message("Open the link in the message to confirm the email address.") }}
+    )
+{% else %}
     session.add(Credential(user_id=user.id, password_hash=hash_password(data.password)))
     await commit(session)
     return Token(access_token=make_token(signing_key(request), user.id))
+{% endif %}
 {% endif %}
 
 
@@ -360,7 +489,8 @@ async def request_password_reset(
         password_hash = credential.password_hash if credential else None
         token = make_reset_token(signing_key(request), user.id, password_hash, expires)
         settings = request.app.state.settings
-        await deliver_password_reset(settings, user, f"{settings.password_reset_url}?token={token}")
+        link = f"{settings.password_reset_url}?token={token}"
+        await deliver_message(settings, password_reset_message(user, link))
 {% if i18n %}
     return PasswordResetRequested(
         detail=t("If the user name exists, the user gets a message with a reset link.")
@@ -387,5 +517,58 @@ async def confirm_password_reset(
     tag = password_tag(credential.password_hash if credential else None)
     if found is None or user is None or not hmac.compare_digest(found[1], tag):
         raise ProblemError(400, {{ py.message("The reset link is not valid, was used, or has ended.") }})
+{% if verify %}
+    if credential is not None and credential.email_verified_at is None:
+        {{ trace(verify.id) }}
+        # The reset link went to the email address, so the address is verified too.
+        credential.email_verified_at = datetime.now(UTC)
+{% endif %}
     await set_password(session, user, data.new_password)
+{% endif %}
+{% if verify %}
+
+
+{{ trace(verify.id) }}
+@router.post(
+    "/verify-email",
+    status_code=202,
+    responses=problem_responses(422, 501),
+    operation_id="request_email_verification",
+)
+async def request_email_verification(
+    data: VerificationLinkRequest, request: Request, session: SessionDep
+) -> VerificationRequested:
+    """Send a new link that confirms the email address. The answer is the same for each user name."""
+    user = await find_user(session, data.username)
+    credential = await session.get(Credential, user.id) if user else None
+    if user is not None and credential is not None and credential.email_verified_at is None:
+        await send_verification(request, user)
+    detail = {{ py.message("If the user name needs a confirmation, the user gets a message with a link.") }}
+    return VerificationRequested(detail=detail)
+
+
+{{ trace(verify.id) }}
+@router.post(
+    "/verify-email/confirm",
+    status_code=204,
+    responses=problem_responses(400, 422),
+    operation_id="confirm_email_verification",
+)
+async def confirm_email_verification(
+    data: EmailVerification, request: Request, session: SessionDep
+) -> None:
+    """Confirm the email address of a user with the token of a link. An ended token gives 400."""
+    found = read_verification_token(signing_key(request), data.token)
+    user = await session.get({{ u.name }}, found[0]) if found else None
+    credential = await session.get(Credential, user.id) if user else None
+    if (
+        found is None
+        or user is None
+        or credential is None
+        or not hmac.compare_digest(found[1], address_tag(user.{{ address.attr }}))
+    ):
+        raise ProblemError(400, {{ py.message("The link is not valid, or has ended.") }})
+    if credential.email_verified_at is None:
+        credential.email_verified_at = datetime.now(UTC)
+        await commit(session)
 {% endif %}

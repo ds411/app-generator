@@ -4,6 +4,8 @@
 {% set access = definition.access %}
 {% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
 {% set creates = py.providers | selectattr("create_users") | list %}
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
 """The sign-in with OpenID Connect providers (ADR 0020).
 
 The flow is the authorization code flow with PKCE. `GET
@@ -37,7 +39,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel{{ ", ValidationError" if creates }}
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import Token, find_user, make_token, sign, signing_key, unsign
+{{ py.from_import("app.core.auth", ["Token", "find_user", "make_token", "sign", "signing_key", "unsign"] + (["remove_unverified_password"] if verify else [])) }}
 from app.core.config import Settings
 {% if creates %}
 from app.core.db import SessionDep, commit
@@ -240,10 +242,16 @@ async def user_of(
         {{ py.problem(401, "The provider did not verify the email address.", 8) }}
     user = await find_user(session, username)
     if user is not None:
+{% if verify %}
+        {{ trace(verify.id) }}
+        email = claims.get("email")
+        if claims.get("email_verified") in (True, "true") and email == user.{{ address.attr }}:
+            await remove_unverified_password(session, user)
+{% endif %}
         return user
+{% if creates %}
     if not provider.create_users:
         {{ py.problem(403, "No user has the user name {username}. Ask an administrator.", 8, username="username") }}
-{% if creates %}
     values: dict[str, Any] = {attr: claims.get(claim) for attr, claim in provider.claims}
     values["{{ username.attr }}"] = username
 {% if role %}
@@ -257,6 +265,8 @@ async def user_of(
     user = await repository.add(session, data)
     await commit(session)
     return user
+{% else %}
+    {{ py.problem(403, "No user has the user name {username}. Ask an administrator.", 4, username="username") }}
 {% endif %}
 
 

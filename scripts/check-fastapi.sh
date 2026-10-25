@@ -13,6 +13,9 @@
 # tests/fixtures/provider-sign-in.yaml (only the sign-in with
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
+# Last, generate tests/fixtures/account-security.yaml (the verification
+# of the email address, and the delivery hook of the messages), and
+# check its code and run its tests.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -20,8 +23,9 @@
 #
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The other apps go to the folders
-# "<output folder>-room-booking", "<output folder>-provider-sign-in", and
-# "<output folder>-rate-limit" (the app of the rate limit check). The
+# "<output folder>-room-booking", "<output folder>-provider-sign-in",
+# "<output folder>-account-security", and "<output folder>-rate-limit"
+# (the app of the rate limit check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
@@ -38,6 +42,7 @@ set -eu
 definition=examples/project-tracker/app.yaml
 auth_definition=examples/room-booking/app.yaml
 provider_definition=tests/fixtures/provider-sign-in.yaml
+security_definition=tests/fixtures/account-security.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -45,10 +50,11 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
+security_out="$out-account-security"
 
 step() {
     echo "check-fastapi: $*"
@@ -147,5 +153,18 @@ rm -f test.db
 cd "$root"
 step "provider sign-in: the sign-in with the mock provider"
 uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
+step "generate $security_definition in $security_out"
+rm -rf "$security_out"
+uv run --locked appgen generate "$security_definition" -b fastapi -o "$security_out" >/dev/null
+uv run --locked appgen check "$security_definition" "$security_out"
+cd "$security_out"
+step "account security: uv sync, ruff, pyright, pytest on SQLite"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+cd "$root"
 
 step "passed"

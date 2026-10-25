@@ -1,0 +1,46 @@
+# An app with the account security of the sign-in (ADR 0023): the
+# verification of the email address of a new user, and the password
+# reset. The user name is not the email address, so the messages go to
+# the field `email`. The messages are in the language of the request,
+# and the delivery is the extension file of the app.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+version: 0
+app:
+  name: club-desk
+  title: Club desk
+entities:
+  Member:
+    fields:
+      login: { type: string, required: true, unique: true, max_length: 60 }
+      email: { type: email, required: true, unique: true }
+      name: { type: string, required: true, max_length: 120 }
+  Note:
+    fields:
+      text: { type: text, required: true }
+operations:
+  list_members: { kind: list, entity: Member }
+  list_notes: { kind: list, entity: Note }
+  create_note: { kind: create, entity: Note }
+auth:
+  user_entity: Member
+  username_field: login
+  sign_up:
+    fields: [login, email, name]
+    verify_email: { token_minutes: 120 }
+  password_reset: {}
+  providers:
+    club:
+      title: Club account
+      issuer: https://login.example.com
+      client_id_env: CLUB_CLIENT_ID
+      client_secret_env: CLUB_CLIENT_SECRET
+      username_claim: preferred_username
+translations:
+  default: en
+  languages:
+    en: { label: English }
+    de:
+      label: Deutsch
+      text:
+        Reset the password: Das Passwort zurücksetzen
+        Confirm the email address: Die E-Mail-Adresse bestätigen

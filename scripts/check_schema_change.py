@@ -12,6 +12,11 @@ temporary folder, and then:
    first migration did not change, that the models and the migrations
    agree (`alembic check`), and that `appgen check` passes.
 
+Then it does the same steps for the verification of the email address
+(ADR 0023): it generates `tests/fixtures/account-security.yaml` without
+`verify_email`, adds a user with a password, turns on `verify_email`, and
+checks that the next migration keeps the user verified.
+
 `scripts/check-fastapi.sh` runs it after its other checks. Run it by hand
 from the repository root, with a generated app:
 
@@ -30,6 +35,8 @@ import uuid
 from pathlib import Path
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+SECURITY = Path("tests/fixtures/account-security.yaml")
+VERIFY_EMAIL = "    verify_email: { token_minutes: 120 }\n"
 FIRST = Path("migrations/versions/0001_schema.py")
 PERSON = "    fields:\n      name: { type: string, required: true, max_length: 120 }\n"
 NEW_FIELD = "      phone: { type: string, max_length: 40 }\n"
@@ -113,12 +120,59 @@ def check(app: Path) -> None:
     log("passed")
 
 
+def check_verification(root: Path) -> None:
+    """Turn on `verify_email` in an app with a user: the user stays verified (ADR 0023)."""
+    with tempfile.TemporaryDirectory(prefix="appgen-schema-change.") as temp:
+        text = SECURITY.read_text()
+        if VERIFY_EMAIL not in text:
+            raise SchemaChangeError(f"{SECURITY} has no 'verify_email' in the expected form.")
+        before = Path(temp) / "before.yaml"
+        before.write_text(text.replace(VERIFY_EMAIL, ""))
+        work = Path(temp) / "app"
+        args = ["uv", "run", "--locked", "appgen", "generate"]
+        log(f"generate {SECURITY} without verify_email")
+        run([*args, str(before), "-b", "fastapi", "-o", str(work)], root)
+        database = Path(temp) / "data.db"
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+        env["DATABASE_URL"] = f"sqlite+aiosqlite:///{database}"
+        run(["uv", "sync", "--quiet"], work, env)
+        run(["uv", "run", "alembic", "upgrade", "head"], work, env)
+        member = uuid.uuid4()
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "INSERT INTO members (id, login, email, name) VALUES (?, ?, ?, ?)",
+                (member.hex, "ada", "ada@example.com", "Ada Lovelace"),
+            )
+            connection.execute(
+                "INSERT INTO credentials (user_id, password_hash) VALUES (?, ?)",
+                (member.hex, "scrypt$00$00"),
+            )
+
+        log("generate the app again with verify_email")
+        run([*args, str(SECURITY), "-b", "fastapi", "-o", str(work)], root)
+        message = "verify the email addresses"
+        run(["uv", "run", "alembic", "revision", "--autogenerate", "-m", message], work, env)
+        new = [p for p in (work / FIRST.parent).glob("*.py") if p.name != FIRST.name]
+        if len(new) != 1 or "email_verified_at" not in new[0].read_text():
+            raise SchemaChangeError("The migration does not add the column email_verified_at.")
+        run(["uv", "run", "alembic", "upgrade", "head"], work, env)
+        run(["uv", "run", "alembic", "check"], work, env)
+        with sqlite3.connect(database) as connection:
+            rows = connection.execute(
+                "SELECT email_verified_at FROM credentials WHERE user_id = ?", (member.hex,)
+            ).fetchall()
+        if len(rows) != 1 or rows[0][0] is None:
+            raise SchemaChangeError(f"The user that exists is not verified: {rows}.")
+    log("passed: the users that exist are verified")
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
     try:
         check(Path(sys.argv[1]).resolve())
+        check_verification(Path.cwd())
     except (SchemaChangeError, subprocess.CalledProcessError) as error:
         print(f"schema-change: failed: {error}", file=sys.stderr)
         return 1

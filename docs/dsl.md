@@ -1034,6 +1034,7 @@ auth:
   sign_up:
     fields: [name, email, team]
     default_role: member
+    verify_email: true
   password_reset:
     token_minutes: 30
   providers:
@@ -1061,6 +1062,16 @@ auth:
   have the role field or a computed field. With `access`,
   `default_role` is the role of a new user. Without it, a new user gets
   the default of the role field.
+- `sign_up.verify_email` makes a new user confirm the email address
+  before the first sign-in ([ADR 0023](adr/0023-email-verification.md)).
+  It is off by default. The app sends a message with a link to the
+  address, and the user can sign in only after the user opens the link.
+  `true` gives a link that stays valid for one day. The mapping form
+  sets the time: `verify_email: { token_minutes: 60 }` (5 to 10080,
+  default 1440). The address is the user name field if its type is
+  `email`, else the first required `email` field of the user entity: the
+  user entity must have one. The users that an administrator gives a
+  password, and the users of a provider, need no verification.
 - `password_reset` lets a user who forgot the password set a new one
   with a link in a message ([ADR 0017](adr/0017-password-reset.md)). It
   is off by default. `token_minutes` (5 to 1440, default 60) is the
@@ -1085,21 +1096,30 @@ auth:
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up` or `password_reset`.
 - No page can use the path `/sign-in`, `/sign-up` with a sign-up,
-  `/forgot-password` and `/reset-password` with a password reset, or a
-  path under `/auth/` with providers: they are the pages of the front
-  ends.
+  `/verify-email` with `verify_email`, `/forgot-password` and
+  `/reset-password` with a password reset, or a path under `/auth/` with
+  providers: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
 set-password <user name>`. With `sign_up`, the public endpoint `POST
 /auth/sign-up` makes the user and its password in one transaction, and
 gives a bearer token. A user name that exists gives 409. With
-`password_reset`, `POST /auth/password-reset` sends a reset link with a
-signed token, and gives 202 also for an unknown user name. `POST
-/auth/password-reset/confirm` sets the new password. A used or an ended
-token gives 400. The extension file `app/core/password_reset_ext.py`
-delivers the link: its stub writes the link to the log with
-`ENVIRONMENT=development`, and gives 501 in production. With
+`verify_email`, the sign-up gives 202 without a token, and sends a link
+with a signed token to the address. A sign-in before the user opens the
+link gives 403. `POST /auth/verify-email/confirm` confirms the address
+with the token, and `POST /auth/verify-email` sends a new link (202 also
+for an unknown user name). `EMAIL_VERIFY_URL` is the page of the link. A
+password reset link confirms the address too. A provider that says
+that the address is verified (`email_verified: true`) removes the
+password of a sign-up that is not verified. With `password_reset`, `POST
+/auth/password-reset` sends a reset link with a signed token, and gives
+202 also for an unknown user name. `POST /auth/password-reset/confirm`
+sets the new password. A used or an ended token gives 400. The
+extension file `app/core/messages_ext.py` delivers the messages of both
+kinds: its stub writes the link to the log with
+`ENVIRONMENT=development`, and gives 501 in production. The subject and
+the text of a message are in the language of the request. With
 `providers`, `GET /auth/providers/<name>/start` sends the browser to the
 provider (the authorization code flow with PKCE), and `GET
 /auth/providers/<name>/callback` checks the ID token (the signature
@@ -1393,6 +1413,18 @@ to translate one. The rules and the workflows give their own messages.
   `Your role may not do this operation.`, `The server has no AUTH_SECRET.`,
   `If the user name exists, the user gets a message with a reset link.`,
   `The reset link is not valid, was used, or has ended.`.
+- The verification of the email address:
+  `Open the link in the message to confirm the email address.`,
+  `Confirm the email address first: open the link in the message.`,
+  `If the user name needs a confirmation, the user gets a message with a link.`,
+  `The link is not valid, or has ended.`.
+- The messages to the users (the subject is the title of the app and a
+  text): `Reset the password`,
+  `Open the link to set a new password. The link is valid one time.`,
+  `If you did not ask for a new password, ignore this message.`,
+  `Confirm the email address`,
+  `Open the link to confirm the email address of your new account.`,
+  `If you did not make an account, ignore this message.`.
 - The sign-in with a provider:
   `The server has no client ID or client secret for {name}.`,
   `The provider did not answer correctly: {url}`,

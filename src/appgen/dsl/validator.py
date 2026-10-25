@@ -24,6 +24,7 @@ from appgen.dsl.auth import (
     RESET_PASSWORD_PATH,
     SIGN_IN_PATH,
     SIGN_UP_PATH,
+    VERIFY_EMAIL_PATH,
     Auth,
     Provider,
     SignUp,
@@ -571,6 +572,8 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     if auth.password_reset is not None:
         reserved[FORGOT_PASSWORD_PATH] = "forgot password"
         reserved[RESET_PASSWORD_PATH] = "password reset"
+    if auth.sign_up is not None and auth.sign_up.verify_email is not None:
+        reserved[VERIFY_EMAIL_PATH] = "email verification"
     for page in definition.pages.values():
         if page.path in reserved:
             yield _error(
@@ -643,6 +646,14 @@ def _check_sign_up(
                 hint="Make the relation optional, or turn off the sign-up.",
             )
     yield from _check_default_role(definition, sign_up, sign_up.default_role, entity, "sign-up")
+    if sign_up.verify_email is not None and definition.address_field() is None:
+        yield _error(
+            "unsuitable-field",
+            "The email verification needs a required field of the type 'email' "
+            f"in '{auth.user_entity}' for the address.",
+            sign_up.verify_email,
+            hint="Make the user name an 'email' field, or add a required 'email' field.",
+        )
 
 
 def _check_default_role(

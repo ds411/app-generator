@@ -55,6 +55,11 @@ spec:
             - name: PASSWORD_RESET_URL
               value: https://app.example.com/reset-password
 {% endif %}
+{% if definition.auth and definition.auth.sign_up and definition.auth.sign_up.verify_email %}
+            # The page of the front end that confirms an email address with a link.
+            - name: EMAIL_VERIFY_URL
+              value: https://app.example.com/verify-email
+{% endif %}
 {% for api in py_apis.values() %}
             {{ trace(api.id) }}
             - name: {{ api.url_env }}

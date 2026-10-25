@@ -252,8 +252,10 @@ git config core.hooksPath .githooks
   `tests/fixtures/provider-sign-in.yaml` (only providers), and runs
   Ruff, pyright, the generated tests, and `appgen check` on them. A
   browser signs in to both apps through the mock OpenID Connect provider
-  `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). It needs
-  Docker. Run it by hand with
+  `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). Last, it
+  generates `tests/fixtures/account-security.yaml` (the verification of
+  the email address), and runs Ruff, pyright, the generated tests, and
+  `appgen check` on it. It needs Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
 - When a push changes the generator core, the Next.js binding, or the

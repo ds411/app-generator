@@ -67,6 +67,14 @@ def upgrade() -> None:
         "credentials",
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("password_hash", sa.String(length=200), nullable=False),
+{% if definition.auth.sign_up and definition.auth.sign_up.verify_email %}
+        sa.Column(
+            "email_verified_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=True,
+        ),
+{% endif %}
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["{{ u.table }}.id"],

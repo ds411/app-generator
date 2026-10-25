@@ -38,3 +38,4 @@ gives the rules.
 | 0019   | [Third-party APIs from OpenAPI documents](0019-third-party-apis.md)    | Accepted |
 | 0020   | [Sign-in with OpenID Connect providers](0020-providers.md)             | Accepted |
 | 0021   | [Seed data in the app definition](0021-seed-data.md)                   | Accepted |
+| 0023   | [Verification of the email address](0023-email-verification.md)       | Accepted |

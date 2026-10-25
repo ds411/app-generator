@@ -196,7 +196,17 @@ a long random text in each environment.
 - `GET /auth/me` gives the signed-in user. The users sign in with a
   provider, not with a password.
 {% endif %}
-{% if definition.auth.sign_up %}
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% if verify %}
+- `POST /auth/sign-up` makes a new user with a password, and sends a
+  message with a link that confirms the email address (202, without a
+  token). A user name that exists gives 409. The user can sign in only
+  after the user opens the link: before, the sign-in gives 403. `POST
+  /auth/verify-email/confirm` confirms the address with the token of
+  the link. A link is valid for {{ verify.token_minutes }} minutes. `POST /auth/verify-email`
+  sends a new link, and gives 202 also for an unknown user name.
+  `EMAIL_VERIFY_URL` is the page of the front end in the link.
+{% elif definition.auth.sign_up %}
 - `POST /auth/sign-up` makes a new user with a password, and gives a
   token. A user name that exists gives 409.
 {% endif %}
@@ -205,10 +215,13 @@ a long random text in each environment.
   202 also for an unknown user name. `POST /auth/password-reset/confirm`
   sets a new password with the token of the link. A link is valid for
   {{ definition.auth.password_reset.token_minutes }} minutes and one time. `PASSWORD_RESET_URL` is the page of
-  the front end in the link. Write the delivery of the link (for example
-  an email) in `app/core/password_reset_ext.py`. Until then, the link
-  goes to the log with `ENVIRONMENT=development`, and the endpoint
-  gives 501 in production.
+  the front end in the link.
+{% endif %}
+{% if py.message_elements %}
+- Write the delivery of the messages with the links (for example an
+  email) in `app/core/messages_ext.py`. Until then, the links go to the
+  log with `ENVIRONMENT=development`, and the endpoints that send a
+  message give 501 in production.
 {% endif %}
 {% if py.providers %}
 - `GET /auth/providers/<name>/start` sends the browser to the sign-in

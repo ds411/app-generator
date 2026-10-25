@@ -72,11 +72,18 @@ def test_the_fastapi_app_has_the_reset_endpoints_and_a_delivery_hook() -> None:
     assert "RESET_SECONDS = 1800\n" in auth
     assert '    "/password-reset",\n    status_code=202,' in auth
     assert '    "/password-reset/confirm",\n    status_code=204,' in auth
-    assert "from app.core.password_reset_ext import deliver_password_reset\n" in auth
-    hook = files["app/core/password_reset_ext.py"]
+    assert "from app.core.messages_ext import deliver_message\n" in auth
+    assert "await deliver_message(settings, password_reset_message(user, link))" in auth
+    hook = files["app/core/messages_ext.py"]
     assert hook.kind == "extension"
     assert "# @trace:gap auth.password_reset file\n" in hook.content
-    assert '    raise NotImplementedError("auth.password_reset")\n' in hook.content
+    assert "async def deliver_message(settings: Settings, message: Message) -> None:" in (
+        hook.content
+    )
+    assert "    raise NotImplementedError(" in hook.content
+    assert "def password_reset_message(user: Member, link: str) -> Message:" in (
+        files["app/core/messages.py"].content
+    )
     config = files["app/core/config.py"].content
     assert '    environment: Literal["development", "production"] = "production"\n' in config
     assert "async def test_an_expired_reset_token_gives_400(" in files["tests/test_auth.py"].content

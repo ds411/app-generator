@@ -107,9 +107,14 @@ BINDING = Binding(
             when="py.providers",
         ),
         Output(
-            template="app/core/password_reset_ext.py.j2",
-            path="app/core/password_reset_ext.py",
-            when="definition.auth and definition.auth.password_reset",
+            template="app/core/messages.py.j2",
+            path="app/core/messages.py",
+            when="py.message_elements",
+        ),
+        Output(
+            template="app/core/messages_ext.py.j2",
+            path="app/core/messages_ext.py",
+            when="py.message_elements",
             extension=True,
         ),
         Output(
@@ -272,7 +277,8 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
+        | {"auth", "sign_up", "email_verification", "password_reset", "provider"}
+        | {"access", "role", "record_rule"}
         | {"api", "api_operation"}
         | {"translations", "language"}
     ),
