@@ -30,9 +30,11 @@ that the two generated apps work together:
    that the browser gets from the mock server of the third-party APIs
    (scripts/mock_api.py) through the generated client. The build sets
    the base URLs of the APIs to the mock server.
-7. Call the endpoint of an operation of the exposed API `exchange_rates`
-   (`expose: true`) in the FastAPI app: the app must call the mock
-   server with the API key, and give the example answer.
+7. Call the endpoint of an operation of the exposed APIs
+   `exchange_rates` and `finance` (`expose: true`) in the FastAPI app:
+   the app must call the mock server with the API key, or with an
+   OAuth 2.0 token and the cookie parameter, and give the example
+   answer.
 
 Run it from the repository root:
 
@@ -65,7 +67,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from mock_api import MockApi
+from mock_api import SECRET, MockApi
 
 from appgen.bindings.react.api_client import DATA_KEY, api_entities
 from appgen.bindings.shared.views import ViewContext
@@ -90,8 +92,6 @@ TODO_COUNT = BOARD_PAGE + 4
 """The tasks that the test adds to the column "To do": more than one page of the column."""
 HOLIDAY_NAME = "Christmas Day"
 """A holiday of the example answers of the holidays API, which the dashboard widget shows."""
-SECRET = "check-secret"
-"""The secret of each API with a secret in the FastAPI app."""
 
 # Open a page, and wait until it shows a text. The arguments are the URL
 # and the text.
@@ -536,13 +536,12 @@ def api_client_test(out: Path) -> None:
     loaded = load_definition(definition)
     with MockApi(loaded) as mock:
         # The FastAPI app calls the exposed APIs on the mock server, with
-        # their secrets.
-        secrets = {a.security.env: SECRET for a in loaded.apis.values() if a.security}
+        # their credentials.
         api_env = {
             **database,
             "CORS_ORIGINS": json.dumps([WEB_URL]),
             **mock.env(),
-            **secrets,
+            **mock.credentials(),
         }
         # The browser reads the base URLs of the APIs from the build variables.
         apis = {f"VITE_{name}": url for name, url in mock.env().items()}
@@ -652,7 +651,7 @@ def check_apps(definition: Path, mock: MockApi) -> None:
 
 
 def check_exposed_api(mock: MockApi) -> None:
-    """Check that the FastAPI app calls the exposed API `exchange_rates` with its secret."""
+    """Check that the FastAPI app calls the exposed APIs with their credentials."""
     url = f"{API_URL}/apis/exchange-rates/get-latest-rates?base=EUR&symbols=USD&symbols=GBP"
     log(f"call {url}")
     answer = request("GET", url)
@@ -668,6 +667,25 @@ def check_exposed_api(mock: MockApi) -> None:
     if call["headers"].get("x-api-key") != SECRET:
         raise ApiClientError("The FastAPI app did not send the API key of the API.")
     log("the FastAPI app called the exchange rates API with its API key")
+
+    url = f"{API_URL}/apis/finance/get-budget?project=APP&tenant=acme"
+    log(f"call {url}")
+    answer = request("GET", url)
+    expected = next(r.example for r in mock.routes if r.operation_id == "getBudget")
+    if answer != expected:
+        raise ApiClientError(f"The endpoint gave {answer}, not the example {expected}.")
+    tokens = mock.calls("finance", "token")
+    if len(tokens) != 1:
+        raise ApiClientError(f"The FastAPI app got {len(tokens)} tokens, not 1.")
+    calls = mock.calls("finance", "getBudget")
+    if len(calls) != 1:
+        raise ApiClientError(f"The FastAPI app called the API {len(calls)} times, not 1.")
+    headers = cast(dict[str, Any], calls[0])["headers"]
+    if headers.get("authorization") != "Bearer mock-token-1":
+        raise ApiClientError("The FastAPI app did not send the token of the token endpoint.")
+    if headers.get("cookie") != "tenant=acme":
+        raise ApiClientError(f"The FastAPI app sent the cookies {headers.get('cookie')!r}.")
+    log("the FastAPI app called the finance API with an OAuth 2.0 token and the cookie")
 
 
 def main() -> int:

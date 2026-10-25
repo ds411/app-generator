@@ -10,6 +10,7 @@ clients of the two apps agree.
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from appgen.dsl.apis import Api
@@ -40,6 +41,8 @@ _RESERVED_METHODS = frozenset({"constructor", "http", "timeoutMs"})
 # The characters of a path that a regular expression must escape.
 _REGEX_SPECIAL = re.compile(r"[\\^$.|?*+()[\]{}/]")
 _SCALARS = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean"}
+# The location of each kind of parameter, and its key in the request parts.
+_PART_KEYS = (("path", "path"), ("query", "query"), ("header", "headers"), ("cookie", "cookies"))
 
 
 def exposed_prefix(api: str) -> str:
@@ -128,6 +131,11 @@ class TsMethod:
     endpoint: str = ""
     """The path of the endpoint of the FastAPI app for an exposed API, for example
     `/apis/holidays/get-public-holidays`."""
+    body_kind: str = "json"
+    """`json`, `form`, or `multipart`."""
+    answer: str = "json"
+    """`json`, `text`, or `binary`."""
+    answer_media: str = "application/json"
 
     @property
     def params_optional(self) -> bool:
@@ -176,14 +184,38 @@ class TsMethod:
         if exposed and self.parameters:
             items = ", ".join(f"{ts_key(p.name)}: {p.access}" for p in self.parameters)
             lines.append(f"query: {{ {items} }},")
-        for location, key in (("path", "path"), ("query", "query"), ("header", "headers")):
+        for location, key in _PART_KEYS:
             found = [p for p in self.parameters if p.location == location]
             if found and not exposed:
                 items = ", ".join(f"{ts_key(p.name)}: {p.access}" for p in found)
                 lines.append(f"{key}: {{ {items} }},")
         if self.body_type is not None:
-            lines.append("body,")
+            match self.body_kind:
+                case "form":
+                    lines.append("form: body,")
+                case "multipart":
+                    lines.append("form: body,")
+                    lines.append("multipart: true,")
+                case _:
+                    lines.append("body,")
+        if self.answer != "json" and self.result_type is not None:
+            lines.append(f"answer: {json.dumps(self.answer)},")
+            lines.append(f"accept: {json.dumps(self.answer_media)},")
         return lines
+
+    @property
+    def mock_media(self) -> str | None:
+        """The content type of the mock answer of a text or a binary answer, or None for JSON."""
+        if self.result_type is None or self.answer == "json":
+            return None
+        if "*" not in self.answer_media:
+            return self.answer_media
+        return "text/plain" if self.answer == "text" else "application/octet-stream"
+
+    @property
+    def cookie_parameter(self) -> str | None:
+        """The name of the first cookie parameter, or None."""
+        return next((p.name for p in self.parameters if p.location == "cookie"), None)
 
     def doc_lines(self) -> list[str]:
         """Return the lines of the JSDoc comment of the method, without the comment markers."""
@@ -212,8 +244,9 @@ class TsApi:
     base_url: str
     url_env: str
     secret_env: str | None
+    """The environment variable of the API key, the token, or the client secret."""
     credential: str | None
-    """`header`, `query`, or `bearer`."""
+    """`header`, `query`, `bearer`, or `oauth2`."""
     credential_name: str | None
     types: list[TsType] = field(default_factory=list[TsType])
     methods: list[TsMethod] = field(default_factory=list[TsMethod])
@@ -221,6 +254,35 @@ class TsApi:
     """True: the FastAPI app has an endpoint for each operation (`apis.<api>.expose`)."""
     prefix: str = ""
     """The path of the endpoints of an exposed API in the FastAPI app."""
+    client_id_env: str | None = None
+    """OAuth 2.0: the environment variable of the client ID."""
+    token_url: str = ""
+    """OAuth 2.0: the token URL of the client credentials flow. A path is under the base URL."""
+    scopes: tuple[str, ...] = ()
+    """OAuth 2.0: the scopes of the access token."""
+
+    @property
+    def cookie_method(self) -> TsMethod | None:
+        """The first method with a cookie parameter, or None."""
+        return next((m for m in self.methods if m.cookie_parameter), None)
+
+    @property
+    def browser(self) -> bool:
+        """True if a browser can call the API: it has no secret and no cookie parameter."""
+        return self.secret_env is None and self.cookie_method is None
+
+    @property
+    def server_reason(self) -> str:
+        """Why only a server can call the API, as the end of a sentence."""
+        if self.secret_env is not None:
+            return f"has a secret (`{self.secret_env}`), and a browser app cannot keep a secret"
+        method = self.cookie_method
+        if method is None:
+            return ""
+        return (
+            f"sends the cookie parameter `{method.cookie_parameter}` in the operation "
+            f"`{method.operation_id}`, and a browser cannot set a cookie for another site"
+        )
 
     @property
     def browser_env(self) -> str:
@@ -252,10 +314,32 @@ class TsApi:
         return None
 
     @property
+    def token_const(self) -> str:
+        """The constant of the token URL of an API with OAuth 2.0."""
+        return self.base_url_const.removesuffix("_BASE_URL") + "_TOKEN_URL"
+
+    @property
     def examples_json(self) -> str:
         """The example answer of each operation, as JSON text."""
         data = {m.operation_id: m.example for m in self.methods}
         return json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True)
+
+
+def ts_features(apis: Mapping[str, TsApi]) -> frozenset[str]:
+    """Return what the HTTP client of the apps needs for the methods of these APIs: `form`,
+    `multipart`, `text`, `binary`, `cookie`, and `oauth2`."""
+    found: set[str] = set()
+    for api in apis.values():
+        if api.credential == "oauth2":
+            found.add("oauth2")
+        for m in api.methods:
+            if m.body_type is not None and m.body_kind != "json":
+                found.add(m.body_kind)
+            if m.result_type is not None and m.answer != "json":
+                found.add(m.answer)
+            if m.cookie_parameter:
+                found.add("cookie")
+    return frozenset(found)
 
 
 def ts_apis(definition: AppDefinition) -> dict[str, TsApi]:
@@ -273,7 +357,8 @@ def _api(name: str, api: Api) -> TsApi:
     )
     credential: str | None = None
     if scheme is not None:
-        credential = "bearer" if scheme.type == "http" else scheme.location
+        credential = {"http": "bearer", "oauth2": "oauth2"}.get(scheme.type, scheme.location)
+    security = api.security
     folder = kebab(name)
     ts = TsApi(
         name=name,
@@ -286,11 +371,14 @@ def _api(name: str, api: Api) -> TsApi:
         base_url_const=constant(name) + "_BASE_URL",
         base_url=document.base_url if document is not None else "",
         url_env=api.base_url_env,
-        secret_env=api.security.env if api.security else None,
+        secret_env=security.secret_env if security else None,
         credential=credential,
         credential_name=scheme.parameter if scheme is not None else None,
         exposed=api.expose,
         prefix=exposed_prefix(name) if api.expose else "",
+        client_id_env=security.client_id_env if security else None,
+        token_url=(scheme.token_url or "") if scheme is not None else "",
+        scopes=tuple(security.scopes) if security else (),
     )
     taken = {s.name for s in spec.schemas}
     ts.types = sorted((_named(s) for s in spec.schemas), key=lambda t: t.name)
@@ -347,6 +435,9 @@ def _method(
         result_type=ts_type(operation.result) if operation.result is not None else None,
         status=operation.status,
         example=operation.example,
+        body_kind=operation.body_kind,
+        answer=operation.answer,
+        answer_media=operation.answer_media,
     )
 
 
@@ -378,6 +469,8 @@ def ts_type(schema: Schema) -> str:
             return name
         case ScalarSchema(kind, _, enum) if enum:
             return " | ".join(json.dumps(v, ensure_ascii=False) for v in enum)
+        case ScalarSchema("string", "binary"):
+            return "Blob"
         case ScalarSchema(kind):
             return _SCALARS.get(kind, "null")
         case ArraySchema(items):

@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from appgen.bindings.shared.integrations import ts_features
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.gen.naming import camel, pascal, words
 
@@ -246,5 +247,6 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "param_type": param_type,
     "zod_schema": zod_schema,
     "param_schema": param_schema,
+    "ts_features": ts_features,
 }
 """The template globals that the shared entity templates use."""

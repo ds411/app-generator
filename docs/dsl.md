@@ -656,7 +656,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the secret. The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so `env` cannot have it. Without `security`, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, and the optional `scopes` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
 | `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
@@ -666,9 +666,51 @@ apis:
   document, so the same files give the same app.
 - Each operation ID must exist in the document, and must be a valid ID
   segment (letters, digits, and `_`).
-- The clients support an API key in a header or a query parameter, and
-  a bearer token. They send path, query, and header parameters, and
-  JSON bodies, and they read JSON answers.
+- The clients support an API key in a header or a query parameter, a
+  bearer token, and OAuth 2.0 with the client credentials flow.
+- They send path, query, header, and cookie parameters. A cookie
+  parameter is a text, a number, or a boolean, and goes in the header
+  `Cookie`.
+- A request body is JSON, a form (`application/x-www-form-urlencoded`),
+  or a multipart form (`multipart/form-data`). The schema of a form is
+  an object with properties. A form has only texts, numbers, booleans,
+  and lists of these. A multipart form can also have files and objects:
+  a file is a string with `format: binary` (or, in OpenAPI 3.1, with
+  `contentMediaType` and without `contentEncoding`), and an object goes
+  as JSON text. A file is a `Blob` in TypeScript and an `ApiFile` (the
+  name, the content, and the media type) in Python. When the document
+  gives more than one media type, the client sends JSON first, then a
+  form, then a multipart form.
+- An answer is JSON, text (a media type `text/*`: a string), or binary
+  data (another media type: a `Blob` in TypeScript, `bytes` in Python).
+  The client sends the media type of the answer in the header `Accept`.
+  When the document gives more than one media type, JSON comes first,
+  then text.
+- With OAuth 2.0, the client gets an access token from the token URL of
+  the client credentials flow of the scheme. It authenticates with
+  HTTP Basic, with the client ID and the client secret, and asks for
+  the scopes in `scopes`. Each scope must be a scope of the flow. A
+  token URL that is a path (for example `/oauth/token`) is under the
+  base URL of the API. The process keeps one token for the clients of
+  an API, and two requests at the same time wait for the same token.
+  The client gets a new token a little before the token ends, and one
+  time after an answer with the status 401. The client ID is not a
+  secret, but only the server apps get it.
+
+```yaml
+apis:
+  finance:
+    document: apis/finance.openapi.yaml
+    base_url_env: FINANCE_API_URL
+    security:
+      scheme: oauth
+      client_id_env: FINANCE_CLIENT_ID
+      client_secret_env: FINANCE_CLIENT_SECRET
+      scopes: [budgets:read]
+    expose: true
+    operations: [getBudget]
+```
+
 - The client has only the selected operations and the schemas that they
   use. Each answer has an example: the example of the document, or a
   sample from the schema.
@@ -676,13 +718,13 @@ apis:
   FastAPI app, its extension function then gets the clients of these
   APIs as arguments. The Next.js app has a server-only client for each
   API in `src/shared/api/<api>/`, which the extension file imports.
-- The React app calls the APIs in the browser, and a browser app cannot
-  keep a secret. Thus only an API without `security` or with `expose`
-  gets a client in `src/shared/api/<api>/`. With mock data, the client
-  gives the example answers. For an API with `security` and without
-  `expose`, `appgen generate` gives a warning: set `expose: true`, or
-  call the API in a custom operation of the FastAPI app, and set
-  `x-react-data: api`.
+- The React app calls the APIs in the browser. A browser app cannot
+  keep a secret, and cannot set a cookie for another site. Thus only an
+  API without `security` and without a cookie parameter, or an API with
+  `expose`, gets a client in `src/shared/api/<api>/`. With mock data,
+  the client gives the example answers. For another API, `appgen
+  generate` gives a warning: set `expose: true`, or call the API in a
+  custom operation of the FastAPI app, and set `x-react-data: api`.
 - With `expose: true`, the FastAPI app has the endpoint
   `/apis/<api>/<operation>` (in kebab case, for example
   `/apis/exchange-rates/get-latest-rates`) for each operation, with the
@@ -695,9 +737,10 @@ apis:
   the client of the React app calls these endpoints, and sends the token
   of the signed-in user.
 - An exposed API cannot have an operation with a parameter that a query
-  parameter cannot hold (an object, or a list of lists), or two
-  parameters with the same name (`unsuitable-operation`). Call such an
-  operation in a custom operation.
+  parameter cannot hold (an object, or a list of lists), two parameters
+  with the same name, a form body, or an answer that is not JSON
+  (`unsuitable-operation`). Call such an operation in a custom
+  operation.
 - The environment variables of the apps (for example `DATABASE_URL`)
   are reserved. Two keys cannot use the same variable.
 - A view can show the answer of an operation without hand-written code:

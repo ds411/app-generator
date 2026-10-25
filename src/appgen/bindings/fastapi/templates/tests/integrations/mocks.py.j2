@@ -1,4 +1,5 @@
 {{ trace_header(*(py_apis.values() | map(attribute="id"))) }}
+{% set oauth = "oauth2" in py_api_features %}
 """The mock answers of the third-party APIs: the examples of their OpenAPI documents.
 
 The tests call the clients with `httpx.MockTransport`, without the network.
@@ -22,7 +23,7 @@ EXAMPLES: dict[str, dict[str, object]] = {
 }
 """The example answer of each operation, by API and operation ID."""
 
-_ROUTES: dict[str, list[tuple[str, str, int, str]]] = {
+_ROUTES: dict[str, list[tuple[str, str, int, str, str]]] = {
 {% for api in py_apis.values() %}
     {{ trace(api.id) }}
     {{ api.name | tojson }}: [
@@ -32,7 +33,17 @@ _ROUTES: dict[str, list[tuple[str, str, int, str]]] = {
     ],
 {% endfor %}
 }
-"""The method, the path pattern, the status, and the operation ID of each operation."""
+"""The method, the path pattern, the status, the operation ID, and the kind of the answer of each
+operation: `json`, `text`, or `binary`."""
+{% if oauth %}
+
+_TOKENS: dict[str, str] = {
+{% for api in py_apis.values() if api.credential == "oauth2" %}
+    {{ api.name | tojson }}: r"{{ api.token_pattern }}",
+{% endfor %}
+}
+"""The path pattern of the token URL of each API with OAuth 2.0."""
+{% endif %}
 {% if py_apis.values() | selectattr("expose") | list %}
 
 FAILURES: dict[str, int] = {}
@@ -40,6 +51,49 @@ FAILURES: dict[str, int] = {}
 {% endif %}
 
 
+{% if oauth %}
+def mock_transport(
+    api: str,
+    requests: list[httpx.Request] | None = None,
+    status: int | None = None,
+    tokens: list[httpx.Request] | None = None,
+    reject: int = 0,
+) -> httpx.MockTransport:
+    """Return a transport that answers each operation of an API with its example.
+
+    The transport adds each request to `requests`. With `status`, it answers
+    each request with this status and the body `mock error`. For an API with
+    OAuth 2.0, the transport answers each request of a token with a new token
+    (`mock-token-1`, `mock-token-2`, and so on), and adds the request to
+    `tokens`. It answers a request with one of the first `reject` tokens with
+    the status 401.
+    """
+    issued: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        token_path = _TOKENS.get(api)
+        if (
+            status is None
+            and token_path is not None
+            and request.method == "POST"
+            and re.match(token_path, request.url.path)
+        ):
+            if tokens is not None:
+                tokens.append(request)
+            issued.append(f"mock-token-{len(issued) + 1}")
+            token = {"access_token": issued[-1], "token_type": "Bearer", "expires_in": 3600}
+            return httpx.Response(200, json=token)
+        if requests is not None:
+            requests.append(request)
+        if status is not None:
+            return httpx.Response(status, text="mock error")
+        rejected = {f"Bearer mock-token-{number}" for number in range(1, reject + 1)}
+        if request.headers.get("Authorization") in rejected:
+            return httpx.Response(401, json={"message": "The token is not valid."})
+        return _answer(api, request)
+
+    return httpx.MockTransport(handle)
+{% else %}
 def mock_transport(
     api: str, requests: list[httpx.Request] | None = None, status: int | None = None
 ) -> httpx.MockTransport:
@@ -54,14 +108,24 @@ def mock_transport(
             requests.append(request)
         if status is not None:
             return httpx.Response(status, text="mock error")
-        for method, pattern, code, operation in _ROUTES[api]:
-            if request.method == method and re.match(pattern, request.url.path):
-                if code == 204:
-                    return httpx.Response(204)
-                return httpx.Response(code, json=EXAMPLES[api][operation])
-        return httpx.Response(404, json={"message": "The mock has no such operation."})
+        return _answer(api, request)
 
     return httpx.MockTransport(handle)
+{% endif %}
+
+
+def _answer(api: str, request: httpx.Request) -> httpx.Response:
+    """Return the example answer of the operation of a request."""
+    for method, pattern, code, operation, answer in _ROUTES[api]:
+        if request.method == method and re.match(pattern, request.url.path):
+            if code == 204:
+                return httpx.Response(204)
+            example = EXAMPLES[api][operation]
+            if answer != "json":
+                # The example of a text or a binary answer is a text.
+                return httpx.Response(code, content=str(example).encode())
+            return httpx.Response(code, json=example)
+    return httpx.Response(404, json={"message": "The mock has no such operation."})
 {% for api in py_apis.values() %}
 
 

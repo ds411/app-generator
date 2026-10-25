@@ -1,0 +1,53 @@
+# The OpenAPI document of a finance API: the project tracker shows the
+# budget of a project. The API gives its access tokens with the client
+# credentials flow of OAuth 2.0, and reads the tenant of the company
+# from a cookie. The token URL is a path under the base URL, so that the
+# mock server of the checks serves it (scripts/mock_api.py).
+openapi: 3.0.3
+info:
+  title: Finance API
+  version: "1.0"
+  description: The budgets of the projects.
+servers:
+  - url: https://finance.example.com/api
+security:
+  - oauth: [budgets:read]
+paths:
+  /budgets/{project}:
+    get:
+      operationId: getBudget
+      summary: Get the budget of a project.
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - name: tenant
+          in: cookie
+          required: true
+          description: The tenant of the company.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The budget.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Budget" }
+              example: { project: APP, currency: EUR, amount: 120000, spent: 45250.5 }
+        "401": { description: The access token is missing or not valid. }
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth/token
+          scopes:
+            budgets:read: Read the budgets.
+            budgets:write: Change the budgets.
+  schemas:
+    Budget:
+      type: object
+      required: [project, currency, amount, spent]
+      properties:
+        project: { type: string, description: The key of the project. }
+        currency: { type: string, description: The ISO 4217 code of the currency. }
+        amount: { type: number, description: The budget. }
+        spent: { type: number, description: The money that the project spent. }

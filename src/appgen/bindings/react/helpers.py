@@ -106,14 +106,12 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     third_party = ts_apis(definition)
     return {
         "api_entities": apis,
-        # The browser cannot keep a secret: only the APIs without a secret
-        # get a client (ADR 0019), and the exposed APIs, which the FastAPI
-        # app calls with the secret (`expose`).
-        "ts_apis": {
-            name: a for name, a in third_party.items() if a.secret_env is None or a.exposed
-        },
+        # The browser cannot keep a secret or set a cookie for another site:
+        # only the APIs without them get a client (ADR 0019), and the
+        # exposed APIs, which the FastAPI app calls (`expose`).
+        "ts_apis": {name: a for name, a in third_party.items() if a.browser or a.exposed},
         "ts_server_apis": {
-            name: a for name, a in third_party.items() if a.secret_env is not None and not a.exposed
+            name: a for name, a in third_party.items() if not a.browser and not a.exposed
         },
         "mock": mock_records(definition),
         "theme": build_theme(definition),
@@ -137,19 +135,20 @@ def context(definition: AppDefinition) -> dict[str, Any]:
 
 
 def warnings(definition: AppDefinition) -> Iterator[str]:
-    """Return a warning for each API with a secret that the FastAPI app does not expose.
+    """Return a warning for each API with a secret or a cookie parameter that the FastAPI app
+    does not expose.
 
     The React app has no client for such an API.
     """
-    for name, api in definition.apis.items():
-        if api.security is None or api.expose:
+    for name, api in ts_apis(definition).items():
+        if api.browser or api.exposed:
             continue
+        reason = api.server_reason.replace("`", "")
         yield (
-            f"The API '{name}' has a secret ({api.security.env}), so the React app has no "
-            "client for it: a browser app cannot keep a secret. Hint: set 'expose: true' on "
-            "the API, so that the FastAPI app calls the API for the React app, or call the "
-            f"API in a custom operation of the FastAPI app (apis: [{name}]). Then set "
-            "'x-react-data: api' in the section 'app'."
+            f"The API '{name}' {reason}, so the React app has no client for it. Hint: set "
+            "'expose: true' on the API, so that the FastAPI app calls the API for the React "
+            f"app, or call the API in a custom operation of the FastAPI app (apis: [{name}]). "
+            "Then set 'x-react-data: api' in the section 'app'."
         )
 
 

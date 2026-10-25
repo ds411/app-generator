@@ -177,7 +177,10 @@ def wait_for(binding: str, url: str) -> None:
 
 @contextmanager
 def started(binding: str, app: Path, apis: dict[str, str]) -> Generator[None]:
-    """Start the built app, and stop it at the end. `apis` points the APIs to the mock server."""
+    """Start the built app, and stop it at the end.
+
+    `apis` points the APIs to the mock server, and gives their credentials.
+    """
     port = str(PORTS[binding])
     env = {**os.environ, "PORT": port, **apis}
     if binding == "react":
@@ -299,7 +302,7 @@ def translation_test(binding: str, out: Path) -> None:
     test = load_definition(path)
     # The Next.js app calls the APIs of its views on the server: the mock
     # server gives the example answers.
-    with MockApi(test) as mock, started(binding, app, mock.env()):
+    with MockApi(test) as mock, started(binding, app, {**mock.env(), **mock.credentials()}):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/")
         log(binding, "UI test of the test language (Playwright)")
         check_ui(binding, test)

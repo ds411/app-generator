@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any, cast
 
 from appgen.bindings.fastapi.i18n import language_test
-from appgen.bindings.fastapi.integrations import mocks_imports, python_apis
+from appgen.bindings.fastapi.integrations import mocks_imports, py_features, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import (
     call,
@@ -1848,6 +1848,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py": python_app(definition),
         "py_apis": apis,
         "py_api_mocks_imports": mocks_imports(apis),
+        "py_api_features": py_features(apis),
         "i18n": plan,
         "i18n_test": language_test(plan) if plan is not None else None,
     }

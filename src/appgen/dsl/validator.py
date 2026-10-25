@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from appgen.dsl.access import ALL, RecordRule
-from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api
+from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
     PROVIDER_PATHS,
@@ -44,7 +44,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
-from appgen.dsl.openapi import query_value
+from appgen.dsl.openapi import SecurityScheme, query_value
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.translations import LOCALE, VALUE
@@ -542,7 +542,7 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     for api in definition.apis.values():
         variables.add(api.base_url_env)
         if api.security is not None:
-            variables.add(api.security.env)
+            variables.update(env for _, env in api.security.variables)
     for provider in auth.providers.values():
         for key in ("client_id_env", "client_secret_env"):
             variable: str = getattr(provider, key)
@@ -924,8 +924,12 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
     for api in definition.apis.values():
         names = [("base_url_env", api.base_url_env)]
         if api.security is not None:
-            names.append(("security", api.security.env))
-        for key, env in names:
+            names += [
+                ("security" if key == "env" else f"security.{key}", env)
+                for key, env in api.security.variables
+            ]
+        for name, env in names:
+            key = name.partition(".")[0]
             if env in RESERVED_ENV_NAMES:
                 yield _error(
                     "reserved-name",
@@ -935,7 +939,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Use a name with the name of the API, for example 'HOLIDAYS_API_URL'.",
                 )
                 continue
-            if key == "security" and env.startswith(PUBLIC_ENV_PREFIXES):
+            secret = name in ("security", "security.client_secret_env")
+            if secret and env.startswith(PUBLIC_ENV_PREFIXES):
                 yield _error(
                     "reserved-name",
                     f"The front-end builds put the variable '{env}' into the code for the "
@@ -945,8 +950,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Use a name without the prefix NEXT_PUBLIC_ or VITE_.",
                 )
                 continue
-            first = envs.setdefault(env, f"{api.id}.{key}")
-            if first != f"{api.id}.{key}":
+            first = envs.setdefault(env, f"{api.id}.{name}")
+            if first != f"{api.id}.{name}":
                 yield _error(
                     "duplicate-name",
                     f"The environment variable '{env}' is also the variable of '{first}'.",
@@ -996,15 +1001,23 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                 hint=f"Did you mean '{matches[0]}'?" if matches else None,
             )
         elif not scheme.supported:
+            flows = (
+                f" Its flows are {', '.join(repr(f) for f in scheme.flows)}."
+                if scheme.type == "oauth2" and scheme.flows
+                else ""
+            )
             yield _error(
                 "unsuitable-security",
                 f"The security scheme '{security.scheme}' is not an API key in a header or a "
-                "query parameter, or a bearer token.",
+                "query parameter, a bearer token, or OAuth 2.0 with the client credentials flow."
+                + flows,
                 api,
                 at="security",
                 hint="The clients support only these schemes. Call the API from hand-written "
                 "code to use another scheme.",
             )
+        else:
+            yield from _check_security_keys(api, security, scheme)
     for operation in definition.operations.values():
         if len(set(operation.apis)) != len(operation.apis):
             yield _error(
@@ -1388,26 +1401,76 @@ def _check_seed_targets(definition: AppDefinition) -> Iterator[Diagnostic]:
                     )
 
 
+def _check_security_keys(
+    api: Api, security: ApiSecurity, scheme: SecurityScheme
+) -> Iterator[Diagnostic]:
+    """The security has the keys of its scheme: `env`, or the keys of OAuth 2.0."""
+    oauth = scheme.type == "oauth2"
+    needed = ("client_id_env", "client_secret_env") if oauth else ("env",)
+    kind = "OAuth 2.0" if oauth else "an API key or a bearer token"
+    for key in needed:
+        if getattr(security, key) is None:
+            yield _error(
+                "missing-key",
+                f"The security of the scheme '{scheme.name}' needs the key '{key}'.",
+                api,
+                at="security",
+            )
+    other = ("env",) if oauth else ("client_id_env", "client_secret_env", "scopes")
+    for key in other:
+        if getattr(security, key):
+            yield _error(
+                "invalid-option",
+                f"The key '{key}' does not suit the scheme '{scheme.name}' ({kind}).",
+                api,
+                at="security",
+                hint=f"Use {', '.join(repr(k) for k in needed)}.",
+            )
+    if oauth:
+        for scope in security.scopes:
+            if scope not in scheme.scopes:
+                yield _error(
+                    "unknown-reference",
+                    f"The client credentials flow of the scheme '{scheme.name}' has no scope "
+                    f"'{scope}'.",
+                    api,
+                    at="security",
+                    hint=_did_you_mean(scope, scheme.scopes),
+                )
+
+
 def _check_exposed(api: Api) -> Iterator[Diagnostic]:
-    """The endpoint of an exposed operation takes each parameter as a query parameter."""
+    """The endpoint of an exposed operation takes each parameter as a query parameter, and a
+    JSON body, and gives a JSON answer."""
     spec = api.spec
     for operation in spec.operations:
+        problems: list[str] = []
         names: set[str] = set()
         for parameter in operation.parameters:
-            problem: str | None = None
             if parameter.name in names:
-                problem = f"two parameters have the name '{parameter.name}'"
-            elif not query_value(parameter.schema, spec):
-                problem = f"a query parameter cannot hold the parameter '{parameter.name}'"
-            names.add(parameter.name)
-            if problem is not None:
-                yield _error(
-                    "unsuitable-operation",
-                    f"The FastAPI app cannot expose the operation '{operation.id}': {problem}. "
-                    "Its endpoint takes each parameter as a query parameter.",
-                    api.operations[operation.id],
-                    hint="Remove 'expose', or call the operation in a custom operation.",
+                problems.append(
+                    f"two parameters have the name '{parameter.name}'. Its endpoint takes each "
+                    "parameter as a query parameter."
                 )
+            elif not query_value(parameter.schema, spec):
+                problems.append(
+                    f"a query parameter cannot hold the parameter '{parameter.name}'. Its "
+                    "endpoint takes each parameter as a query parameter."
+                )
+            names.add(parameter.name)
+        if operation.body is not None and operation.body_kind != "json":
+            problems.append("its body is a form. Its endpoint takes a JSON body.")
+        if operation.result is not None and operation.answer != "json":
+            problems.append(
+                f"its answer is {operation.answer_media}, not JSON. Its endpoint gives JSON."
+            )
+        for problem in problems:
+            yield _error(
+                "unsuitable-operation",
+                f"The FastAPI app cannot expose the operation '{operation.id}': {problem}",
+                api.operations[operation.id],
+                hint="Remove 'expose', or call the operation in a custom operation.",
+            )
 
 
 CHECKS: list[Check] = [

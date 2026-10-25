@@ -189,8 +189,8 @@ def started(
     """Start the app, and stop it and delete its data at the end.
 
     `apis` holds the environment variables of the base URLs of the APIs,
-    with the host `host.docker.internal`: the containers of the app reach
-    the mock server on the machine through it.
+    with the host `host.docker.internal` (the containers of the app reach
+    the mock server on the machine through it), and of their credentials.
     """
     project = f"appgen-smoke-{binding}"
     if binding == "react":
@@ -238,7 +238,7 @@ def started(
 def started_local(binding: str, app: Path, temp: Path, apis: dict[str, str]) -> Generator[None]:
     """Start the app on the machine with its local database, and stop it at the end.
 
-    `apis` holds the environment variables of the base URLs of the APIs.
+    `apis` holds the environment variables of the base URLs and the credentials of the APIs.
     """
     env = {**os.environ, "PORT": str(PORTS[binding]), **apis}
     if binding == "nextjs":
@@ -552,7 +552,13 @@ def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = Fal
         # The containers reach the mock server through the host gateway.
         with (
             MockApi(definition, host="0.0.0.0") as mock,
-            started(binding, app, image, Path(temp), mock.env("host.docker.internal")),
+            started(
+                binding,
+                app,
+                image,
+                Path(temp),
+                {**mock.env("host.docker.internal"), **mock.credentials()},
+            ),
         ):
             check(binding, definition, ui)
             if ui and binding == "nextjs":
@@ -565,7 +571,7 @@ def smoke_test_local(binding: str, app: Path, ui: bool = False) -> None:
     with (
         tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp,
         MockApi(definition) as mock,
-        started_local(binding, app, Path(temp), mock.env()),
+        started_local(binding, app, Path(temp), {**mock.env(), **mock.credentials()}),
     ):
         check(binding, definition, ui)
         if binding == "fastapi":

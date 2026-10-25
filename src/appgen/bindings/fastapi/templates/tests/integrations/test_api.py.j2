@@ -1,6 +1,7 @@
 {{ trace_header(element_id) }}
 {% set api = py_apis[name] %}
 {% set first = api.methods[0] %}
+{% set oauth = api.credential == "oauth2" %}
 """The tests of the client of the API `{{ api.name }}`, without the network.
 
 The mock transport answers each operation with the example of the OpenAPI
@@ -10,6 +11,25 @@ document (`tests/integrations/{{ api.module }}_examples.json`).
 {{ py.imports(api.test_imports()) }}
 
 pytestmark = pytest.mark.anyio
+{% if oauth %}
+
+
+@pytest.fixture(autouse=True)
+def fresh_tokens() -> None:
+    """Give each test its own access tokens: the process keeps one token for each client."""
+    clear_tokens()
+
+
+def make_client(
+    requests: list[httpx.Request] | None = None,
+    status: int | None = None,
+    tokens: list[httpx.Request] | None = None,
+    reject: int = 0,
+) -> {{ api.client }}:
+    """Return a client with the mock transport."""
+    transport = mock_transport({{ api.name | tojson }}, requests, status, tokens, reject)
+    {{ api.test_construction() }}
+{% else %}
 
 
 def make_client(
@@ -18,6 +38,7 @@ def make_client(
     """Return a client with the mock transport."""
     transport = mock_transport({{ api.name | tojson }}, requests, status)
     {{ api.test_construction() }}
+{% endif %}
 {% for m in api.methods %}
 
 
@@ -69,9 +90,43 @@ async def test_each_request_sends_the_credential() -> None:
 
 {% if api.credential == "bearer" %}
     assert requests[0].headers["Authorization"] == "Bearer secret"
+{% elif oauth %}
+    assert requests[0].headers["Authorization"] == "Bearer mock-token-1"
 {% elif api.credential == "header" %}
     assert requests[0].headers[{{ api.credential_name | tojson }}] == "secret"
 {% else %}
     assert requests[0].url.params[{{ api.credential_name | tojson }}] == "secret"
 {% endif %}
+{% endif %}
+{% if oauth %}
+
+
+async def test_the_client_gets_one_token_for_the_requests_at_the_same_time() -> None:
+{% for line in first.sample_lines() %}
+    {{ line }}
+{% endfor %}
+    tokens: list[httpx.Request] = []
+    async with make_client(tokens=tokens) as client:
+        await asyncio.gather({{ first.test_call("", 8) }}, {{ first.test_call("", 8) }})
+
+    assert len(tokens) == 1
+    # The client authenticates with HTTP Basic: client:secret.
+    assert tokens[0].headers["Authorization"] == "Basic Y2xpZW50OnNlY3JldA=="
+    assert b"grant_type=client_credentials" in tokens[0].content
+
+
+async def test_an_answer_with_the_status_401_gets_a_new_token_one_time() -> None:
+{% for line in first.sample_lines() %}
+    {{ line }}
+{% endfor %}
+    requests: list[httpx.Request] = []
+    tokens: list[httpx.Request] = []
+    async with make_client(requests, tokens=tokens, reject=1) as client:
+        {{ first.test_call("await ") }}
+
+    assert len(tokens) == 2
+    assert [request.headers["Authorization"] for request in requests] == [
+        "Bearer mock-token-1",
+        "Bearer mock-token-2",
+    ]
 {% endif %}

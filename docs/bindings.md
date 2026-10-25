@@ -355,11 +355,11 @@ app:
   language. `scripts/check-react-api.sh` opens the page in the second
   language, and checks the header of each request.
 - The FastAPI app must allow the origin of the React app (`CORS_ORIGINS`).
-- The browser calls each third-party API without a secret at the base
-  URL of the build variable `VITE_<base_url_env>`, for example
-  `VITE_HOLIDAYS_API_URL`. The API must allow the origin of the app.
-  With mock data, the client gives the example answers of the OpenAPI
-  document instead.
+- The browser calls each third-party API without a secret and without a
+  cookie parameter at the base URL of the build variable
+  `VITE_<base_url_env>`, for example `VITE_HOLIDAYS_API_URL`. The API
+  must allow the origin of the app. With mock data, the client gives the
+  example answers of the OpenAPI document instead.
 - The client of an exposed API (`expose: true`) calls the endpoints of
   the FastAPI app (`/apis/<api>/<operation>`), with the bearer token of
   the user, so the secret of the API stays in the FastAPI app.
@@ -367,8 +367,8 @@ app:
   the FastAPI app sends the API key to the mock server of the APIs.
 - A view of API data ([ADR 0022](adr/0022-api-views.md)) calls its
   operation with the client of the API. A view of an API with a secret
-  and without `expose` is a gap: an extension file with a stub of the
-  view.
+  or a cookie parameter, and without `expose`, is a gap: an extension
+  file with a stub of the view.
 
 ## Extension files
 

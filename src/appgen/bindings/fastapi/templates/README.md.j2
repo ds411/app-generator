@@ -306,7 +306,7 @@ environment.
 | API | Client | Base URL | Secret |
 | --- | ------ | -------- | ------ |
 {% for api in py_apis.values() %}
-| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
 {% endfor %}
 
 An endpoint gets a client as a dependency, for example

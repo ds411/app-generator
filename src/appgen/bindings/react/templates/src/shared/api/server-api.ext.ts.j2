@@ -1,9 +1,8 @@
 {% set api = ts_server_apis[name] %}
 {{ trace_header(element_id, *(api.methods | map(attribute="id"))) }}
 /*
- * The API `{{ api.name }}` ({{ api.title }}) has a secret:
- * `{{ api.secret_env }}`. A browser app cannot keep a secret, so appgen
- * generates no client for this API in the React app.
+ * {{ ("The API `%s` (%s) %s." | format(api.name, api.title, api.server_reason)) | wordwrap(73, break_long_words=False, wrapstring="\n * ", break_on_hyphens=False) }}
+ * So appgen generates no client for this API in the React app.
  *
  * TODO(appgen): set `expose: true` on the API, so that the FastAPI app of
  * the same definition calls the API for this app, and this app gets a

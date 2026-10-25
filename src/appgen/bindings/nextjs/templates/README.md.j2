@@ -214,7 +214,7 @@ server. An answer with an error status throws `ApiError` of
 | API | Client | Base URL | Secret |
 | --- | ------ | -------- | ------ |
 {% for api in ts_apis.values() %}
-| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | `{{ api.url_env }}` | {{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
 {% endfor %}
 
 `{{ (ts_apis.values() | first).factory }}()` reads the settings from the environment, for
