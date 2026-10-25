@@ -242,7 +242,7 @@
     **Goal:** Keep the stories that wait for a decision of a person.
 
     **Scope**
-    - In: CI on GitHub Actions and an MCP server for appgen. Each story has the `deferred` label.
+    - In: CI on GitHub Actions, an MCP server for appgen, and the features of the real app report that need configuration at run time (fields, saved views, automations, workflows, and reports that users make) or that are outside the model of appgen (editing by many people at the same time, calls, offline and native apps, and events at a large scale). Each story has the `deferred` label.
     - Out: All work. Do not start a story in this milestone until a person moves it to an active milestone.
 
     **Exit criteria**
@@ -487,5 +487,161 @@
     - [ ] A translatable field shows the value of the selected language, or the value of the default language when the record has no translation, in each app.
 
     **Demo:** The project tracker in a test language from right to left, and the title of a task in two languages.
+
+    **Depends on:** None.
+
+- title: "M29: Jobs and events"
+  description: |
+    **Goal:** The app author declares work on a schedule, at a time that a date field gives, or after a change of a record, and the apps run it without a hand-written scheduler.
+
+    **Scope**
+    - In: a `jobs` section with schedules and times from date fields, a worker of the FastAPI app, a job route and a CronJob of the Next.js app, and events that run an operation after a create, a change, or a transition.
+    - Out: Rules or jobs that users make at run time (deferred in M14). A general queue for long tasks of the request handlers. Jobs in the React app with mock data: it has no server.
+
+    **Exit criteria**
+    - [ ] A job runs a custom operation on each record that its filter selects, at the time of a date field minus an offset, in the FastAPI and the Next.js apps, in tests with a fixed clock.
+    - [ ] Two replicas of the FastAPI app run each job one time.
+    - [ ] A transition of a workflow runs its event operation in the same transaction, in the FastAPI and the Next.js apps.
+    - [ ] The trace check covers each `jobs` element and each event.
+
+    **Demo:** The room booking example: a reminder job 24 hours before the start of each booking, with the time of the test clock.
+
+    **Depends on:** M27 (the deployment files of the Next.js app).
+
+- title: "M30: Entry points for other systems"
+  description: |
+    **Goal:** Other systems can call the generated apps (webhooks and inbound email), the apps can call APIs in the name of a user, and other websites can show a public page in a frame.
+
+    **Scope**
+    - In: webhook endpoints with a signature check, inbound email from a mail service, an extension router of the FastAPI app for hand-written endpoints, OAuth with the user (authorization code) for third-party APIs, and pages that other websites can embed.
+    - Out: A mail server in the app (a mail service receives the email). Standard protocols such as LTI and SCORM: an app developer writes them in the extension router. A generated tracking script for other websites: a hand-written endpoint in the extension router can collect the events.
+
+    **Exit criteria**
+    - [ ] The checks send a signed webhook to the FastAPI and the Next.js apps: a correct signature runs the gap function one time, also for a repeated event, and a wrong signature gives status 401.
+    - [ ] An inbound email of the mock mail service makes a record through its gap function.
+    - [ ] A user connects an account at a mock OAuth server, and a custom operation calls the API with the token of the user.
+    - [ ] A public page with `embed` shows in a frame of an allowed origin, and the browser blocks it in a frame of another origin.
+
+    **Demo:** The project tracker: a signed webhook of the mock server makes a comment, and a public page shows in a frame of a test page.
+
+    **Depends on:** M23 (the token store of the client credentials flow).
+
+- title: "M31: Files and media"
+  description: |
+    **Goal:** Records can hold files and images, and the apps upload, store, show, and download them without hand-written code.
+
+    **Scope**
+    - In: `file` and `image` field types, a `storage` section (a local folder or an S3-compatible service), upload and download endpoints, a file widget in the forms, and images in the tables, cards, detail views, and avatars.
+    - Out: Video transcoding and streaming: a `url` field links a video service. Image editing. Virus scans: an app developer adds them in a hook.
+
+    **Exit criteria**
+    - [ ] A user uploads an image in a form, and sees it in the table, the card, and the detail view, in the Next.js app and in the React app with the FastAPI app.
+    - [ ] The FastAPI and the Next.js apps reject a file that is too large or that has a type that the field does not allow.
+    - [ ] The checks store the files in a local folder and in an S3-compatible mock service.
+
+    **Demo:** The project tracker with a screenshot field on the task, in the React app with the FastAPI app and in the Next.js app.
+
+    **Depends on:** None.
+
+- title: "M32: Totals and nested records"
+  description: |
+    **Goal:** A record shows totals of its related records, a form edits a record and its lines together, and rules check the totals.
+
+    **Scope**
+    - In: computed fields that count or add the records of a relation, create and update operations with the lines of a record in one transaction, a lines editor in the forms, and compare rules over totals.
+    - Out: Totals of totals (more than one level). Stored totals that a job refreshes. Lines of lines.
+
+    **Exit criteria**
+    - [ ] An invoice shows the sum of its lines, and a post shows the count of its votes, in each app.
+    - [ ] A form creates an invoice and three lines in one request, and an error in one line stores nothing, in the FastAPI and the Next.js apps.
+    - [ ] A journal entry whose debits and credits do not balance gives status 422.
+
+    **Demo:** A fixture with invoices and lines: add a line in the form, and see the total change before the save.
+
+    **Depends on:** None.
+
+- title: "M33: Small DSL additions"
+  description: |
+    **Goal:** The DSL covers small, common needs of real apps with one new key or value each.
+
+    **Scope**
+    - In: a manual order with drag and drop, sequence numbers, a currency from another field, a date range and a compare for dashboards, charts by day, week, month, or year, page metadata and a sitemap, and infinite scroll.
+    - Out: Exchange rates (a third-party API does this). Search engine metadata in the React app: a browser app has no server render.
+
+    **Exit criteria**
+    - [ ] Each new key has a fixture, and the three bindings generate and check it.
+    - [ ] `appgen validate` reports each wrong value of the new keys.
+    - [ ] The docs and the skill describe each new key.
+
+    **Demo:** A fixture with an invoice sequence, a currency field, and a dashboard with a date range, in the Next.js and the React apps.
+
+    **Depends on:** M26 (the values of the dashboards on the server).
+
+- title: "M34: History and notifications"
+  description: |
+    **Goal:** The apps keep the history of the records, show charts of past values, and tell users about the changes that concern them.
+
+    **Scope**
+    - In: a change log of the records with a restore of an old version, daily snapshots for charts, notices in the app with a bell in the top bar, notices by email, and mentions with `@`.
+    - Out: Push notices to the phone or the desktop. Notification rules that users make at run time (deferred in M14). A digest that collects notices: a job of M29 can do it.
+
+    **Exit criteria**
+    - [ ] A change of a record with history adds an entry with the user, the time, and the old and new values, and a restore gives the old values back, in the FastAPI and the Next.js apps.
+    - [ ] A burndown chart shows the daily snapshots of a sum.
+    - [ ] A user gets a notice in the app and by email when a record that concerns the user changes, and when a text mentions the user.
+
+    **Demo:** The project tracker: change a task, see its history tab, and see the notice of the assignee in the top bar.
+
+    **Depends on:** M24 (the SMTP delivery) and M29 (jobs and events).
+
+- title: "M35: Custom queries and maps"
+  description: |
+    **Goal:** An app author declares read operations that return lists, places on a map, and searches for free dates, and the views show their results.
+
+    **Scope**
+    - In: custom queries with params that return a list (a generation gap), views of a query, a geo point field with filters by distance and by area, a map view, and a filter for records without an overlap in a date range.
+    - Out: A spatial database extension (PostGIS). A search engine. Map tiles of a paid service: the tile URL is a setting.
+
+    **Exit criteria**
+    - [ ] A custom query returns a page of results with its params, and a table view shows them, in each app.
+    - [ ] A map view shows the records in the visible area, and the list changes when the user moves the map, in the Next.js app and in the React app with the FastAPI app.
+    - [ ] A search by dates shows only the listings without a booking in the range.
+
+    **Demo:** A fixture of listings on a map with bookings: search by area and by free dates.
+
+    **Depends on:** M23 (views of API data).
+
+- title: "M36: Users and sessions"
+  description: |
+    **Goal:** Filters can use the signed-in user, a user can have a different role in each team or course, guests have their own records, and a link can share one record.
+
+    **Scope**
+    - In: the value `$me`, roles that come from membership records, share links with a secret token, and records of guests that move to the user at the sign-in.
+    - Out: Groups and roles that users make at run time. Single sign-on with SAML.
+
+    **Exit criteria**
+    - [ ] A view with the filter `assignee: $me` shows only the records of the signed-in user, in each app.
+    - [ ] A user is a teacher in one course and a student in another, and the operations of each course follow the role of the membership, in the FastAPI and the Next.js apps.
+    - [ ] A person without an account opens a shared record with its link, and cannot open it after the owner revokes the link.
+    - [ ] A guest fills a cart, signs up, and keeps the cart.
+
+    **Demo:** A fixture with courses and memberships: sign in as a user with two roles, and open a shared lesson in a private window.
+
+    **Depends on:** M25 (owners through a path of relations).
+
+- title: "M37: Live updates"
+  description: |
+    **Goal:** Open views show new and changed records at once, and record pages show who else is on the page.
+
+    **Scope**
+    - In: server-sent events for the records of an entity, with the access rules, the refresh of the open views in the Next.js and the React apps, and the presence of users on a record page.
+    - Out: WebSockets, and editing by many people at the same time (deferred in M14). Live updates in the React app with mock data.
+
+    **Exit criteria**
+    - [ ] A record that one user creates shows in the open view of another user in less than two seconds, in the Next.js app and in the React app with the FastAPI app.
+    - [ ] A user does not get the events of records that the access rules hide.
+    - [ ] Two replicas of the FastAPI app send the same events through Redis.
+
+    **Demo:** Two browser windows on the task board of the project tracker: move a card in one window, and see it move in the other.
 
     **Depends on:** None.
