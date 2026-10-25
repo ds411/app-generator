@@ -158,7 +158,7 @@ export function DataTable<T extends { id: string }>({
       {selection && selected.length > 0 && bulkActions && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
           <span className="font-medium tabular-nums">{{ jsx_format("{count} selected", count="selected.length") }}</span>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="ms-auto flex flex-wrap items-center gap-2">
             {bulkActions(selected, () => setRowSelection({}))}
             <Button variant="ghost" size="sm" onClick={() => setRowSelection({})}>
               {{ jsx_text("Clear the selection") }}

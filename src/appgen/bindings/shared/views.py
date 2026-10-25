@@ -1001,7 +1001,7 @@ class ViewContext:
                     f'<Link href={{{href}}} className="font-medium underline-offset-4 '
                     f'hover:underline" onClick={{(event) => event.stopPropagation()}}>{cell}</Link>'
                 )
-            align = {"start": "", "center": "text-center", "end": "text-right"}[column.align]
+            align = {"start": "", "center": "text-center", "end": "text-end"}[column.align]
             hide = f"max-{column.hide_below}:hidden" if column.hide_below else ""
             plan.columns.append(
                 ColumnPlan(

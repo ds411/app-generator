@@ -15,7 +15,7 @@ import { appConfig } from "@/shared/config";
 import { AccessProvider } from "@/shared/lib/access";
 {% endif %}
 {% if i18n %}
-import { localeOf } from "@/shared/lib/i18n";
+import { dirOf, localeOf } from "@/shared/lib/i18n";
 import { inRequestLanguage, requestLanguage } from "@/shared/lib/i18n-server";
 
 /** The title and the description of the pages, in the language of the request. */
@@ -60,7 +60,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
 {% set providers = "Providers language={language}" if i18n else "Providers" %}
   return (
     // next-themes sets the class of the color mode before React hydrates.
-    <html lang={{ "{localeOf(language)}" if i18n else '"en"' }} suppressHydrationWarning>
+{% if i18n %}
+    <html lang={localeOf(language)} dir={dirOf(language)} suppressHydrationWarning>
+{% else %}
+    <html lang="en" suppressHydrationWarning>
+{% endif %}
       <body className="min-h-svh antialiased">
 {% if definition.access %}
         <{{ providers }}>

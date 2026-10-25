@@ -419,7 +419,7 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
         )}
 {% endif %}
 {% if plan.actions %}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ms-auto flex flex-wrap items-center gap-2">
           {Object.values(viewActions).map((action) => (
             <ActionButton key={action.key} action={action} records={[]} onRun={run} />
           ))}

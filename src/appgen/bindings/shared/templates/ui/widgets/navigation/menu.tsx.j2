@@ -113,10 +113,10 @@ export function {{ name | pascal }}Menu() {
           <SidebarGroupLabel asChild>
             <CollapsibleTrigger>
 {% if group.icon %}
-              <{{ group.icon | pascal }}Icon className="mr-2" />
+              <{{ group.icon | pascal }}Icon className="me-2" />
 {% endif %}
               {{ jsx_text(group.label or label(group_name)) }}
-              <ChevronRightIcon className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
+              <ChevronRightIcon className="ms-auto transition-transform group-data-[state=closed]/collapsible:rtl:rotate-180 group-data-[state=open]/collapsible:rotate-90" />
             </CollapsibleTrigger>
           </SidebarGroupLabel>
           <CollapsibleContent>
@@ -135,7 +135,7 @@ export function {{ name | pascal }}Menu() {
 {% if group.label %}
         <SidebarGroupLabel>
 {% if group.icon %}
-          <{{ group.icon | pascal }}Icon className="mr-2" />
+          <{{ group.icon | pascal }}Icon className="me-2" />
 {% endif %}
           {{ jsx_text(group.label) }}
         </SidebarGroupLabel>

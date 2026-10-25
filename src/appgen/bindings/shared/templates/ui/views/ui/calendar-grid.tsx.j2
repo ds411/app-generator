@@ -111,10 +111,10 @@ export function CalendarGrid({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="icon" aria-label={{ "{" ~ ("mode === \"month\" ? " ~ tr(js("Previous month")) ~ " : " ~ tr(js("Previous week")) if i18n else "`Previous ${mode}`") ~ "}" }} onClick={() => move(-1)}>
-          <ChevronLeftIcon />
+          <ChevronLeftIcon className="rtl:rotate-180" />
         </Button>
         <Button variant="outline" size="icon" aria-label={{ "{" ~ ("mode === \"month\" ? " ~ tr(js("Next month")) ~ " : " ~ tr(js("Next week")) if i18n else "`Next ${mode}`") ~ "}" }} onClick={() => move(1)}>
-          <ChevronRightIcon />
+          <ChevronRightIcon className="rtl:rotate-180" />
         </Button>
         <Button variant="outline" onClick={() => setAnchor(startOfDay(new Date()))}>
           {{ jsx_text("Today") }}
@@ -122,7 +122,7 @@ export function CalendarGrid({
         <h3 className="text-base font-medium" aria-live="polite">
           {title}
         </h3>
-        <div className="ml-auto flex gap-1" role="group" aria-label={{ jsx_attr("Calendar mode") }}>
+        <div className="ms-auto flex gap-1" role="group" aria-label={{ jsx_attr("Calendar mode") }}>
           {(["week", "month"] as const).map((value) => (
             <Button
               key={value}
@@ -150,7 +150,7 @@ export function CalendarGrid({
               key={day.getTime()}
               aria-label={rangeFormat{{ "()" if i18n }}.format(day)}
               className={cn(
-                "flex flex-col gap-1 border-b border-r p-1.5 [&:nth-child(7n)]:border-r-0",
+                "flex flex-col gap-1 border-b border-e p-1.5 [&:nth-child(7n)]:border-e-0",
                 mode === "week" ? "min-h-48" : "min-h-24",
                 outside && "bg-muted/30 text-muted-foreground",
               )}
@@ -167,7 +167,7 @@ export function CalendarGrid({
                 const time = dateOnly || event.start < day ? null : timeFormat{{ "()" if i18n }}.format(event.start);
                 const content = (
                   <>
-                    {time && <span className="mr-1 tabular-nums text-muted-foreground">{time}</span>}
+                    {time && <span className="me-1 tabular-nums text-muted-foreground">{time}</span>}
                     {event.label}
                   </>
                 );

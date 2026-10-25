@@ -44,6 +44,8 @@ class LanguagePlan:
     """The locale of the dates and numbers (BCP 47): `locale`, or the code."""
     element_id: str
     text: dict[str, str]
+    direction: str = "ltr"
+    """The direction of the text: `ltr` or `rtl`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +75,7 @@ def i18n_plan(definition: AppDefinition) -> I18nPlan | None:
                 locale=translations.languages[code].locale_tag(code),
                 element_id=translations.languages[code].id,
                 text=dict(sorted(translations.languages[code].text.items())),
+                direction=translations.languages[code].text_direction(code),
             )
             for code in order
         ],

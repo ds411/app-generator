@@ -1885,13 +1885,6 @@
       "title": "DetailView",
       "type": "object"
     },
-    "Direction": {
-      "enum": [
-        "asc",
-        "desc"
-      ],
-      "type": "string"
-    },
     "Entity": {
       "additionalProperties": false,
       "description": "A kind of record that the app stores, for example a task.",
@@ -3050,6 +3043,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/appgen__dsl__translations__Direction"
             },
             {
               "type": "null"
@@ -4671,7 +4675,7 @@
           "$ref": "#/$defs/FieldPath"
         },
         "direction": {
-          "$ref": "#/$defs/Direction",
+          "$ref": "#/$defs/appgen__dsl__ui__views__Direction",
           "default": "asc"
         }
       },
@@ -5709,6 +5713,13 @@
       "title": "Workflow",
       "type": "object"
     },
+    "appgen__dsl__translations__Direction": {
+      "enum": [
+        "ltr",
+        "rtl"
+      ],
+      "type": "string"
+    },
     "appgen__dsl__ui__dashboards__Widget": {
       "oneOf": [
         {
@@ -5738,6 +5749,13 @@
         "datetime",
         "relation",
         "custom"
+      ],
+      "type": "string"
+    },
+    "appgen__dsl__ui__views__Direction": {
+      "enum": [
+        "asc",
+        "desc"
       ],
       "type": "string"
     }

@@ -1236,6 +1236,13 @@ translations:
   default is the code of the language, so the code must be a language
   tag when the language has no `locale`. `appgen validate` reports a
   locale that is not a language tag (`translation-locale`).
+- `direction` is the direction of the text: `ltr` (left to right) or
+  `rtl` (right to left). The default comes from the locale: a script
+  subtag first (`az-Arab` is `rtl`, `ur-Latn` is `ltr`), else the
+  language. The languages `ar`, `arc`, `azb`, `ckb`, `dv`, `fa`, `he`,
+  `iw`, `ks`, `lrc`, `mzn`, `nqo`, `ps`, `sd`, `syr`, `ug`, `ur`, and
+  `yi` are `rtl`. For example, `ar: { label: العربية, text: ... }` is
+  `rtl` without `direction`.
 - `text` maps a text of the default language, as the app shows it, to
   its translation. A key can be a text that the definition does not
   give, for example the default label of a field (`Due date` for
@@ -1267,7 +1274,16 @@ numbers have the format of the locale of the selected language: the
 views, the forms, the filters, the charts, the date pickers, and the
 calendars. The format of a field (`number`, `currency`, `percent`,
 `date`, `datetime`, `relative_time`) and its currency stay the same in
-each language. The `lang` of the page is the locale.
+each language. The `lang` of the page is the locale, and the `dir` of the
+page is the direction of the language.
+
+In a language from right to left, the front ends show the layout from
+right to left: the sidebar, the menus, the forms, the tables, and the
+date pickers. The start of a line is at the right, so the sidebar with
+`side: left` shows at the right, and a column with `align: end` at the
+left. The icons of a direction, for example the arrows of the pages of a
+list and of the breadcrumbs, turn. The icons of the definition do not
+turn.
 
 The FastAPI app gives its messages in the language of the request: the
 first language of the `Accept-Language` header that the app has, as the

@@ -54,16 +54,16 @@ export function ListPagination({
         </span>
         <div className="flex items-center gap-1">
           <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label={{ jsx_attr("First page") }} disabled={page <= 1} onClick={() => onPageChange(1)}>
-            <ChevronsLeftIcon />
+            <ChevronsLeftIcon className="rtl:rotate-180" />
           </Button>
           <Button variant="outline" size="icon" className="size-8" aria-label={{ jsx_attr("Previous page") }} disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-            <ChevronLeftIcon />
+            <ChevronLeftIcon className="rtl:rotate-180" />
           </Button>
           <Button variant="outline" size="icon" className="size-8" aria-label={{ jsx_attr("Next page") }} disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
-            <ChevronRightIcon />
+            <ChevronRightIcon className="rtl:rotate-180" />
           </Button>
           <Button variant="outline" size="icon" className="size-8 max-sm:hidden" aria-label={{ jsx_attr("Last page") }} disabled={page >= pageCount} onClick={() => onPageChange(pageCount)}>
-            <ChevronsRightIcon />
+            <ChevronsRightIcon className="rtl:rotate-180" />
           </Button>
         </div>
       </div>

@@ -51,7 +51,7 @@ export function PageSearch({ className }: { className?: string }) {
         onClick={() => setOpen(true)}
       >
         <SearchIcon />
-        <span className="flex-1 text-left">{{ jsx_text("Search pages") }}</span>
+        <span className="flex-1 text-start">{{ jsx_text("Search pages") }}</span>
         <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px]">{{ jsx_text("Ctrl K") }}</kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen} title={{ jsx_attr("Search pages") }} description={{ jsx_attr("Find a page by its title.") }}>

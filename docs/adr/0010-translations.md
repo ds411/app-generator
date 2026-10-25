@@ -103,6 +103,33 @@ and data in modules, for example the badge sets and the page titles.
   months and days. `scripts/vendor_shadcn.py` changes the date picker
   and the chart tooltip of shadcn/ui to use the locale. The `lang` of
   the page is the locale.
+- Each language has a direction of its text, `ltr` or `rtl`, in
+  `translations.languages.<code>.direction`. The default comes from the
+  locale: a script subtag first (`Arab`, `Hebr`, and other scripts from
+  right to left), else the primary language (`ar`, `fa`, `he`, `ur`, and
+  other languages from right to left). The `dir` of the `html` element is
+  the direction of the selected language: the Next.js server renders it,
+  the React app writes the direction of the default language in
+  `index.html`, and a change of the language sets it in the browser
+  (`showLanguage`). The provider of the language gives the direction to
+  the Radix primitives (`Direction.Provider`), so that a submenu opens
+  at the end of the line, and to the date picker (`dir` of `DayPicker`).
+- The templates of the front ends use the logical classes of Tailwind
+  CSS (`ms-*`, `pe-*`, `start-*`, `border-s`, `rounded-e-*`,
+  `text-start`, `slide-in-from-start`) in place of the classes of a side
+  (`ml-*`, `pr-*`, `left-*`, `border-l`, `rounded-r-*`, `text-left`,
+  `slide-in-from-left`). In `ltr`, a logical class gives the same layout
+  as the class of the side, so the pages of the apps that exist do not
+  change. `appgen.bindings.shared.sides` maps the classes, and
+  `scripts/vendor_shadcn.py` changes the classes of the shadcn/ui
+  components with it. A test finds a class of a side in the templates
+  that `ALLOWED` does not have with a reason, for example the classes
+  that center a dialog, and the sides of a popover, which are sides of
+  the screen.
+- The icons of a direction (the chevrons of the pages of a list, of the
+  breadcrumbs, of a submenu, and of the calendar, and the icon of the
+  sidebar toggle) turn in `rtl` (`rtl:rotate-180`). A move to the side
+  goes to the other side in `rtl`, for example the thumb of a switch.
 
 ## Consequences
 
@@ -136,3 +163,13 @@ and data in modules, for example the badge sets and the page titles.
 - The generated tests of the FastAPI app check the selection of the
   language, and one message in two languages.
 - An app without translations has the same code as before.
+- In `rtl`, the start of a line is at the right. So the sidebar with
+  `side: left` shows at the right, and a column with `align: end` at the
+  left. The `side` of the sidebar is a logical side.
+- The icons of the definition (the menus, the actions, and the badges)
+  do not turn in `rtl`, because the generator does not know their
+  meaning.
+- A template that uses a class of a side fails the test. A class that
+  must stay at its side needs an entry in `ALLOWED` with the reason.
+- The charts and the place of the toasts (at the bottom right) keep
+  their sides.
