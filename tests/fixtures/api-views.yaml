@@ -1,0 +1,83 @@
+# Views of API data (ADR 0022): a table, a card list, and a detail view,
+# with nested properties, a list in a property of the answer, an answer
+# that can be null, and the path parameters of a page. The API `shop`
+# has a secret: in the React app, its view is a gap.
+version: 0
+app:
+  name: api-views
+  title: API views
+entities:
+  Note:
+    fields:
+      text: { type: string }
+apis:
+  books:
+    document: apis/books.openapi.yaml
+    base_url_env: BOOKS_API_URL
+    operations: [listBooks, getBook, listAuthorBooks]
+  shop:
+    document: apis/books.openapi.yaml
+    base_url_env: SHOP_API_URL
+    security: { scheme: ApiKeyAuth, env: SHOP_API_KEY }
+    operations: [listBooks]
+pages:
+  books:
+    path: /books
+    title: Books
+    content: { view: book_table }
+  book:
+    path: "/books/{isbn}"
+    title: Book
+    content: { view: book_detail }
+  author_books:
+    path: "/authors/{author}/{year}/{genre}"
+    title: Books of the author
+    content: { view: author_books }
+  shop:
+    path: /shop
+    title: Shop
+    content: { view: shop_books }
+ui:
+  views:
+    book_table:
+      kind: table
+      source: apis.books.operations.listBooks
+      params: { genre: fiction, limit: 50 }
+      items: data.items
+      columns:
+        title: {}
+        author: { field: author.name, label: Author }
+        country: { field: author.country }
+        published: {}
+        format: {}
+        pages: { align: end }
+        price: { format: currency, hide_below: md }
+        in_stock: { field: in-stock, label: In stock }
+        website: { sortable: false }
+        tags: {}
+      sort: { field: published, direction: desc }
+      filters:
+        search: { kind: search, label: Search books, fields: [title, author.name] }
+      pagination: { page_size: 10, page_sizes: [10, 25] }
+    book_detail:
+      kind: detail
+      source: apis.books.operations.getBook
+      params: { isbn: $route.isbn }
+      header: { title: title, subtitle: author.name }
+      sections:
+        facts: { title: Facts, fields: [isbn, published, pages, format], columns: 2 }
+      states:
+        empty: { title: No such book }
+    author_books:
+      kind: cards
+      source: apis.books.operations.listAuthorBooks
+      params: { author: $route.author, year: $route.year, genre: $route.genre, signed: true }
+      card: { title: title, subtitle: published, fields: [format, pages], footer: [tags] }
+      sort: { field: title }
+      filters:
+        search: { kind: search, fields: [title] }
+    shop_books:
+      kind: cards
+      source: apis.shop.operations.listBooks
+      items: data.items
+      card: { title: title }

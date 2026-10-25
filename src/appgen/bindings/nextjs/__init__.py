@@ -388,6 +388,8 @@ BINDING = Binding(
         | {"menu", "menu_group", "menu_item", "menu_sub_item"}
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
         | {"calendar_view"}
+        | {"api_table_view", "api_cards_view", "api_detail_view", "api_column", "api_sort"}
+        | {"api_search_filter", "api_card", "api_detail_header", "api_detail_section"}
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}

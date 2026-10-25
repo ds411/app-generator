@@ -9,7 +9,9 @@ data, as the pages of the React app with its mock data do. Then it
 checks the app:
 
 - Next.js and React: open one page for each entity that has a page.
-  Next.js: a detail page with an unknown ID gives the status 404.
+  Next.js: a detail page with an unknown ID gives the status 404, and
+  the server renders each page of API data with the answer of the mock
+  server.
 - FastAPI: call the health check, and the list endpoint of each entity.
 
 With `--local`, the script runs the Next.js app or the FastAPI app on the
@@ -61,6 +63,7 @@ Environment variables:
 
 import argparse
 import fcntl
+import html
 import json
 import os
 import re
@@ -83,6 +86,8 @@ from mock_api import MockApi
 
 from appgen.bindings.shared.theme import css_value, css_var
 from appgen.dsl import AppDefinition, load_definition
+from appgen.dsl.ui.api_data import api_data
+from appgen.dsl.ui.views import ApiCardsView, ApiDetailView, ApiTableView
 from appgen.gen.tokens import resolve_tokens
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
@@ -297,6 +302,66 @@ def detail_pages(definition: AppDefinition) -> list[str]:
     ]
 
 
+def api_view_pages(definition: AppDefinition) -> list[tuple[str, str, str]]:
+    """Return the name, the path, and a text of the example answer of each page of API data.
+
+    The pages have no path parameters. The text is the value of the first
+    text property of the first item that the view shows (ADR 0022).
+    """
+    ui = definition.ui
+    views = ui.views if ui is not None else {}
+    pages: list[tuple[str, str, str]] = []
+    for name, page in definition.pages.items():
+        view = views.get(page.content.view or "") if page.content is not None else None
+        if not isinstance(view, ApiTableView | ApiCardsView | ApiDetailView) or "{" in page.path:
+            continue
+        data = api_data(definition, view)
+        if data is None:
+            continue
+        item: object = data.operation.example
+        if isinstance(view, ApiTableView | ApiCardsView):
+            for part in (view.items or "").split(".") if view.items else ():
+                item = cast(dict[str, object], item).get(part) if isinstance(item, dict) else None
+            item = cast(list[object], item)[0] if isinstance(item, list) and item else None
+        texts = [_example_text(item, path) for path in _shown_paths(view)]
+        text = next((t for t in texts if t), None)
+        if text is not None:
+            pages.append((name, page.path, text))
+    return pages
+
+
+def _shown_paths(view: ApiTableView | ApiCardsView | ApiDetailView) -> list[str]:
+    match view:
+        case ApiTableView():
+            return [column.field or name for name, column in view.columns.items()]
+        case ApiCardsView():
+            return [view.card.title, *view.card.fields]
+        case ApiDetailView():
+            return [path for section in view.sections.values() for path in section.fields]
+
+
+def _example_text(item: object, path: str) -> str | None:
+    """Return the value of a property path of an example item if it is a text, not a date."""
+    value = item
+    for part in path.split("."):
+        value = cast(dict[str, object], value).get(part) if isinstance(value, dict) else None
+    if isinstance(value, str) and value and not re.match(r"^\d{4}-\d{2}-\d{2}", value):
+        return value
+    return None
+
+
+def check_api_views(binding: str, definition: AppDefinition) -> None:
+    """The Next.js server renders the pages of API data with the answers of the mock server."""
+    base = f"http://localhost:{PORTS[binding]}"
+    for name, path, text in api_view_pages(definition):
+        response = get(base + path)
+        if response.status != 200:
+            raise SmokeError(f"{binding}: GET {path} gave the status {response.status}.")
+        if text not in html.unescape(response.body):
+            raise SmokeError(f"{binding}: GET {path} does not show {text!r} of the API answer.")
+        log(binding, f"page {name}: GET {path} shows {text!r} of the API answer")
+
+
 def check_front_end(binding: str, definition: AppDefinition) -> None:
     base = f"http://localhost:{PORTS[binding]}"
     wait_for(binding, base + "/")
@@ -318,6 +383,7 @@ def check_front_end(binding: str, definition: AppDefinition) -> None:
     if binding != "nextjs":
         # The React app is a single-page app: nginx gives status 200 for each path.
         return
+    check_api_views(binding, definition)
     for name in detail_pages(definition):
         path = definition.pages[name].path
         path = re.sub(r"\{[^}]+\}", UNKNOWN_ID, path)

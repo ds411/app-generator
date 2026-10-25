@@ -1,0 +1,5 @@
+{% set plan = ui_views.api_view_plan(name) %}
+{# A view of an API without a client in the app is a gap: its component is in the extension file. #}
+{% set gap = plan.api.name not in ts_apis %}
+{{ trace_header(element_id) }}
+export { {{ name | pascal }}View{% if plan.props %}, type {{ name | pascal }}ViewProps{% endif %} } from "./ui/{{ name | kebab }}-view{{ '.ext' if gap }}";

@@ -162,10 +162,17 @@ def _diagnostic(detail: ErrorDetails, source_map: SourceMap) -> Diagnostic:
         choices = [
             choice.removeprefix("tag-") for choice in _literal_choices(ctx.get("expected_tags", ""))
         ]
+        # A view with `source` has the tag `api-<kind>` (`appgen.dsl.ui.views.view_tag`).
+        api = tag.startswith("api-")
+        tag = tag.removeprefix("api-")
+        choices = [
+            choice.removeprefix("api-") for choice in choices if choice.startswith("api-") == api
+        ]
         expected = ", ".join(f"'{choice}'" for choice in choices)
+        what = "of a view with 'source' " if api else ""
         return Diagnostic(
             code="invalid-value",
-            message=f"The kind '{tag}' is not valid. Expected {expected}.",
+            message=f"The kind '{tag}' {what}is not valid. Expected {expected}.",
             location=source_map.value((*path, "kind")),
             hint=_did_you_mean(tag, choices),
             element_id=element,

@@ -24,6 +24,7 @@ DEFINITIONS = [
     *sorted((ROOT / "examples").glob("*/app.yaml")),
     ROOT / "tests" / "fixtures" / "react-gaps.yaml",
     ROOT / "tests" / "fixtures" / "secret-api.yaml",
+    ROOT / "tests" / "fixtures" / "api-views.yaml",
 ]
 TEST_COMMANDS = {
     "nextjs": ["pnpm lint", "pnpm typecheck", "pnpm build"],

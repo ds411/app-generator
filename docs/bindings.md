@@ -365,6 +365,10 @@ app:
   the user, so the secret of the API stays in the FastAPI app.
   `scripts/check-react-api.sh` calls such an endpoint, and checks that
   the FastAPI app sends the API key to the mock server of the APIs.
+- A view of API data ([ADR 0022](adr/0022-api-views.md)) calls its
+  operation with the client of the API. A view of an API with a secret
+  and without `expose` is a gap: an extension file with a stub of the
+  view.
 
 ## Extension files
 

@@ -46,12 +46,14 @@ from appgen.dsl.ui.common import (
 from appgen.dsl.ui.fields import SINGLE_KINDS, resolve_path
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
+    ApiViewBase,
     BadgeSet,
     BoardView,
     BooleanFilter,
     CalendarView,
     CardsView,
     DateRangeFilter,
+    DetailView,
     Filter,
     SearchFilter,
     SelectFilter,
@@ -63,6 +65,7 @@ from appgen.gen.naming import camel, pascal, words
 from appgen.gen.render import GenerationError
 
 if TYPE_CHECKING:
+    from appgen.bindings.shared.api_views import ApiViewPlan
     from appgen.bindings.shared.dashboards import DashboardPlan
     from appgen.bindings.shared.details import DetailPlan
 
@@ -481,14 +484,18 @@ class ViewContext:
         *,
         forms: bool = False,
         endpoints: Mapping[str, ListEndpoint] | None = None,
+        api_server: bool = False,
     ) -> None:
         """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
 
         With `endpoints` (the list endpoints by entity name), the list views
-        send their query to the API.
+        send their query to the API. With `api_server`, the server component
+        of a page calls the operation of a view of API data (Next.js), else
+        the view calls it in the browser.
         """
         self.definition = definition
         self.with_forms = forms
+        self.api_server = api_server
         self.endpoints: dict[str, ListEndpoint] = dict(endpoints or {})
         ui = definition.ui
         self.badge_sets: dict[str, BadgeSet] = dict(ui.badges) if ui else {}
@@ -499,8 +506,14 @@ class ViewContext:
         }
         """The kind of each list view (`table`, `cards`, `board`, or `calendar`), by name."""
         self.detail_views: list[str] = [
-            name for name, view in (ui.views.items() if ui else ()) if view.kind == "detail"
+            name for name, view in (ui.views.items() if ui else ()) if isinstance(view, DetailView)
         ]
+        self.api_views: dict[str, str] = {
+            name: view.kind
+            for name, view in (ui.views.items() if ui else ())
+            if isinstance(view, ApiViewBase)
+        }
+        """The kind of each view of API data (`table`, `cards`, or `detail`), by name."""
         self.dashboards: list[str] = list(ui.dashboards) if ui else []
         self._plans: dict[str, ViewPlan] = {}
         # A local import: the forms module imports this module.
@@ -509,13 +522,18 @@ class ViewContext:
         self.forms = FormContext(definition, server=bool(self.endpoints))
         self._details: dict[str, Any] = {}
         self._dashboards: dict[str, Any] = {}
+        self._api_views: dict[str, Any] = {}
         self._bars: dict[str, ActionBarPlan] = {}
 
     @property
     def runtime(self) -> bool:
         """Return True if the app has views, dashboards, or page actions: they need the runtime."""
         return bool(
-            self.list_views or self.detail_views or self.dashboards or self.page_action_bars
+            self.list_views
+            or self.detail_views
+            or self.api_views
+            or self.dashboards
+            or self.page_action_bars
         )
 
     @property
@@ -679,6 +697,14 @@ class ViewContext:
             self._details[name] = build_detail(self, name)
         return self._details[name]
 
+    def api_view_plan(self, name: str) -> ApiViewPlan:
+        """Return the plan of a view of API data (see `appgen.bindings.shared.api_views`)."""
+        from appgen.bindings.shared.api_views import build_api_view
+
+        if name not in self._api_views:
+            self._api_views[name] = build_api_view(self, name, self.api_server)
+        return self._api_views[name]
+
     def dashboard_plan(self, name: str) -> DashboardPlan:
         """Return the plan of a dashboard (see `appgen.bindings.shared.dashboards`)."""
         from appgen.bindings.shared.dashboards import build_dashboard
@@ -696,7 +722,7 @@ class ViewContext:
 
     @property
     def features(self) -> set[str]:
-        """Return the runtime parts that the list views need, for the outputs and shadcn/ui.
+        """Return the runtime parts that the views need, for the outputs and shadcn/ui.
 
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
         `date_range`, `select`, `multi_select`), and the value components
@@ -716,6 +742,12 @@ class ViewContext:
         for name in self.detail_views:
             found.add("detail")
             found |= self.detail_plan(name).uses & values
+        for name, kind in self.api_views.items():
+            api_plan = self.api_view_plan(name)
+            found.add(kind)
+            found |= api_plan.uses & values
+            if api_plan.filters:
+                found.add("search")
         for name in self.dashboards:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
@@ -880,6 +912,7 @@ class ViewContext:
         definition = self.definition
         assert definition.ui is not None
         view = definition.ui.views[name]
+        assert not isinstance(view, ApiViewBase), "A view of API data has an ApiViewPlan."
         plan = ViewPlan(name=name, view=view, entity=view.entity)
         paths: list[str] = []
         if isinstance(view, TableView):
@@ -1590,6 +1623,8 @@ HELPERS: dict[str, Callable[..., Any]] = {
 
 
 _VIEW = "src/widgets/{{ name | kebab }}"
+_API_CLIENT = "ui_views.api_view_plan(name).api.name in ts_apis"
+"""The condition of the views of API data whose API has a client in the app."""
 
 
 def view_rules() -> tuple[Output, ...]:
@@ -1662,6 +1697,28 @@ def view_rules() -> tuple[Output, ...]:
             template="ui/details/detail-view.tsx.j2",
             path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
             for_each="detail_view",
+        ),
+        # The views of API data (ADR 0022). A view of an API without a
+        # client in the app (an API with a secret in the React app) is a gap.
+        *(
+            rule
+            for kind in ("api_table_view", "api_cards_view", "api_detail_view")
+            for rule in (
+                Output(
+                    template="ui/views/api-view.tsx.j2",
+                    path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
+                    for_each=kind,
+                    when=_API_CLIENT,
+                ),
+                Output(
+                    template="ui/views/api-view.ext.tsx.j2",
+                    path=_VIEW + "/ui/{{ name | kebab }}-view.ext.tsx",
+                    for_each=kind,
+                    when=f"not ({_API_CLIENT})",
+                    extension=True,
+                ),
+                Output(template="ui/views/api-index.ts.j2", path=_VIEW + "/index.ts", for_each=kind),
+            )
         ),
         *(
             Output(template=f"ui/dashboards/{template}", path=path, when=when)

@@ -3,12 +3,19 @@
 {% set protected = definition.auth and name not in definition.auth.public_pages %}
 {# On a protected page, an owner rule (ADR 0018) hides the records of other users. #}
 {% set rule = owner_rules.get(element.entity) if detail and protected else none %}
+{% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
+{% set api_plan = ui_views.api_view_plan(api_view) if api_view else none %}
 {{ trace_header(element_id) }}
 import type { Metadata } from "next";
 {% if detail %}
 import { notFound } from "next/navigation";
 
 import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.entity | kebab }}/server";
+{% elif api_plan %}
+import { connection } from "next/server";
+
+import { {{ api_plan.api.factory }}{% if api_plan.params_type_used %}, type {{ api_plan.method.params_type }}{% endif %} } from "{{ api_plan.module }}";
+import { viewAnswer } from "@/shared/api/third-party";
 {% else %}
 
 {% endif %}
@@ -30,7 +37,25 @@ export async function generateMetadata(): Promise<Metadata> {
 {% else %}
 export const metadata: Metadata = { title: {{ element.title | tojson }} };
 {% endif %}
-{% if detail %}
+{% if api_plan %}
+
+/** Call the operation of the view at each request: the page does not keep the answer of the API. */
+export default async function Route({% if info.params %}{ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>{% endif %}) {
+{% if protected %}
+{% if definition.access %}
+  await requirePage({{ name | camel | tojson }}, {{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.access.id) }}
+{% else %}
+  await requirePageUser({{ element.path | tojson }}{% if info.params %}, await params{% endif %}); {{ trace(definition.auth.id) }}
+{% endif %}
+{% endif %}
+  await connection();
+{% if api_plan.route_params %}
+  const route: Record<string, string | undefined> = await params;
+{% endif %}
+  const result = await viewAnswer(() => {{ api_plan.call }}); {{ trace(api_plan.method.id) }}
+  return <{{ info.component }} result={result} />;
+}
+{% elif detail %}
 
 /** Show the not-found page (status 404) if the record does not exist. */
 export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>) {

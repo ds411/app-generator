@@ -6,10 +6,12 @@
 {% set detail = element.content.view if params and element.content is not none and element.content.view in ui_views.detail_views else none %}
 {% set dashboard = element.content.dashboard if element.content is not none and element.content.dashboard else none %}
 {% set id_param = params[-1] if detail else none %}
+{% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
+{% set api_route = api_view and ui_views.api_view_plan(api_view).props %}
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
 {% endif %}
-{% if (params and not view and not dashboard) or form %}
+{% if (params and not view and not dashboard and not api_view) or form or api_route %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
 {% if dashboard %}
@@ -20,8 +22,8 @@ import { {{ dashboard | pascal }}Dashboard } from "@/widgets/{{ dashboard | keba
 import { {{ name | pascal }}PageActions } from "@/widgets/page-actions";
 {% endif %}
 import { PageHeader } from "@/widgets/page-header";
-{% if view or detail %}
-import { {{ (view or detail) | pascal }}View } from "@/widgets/{{ (view or detail) | kebab }}";
+{% if view or detail or api_view %}
+import { {{ (view or detail or api_view) | pascal }}View } from "@/widgets/{{ (view or detail or api_view) | kebab }}";
 {% endif %}
 {% if custom %}
 
@@ -38,7 +40,9 @@ export function {{ name | pascal }}Page() {
   const params = useParams();
 {% elif detail %}
   const { {{ id_param }}{% if id_param != id_param | camel %}: {{ id_param | camel }}{% endif %} } = useParams();
-{% elif params and not view and not dashboard %}
+{% elif api_route %}
+  const route = useParams();
+{% elif params and not view and not dashboard and not api_view %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
 {% set regions = page_regions(element, page_actions | length > 0) %}
@@ -49,6 +53,8 @@ export function {{ name | pascal }}Page() {
 <{{ view | pascal }}View /> {{ trace(element.content.id, jsx=True) }}
 {% elif detail %}
 <{{ detail | pascal }}View id={ {{- id_param | camel }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
+{% elif api_view %}
+<{{ api_view | pascal }}View{% if api_route %} route={route}{% endif %} /> {{ trace(element.content.id, jsx=True) }}
 {% elif dashboard %}
 <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
 {% elif form %}

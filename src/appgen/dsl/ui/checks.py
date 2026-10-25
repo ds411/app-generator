@@ -4,6 +4,7 @@ The validator runs these checks after the checks of the data part.
 """
 
 import difflib
+import json
 import re
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping
 from typing import cast
@@ -11,6 +12,8 @@ from typing import cast
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Page
+from appgen.dsl.openapi import accepts, object_properties, property_chain, query_value
+from appgen.dsl.ui.api_data import api_data
 from appgen.dsl.ui.common import (
     ActionBase,
     FormAction,
@@ -47,6 +50,12 @@ from appgen.dsl.ui.model import Defaults
 from appgen.dsl.ui.page import PageContent
 from appgen.dsl.ui.tokens import TokenTable, check_tokens
 from appgen.dsl.ui.views import (
+    ApiCardsView,
+    ApiDetailView,
+    ApiListViewBase,
+    ApiTableView,
+    ApiView,
+    ApiViewBase,
     BadgeRef,
     BadgeSet,
     BoardView,
@@ -85,6 +94,8 @@ MANY_KINDS = frozenset({"one_to_many", "many_to_many"})
 STRING_TYPES = frozenset({"string", "text", "email", "url"})
 FORM_OPERATION_KINDS = ("create", "update", "custom")
 ROUTE_DEFAULT = re.compile(r"^\$route\.[a-z][a-z0-9_]*$")
+ROUTE_PARAM = re.compile(r"^\$route\.([a-z][a-z0-9_]*)$")
+"""A path parameter of the page as the value of a parameter of an API view."""
 
 
 def check_ui_tokens(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -246,6 +257,9 @@ def _check_badge_set(definition: AppDefinition, badge: BadgeSet) -> Iterator[Dia
 
 
 def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
+    if isinstance(view, ApiViewBase):
+        yield from _check_api_view(definition, view)
+        return
     if view.entity not in definition.entities:
         yield _missing(view, "entity", "entity", view.entity, definition.entities)
         return
@@ -281,6 +295,150 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
             yield from _check_calendar(definition, entity, view)
         case DetailView():
             yield from _check_detail(definition, entity, view)
+
+
+def _check_api_view(definition: AppDefinition, view: ApiView) -> Iterator[Diagnostic]:
+    """The operation of a view of API data must exist, take the params, and answer with items."""
+    api = definition.apis.get(view.api)
+    if api is None:
+        yield _missing(view, "source", "API", view.api, definition.apis)
+        return
+    if view.operation not in api.operations:
+        matches = difflib.get_close_matches(view.operation, list(api.operations), n=1)
+        yield _error(
+            "unknown-reference",
+            f"The API '{view.api}' has no operation '{view.operation}' in its 'operations'.",
+            view,
+            at="source",
+            hint=f"Did you mean '{matches[0]}'?" if matches else None,
+        )
+        return
+    if view.states is not None:
+        yield from _check_states(view.states, {})
+    data = api_data(definition, view)
+    if data is None:
+        # The document is not valid: `check_apis` reports it.
+        return
+    operation = data.operation
+    if operation.body is not None:
+        yield _error(
+            "unsuitable-operation",
+            f"The operation '{operation.id}' has a body, but a view sends no body.",
+            view,
+            at="source",
+            hint="Use an operation without a body, or show its answer in a custom page.",
+        )
+    parameters = {p.name: p for p in operation.parameters}
+    for name, value in view.params.items():
+        if name not in parameters:
+            matches = difflib.get_close_matches(name, list(parameters), n=1)
+            yield _error(
+                "unknown-reference",
+                f"The operation '{operation.id}' has no parameter '{name}'.",
+                view,
+                at="params",
+                hint=f"Did you mean '{matches[0]}'?" if matches else None,
+            )
+        elif isinstance(value, str) and value.startswith("$"):
+            if not ROUTE_PARAM.match(value):
+                yield _error(
+                    "invalid-value",
+                    f"The value '{value}' of the parameter '{name}' is not valid. A value that "
+                    "starts with '$' must be '$route.<name>', a path parameter of the page.",
+                    view,
+                    at="params",
+                )
+        elif not accepts(parameters[name].schema, value, data.spec):
+            yield _error(
+                "invalid-value",
+                f"The value {json.dumps(value)} of the parameter '{name}' does not match the "
+                f"schema of the parameter in the document of the API '{view.api}'.",
+                view,
+                at="params",
+            )
+    for parameter in operation.parameters:
+        if parameter.required and parameter.name not in view.params:
+            yield _error(
+                "missing-key",
+                f"The operation '{operation.id}' needs the parameter '{parameter.name}'.",
+                view,
+                at="source",
+                hint=f"Give its value in 'params', for example '{parameter.name}: ...', or "
+                f"'$route.<name>' for a path parameter of the page.",
+            )
+    if data.item is None:
+        yield _unsuitable_answer(view, operation.id)
+        return
+    what, verb = ("answer", "has") if isinstance(view, ApiDetailView) else ("items", "have")
+    for element, key, paths in _api_view_paths(view):
+        for path in paths:
+            chain = property_chain(data.item, path, data.spec)
+            if chain is None:
+                names = [p.name for p in object_properties(data.item, data.spec) or ()]
+                matches = difflib.get_close_matches(path, names, n=1)
+                yield _error(
+                    "unknown-reference",
+                    f"The {what} of '{operation.id}' {verb} no property '{path}'.",
+                    element,
+                    at=key,
+                    hint=f"Did you mean '{matches[0]}'?" if matches else None,
+                )
+            elif not query_value(chain[-1].schema, data.spec):
+                yield _error(
+                    "unsuitable-field",
+                    f"The property '{path}' of the {what} of '{operation.id}' is an object. "
+                    "A view shows a text, a number, a boolean, or a list of these.",
+                    element,
+                    at=key,
+                    hint="Name a property of the object, for example 'address.city'.",
+                )
+
+
+def _unsuitable_answer(view: ApiView, operation: str) -> Diagnostic:
+    if isinstance(view, ApiDetailView):
+        need = "an answer that is an object"
+    elif view.items is None:
+        need = "an answer that is a list of objects"
+    else:
+        need = f"an answer with a list of objects in the property '{view.items}'"
+    what = {"table": "A table", "cards": "A card list", "detail": "A detail view"}[view.kind]
+    return _error(
+        "unsuitable-operation",
+        f"{what} needs {need}, but the operation '{operation}' does not give it.",
+        view,
+        at="items" if isinstance(view, ApiListViewBase) and view.items is not None else "source",
+        hint="Set 'items' to the property with the list."
+        if isinstance(view, ApiListViewBase) and view.items is None
+        else None,
+    )
+
+
+def _api_view_paths(view: ApiView) -> Iterator[tuple[Element, str, list[str]]]:
+    """Yield each element of a view of API data with a key and its property paths."""
+    if isinstance(view, ApiListViewBase):
+        if view.sort is not None:
+            yield view.sort, "field", [view.sort.field]
+        for filter_ in view.filters.values():
+            yield filter_, "fields", filter_.fields
+    match view:
+        case ApiTableView():
+            for name, column in view.columns.items():
+                yield column, "field", [column.field or name]
+        case ApiCardsView():
+            card = view.card
+            yield card, "title", [card.title]
+            if card.subtitle is not None:
+                yield card, "subtitle", [card.subtitle]
+            yield card, "fields", card.fields
+            yield card, "footer", card.footer
+        case ApiDetailView():
+            if view.header is not None:
+                for key in ("title", "subtitle"):
+                    path = getattr(view.header, key)
+                    if path is not None:
+                        yield view.header, key, [path]
+            for section in view.sections.values():
+                yield section, "fields", section.fields
 
 
 def _check_detail(definition: AppDefinition, entity: str, view: DetailView) -> Iterator[Diagnostic]:
@@ -331,6 +489,13 @@ def _check_list_view(
     view = views.get(name)
     if view is None:
         yield _missing(element, key, "view", name, views)
+    elif isinstance(view, ApiViewBase):
+        yield _error(
+            "unsuitable-view",
+            f"The view '{name}' shows API data. A list of records needs a view of an entity.",
+            element,
+            at=key,
+        )
     elif not isinstance(view, TableView | CardsView):
         yield _error(
             "unsuitable-view",
@@ -851,6 +1016,8 @@ def _check_page_content(
         view = views.get(content.view)
         if view is None:
             yield _missing(content, "view", "view", content.view, views)
+        elif isinstance(view, ApiViewBase):
+            yield from _check_api_page(page, content, view)
         elif isinstance(view, DetailView) and not _path_params(page.path):
             yield _error(
                 "unsuitable-view",
@@ -876,6 +1043,30 @@ def _check_page_content(
         dashboards = ui.dashboards if ui else {}
         if content.dashboard not in dashboards:
             yield _missing(content, "dashboard", "dashboard", content.dashboard, dashboards)
+
+
+def _check_api_page(page: Page, content: PageContent, view: ApiView) -> Iterator[Diagnostic]:
+    """A page with a view of API data has no entity, and has each path parameter of the view."""
+    if page.entity is not None:
+        yield _error(
+            "unsuitable-view",
+            f"The view '{content.view}' shows API data, but the page shows '{page.entity}'.",
+            content,
+            at="view",
+            hint="Remove 'entity' from the page.",
+        )
+    params = _path_params(page.path)
+    for name, value in view.params.items():
+        match = ROUTE_PARAM.match(value) if isinstance(value, str) else None
+        if match is not None and match[1] not in params:
+            yield _error(
+                "unsuitable-view",
+                f"The view '{content.view}' gives the parameter '{name}' the path parameter "
+                f"'{match[1]}' ('{value}'), but the path '{page.path}' does not have it.",
+                content,
+                at="view",
+                hint=f"Add '{{{match[1]}}}' to the path of the page.",
+            )
 
 
 def _check_board_move(definition: AppDefinition, view: BoardView) -> Iterator[Diagnostic]:

@@ -186,7 +186,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
-        "ui_views": ViewContext(definition, forms=True),
+        "ui_views": ViewContext(definition, forms=True, api_server=True),
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "owner_rules": owner_rules(definition),
