@@ -7,12 +7,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import ConfigDict
-from sqlalchemy import func, select
+from pydantic import ConfigDict, Field
+from sqlalchemy import func, or_, select
 
 from app.core.db import SessionDep
 from app.core.errors import problem_responses
-from app.core.pagination import Page, PageQuery, sort_order
+from app.core.pagination import Page, PageQuery, contains, search_words, sort_order
 from app.features.tasks.models import Task
 from app.features.tasks.schemas import TaskRead
 
@@ -24,6 +24,8 @@ class ListTasksQuery(PageQuery):
 
     model_config = ConfigDict(extra="forbid")
 
+    # @trace entities.Task
+    id: list[UUID] | None = Field(default=None, description="The IDs of the records.")
     # @trace entities.Task.fields.title
     title: str | None = None
     # @trace entities.Task.fields.due_date
@@ -32,6 +34,11 @@ class ListTasksQuery(PageQuery):
     done: bool | None = None
     # @trace entities.Task.relations.project
     project_id: UUID | None = None
+    # @trace entities.Task.fields.title
+    q: str | None = Field(
+        default=None,
+        description="Words that each record has in one of the fields `title`, in any case.",
+    )
 
 
 SORTABLE = {
@@ -53,6 +60,8 @@ async def list_tasks(
 ) -> Page[TaskRead]:
     """Return a page of the records of the entity Task."""
     statement = select(Task)
+    if query.id:
+        statement = statement.where(Task.id.in_(query.id))
     if query.title is not None:
         statement = statement.where(Task.title == query.title)
     if query.due_date is not None:
@@ -61,6 +70,8 @@ async def list_tasks(
         statement = statement.where(Task.done == query.done)
     if query.project_id is not None:
         statement = statement.where(Task.project_id == query.project_id)
+    for word in search_words(query.q):
+        statement = statement.where(or_(contains(Task.title, word)))
     total = await session.scalar(select(func.count()).select_from(statement.subquery()))
     order = sort_order(query.sort, SORTABLE, Task.id)
     records = await session.scalars(

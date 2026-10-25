@@ -98,6 +98,9 @@ class FieldPlan:
     """For an enum: the options `{ value, label }[]`. For a relation: of `lookups`."""
     target: str | None = None
     """The target entity of a relation."""
+    source: str | None = None
+    """For a relation of a form that searches on the server: the option source, for example
+    `personOptions`. The field then has no `options`."""
     initial: str = ""
     """The TypeScript initial value, of `record` and `routeParams`."""
     checks: list[Check] = field(default_factory=list[Check])
@@ -158,7 +161,8 @@ class FormPlan:
     imports: list[str]
     """The import lines of the entity slices, the operations, and the gaps."""
     lookups: list[str]
-    """The target entities of the relation fields, sorted by name."""
+    """The target entities of the relation fields that the form loads, sorted by name. A form
+    that searches on the server loads none."""
     host_page: str | None = None
     """The page that shows the form as its content, or None."""
     record_param: str | None = None
@@ -227,8 +231,10 @@ class SignUpPlan:
 class FormContext:
     """The form plans of a definition, for the form templates and the actions."""
 
-    def __init__(self, definition: AppDefinition) -> None:
+    def __init__(self, definition: AppDefinition, *, server: bool = False) -> None:
+        """Make the context. With `server`, the relation fields search their options on the API."""
         self.definition = definition
+        self.server = server
         ui = definition.ui
         self.names: list[str] = list(ui.forms) if ui else []
         self._plans: dict[str, FormPlan] = {}
@@ -237,7 +243,7 @@ class FormContext:
     def plan(self, name: str) -> FormPlan:
         """Return the plan of a form."""
         if name not in self._plans:
-            self._plans[name] = _build(self.definition, name)
+            self._plans[name] = _build(self.definition, name, self.server)
         return self._plans[name]
 
     @property
@@ -257,7 +263,7 @@ class FormContext:
         return any(f.target for name in self.names for f in self.plan(name).fields)
 
 
-def _build(definition: AppDefinition, name: str) -> FormPlan:
+def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPlan:
     assert definition.ui is not None
     form = definition.ui.forms[name]
     entity = form.entity
@@ -283,6 +289,11 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
             plan.gap_name = spec.name
         plan.classes = _span_classes(form_field.span, form.grid)
         plan.owner = rule is not None and field_name == rule.relation
+        if server and plan.target is not None and plan.widget != "custom":
+            # The server searches the options: a select or a radio of a relation is a search box.
+            plan.source = f"{camel(plan.target)}Options"
+            plan.options = None
+            plan.widget = "relation"
         fields.append(plan)
     by_field = {f.name: f for f in fields}
     sections = [
@@ -325,14 +336,22 @@ def _build(definition: AppDefinition, name: str) -> FormPlan:
             if operation.kind == "create"
             else f"{op}(record.id, input)"
         )
+    sources = sorted({f.target for f in fields if f.source and f.target})
+    if entity in sources:
+        entity_names.append(f"{camel(entity)}Options")
     imports.insert(0, f'import {{ {", ".join(entity_names)} }} from "@/entities/{kebab_entity}";')
+    imports[1:1] = [
+        f'import {{ {camel(target)}Options }} from "@/entities/{kebab(target)}";'
+        for target in sources
+        if target != entity
+    ]
     for rule in rules:
         if rule.gap_name:
             imports.append(f'import {{ {rule.gap_name} }} from "{rule.gap_module}";')
     for f in fields:
         if f.gap_name:
             imports.append(f'import {{ {f.gap_name} }} from "{f.gap_module}";')
-    lookups = sorted({f.target for f in fields if f.target})
+    lookups = sorted({f.target for f in fields if f.target and not f.source})
     host = next(
         (
             p_name

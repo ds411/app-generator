@@ -15,10 +15,17 @@ that the two generated apps work together:
    table must load each page with one request to the list endpoint, and
    send its search and its sort to the API. The tabs of a project must
    load the tasks and the members of the project from the API.
-5. With translations: the API gives an error in the second language of
+5. Check the large lists (M26): no page loads all records of an entity.
+   A page loads its related records by ID. The owner field of the edit
+   form searches the people on the server, with more people than one
+   page of options, and saves the person of the search. The board loads
+   one page for each column, shows the counts of the server, loads more
+   cards of a column, and moves a card. The calendar (a view that the
+   test adds to the definition) loads only the records of the shown days.
+6. With translations: the API gives an error in the second language of
    `Accept-Language`, and the page in the second language asks the API
    for it (ADR 0010).
-6. Open the dashboard: its custom widget (the hand-written code in
+7. Open the dashboard: its custom widget (the hand-written code in
    examples/project-tracker/extensions/react/) must show the holidays
    that the browser gets from the mock server of the third-party APIs
    (scripts/mock_api.py) through the generated client. The build sets
@@ -42,6 +49,7 @@ Environment variables:
     APPGEN_SMOKE_TIMEOUT          Seconds to wait for an app to start (default 180).
 """
 
+import datetime as dt
 import json
 import os
 import re
@@ -60,6 +68,7 @@ from typing import Any, cast
 from mock_api import MockApi
 
 from appgen.bindings.react.api_client import DATA_KEY, api_entities
+from appgen.bindings.shared.views import ViewContext
 from appgen.dsl import load_definition
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
@@ -71,6 +80,14 @@ WEB_URL = f"http://localhost:{WEB_PORT}"
 PAGE_SIZE = 20
 """The page size of the project table (`ui.views.project_table.pagination`)."""
 PROJECT_COUNT = PAGE_SIZE + 5
+OPTION_COUNT = 20
+"""The count of the options of a search of a choice (`OPTION_COUNT` of the HTTP store)."""
+PEOPLE_COUNT = OPTION_COUNT + 5
+"""The people that the test adds for the owner field: more than one page of options."""
+BOARD_PAGE = 20
+"""The count of cards that a board column loads first (`PAGE_SIZE` of the board view)."""
+TODO_COUNT = BOARD_PAGE + 4
+"""The tasks that the test adds to the column "To do": more than one page of the column."""
 HOLIDAY_NAME = "Christmas Day"
 """A holiday of the example answers of the holidays API, which the dashboard widget shows."""
 SECRET = "check-secret"
@@ -203,6 +220,153 @@ function check(ok, message) {
 """
 
 
+# Open the pages of the large lists (M26), and check their requests to the
+# API: no request loads all records of an entity (a list request with the
+# largest page and no filter). The argument is a JSON object with the URLs
+# and the records of the test.
+LIST_CHECK = """
+const { existsSync } = require("node:fs");
+const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+const timeout = 30000;
+const PAGE_KEYS = ["limit", "offset", "sort"];
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+(async () => {
+  const test = JSON.parse(process.argv[1]);
+  const system = "/opt/pw-browsers/chromium";
+  let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    executablePath = existsSync(system) ? system : undefined;
+  }
+  const browser = await chromium.launch({ executablePath });
+  try {
+    const page = await browser.newPage();
+    const gets = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.origin === test.api) gets.push(url);
+    });
+    const shows = (text, scope = page) =>
+      scope.getByText(text, { exact: true }).first().waitFor({ timeout });
+    const since = (start, path) => gets.slice(start).filter((url) => url.pathname === path);
+    const settle = () => page.waitForLoadState("networkidle");
+    const button = (name, scope = page) => scope.getByRole("button", { name, exact: true });
+    const noLoadAll = (where) => {
+      const all = gets.filter((url) => {
+        const keys = [...url.searchParams.keys()];
+        return url.searchParams.get("limit") === "200" && keys.every((k) => PAGE_KEYS.includes(k));
+      });
+      check(all.length === 0, `${where} loaded all records: ${all.join(", ")}`);
+    };
+
+    // The table loads the owners of its page by ID.
+    await page.goto(`${test.web}/projects`);
+    await shows(test.names[0]);
+    await settle();
+    const owners = since(0, "/people");
+    check(owners.length === 1, `The table sent ${owners.length} requests for the owners, not 1.`);
+    check(owners[0].searchParams.has("id"), `The request of the owners has no IDs: ${owners[0]}`);
+    noLoadAll("The project table");
+
+    // The owner field searches the people on the server.
+    await page.goto(`${test.web}/projects/${test.project}`);
+    await button("Edit").click();
+    let start = gets.length;
+    await page.locator("#edit-project-owner").click();
+    await page.getByRole("option").nth(test.optionCount - 1).waitFor({ timeout });
+    const options = await page.getByRole("option").count();
+    check(options === test.optionCount, `The owner field shows ${options} options.`);
+    const first = since(start, "/people").map((url) => url.searchParams.get("limit"));
+    check(first.includes(String(test.optionCount)), `The owner field asked for ${first}.`);
+    start = gets.length;
+    await page.getByPlaceholder("Search").fill(test.searched.text);
+    await page.getByRole("option", { name: test.searched.name, exact: true }).click();
+    const words = since(start, "/people").map((url) => url.searchParams.get("q"));
+    check(words.includes(test.searched.text), `The owner field searched for ${words}.`);
+    const patch = (response) => response.request().method() === "PATCH";
+    const saved = page.waitForResponse(patch, { timeout });
+    await button("Save").click();
+    await saved;
+    const project = await (await fetch(`${test.api}/projects/${test.project}`)).json();
+    check(project.owner_id === test.searched.id, `The owner is ${project.owner_id}.`);
+    await settle();
+    noLoadAll("The project page and its edit form");
+
+    // The board loads one page for each column, with the counts of the server.
+    start = gets.length;
+    await page.goto(`${test.web}/tasks`);
+    const todo = page.getByRole("region", { name: "To do" });
+    const progress = page.getByRole("region", { name: "In progress" });
+    await shows(String(test.todoCount), todo);
+    await settle();
+    const columns = since(start, "/tasks");
+    check(columns.length === test.columns, `The board sent ${columns.length} requests.`);
+    const onePage = (url) =>
+      url.searchParams.has("status") && url.searchParams.get("limit") === String(test.boardPage);
+    check(columns.every(onePage), `The board requests are not pages: ${columns.join(", ")}`);
+    const cards = todo.getByRole("button", { name: "Actions" });
+    const shown = await cards.count();
+    check(shown === test.boardPage, `The column "To do" shows ${shown} cards.`);
+    await button("Show more", todo).click();
+    await cards.nth(test.todoCount - 1).waitFor({ timeout });
+    check(!(await button("Show more", todo).isVisible()), "The full column has more cards.");
+    await cards.first().click();
+    await page.getByRole("menuitem", { name: "In progress", exact: true }).click();
+    await shows(String(test.todoCount - 1), todo);
+    await shows("1 / 8", progress);
+    await settle();
+    noLoadAll("The board");
+
+    // The calendar loads the records of the shown days.
+    start = gets.length;
+    await page.goto(`${test.web}${test.calendar}`);
+    await shows(test.dueToday);
+    await settle();
+    const ranges = since(start, "/tasks");
+    const range = (url) => test.range.map((name) => url.searchParams.get(name));
+    check(ranges.length === 1, `The calendar sent ${ranges.length} requests, not 1.`);
+    const [from, to] = range(ranges[0]);
+    const shownToday = from && to && from <= test.today && test.today <= to;
+    check(shownToday, `The calendar asked for the days ${from} to ${to}.`);
+    start = gets.length;
+    const tasks = (request) => new URL(request.url()).pathname === "/tasks";
+    const loaded = page.waitForRequest(tasks, { timeout });
+    await button("Next month").click();
+    await loaded;
+    const [next] = range(since(start, "/tasks")[0]);
+    check(next > from, `The next month asked for the days from ${next}, not after ${from}.`);
+    await settle();
+    noLoadAll("The calendar");
+  } finally {
+    await browser.close();
+  }
+})().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+"""
+
+# The calendar view and its page that the test adds to the definition:
+# the project tracker has no calendar.
+CALENDAR_VIEW = """\
+    task_calendar:
+      kind: calendar
+      entity: Task
+      title: Task calendar
+      start: due_date
+      label: title
+"""
+CALENDAR_PAGE = """\
+  task_calendar:
+    path: /calendar
+    title: Calendar
+    entity: Task
+    content: { view: task_calendar }
+"""
+CALENDAR_PATH = "/calendar"
+
+
 class ApiClientError(Exception):
     """A failed check."""
 
@@ -281,11 +445,19 @@ def wait_for(url: str) -> None:
 
 
 def api_definition(folder: Path) -> Path:
-    """Write the project tracker with the key `x-react-data: api` in its `app` section."""
+    """Write the project tracker with the key `x-react-data: api` in its `app` section.
+
+    The copy also has a calendar of the tasks, on the page `/calendar`.
+    """
     text = DEFINITION.read_text()
-    text, count = re.subn(r"(?m)^app:\n", f"app:\n  {DATA_KEY}: api\n", text, count=1)
-    if count != 1:
-        raise ApiClientError(f"{DEFINITION} has no 'app:' line.")
+    for line, added in (
+        ("app:", f"  {DATA_KEY}: api\n"),
+        ("  views:", CALENDAR_VIEW),
+        ("pages:", CALENDAR_PAGE),
+    ):
+        text, count = re.subn(f"(?m)^{line}\n", f"{line}\n{added}", text, count=1)
+        if count != 1:
+            raise ApiClientError(f"{DEFINITION} has no '{line}' line.")
     # The other files of the example, for example the OpenAPI documents of its APIs.
     shutil.copytree(DEFINITION.parent, folder, dirs_exist_ok=True)
     path = folder / "app.yaml"
@@ -409,6 +581,22 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     ]
     task = {"title": "API task", "project_id": projects[0]["id"]}
     request("POST", f"{API_URL}/tasks", task)
+    log(f"add {PEOPLE_COUNT} people, and {TODO_COUNT} tasks to do, for the large lists")
+    people = [
+        request(
+            "POST",
+            f"{API_URL}/people",
+            {"name": f"API person {number:02d}", "email": f"person{number}@example.com"},
+        )
+        for number in range(1, PEOPLE_COUNT + 1)
+    ]
+    for number in range(1, TODO_COUNT + 1):
+        # The tasks of another project: the first page of the tasks tab stays the same.
+        todo = {"title": f"API todo {number:02d}", "project_id": projects[2]["id"]}
+        request("POST", f"{API_URL}/tasks", todo)
+    today = dt.date.today().isoformat()
+    due = {"title": "API due today", "project_id": projects[1]["id"], "due_date": today}
+    request("POST", f"{API_URL}/tasks", due)
     language = check_language(definition)
     if language is not None:
         log(f"the API gives its messages in '{language['locale']}' for Accept-Language")
@@ -425,6 +613,35 @@ def check_apps(definition: Path, mock: MockApi) -> None:
         "language": language,
     }
     run("node", "-e", PAGE_CHECK, json.dumps(check))
+    # The board and the calendar get the names of their parameters from the plan of the views.
+    loaded = load_definition(definition)
+    endpoints = {name: api.list_endpoint for name, api in api_entities(loaded).items()}
+    plans = ViewContext(loaded, endpoints=endpoints)
+    calendar = plans.view_plan("task_calendar").server
+    assert calendar is not None and calendar.range is not None
+    searched = people[-1]
+    lists: dict[str, object] = {
+        "api": API_URL,
+        "web": WEB_URL,
+        "names": names,
+        "project": projects[0]["id"],
+        "optionCount": OPTION_COUNT,
+        "searched": {
+            "id": searched["id"],
+            "name": searched["name"],
+            "text": f"person {PEOPLE_COUNT}",
+        },
+        "columns": len(plans.view_plan("task_board").board_columns),
+        "boardPage": BOARD_PAGE,
+        # The tasks of the column "To do": all tasks of the test have the default status.
+        "todoCount": request("GET", f"{API_URL}/tasks?status=todo&limit=1")["total"],
+        "calendar": CALENDAR_PATH,
+        "range": list(calendar.range),
+        "today": today,
+        "dueToday": due["title"],
+    }
+    log(f"open the large lists: no page loads all records ({len(people)} people)")
+    run("node", "-e", LIST_CHECK, json.dumps(lists))
     log(f"open {WEB_URL}/, and wait for the holiday '{HOLIDAY_NAME}' of the mock server")
     run("node", "-e", TEXT_CHECK, f"{WEB_URL}/", HOLIDAY_NAME)
     calls = mock.calls("holidays", "getNextPublicHolidays")

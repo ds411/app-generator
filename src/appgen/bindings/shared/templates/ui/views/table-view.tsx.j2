@@ -103,7 +103,7 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
 {{ m.action_lookups(plan) -}}
 {% if plan.filters %}
   const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
-{% if plan.filters | selectattr("kind", "eq", "select") | list %}
+{% if plan.filters | selectattr("options") | list %}
   const options = filterOptions(lookups);
 {% endif %}
 {% endif %}
@@ -124,7 +124,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {{ m.action_lookups(plan) -}}
 {% if plan.filters %}
   const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
-{% set options = plan.filters | selectattr("kind", "eq", "select") | list %}
+{% set options = plan.filters | selectattr("options") | list %}
 {% if options %}
   const options = filterOptions(lookups);
 {% endif %}

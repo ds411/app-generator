@@ -25,7 +25,7 @@ from appgen.bindings.shared.typescript import (
     to_json,
 )
 from appgen.bindings.shared.ui import ui_plan
-from appgen.bindings.shared.views import ViewContext
+from appgen.bindings.shared.views import ListEndpoint, ViewContext
 from appgen.dsl.model import AppDefinition
 
 __all__ = ["HELPERS", "Member", "context", "members", "mock_records", "to_json", "warnings"]
@@ -56,12 +56,19 @@ def mock_records(definition: AppDefinition) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
+def _endpoints(definition: AppDefinition) -> dict[str, ListEndpoint]:
+    """Return the list endpoints by entity name, for an app with `x-react-data: api`."""
+    if data_source(definition) != "api":
+        return {}
+    return {name: entity.list_endpoint for name, entity in api_entities(definition).items()}
+
+
 def package_json(definition: AppDefinition) -> dict[str, Any]:
     """Return the content of `package.json`, with the packages sorted by name.
 
     The app gets the npm packages of the shadcn/ui components that it uses.
     """
-    components = shadcn.used_components(definition)
+    components = shadcn.used_components(definition, _endpoints(definition))
     dependencies = {
         **versions.DEPENDENCIES,
         **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
@@ -91,11 +98,11 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
-    components = shadcn.used_components(definition)
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}
     endpoints = {name: entity.list_endpoint for name, entity in apis.items()}
+    components = shadcn.used_components(definition, endpoints)
     third_party = ts_apis(definition)
     return {
         "api_entities": apis,
@@ -113,7 +120,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": ui_plan(definition),
         "ui_views": ViewContext(definition, forms=True, endpoints=endpoints),
-        "ui_forms": FormContext(definition),
+        "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "owner_rules": owner_rules(definition),
         **text_helpers(definition),

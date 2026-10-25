@@ -1,0 +1,61 @@
+{{ trace_header("app") }}
+import type { EntityRecord } from "./types";
+
+/** A store that loads records by ID, for example `HttpStore`. */
+export type RelatedStore = {
+  byIds(ids: Iterable<string>): Promise<ReadonlyMap<string, EntityRecord>>;
+};
+
+/**
+ * A key with the ID, or the list of IDs, of related records: a key of the
+ * records of the view (`from: null`), or of the related records of an
+ * entity, for example the owner of the project of a task.
+ */
+export type RelatedKey = { from: string | null; key: string };
+
+/** The related records of one entity: the store, and the keys that give their IDs. */
+export type RelatedStep = { entity: string; store: RelatedStore; keys: readonly RelatedKey[] };
+
+/**
+ * Load the related records that a view shows for its records: the records
+ * of the IDs on the page, with one request for each entity. The stages run
+ * in order, and the steps of a stage at the same time: a step can read the
+ * records of an earlier stage. The stages run again while a step finds IDs
+ * that it did not ask for, for example in a cycle of relations.
+ */
+export async function loadRelated(
+  records: readonly EntityRecord[],
+  stages: readonly (readonly RelatedStep[])[],
+): Promise<Record<string, Map<string, EntityRecord>>> {
+  const loads = stages.map((stage) =>
+    stage.map((step) => ({ step, asked: new Set<string>(), found: new Map<string, EntityRecord>() })),
+  );
+  const found = new Map(loads.flat().map((load) => [load.step.entity, load.found]));
+  let more = true;
+  while (more) {
+    more = false;
+    for (const stage of loads) {
+      await Promise.all(
+        stage.map(async ({ step, asked, found: loaded }) => {
+          const ids = new Set<string>();
+          for (const { from, key } of step.keys) {
+            const sources = from === null ? records : [...(found.get(from)?.values() ?? [])];
+            for (const source of sources) {
+              const value = (source as Record<string, unknown>)[key];
+              for (const id of Array.isArray(value) ? value : [value]) {
+                if (typeof id === "string" && !asked.has(id)) ids.add(id);
+              }
+            }
+          }
+          if (ids.size === 0) return;
+          more = true;
+          ids.forEach((id) => asked.add(id));
+          for (const [id, record] of await step.store.byIds(ids)) {
+            loaded.set(id, record);
+          }
+        }),
+      );
+    }
+  }
+  return Object.fromEntries(found);
+}

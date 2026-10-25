@@ -42,9 +42,8 @@ def _file(result: GenerationResult, path: str) -> str:
 def test_a_select_filter_makes_the_parameter_a_list(result: GenerationResult) -> None:
     code = _file(result, "app/features/items/list_items.py")
 
-    assert (
-        "    # @trace ui.views.item_table.filters.stage\n    stage: list[ItemStage] | None" in code
-    )
+    assert "    # @trace ui.views.item_table.filters.stage\n" in code
+    assert "    stage: list[ItemStage] | None = None\n" in code
     assert "statement = statement.where(Item.stage.in_(query.stage))" in code
     assert "owner_id: list[UUID] | None = None" in code
     assert "statement = statement.where(Item.owner_id.in_(query.owner_id))" in code
@@ -90,7 +89,8 @@ def test_the_search_takes_the_fields_of_all_search_filters(result: GenerationRes
     code = _file(result, "app/features/items/list_items.py")
 
     assert "    # @trace ui.views.item_table.filters.search\n" in code
-    assert "    # @trace ui.views.item_cards.filters.search\n    q: str | None = Field(" in code
+    assert "    # @trace ui.views.item_cards.filters.search\n" in code
+    assert "    # @trace entities.Item.fields.code\n    q: str | None = Field(" in code
     assert "    for word in search_words(query.q):\n" in code
     assert "                contains(Item.code, word),\n" in code
     assert "                contains(Item.notes, word),\n" in code
@@ -140,13 +140,55 @@ def test_each_list_endpoint_with_views_has_tests_of_its_query(result: Generation
     assert "tests/ordering.py" in paths
 
 
-def test_an_entity_without_views_has_no_tests_of_a_query(fastapi: Binding) -> None:
+def test_an_entity_without_views_has_tests_of_its_ids_and_its_search(fastapi: Binding) -> None:
     result = generate(load_definition(TESTS / "fixtures" / "project-tracker.yaml"), fastapi)
     paths = {f.path for f in result.files}
+    tests = _file(result, "tests/features/tasks/test_list_tasks_query.py")
 
-    assert "tests/features/tasks/test_list_tasks.py" in paths
-    assert "tests/features/tasks/test_list_tasks_query.py" not in paths
+    assert "async def test_list_tasks_filters_by_id(" in tests
+    assert "async def test_list_tasks_searches_the_records(" in tests
+    assert "sorts_by" not in tests
     assert "tests/ordering.py" not in paths
+
+
+def test_each_list_endpoint_takes_ids_and_searches_the_display_field(fastapi: Binding) -> None:
+    result = generate(load_definition(TESTS / "fixtures" / "project-tracker.yaml"), fastapi)
+    code = _file(result, "app/features/tasks/list_tasks.py")
+
+    # The front ends load the related records of a page by ID (M26).
+    assert "    # @trace entities.Task\n    id: list[UUID] | None" in code
+    assert "statement = statement.where(Task.id.in_(query.id))" in code
+    # A reference field searches its options in the display field.
+    assert "    # @trace entities.Task.fields.title\n    q: str | None = Field(" in code
+    assert "contains(Task.title, word)" in code
+
+
+def test_a_display_field_that_is_not_a_text_is_not_in_the_search(fastapi: Binding) -> None:
+    text = VIEWS.read_text().replace(
+        "  Item:\n    fields:", "  Item:\n    display_field: count\n    fields:"
+    )
+    code = _file(generate(load_definition_text(text), fastapi), "app/features/items/list_items.py")
+
+    assert "# @trace entities.Item.fields.count\n    q:" not in code
+    assert "contains(Item.count" not in code
+
+
+def test_a_board_filters_by_its_group_field(result: GenerationResult) -> None:
+    code = _file(result, "app/features/items/list_items.py")
+
+    # The board loads one page for each column: the records of one value.
+    assert "    # @trace ui.views.item_board\n    stage: list[ItemStage] | None" in code
+
+
+def test_a_calendar_adds_the_date_ranges_of_its_fields(fastapi: Binding) -> None:
+    definition = load_definition(TESTS.parent / "examples" / "room-booking" / "app.yaml")
+    code = _file(generate(definition, fastapi), "app/features/bookings/list_bookings.py")
+
+    # A required end: the records that start before the last day, and end after the first.
+    assert "    # @trace ui.views.booking_calendar\n    starts_at_to: dt.date | None" in code
+    assert "    # @trace ui.views.booking_calendar\n    ends_at_from: dt.date | None" in code
+    assert "Booking.ends_at >= day_start(query.ends_at_from)" in code
+    assert "Booking.starts_at < day_start(query.starts_at_to, 1)" in code
 
 
 def test_a_tab_of_a_many_to_many_relation_adds_the_ids_to_its_target(fastapi: Binding) -> None:
@@ -158,7 +200,8 @@ def test_a_tab_of_a_many_to_many_relation_adds_the_ids_to_its_target(fastapi: Bi
     assert "statement = statement.where(Person.id.in_(query.id))" in code
     assert "async def test_list_people_filters_by_id(" in tests
     # A tab of a one_to_many relation uses the foreign key of the inverse relation.
-    assert "    id: list[UUID]" not in _file(result, "app/features/tasks/list_tasks.py")
+    tasks = _file(result, "app/features/tasks/list_tasks.py")
+    assert "# @trace ui.views.project_detail.tabs" not in tasks.split("project_id:")[0]
 
 
 def test_the_generated_python_compiles(result: GenerationResult) -> None:

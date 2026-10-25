@@ -325,13 +325,27 @@ app:
   the client in the OpenAPI document, and opens the project table with
   more projects than one page: each page must load with one request,
   and the search, the sort, and the tabs of a project must load from
-  the API. The pre-push hook runs it.
+  the API. It also counts the requests of the large lists: no page may
+  load all records of an entity. The pre-push hook runs it.
 - A table or a card list sends its filters, its search, its sort, and
   its page to the list endpoint (`HttpStore.page`), and loads one page.
   A tab of a detail view adds the foreign key of its relation, or `id`
-  (the IDs of a `many_to_many` relation). The related records that a
-  view shows, the boards, the forms, and the dashboards load all pages.
-  `applyQuery` runs only with mock data.
+  (the IDs of a `many_to_many` relation). `applyQuery` runs only with
+  mock data.
+- A view loads the related records that it shows for its page by ID
+  (`HttpStore.byIds` and `loadRelated`): one request for each related
+  entity, in stages for the related records of related records. A
+  detail view does the same for its record.
+- A relation field of a form, and a select filter of a relation, search
+  their options on the server: the first 20 records in the order of the
+  display field, and `q` with the text of the search. Each entity slice
+  exports its option source, for example `personOptions`. A `select` or
+  a `radio` widget of a relation is a search box in this mode.
+- A board loads one page for each column (the query parameter of its
+  group field), shows the counts of the server, and has "Show more" for
+  each column. A calendar loads only the records of the shown days (the
+  date ranges of its start field, and of a required end field). The
+  dashboards still load all pages.
 - A custom operation calls its endpoint: the FastAPI app runs the
   logic, so the React app has no extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request

@@ -15,11 +15,13 @@ import { {{ react_names | unique | sort | join(", ") }} } from "react";
 import { toast } from "sonner";
 {% endif %}
 
-{% if plan.server %}
-import type { ApiParams, ApiQuery } from "@/shared/api";
+{% if plan.server and plan.lookups %}
+import { type ApiParams, {{ "type ApiQuery, " if shape in ("table", "cards") }}loadRelated, type RelatedStep } from "@/shared/api";
+{% elif plan.server %}
+import type { ApiParams{{ ", ApiQuery" if shape in ("table", "cards") }} } from "@/shared/api";
 {% endif %}
 {% for entity in ([plan.entity] + plan.lookups) | unique %}
-import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+import { {{ entity | camel }}Api, {{ (entity | camel) ~ "Options, " if entity in plan.sources }}type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
 {% for line in plan.imports %}
 {{ line }}
@@ -39,19 +41,19 @@ import { formatValue } from "@/shared/lib/format";
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
 {% set query = [] if plan.server else ["sortBy"] %}
-{% if plan.lookups %}{% set query = query + ["byId"] %}{% endif %}
+{% if plan.lookups and not plan.server %}{% set query = query + ["byId"] %}{% endif %}
 {% if plan.needs("matchesSearch") %}{% set query = query + ["matchesSearch"] %}{% endif %}
 {% if plan.needs("inDateRange") %}{% set query = query + ["inDateRange"] %}{% endif %}
 {% if shape == "cards" %}{% set query = query + (["pageCount"] if plan.server else ["pageCount", "pageOf"]) %}{% endif %}
 {% if plan.filters | selectattr("kind", "eq", "date_range") | list %}{% set query = query + ["type DateRange"] %}{% endif %}
-{% if plan.filters | selectattr("kind", "eq", "select") | list %}{% set query = query + ["type Option"] %}{% endif %}
+{% if plan.filters | selectattr("options") | list %}{% set query = query + ["type Option"] %}{% endif %}
 {% if query %}
 import { {{ query | join(", ") }} } from "@/shared/lib/query";
 {% endif %}
 {% if "link" in plan.uses %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
-import { {{ "combine, " if plan.server }}useResource } from "@/shared/lib/use-resource";
+import { useResource } from "@/shared/lib/use-resource";
 {% set actions = [] %}
 {% if plan.actions or plan.bulk_actions %}{% set actions = actions + ["ActionButton"] %}{% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}{% set actions = actions + ["type ActionSpec"] %}{% endif %}
@@ -75,10 +77,13 @@ import { BooleanFilter } from "@/shared/ui/filters/boolean-filter";
 import { DateRangeFilter } from "@/shared/ui/filters/date-range-filter";
 {% endif %}
 {% endfor %}
-{% if plan.filters | selectattr("kind", "eq", "select") | selectattr("multiple") | list %}
+{% if plan.filters | selectattr("options") | selectattr("multiple") | list %}
 import { MultiSelectFilter } from "@/shared/ui/filters/multi-select-filter";
 {% endif %}
-{% if plan.filters | selectattr("kind", "eq", "select") | rejectattr("multiple") | list %}
+{% if plan.filters | selectattr("source") | list %}
+import { RecordFilter } from "@/shared/ui/filters/record-filter";
+{% endif %}
+{% if plan.filters | selectattr("options") | rejectattr("multiple") | list %}
 import { SelectFilter } from "@/shared/ui/filters/select-filter";
 {% endif %}
 {% if "avatar" in plan.uses %}
@@ -145,6 +150,23 @@ function subscribe(listener: () => void): () => void {
 {%- endif %}
 {%- endmacro %}
 
+{% macro related_steps(related) -%}
+/** The related records, in the order of their loads: the store of each entity, and the keys of their IDs. */
+const RELATED: RelatedStep[][] = [
+{% for stage in related %}
+  [
+{% for step in stage %}
+    {
+      entity: {{ js(step.var) }},
+      store: {{ step.var }}Api,
+      keys: [{% for k in step.keys %}{ from: {{ js(k.source) if k.source else "null" }}, key: {{ js(k.key) }} }{{ ", " if not loop.last }}{% endfor %}],
+    },
+{% endfor %}
+  ],
+{% endfor %}
+];
+{%- endmacro %}
+
 {% macro server_data(plan, entities) -%}
 {% if plan.lookups %}
 type Lookups = {
@@ -153,20 +175,17 @@ type Lookups = {
 {% endfor %}
 };
 
-/** Read the related records that the fields and the filters of the view show. */
-async function loadLookups(): Promise<Lookups> {
-  const [{% for entity in plan.lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
-{% for entity in plan.lookups %}
-    {{ entity | camel }}Api.list(),
-{% endfor %}
-  ]);
-  return { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} };
+{{ related_steps(plan.related) }}
+
+/** Load the related records that the view shows for its records: the records of their IDs. */
+async function loadLookups(rows: readonly {{ plan.type }}[]): Promise<Lookups> {
+  return (await loadRelated(rows, RELATED)) as Lookups;
 }
 {% else %}
 type Lookups = Record<string, never>;
 
 /** The view shows no related records. */
-function loadLookups(): Promise<Lookups> {
+function loadLookups(_rows: readonly {{ plan.type }}[]): Promise<Lookups> {
   return Promise.resolve({});
 }
 {% endif %}
@@ -179,9 +198,15 @@ function subscribe(listener: () => void): () => void {
 {%- endmacro %}
 
 {% macro server_resource(plan) -%}
-const listPage = useResource(JSON.stringify(query), () => {{ plan.var }}Api.page(query), subscribe, { keep: true });
-  const related = useResource({{ js(plan.name) }}, loadLookups, subscribe);
-  const resource = combine(listPage, related);
+const resource = useResource(
+    JSON.stringify(query),
+    async () => {
+      const page = await {{ plan.var }}Api.page(query);
+      return [page, await loadLookups(page.items)] as const;
+    },
+    subscribe,
+    { keep: true },
+  );
 {%- endmacro %}
 
 {% macro filters(plan) -%}
@@ -218,7 +243,7 @@ function matches(row: {{ plan.type }}, filters: Filters, {{ lookups_param(code) 
   );
 }
 {% endif %}
-{% set options = plan.filters | selectattr("kind", "eq", "select") | list %}
+{% set options = plan.filters | selectattr("options") | list %}
 {% if options %}
 
 {% set options_code = options | map(attribute="options") | join(" ") %}
@@ -404,6 +429,10 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
         <BooleanFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
 {% elif f.kind == "date_range" %}
         <DateRangeFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.source and f.multiple %}
+        <RecordFilter label={{ jsx_attr(f.label) }} source={ {{- f.source }}} multiple value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.source %}
+        <RecordFilter label={{ jsx_attr(f.label) }} source={ {{- f.source }}} value={filters.{{ f.key }} === null ? [] : [filters.{{ f.key }}]} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value[0] ?? null })} />
 {% elif f.multiple %}
         <MultiSelectFilter label={{ jsx_attr(f.label) }} options={options.{{ f.key }} ?? []} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
 {% else %}

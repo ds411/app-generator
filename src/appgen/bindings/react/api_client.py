@@ -12,8 +12,9 @@ from typing import Literal
 
 from appgen.bindings.fastapi.model import python_app
 from appgen.bindings.shared.typescript import members
-from appgen.bindings.shared.views import ListEndpoint
+from appgen.bindings.shared.views import ListEndpoint, definition_display
 from appgen.dsl.model import AppDefinition
+from appgen.gen.naming import camel
 
 DATA_KEY = "x-react-data"
 """The extension key of the app that selects the data source: `mock` (default) or `api`."""
@@ -45,6 +46,10 @@ class ApiEntity:
     """The keys that the list endpoint can filter by: `one` value, or a `list` of values."""
     sorts: list[str]
     """The keys that the list endpoint can sort by."""
+    display: str
+    """The key of the display field: the text of a record in a choice."""
+    search: bool
+    """True if `q` of the list endpoint searches the display field."""
     endpoints: list[ApiEndpoint]
     list_endpoint: ListEndpoint
     """The query parameters and the sort keys of the list endpoint, for the views."""
@@ -80,6 +85,8 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             for element_id in param.ids:
                 element_params.setdefault(element_id, []).append(param.name)
         sort_keys = frozenset(k.name for k in query.sort_keys)
+        display = definition_display(entity)
+        search = query.search
         result[name] = ApiEntity(
             name=name,
             path=py.path,
@@ -87,6 +94,8 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             numbers=[keys[f.name] for f in py.fields if f.type == "decimal" and f.name in keys],
             filters=filters,
             sorts=[key for json, key in keys.items() if json in sort_keys],
+            display=camel(display),
+            search=search is not None and any(p.path == display for p in search.search),
             endpoints=[
                 ApiEndpoint(op.name, op.method.upper(), py.path + op.path.rstrip("/"))
                 for op in py.operations

@@ -13,7 +13,9 @@ from appgen.bindings.shared.gaps import GapSpec, component_gap
 from appgen.bindings.shared.views import (
     ActionPlan,
     FormRef,
+    RelatedStep,
     ViewContext,
+    action_paths,
     definition_display,
     label,
     state_ids,
@@ -75,6 +77,8 @@ class DetailPlan:
     tabs: list[TabPlan] = field(default_factory=list[TabPlan])
     lookups: list[str] = field(default_factory=list[str])
     """The related entities that the view reads, sorted by name."""
+    related: list[list[RelatedStep]] | None = None
+    """With the API: the related records that the view loads by ID, in stages."""
     actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
     forms: list[FormRef] = field(default_factory=list[FormRef])
     """The forms that the actions open in a dialog or a sheet."""
@@ -158,6 +162,9 @@ def build_detail(ctx: ViewContext, name: str) -> DetailPlan:
     for tab_name, tab in view.tabs.items():
         plan.tabs.append(_tab(ctx, plan, tab_name, tab, paths))
     plan.lookups = sorted(ctx.lookups_of(entity, paths))
+    if ctx.server:
+        plan.related = ctx.related(entity, paths + action_paths(view))
+        plan.lookups = sorted({*plan.lookups, *(s.entity for st in plan.related for s in st)})
     plan.states = effective_states(definition, view)
     plan.state_ids = state_ids(definition, view)
     plan.actions = ctx.action_plans(entity, view.actions.items(), "row")

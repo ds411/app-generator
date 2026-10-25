@@ -8,9 +8,10 @@ definition needs, and the npm packages of these components.
 """
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import cache
+from typing import TYPE_CHECKING
 
 from appgen.bindings.shared import TEMPLATE_DIR
 from appgen.dsl.model import AppDefinition, Field
@@ -25,6 +26,9 @@ from appgen.dsl.ui.views import (
     TableView,
     View,
 )
+
+if TYPE_CHECKING:
+    from appgen.bindings.shared.views import ListEndpoint
 
 BASE_COMPONENTS = ("button", "sonner")
 """The components that each app has: buttons, and the toasts of the actions."""
@@ -115,8 +119,14 @@ def has_mode_toggle(definition: AppDefinition) -> bool:
     return not topbars or any(topbar.mode_toggle for topbar in topbars)
 
 
-def used_components(definition: AppDefinition) -> list[Component]:
-    """Return the components that the UI of a definition needs, with their dependencies."""
+def used_components(
+    definition: AppDefinition, endpoints: Mapping[str, ListEndpoint] | None = None
+) -> list[Component]:
+    """Return the components that the UI of a definition needs, with their dependencies.
+
+    With `endpoints` (the list endpoints by entity name), the views and the
+    forms search the records of their relations on the API.
+    """
     names: set[str] = set(BASE_COMPONENTS)
     ui = definition.ui
     if ui is not None:
@@ -139,9 +149,9 @@ def used_components(definition: AppDefinition) -> list[Component]:
             names.add("badge")
         for view in ui.views.values():
             names.update(_view_components(view))
-        names.update(_list_components(definition))
+        names.update(_list_components(definition, endpoints))
         for form in ui.forms.values():
-            names.update(_form_components(definition, form))
+            names.update(_form_components(definition, form, bool(endpoints)))
         for dashboard in ui.dashboards.values():
             for widget in dashboard.widgets.values():
                 if isinstance(widget, StatWidget):
@@ -203,17 +213,20 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "date_range": ("popover", "calendar"),
     "select": ("select",),
     "multi_select": ("popover", "command"),
+    "record_select": ("popover", "command"),
     "badge": ("badge",),
     "avatar": ("avatar",),
 }
 
 
-def _list_components(definition: AppDefinition) -> set[str]:
+def _list_components(
+    definition: AppDefinition, endpoints: Mapping[str, ListEndpoint] | None
+) -> set[str]:
     """Return the components of the list views and of their shared runtime files."""
     # A local import: the views module imports this module through `ui`.
     from appgen.bindings.shared.views import ViewContext
 
-    context = ViewContext(definition)
+    context = ViewContext(definition, endpoints=endpoints)
     if not context.runtime:
         return set()
     # The actions, the states, and the page controls of all views.
@@ -223,7 +236,7 @@ def _list_components(definition: AppDefinition) -> set[str]:
     return names
 
 
-def _form_components(definition: AppDefinition, form: Form) -> set[str]:
+def _form_components(definition: AppDefinition, form: Form, server: bool = False) -> set[str]:
     names = {"field", "label", "spinner", *_FORM_MODES[form.mode]}
     operation = definition.operations.get(form.operation)
     params = operation.params if operation is not None and operation.kind == "custom" else None
@@ -231,6 +244,9 @@ def _form_components(definition: AppDefinition, form: Form) -> set[str]:
         widget = form_field.widget
         if widget is None:
             widget = _default_widget(definition, form.entity, name, params)
+        if server and widget != "custom" and _is_relation(definition, form.entity, name, params):
+            # A relation field that searches on the server is a search box.
+            widget = "relation"
         names.update(_WIDGET_COMPONENTS.get(widget or "custom", ()))
         if widget == "number" and _has_format(definition, form.entity, name, params):
             names.add("input-group")
@@ -249,6 +265,17 @@ def _has_format(
         except FieldPathError:
             return False
     return isinstance(member, Field) and member.format in ("number", "currency", "percent")
+
+
+def _is_relation(
+    definition: AppDefinition, entity: str, name: str, params: dict[str, Field] | None
+) -> bool:
+    if params is not None and name in params:
+        return False
+    try:
+        return resolve_path(definition, entity, name).relation_kind is not None
+    except FieldPathError:
+        return False
 
 
 def _default_widget(

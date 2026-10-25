@@ -37,7 +37,11 @@ export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_val
   numbers: {{ api.numbers | tojson }},
   filters: {{ api.filters | tojson }},
   sorts: {{ api.sorts | tojson }},
+  display: { key: {{ api.display | tojson }}, search: {{ api.search | tojson }} },
 });
+
+/** The records of {{ type }} for a choice, with the text of the display field: the server searches them. */
+export const {{ var }}Options = {{ var }}Api.options((item) => String(item.{{ api.display }} ?? ""));
 {% else %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";

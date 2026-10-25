@@ -5,7 +5,7 @@
 {{ trace_header(element_id) }}
 "use client";
 
-{% set ui_lines = ['import { Badge } from "@/shared/ui/badge";', m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { ScrollArea, ScrollBar } from "@/shared/ui/scroll-area";', 'import { cn } from "@/shared/lib/utils";'] %}
+{% set ui_lines = ['import { Badge } from "@/shared/ui/badge";'] + (['import { Button } from "@/shared/ui/button";'] if plan.server and not plan.filters else []) + [m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { ScrollArea, ScrollBar } from "@/shared/ui/scroll-area";', 'import { cn } from "@/shared/lib/utils";'] %}
 {% set check_move = definition.access is not none and plan.move_operation is not none %}
 {% if check_move %}{% set ui_lines = ui_lines + ['import { useAccess } from "@/shared/lib/access";'] %}{% endif %}
 {{ m.imports(plan, "board", lucide=["TriangleAlertIcon"], react=["type CSSProperties", "type ReactNode"], ui=ui_lines) }}
@@ -36,19 +36,61 @@ const COLUMNS: BoardColumn[] = [
 function moveRecord(record: {{ plan.type }}, value: string): Promise<unknown> {
   return {{ plan.move }};
 }
+{% if plan.server %}
+
+/** The count of cards that a column loads first, and adds for each "Show more". */
+const PAGE_SIZE = 20;
+
+type BoardData = { columns: { items: {{ plan.type }}[]; total: number }[]; lookups: Lookups };
+
+/**
+ * Load the first cards of each column: one page of the records with the
+ * value of the column, and the related records of all cards.
+ */
+async function loadColumns(params: ApiParams, sizes: Readonly<Record<string, number>>): Promise<BoardData> {
+  const columns = await Promise.all(
+    COLUMNS.map((column) =>
+      {{ plan.var }}Api.page({
+        params: { ...params, {{ js(plan.server.group) }}: column.value },
+        sort: VIEW_SORT,
+        page: 1,
+        pageSize: sizes[column.value] ?? PAGE_SIZE,
+      }),
+    ),
+  );
+  return { columns, lookups: await loadLookups(columns.flatMap((column) => column.items)) };
+}
+{% endif %}
 
 {{ m.record_card(plan, true) }}
 
 export type {{ name | pascal }}ViewProps = {
+{% if plan.server %}
+  /** Query parameters of the list endpoint that the view adds, for example the records of one parent. */
+  params?: ApiParams;
+{% else %}
   /** Show only the records that pass this test, for example the records of one parent. */
   where?: (record: {{ plan.type }}) => boolean;
+{% endif %}
 };
 
 {% if view.title %}
 /** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
 {% endif %}
+{% if plan.server %}
+export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps) {
+  // The count of cards that each column loads: "Show more" adds a page.
+  const [sizes, setSizes] = useState<Record<string, number>>({});
+  const resource = useResource(
+    JSON.stringify([params, sizes]),
+    () => loadColumns(params ?? {}, sizes),
+    subscribe,
+    { keep: true },
+  );
+{% else %}
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
+{% endif %}
 {% if plan.actions or plan.row_actions %}
 {{ m.runner(plan) }}
 {% endif %}
@@ -61,10 +103,17 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 
 {{ m.states(plan, "board") }}
 
+{% if plan.server %}
+  const { columns, lookups } = resource.data;
+  const rows = columns.flatMap((column) => column.items);
+  const total = columns.reduce((sum, column) => sum + column.total, 0);
+{{ m.action_lookups(plan) -}}
+{% else %}
   const { records, lookups } = resource.data;
   const all = where ? records.filter(where) : records;
 {{ m.action_lookups(plan) -}}
   const rows = sortRecords(all, lookups);
+{% endif %}
 
   const move = async (record: {{ plan.type }}, value: string) => {
     if ({{ ui_views.value(plan.entity, view.group_by, row="record").expr }} === value) return;
@@ -92,15 +141,24 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
         ))}
       </div>
 {% endif %}
-      {all.length === 0 ? (
+      {{ "{total === 0 ? (" if plan.server else "{all.length === 0 ? (" }}
 {{ m.empty_state(plan) | indent(2, true) }}
       ) : (
         // The columns scroll in a horizontal scroll area with a scroll bar that always shows.
         <ScrollArea type="always" className={{ js(plan.board_area_classes) }}>{{ (" " ~ trace(view.responsive.id, jsx=True)) if view.responsive else "" }}
           <div className={{ js(plan.board_classes) }}>
+{% if plan.server %}
+            {COLUMNS.map((column, index) => {
+              // The server gives the count of the records of the column, and its first cards.
+              const cards = columns[index]?.items ?? [];
+              const count = columns[index]?.total ?? 0;
+              const over = column.limit !== undefined && count > column.limit;
+{% else %}
             {COLUMNS.map((column) => {
               const cards = rows.filter((row) => {{ group.expr }} === column.value);
-              const over = column.limit !== undefined && cards.length > column.limit;
+              const count = cards.length;
+              const over = column.limit !== undefined && count > column.limit;
+{% endif %}
               return (
                 <section
                   key={column.value}
@@ -124,7 +182,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                     <span className="size-2.5 shrink-0 rounded-full bg-(--column-color,var(--muted-foreground))" />
                     <h3 className="truncate text-sm font-medium">{{ '{' ~ tr('column.label') ~ '}' }}</h3>
                     <Badge variant={over ? "destructive" : "secondary"} className="ms-auto tabular-nums">
-                      {column.limit === undefined ? cards.length : `${cards.length} / ${column.limit}`}
+                      {column.limit === undefined ? count : `${count} / ${column.limit}`}
                     </Badge>
                   </header>
                   {over && (
@@ -186,6 +244,17 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                         {{ jsx_text("Drop a card here") }}
                       </p>
                     )}
+{% if plan.server %}
+                    {cards.length < count && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSizes((current) => ({ ...current, [column.value]: cards.length + PAGE_SIZE }))}
+                      >
+                        {{ jsx_text("Show more") }}
+                      </Button>
+                    )}
+{% endif %}
                   </div>
                 </section>
               );

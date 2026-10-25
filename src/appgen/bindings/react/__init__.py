@@ -221,6 +221,16 @@ BINDING = Binding(
             path="src/shared/api/http-store.ts",
             when="react.api",
         ),
+        Output(
+            template="src/shared/api/related.ts.j2",
+            path="src/shared/api/related.ts",
+            when="react.api",
+        ),
+        Output(
+            template="src/shared/lib/use-options.ts.j2",
+            path="src/shared/lib/use-options.ts",
+            when="react.api",
+        ),
         Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
         # The clients of the third-party APIs without a secret (shared
         # templates, see `appgen.bindings.shared.integrations`).

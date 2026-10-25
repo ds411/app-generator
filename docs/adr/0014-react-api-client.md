@@ -60,6 +60,44 @@ The list endpoints of the FastAPI app now take the filters, the search
   request to the list endpoint for each page, the search, the sort, and
   the tabs of a project.
 
+### Update for M26: large lists everywhere
+
+The views, the forms, and the filters of the React app no longer load
+all records of an entity (#336, #337, #338):
+
+- Each list endpoint of the FastAPI app takes `id` (a list of IDs), and
+  `q` searches the display field when it is a text (`string`, `text`,
+  or `email`).
+- A view loads the related records of its page by ID: one request for
+  each target entity (`HttpStore.byIds`, at most 100 IDs in a request).
+  The generator orders the entities in stages (`RELATED`), because a
+  related record can give the IDs of other related records, for example
+  the owner of the project of a task. `loadRelated` loads a stage at a
+  time, and loads again while it finds new IDs, for a cycle of
+  relations. A detail view loads the related records of its record in
+  the same way. The store keeps the records that it loads, and a change
+  of a record clears them.
+- A relation field of a form, and a select filter of a relation, search
+  their options on the server (`<entity>Options`, an `OptionSource`):
+  the first 20 records in the order of the display field, and `q` for a
+  text. A select or a radio widget of a relation is a search box in this
+  mode. The labels of the selected records come from `byIds`.
+- A board loads one page for each column, with the value of the column
+  in the query parameter of its group field, and shows the counts of
+  the server. "Show more" loads more cards of a column. A move loads the
+  columns again.
+- A calendar loads only the records of the shown days. The list endpoint
+  takes the date range of the start field, and also of a required end
+  field: a record that starts before the last day and ends after the
+  first day is on the calendar. The query adds one day at each end,
+  because the server compares dates in UTC.
+- The check script counts the requests of the pages: no page loads all
+  records, the table loads the owners of its page by ID, the owner field
+  searches and saves a person that is not on the first page of options,
+  the board loads one page for each column and moves a card, and a
+  calendar of the tasks (which the script adds to the definition) loads
+  the shown days.
+
 ## Consequences
 
 - The two generated apps work together without a change by hand.
@@ -71,6 +109,7 @@ The list endpoints of the FastAPI app now take the filters, the search
   (Fixed in M18 for the tables and the card lists: see the update.)
 - After the update for M18, the related records that a view shows (for
   example the people of the owner column), the boards, the forms, and
-  the dashboards still load all pages of their entities.
+  the dashboards still load all pages of their entities. (Fixed in M26
+  for the views and the forms: see the update.)
 - The custom operations run on the server, so their extension files of
   the React app are not generated in this mode.

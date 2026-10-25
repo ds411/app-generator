@@ -8,7 +8,43 @@ import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/shared/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+{% if ui_forms.server %}
+import type { OptionSource, RecordOption } from "@/shared/api";
+import { useOptionLabels, useOptionSearch } from "@/shared/lib/use-options";
+{% endif %}
 import { cn } from "@/shared/lib/utils";
+{% if ui_forms.server %}
+
+/** The first records of a search on the server: the list asks again for each new text. */
+function OptionList({
+  source,
+  selected,
+  onToggle,
+}: {
+  source: OptionSource;
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const { options, loading } = useOptionSearch(source, text);
+  return (
+    <Command shouldFilter={false}>
+      <CommandInput placeholder={{ jsx_attr("Search") }} value={text} onValueChange={setText} />
+      <CommandList{{ " label=" ~ jsx_attr("Suggestions") if i18n }}>
+        <CommandEmpty>{loading ? {{ tr(js("Loading…")) }} : {{ tr(js("No results.")) }}}</CommandEmpty>
+        <CommandGroup>
+          {options.map((option: RecordOption) => (
+            <CommandItem key={option.value} value={option.value} onSelect={() => onToggle(option.value)}>
+              <CheckIcon className={cn(!selected.includes(option.value) && "opacity-0")} />
+              {option.label}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+{% else %}
 
 import type { FieldOption } from "./option-select";
 
@@ -38,11 +74,12 @@ function OptionList({
     </Command>
   );
 }
+{% endif %}
 
 /** A search box with a list of records, for a relation to one record. */
 export function RelationSelect({
   id,
-  options,
+  {{ "source" if ui_forms.server else "options" }},
   value,
   onChange,
   placeholder = {{ tr(js("Select a record")) }},
@@ -51,7 +88,11 @@ export function RelationSelect({
   invalid,
 }: {
   id: string;
+{% if ui_forms.server %}
+  source: OptionSource;
+{% else %}
   options: FieldOption[];
+{% endif %}
   value: string | null;
   onChange: (value: string | null) => void;
   placeholder?: string;
@@ -60,7 +101,12 @@ export function RelationSelect({
   invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+{% if ui_forms.server %}
+  const labels = useOptionLabels(source, value ? [value] : []);
+  const current = value ? { value, label: labels.get(value) } : undefined;
+{% else %}
   const current = options.find((option) => option.value === value);
+{% endif %}
   return (
     <div className="flex gap-1">
       <Popover open={open} onOpenChange={setOpen}>
@@ -75,13 +121,17 @@ export function RelationSelect({
             disabled={disabled}
             className={cn("min-w-0 flex-1 justify-between font-normal", !current && "text-muted-foreground")}
           >
+{% if ui_forms.server %}
+            <span className="truncate">{current ? (current.label ?? "…") : placeholder}</span>
+{% else %}
             <span className="truncate">{current?.label ?? placeholder}</span>
+{% endif %}
             <ChevronsUpDownIcon className="opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-(--radix-popover-trigger-width) min-w-56 p-0" align="start">
           <OptionList
-            options={options}
+            {{ "source={source}" if ui_forms.server else "options={options}" }}
             selected={value ? [value] : []}
             onToggle={(next) => {
               onChange(next === value && clearable ? null : next);
@@ -102,7 +152,7 @@ export function RelationSelect({
 /** A search box with a list of records, for a relation to many records. */
 export function RelationMultiSelect({
   id,
-  options,
+  {{ "source" if ui_forms.server else "options" }},
   value,
   onChange,
   placeholder = {{ tr(js("Select records")) }},
@@ -110,7 +160,11 @@ export function RelationMultiSelect({
   invalid,
 }: {
   id: string;
+{% if ui_forms.server %}
+  source: OptionSource;
+{% else %}
   options: FieldOption[];
+{% endif %}
   value: string[];
   onChange: (value: string[]) => void;
   placeholder?: string;
@@ -118,7 +172,12 @@ export function RelationMultiSelect({
   invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+{% if ui_forms.server %}
+  const labels = useOptionLabels(source, value);
+  const chosen = value.map((item) => ({ value: item, label: labels.get(item) ?? "…" }));
+{% else %}
   const chosen = options.filter((option) => value.includes(option.value));
+{% endif %}
   return (
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
@@ -139,7 +198,7 @@ export function RelationMultiSelect({
         </PopoverTrigger>
         <PopoverContent className="w-(--radix-popover-trigger-width) min-w-56 p-0" align="start">
           <OptionList
-            options={options}
+            {{ "source={source}" if ui_forms.server else "options={options}" }}
             selected={value}
             onToggle={(next) => onChange(value.includes(next) ? value.filter((item) => item !== next) : [...value, next])}
           />
