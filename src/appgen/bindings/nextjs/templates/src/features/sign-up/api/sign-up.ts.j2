@@ -4,7 +4,15 @@ import { unwrap } from "@/shared/api";
 import type { SignUpInput } from "../model/schema";
 import { signUpAction } from "./sign-up-action";
 
+{% if definition.auth.sign_up.verify_email %}
+/**
+ * Make a new user. The app sends a message with a link that confirms the
+ * email address, and the user signs in after the confirmation (ADR 0023).
+ * An input that is not valid throws a ValidationError.
+ */
+{% else %}
 /** Make a new user, and sign in as the user. An input that is not valid throws a ValidationError. */
+{% endif %}
 export async function signUp(input: SignUpInput): Promise<void> {
   unwrap(await signUpAction(input));
 }

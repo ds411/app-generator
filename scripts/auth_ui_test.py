@@ -15,7 +15,10 @@ test proves it for the room booking example (`examples/room-booking`):
    open ("not found"), and checks the page actions. Without a session,
    the menu of a public page shows only the public pages. Last, it
    compares the sign-up page with an approved screenshot, and signs up a
-   new user (ADR 0016). In the Next.js app, it compares the password
+   new user (ADR 0016). In the Next.js app, the new user confirms the
+   email address with the link in the log of the app before the sign-in
+   (ADR 0023), and the test compares the page of the link with an
+   approved screenshot. In the Next.js app, it compares the password
    reset pages with approved screenshots, resets the password of a user
    with the link in the log of the app, and signs in with the new
    password (ADR 0017). For each owner rule (ADR 0018), it signs in as a
@@ -174,8 +177,13 @@ def page_actions(definition: AppDefinition, allowed: Permissions) -> list[dict[s
     return found
 
 
-def expected_sign_up(definition: AppDefinition) -> dict[str, Any] | None:
-    """Return the values of the sign-up: the required fields, and the menu of a new user."""
+def expected_sign_up(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any] | None:
+    """Return the values of the sign-up: the required fields, and the menu of a new user.
+
+    Only the Next.js app has the page of the verification link: the React
+    app with mock data signs in a new user at once. With
+    `ENVIRONMENT=development`, the Next.js app writes each link to its log.
+    """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
     if auth.sign_up is None:
@@ -191,11 +199,16 @@ def expected_sign_up(definition: AppDefinition) -> dict[str, Any] | None:
             raise AuthUiTestError(f"The test cannot fill the required sign-up field {name!r}.")
         fields.append({"id": f"sign-up-{kebab(name)}", "value": values.get(field.type, "New {n}")})
     role = auth.sign_up.default_role or str(entity.fields[access.role_field].default)
+    address = definition.address_field()
+    verify: dict[str, str] | None = None
+    if auth.sign_up.verify_email is not None and binding == "nextjs" and address is not None:
+        verify = {"addressId": f"sign-up-{kebab(address)}", "serverLog": str(app / "server.log")}
     return {
         "fields": fields,
         "usernameId": f"sign-up-{kebab(auth.username_field)}",
         "password": "a-new-password-for-the-test",
         "menu": menu_labels(definition, Permissions(definition, role)),
+        "verifyEmail": verify,
     }
 
 
@@ -382,7 +395,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
             "menu": menu_labels(definition, anonymous),
             "actions": [a for a in page_actions(definition, anonymous) if a["path"] == public.path],
         },
-        "signUp": expected_sign_up(definition),
+        "signUp": expected_sign_up(binding, definition, app),
         "passwordReset": expected_password_reset(binding, definition, app, used),
         "ownerRules": owner_rules,
         "providers": expected_providers(binding, definition),
@@ -421,7 +434,7 @@ def started(binding: str, app: Path) -> Generator[None]:
             "DATABASE_SEED": "true",
             "SEED_PASSWORD": PASSWORDS[binding],
             "AUTH_SECRET": "auth-ui-test-secret",
-            # The password reset writes the links to the log (server.log).
+            # The password reset and the sign-up write the links to the log (server.log).
             "ENVIRONMENT": "development",
             "PUBLIC_URL": f"http://localhost:{port}",
             **provider_env(load_definition(DEFINITION)),

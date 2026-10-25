@@ -76,7 +76,7 @@ of the entity in snake case, for example `bookings`.
 | A custom form widget (`widget: custom`)                            | `src/features/<form>-form/ui/<field>-widget.ext.tsx`      | `id`, `value`, `onChange`, and `disabled`.                  |
 | A custom form rule (`kind: custom`)                                | `src/features/<form>-form/model/<rule>-rule.ext.ts`       | The values of the form. Return `true` if they are valid.    |
 | A custom action (`kind: custom`)                                   | `src/features/<owner>-actions/model/<action>-action.ext.ts` | The record of a row action or of a page with a record, the records of a bulk action (`bulk-<action>`), or nothing. A row action has the name `row-<action>`. `<owner>` is the view, the page, or the layout. |
-| The delivery of the password reset links (`auth.password_reset`) | `src/shared/auth/password-reset.ext.ts` | `deliverPasswordReset(user, link)`: send the link to the user, for example by email. The stub writes the link to the log with `ENVIRONMENT=development`, and else throws an error. |
+| The delivery of the messages of the sign-in (`auth.password_reset`, `auth.sign_up.verify_email`) | `src/shared/auth/messages.ext.ts` | `deliverMessage(message)`: send the message to `message.to`, for example by email. The generated `Message` has the `kind` (`password-reset` or `email-verification`), the `userId`, the `subject`, the `text` (in the language of the request, with the link), and the `link`. The stub writes the link to the log with `ENVIRONMENT=development`, and else throws an error. |
 
 - The binding covers all kinds of elements. A kind that a later version
   of the DSL adds, before the binding covers it, gets a gap file

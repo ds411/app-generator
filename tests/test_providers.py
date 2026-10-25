@@ -206,7 +206,8 @@ def test_the_nextjs_app_has_the_flow_of_each_provider() -> None:
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
 def test_the_sign_in_page_has_a_button_for_each_provider(binding: Binding) -> None:
     form = front_end(EXAMPLE.read_text(), binding)["src/features/sign-in/ui/sign-in-form.tsx"]
-    assert 'import { signIn, signInWithProvider } from "@/shared/auth";' in form
+    # The Next.js app also sends a new link that confirms the email address.
+    assert 'signIn, signInWithProvider } from "@/shared/auth";' in form
     assert 'onClick={() => signInWith("company")}' in form
     assert "{/* @trace auth.providers.company */}\n          Company account\n" in form
     assert 'name="password"' in form

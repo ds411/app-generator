@@ -87,12 +87,24 @@ function validate(values: Values): { input?: SignUpInput; errors: FormErrors } {
   return { input: result.data, errors };
 }
 
+{% if auth_pages.verify_email %}
+/**
+ * The sign-up form: the fields of a new user, and a password. After the
+ * sign-up, the app sends a message with a link that confirms the email
+ * address (ADR 0023). The user signs in after the confirmation, and then
+ * opens the page `next`.
+ */
+{% else %}
 /** The sign-up form: the fields of a new user, and a password. After the sign-up, it opens the page `next`. */
+{% endif %}
 export function SignUpForm({ next }: { next: string }) {
   const [values, setValues] = useState<Values>(INITIAL_VALUES);
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
+{% if auth_pages.verify_email %}
+  const [sent, setSent] = useState(false);
+{% endif %}
 
   const change = <K extends keyof Values>(key: K, value: Values[K]) => {
     const next = { ...values, [key]: value };
@@ -109,13 +121,36 @@ export function SignUpForm({ next }: { next: string }) {
     setBusy(true);
     try {
       await signUp(input);
+{% if auth_pages.verify_email %}
+      setSent(true);
+      setBusy(false);
+{% else %}
       window.location.assign(next);
+{% endif %}
     } catch (error) {
       setErrors(submitErrors(error));
       setBusy(false);
     }
   };
 
+{% if auth_pages.verify_email %}
+  if (sent) {
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+        <div className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm"> {{ trace(definition.auth.sign_up.verify_email.id, jsx=True) }}
+          <h1 className="text-xl font-semibold">{{ jsx_text("Sign up") }}</h1>
+          <p role="status" className="text-sm">
+            {{ jsx_text("Open the link in the message to confirm the email address.") }}
+          </p>
+          <Link href={`/sign-in?next=${encodeURIComponent(next)}`} className="text-sm font-medium underline underline-offset-4">
+            {{ jsx_text("Go to the sign-in") }}
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+{% endif %}
   return (
     <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
       <form noValidate onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm"> {{ trace(plan.element_id, jsx=True) }}

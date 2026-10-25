@@ -1,32 +1,60 @@
 {% set plan = ui_forms.sign_up %}
 {% set var = plan.entity | camel %}
+{% set verify = definition.auth.sign_up.verify_email %}
+{% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set address = (table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.address_field()].id) | first) if verify else none %}
 {{ trace_header(plan.element_id) }}
 "use server";
 
 import type { ActionResult } from "@/shared/api";
 import { runAction } from "@/shared/api/server";
+{% if verify %}
+import { sendVerification } from "@/shared/auth/email-verification";
+import { hashPassword } from "@/shared/auth/password";
+{% else %}
 import { hashPassword } from "@/shared/auth/password";
 import { startSession } from "@/shared/auth/session";
+{% endif %}
 import { credentialsTable } from "@/shared/db";
 
 import { {{ var }}Repository } from "@/entities/{{ plan.entity | kebab }}/server";
 
 import { type SignUpInput, signUpSchema } from "../model/schema";
 
+{% if verify %}
+/**
+ * Make a new user with a password, and send the message with the link that
+ * confirms the email address (ADR 0023). The user signs in after the
+ * confirmation. The record, its credential, and the delivery are in one
+ * transaction: a failed delivery rolls back the new user, so that the user
+ * can sign up again. The repository checks the rules of {{ plan.entity | pascal }}.{% if plan.role %} A new user gets the role {{ plan.role | tojson }}.{% endif %}
+
+ */
+{% else %}
 /**
  * Make a new user with a password, and sign in as the user. The record
  * and its credential are in one transaction. The repository checks the
  * rules of {{ plan.entity | pascal }}.{% if plan.role %} A new user gets the role {{ plan.role | tojson }}.{% endif %}
 
  */
+{% endif %}
 export async function signUpAction(input: SignUpInput): Promise<ActionResult<null>> {
   return runAction(
     async () => {
       const { password, ...fields } = signUpSchema.parse(input);
+{% if verify %}
+      await {{ var }}Repository.create({{ "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" }}, async (tx, record) => {
+        {{ trace(verify.id) }}
+        // The new user is not verified. Without a value, the database would set the time.
+        await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password), emailVerifiedAt: null });
+        await sendVerification({ id: record.id, address: record.{{ address.key }} });
+      });
+{% else %}
       const user = await {{ var }}Repository.create({{ "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" }}, async (tx, record) => {
         await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password) });
       });
       await startSession(user.id);
+{% endif %}
       return null;
     },
     { public: true, changes: true },

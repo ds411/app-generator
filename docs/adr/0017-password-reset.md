@@ -54,7 +54,8 @@ without new packages and with no table except `credentials`.
   with `ENVIRONMENT=development`, and raises `NotImplementedError`
   (501) in production, so that a production app does not hide a missing
   delivery. (Update for ADR 0023: one hook delivers the messages of all
-  kinds, `app/core/messages_ext.py` in the FastAPI app.)
+  kinds, `app/core/messages_ext.py` in the FastAPI app and
+  `src/shared/auth/messages.ext.ts` in the Next.js app.)
 
 ## Consequences
 

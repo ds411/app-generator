@@ -7,12 +7,14 @@ from textwrap import dedent
 import pytest
 from typer.testing import CliRunner
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs, react
 from appgen.cli import app
 from appgen.dsl import DefinitionError, load_definition, load_definition_text, validate_definition
+from appgen.gen.binding import Binding
 from appgen.gen.generator import generate
 
 FIXTURE = Path(__file__).parent / "fixtures" / "account-security.yaml"
+EXAMPLE = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
 
 BASE = dedent(
     """\
@@ -167,3 +169,93 @@ def test_the_check_reports_the_delivery_as_an_open_gap_of_both_elements(tmp_path
     report = json.loads(result.output)
     gaps = sorted(g["id"] for g in report["gaps"])
     assert gaps == ["auth.password_reset", "auth.sign_up.verify_email"]
+
+
+def front_end_files(binding: Binding, text: str | None = None) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml") if text else load_definition(EXAMPLE)
+    return {f.path: f.content for f in generate(definition, binding).files}
+
+
+def api_text() -> str:
+    return EXAMPLE.read_text().replace("app:\n", "app:\n  x-react-data: api\n", 1)
+
+
+def test_the_nextjs_app_has_the_verification_page_with_the_token_rules_of_the_api() -> None:
+    files = front_end_files(nextjs.BINDING)
+    assert "<VerifyEmailForm token=" in files["app/verify-email/page.tsx"]
+    verification = files["src/shared/auth/email-verification.ts"]
+    # The same rules as the FastAPI app: its own prefix, an end time, and the tag of the address.
+    assert "export const VERIFY_SECONDS = 86400;" in verification
+    assert "return sign(`email-verification.${body}`);" in verification
+    payload = "const payload = { sub: userId, exp: expires, adr: addressTag(address) };"
+    assert payload in verification
+    assert "isNull(credentialsTable.emailVerifiedAt)" in verification
+    credentials = files["src/shared/db/schema/credentials.ts"]
+    column = 'emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }).defaultNow(),'
+    assert column in credentials
+    # The sign-up sends the link in the transaction of the new user, and starts no session.
+    sign_up = files["src/features/sign-up/api/sign-up-action.ts"]
+    assert "emailVerifiedAt: null" in sign_up
+    assert "await sendVerification({ id: record.id, address: record.email });" in sign_up
+    assert "startSession" not in sign_up
+    actions = files["src/shared/auth/actions.ts"]
+    assert 'return { status: "unverified", message };' in actions
+    assert "export async function requestEmailVerificationAction(" in actions
+    assert "export async function confirmEmailVerificationAction(" in actions
+    # A reset verifies the address, and a provider removes an unverified password.
+    session = files["src/shared/auth/session.ts"]
+    assert "sql`coalesce(${credentialsTable.emailVerifiedAt}, now())`" in session
+    assert "isNull(credentialsTable.emailVerifiedAt)" in files["src/shared/auth/providers.ts"]
+    hook = files["src/shared/auth/messages.ext.ts"]
+    assert "// @trace:gap auth.password_reset file" in hook
+    assert "// @trace:gap auth.sign_up.verify_email file" in hook
+    assert "export async function deliverMessage(message: Message): Promise<void> {" in hook
+    assert "export async function emailVerificationMessage(" in files["src/shared/auth/messages.ts"]
+    assert "setSent(true);" in files["src/features/sign-up/ui/sign-up-form.tsx"]
+    sign_in = files["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert 'setUnverified(result.status === "unverified" ? username : null);' in sign_in
+    assert "Send the link again" in sign_in
+
+
+def test_the_react_app_has_the_verification_page_only_with_the_api() -> None:
+    api = front_end_files(react.BINDING, api_text())
+    auth = api["src/shared/auth/index.ts"]
+    assert "if (error instanceof ApiError && error.status === 403) {" in auth
+    assert 'await apiRequest("POST", "/auth/verify-email", { username });' in auth
+    assert 'await apiRequest("POST", "/auth/verify-email/confirm", { token });' in auth
+    router = api["src/app/router.tsx"]
+    assert '{ path: "/verify-email", element: <VerifyEmailRoute /> },' in router
+    assert "src/features/email-verification/ui/verify-email-form.tsx" in api
+    assert "startSession" not in api["src/features/sign-up/api/sign-up.ts"]
+    mock = front_end_files(react.BINDING)
+    assert not [path for path in mock if "email-verification" in path]
+    assert "setSent" not in mock["src/features/sign-up/ui/sign-up-form.tsx"]
+    assert (
+        "the sign-up of an app with mock data signs in at once. // @trace auth.sign_up"
+        in (mock["src/shared/auth/index.ts"])
+    )
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
+def test_without_the_verification_the_sign_up_signs_in_at_once(binding: Binding) -> None:
+    text = EXAMPLE.read_text().replace("    verify_email: true\n", "")
+    files = front_end_files(binding, text.replace("app:\n", "app:\n  x-react-data: api\n", 1))
+    assert not [path for path in files if "email-verification" in path or "verify-email" in path]
+    assert "setSent" not in files["src/features/sign-up/ui/sign-up-form.tsx"]
+    assert "unverified" not in files["src/features/sign-in/ui/sign-in-form.tsx"]
+    if binding is nextjs.BINDING:
+        assert "await startSession(user.id);" in files["src/features/sign-up/api/sign-up-action.ts"]
+        assert "emailVerifiedAt" not in files["src/shared/db/schema/credentials.ts"]
+        hook = files["src/shared/auth/messages.ext.ts"]
+        assert "// @trace:gap auth.sign_up.verify_email" not in hook
+
+
+def test_the_check_of_the_nextjs_app_reports_the_delivery_as_a_gap(tmp_path: Path) -> None:
+    runner = CliRunner()
+    args = ["generate", str(EXAMPLE), "-b", "nextjs", "-o", str(tmp_path)]
+    generated = runner.invoke(app, args)
+    assert generated.exit_code == 0, generated.output
+    result = runner.invoke(app, ["check", str(EXAMPLE), str(tmp_path), "-f", "json"])
+    report = json.loads(result.output)
+    gaps = {g["id"] for g in report["gaps"]}
+    assert {"auth.password_reset", "auth.sign_up.verify_email"} <= gaps

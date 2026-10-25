@@ -1,12 +1,13 @@
 {% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
 {% set username = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.auth.username_field].id) | first %}
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {{ trace_header(definition.auth.id) }}
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 {% if definition.auth.password %}
-import { eq } from "drizzle-orm";
+import { eq{{ ", sql" if verify }} } from "drizzle-orm";
 {% endif %}
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -105,7 +106,7 @@ export async function requirePageUser(path: string, params: Record<string, strin
     redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(next)}`);
   }
 }
-{% if definition.auth.password_reset or definition.auth.providers %}
+{% if definition.auth.password_reset or definition.auth.providers or verify %}
 
 /** Return the URL of the app for the browsers: PUBLIC_URL, or the local URL in development. */
 export function publicUrl(): string {
@@ -117,6 +118,22 @@ export function publicUrl(): string {
 {% endif %}
 {% if definition.auth.password %}
 
+{% if verify %}
+/**
+ * Return the user with a user name and a password, or null. `verified` is
+ * false before the user confirms the email address (ADR 0023).
+ */
+export async function checkPassword(username: string, password: string): Promise<{ id: string; verified: boolean } | null> {
+  const rows = await getDb()
+    .select({ id: {{ table.const }}.id, passwordHash: credentialsTable.passwordHash, emailVerifiedAt: credentialsTable.emailVerifiedAt })
+    .from({{ table.const }})
+    .innerJoin(credentialsTable, eq(credentialsTable.userId, {{ table.const }}.id))
+    .where(eq({{ table.const }}.{{ username.key }}, username))
+    .limit(1);
+  const [row] = rows;
+  return row && verifyPassword(password, row.passwordHash) ? { id: row.id, verified: row.emailVerifiedAt !== null } : null;
+}
+{% else %}
 /** Return the ID of the user with a user name and a password, or null. */
 export async function checkPassword(username: string, password: string): Promise<string | null> {
   const rows = await getDb()
@@ -128,7 +145,22 @@ export async function checkPassword(username: string, password: string): Promise
   const [row] = rows;
   return row && verifyPassword(password, row.passwordHash) ? row.id : null;
 }
+{% endif %}
 
+{% if verify %}
+/**
+ * Store the hash of a new password of a user. The reset link went to the
+ * email address, so the address is verified too (ADR 0023).
+ */
+export async function setPassword(userId: string, password: string): Promise<void> {
+  const passwordHash = hashPassword(password);
+  const emailVerifiedAt = sql`coalesce(${credentialsTable.emailVerifiedAt}, now())`;
+  await getDb()
+    .insert(credentialsTable)
+    .values({ userId, passwordHash })
+    .onConflictDoUpdate({ target: credentialsTable.userId, set: { passwordHash, emailVerifiedAt } });
+}
+{% else %}
 /** Store the hash of a new password of a user. */
 export async function setPassword(userId: string, password: string): Promise<void> {
   const passwordHash = hashPassword(password);
@@ -137,4 +169,5 @@ export async function setPassword(userId: string, password: string): Promise<voi
     .values({ userId, passwordHash })
     .onConflictDoUpdate({ target: credentialsTable.userId, set: { passwordHash } });
 }
+{% endif %}
 {% endif %}

@@ -4,16 +4,18 @@
 {% set var = auth.user_entity | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
 {% set creates = auth.providers.values() | selectattr("create_users") | list %}
+{% set verify = auth.sign_up.verify_email if auth.sign_up else none %}
+{% set address = (table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[definition.address_field()].id) | first) if verify else none %}
 {{ trace_header(*(auth.providers.values() | map(attribute="id") | list)) }}
 import "server-only";
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { {{ "and, " if verify }}eq{{ ", isNull" if verify }} } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { z } from "zod";
 
-import { getDb, {{ table.const }} } from "@/shared/db";
+import { {{ "credentialsTable, " if verify }}getDb, {{ table.const }} } from "@/shared/db";
 
 {% if creates %}
 import { {{ var }}InputSchema } from "@/entities/{{ auth.user_entity | kebab }}";
@@ -287,12 +289,27 @@ async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
     throw new ProviderError("The provider did not verify the email address.");
   }
   const rows = await getDb()
-    .select({ id: {{ table.const }}.id })
+    .select({ id: {{ table.const }}.id{% if verify %}, address: {{ table.const }}.{{ address.key }}{% endif %} })
     .from({{ table.const }})
     .where(eq({{ table.const }}.{{ username.key }}, username))
     .limit(1);
   const [found] = rows;
+{% if verify %}
+  if (found) {
+    {{ trace(verify.id) }}
+    // The provider verified the email address. Nobody proved that the person who chose the
+    // password of the sign-up owns the address, so the password must not give access to the
+    // account (ADR 0023). The user can set a new password with a reset link.
+    if ((claims.email_verified === true || claims.email_verified === "true") && claims.email === found.address) {
+      await getDb()
+        .delete(credentialsTable)
+        .where(and(eq(credentialsTable.userId, found.id), isNull(credentialsTable.emailVerifiedAt)));
+    }
+    return found.id;
+  }
+{% else %}
   if (found) return found.id;
+{% endif %}
 {% if creates %}
   if (!provider.createUsers) {
     throw new ProviderError(`No user has the user name ${username}.`, "unknown-user");

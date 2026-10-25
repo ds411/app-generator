@@ -1,9 +1,10 @@
 """The sign-in of the front ends (React and Next.js): the shared parts (ADR 0011).
 
 Each binding has its own `src/shared/auth/` with `signIn`, `signOut`,
-and the calls of the password reset (ADR 0017). The sign-in form, the
-sign-up form (ADR 0016), the forms of the password reset, and the
-sign-out button are shared templates. Each binding has its own
+and the calls of the password reset (ADR 0017) and of the verification
+of the email address (ADR 0023). The sign-in form, the sign-up form
+(ADR 0016), the forms of the password reset, the page of the
+verification link, and the sign-out button are shared templates. Each binding has its own
 `src/features/sign-up/api/` with `signUp`. The table of the permissions
 of the roles (ADR 0012) is a shared template too. The checks of the app
 and the menus, the links, and the actions of the UI read it. Each
@@ -28,6 +29,8 @@ class AuthPages:
     """The page `/sign-up` (ADR 0016)."""
     password_reset: bool
     """The pages `/forgot-password` and `/reset-password` (ADR 0017)."""
+    verify_email: bool = False
+    """The page `/verify-email` of the link that confirms the email address (ADR 0023)."""
 
 
 def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
@@ -35,7 +38,8 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
 
     `server` is True if the app has a server that sends the reset links:
     the Next.js app, or the React app with the FastAPI app. An app with
-    mock data has no password reset pages.
+    mock data has no password reset pages, and no verification of the
+    email address: its sign-up signs in at once.
     """
     auth = definition.auth
     if auth is None:
@@ -43,6 +47,7 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
     return AuthPages(
         sign_up=auth.sign_up is not None,
         password_reset=auth.password_reset is not None and server,
+        verify_email=auth.sign_up is not None and auth.sign_up.verify_email is not None and server,
     )
 
 
@@ -113,6 +118,19 @@ def auth_rules() -> tuple[Output, ...]:
                 (
                     "ui/features/password-reset/reset-password-form.tsx.j2",
                     "src/features/password-reset/ui/reset-password-form.tsx",
+                ),
+            )
+        ),
+        *(
+            Output(template=template, path=path, when="auth_pages.verify_email")
+            for template, path in (
+                (
+                    "ui/features/email-verification/index.ts.j2",
+                    "src/features/email-verification/index.ts",
+                ),
+                (
+                    "ui/features/email-verification/verify-email-form.tsx.j2",
+                    "src/features/email-verification/ui/verify-email-form.tsx",
                 ),
             )
         ),

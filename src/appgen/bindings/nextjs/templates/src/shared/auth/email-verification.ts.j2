@@ -1,0 +1,100 @@
+{% set auth = definition.auth %}
+{% set verify = auth.sign_up.verify_email %}
+{% set table = nextjs.tables_by_entity[auth.user_entity] %}
+{% set fields = definition.entities[auth.user_entity].fields %}
+{% set username = table.columns | selectattr("element_id", "eq", fields[auth.username_field].id) | first %}
+{% set address = table.columns | selectattr("element_id", "eq", fields[definition.address_field()].id) | first %}
+{{ trace_header(verify.id) }}
+import "server-only";
+
+import { createHash, timingSafeEqual } from "node:crypto";
+
+import { and, eq, isNull } from "drizzle-orm";
+
+import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
+
+import { emailVerificationMessage } from "./messages";
+import { deliverMessage } from "./messages.ext";
+import { publicUrl, sign } from "./session";
+
+// The verification of the email address of a new user (ADR 0023). A
+// verification token is a signed text with the user ID, the end time, and
+// a tag of the address. A token for another address of the user is not
+// valid. The signed message has its own prefix, so that a session token or
+// a reset token is never valid as a verification token, and the reverse.
+
+/** The time that a link that confirms an email address stays valid: {{ verify.token_minutes }} minutes. */
+export const VERIFY_SECONDS = {{ verify.token_minutes * 60 }};
+
+/** Return a short hash of an email address. Another address gives another tag. */
+export function addressTag(address: string): string {
+  return createHash("sha256").update(address).digest("hex").slice(0, 32);
+}
+
+function verificationSignature(body: string): string {
+  return sign(`email-verification.${body}`);
+}
+
+/** Return a signed token that confirms the email address of a user until the time `expires` (in seconds). */
+export function makeVerificationToken(userId: string, address: string, expires: number): string {
+  const payload = { sub: userId, exp: expires, adr: addressTag(address) };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${body}.${verificationSignature(body)}`;
+}
+
+/** Return the user ID and the address tag of a valid verification token that has not ended, or null. */
+export function readVerificationToken(token: string): { userId: string; tag: string } | null {
+  const [body = "", signature = ""] = token.split(".");
+  const expected = verificationSignature(body);
+  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as { sub?: unknown; exp?: unknown; adr?: unknown };
+    if (typeof payload.sub !== "string" || typeof payload.exp !== "number" || typeof payload.adr !== "string") return null;
+    return payload.exp * 1000 > Date.now() ? { userId: payload.sub, tag: payload.adr } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Send the message with a new link that confirms the email address of a user. */
+export async function sendVerification(user: { id: string; address: string }): Promise<void> {
+  const token = makeVerificationToken(user.id, user.address, Math.floor(Date.now() / 1000) + VERIFY_SECONDS);
+  const link = `${publicUrl()}/verify-email?token=${encodeURIComponent(token)}`;
+  await deliverMessage(await emailVerificationMessage({ id: user.id, to: user.address }, link));
+}
+
+/** Return the user with a user name who has a password and must confirm the email address, or null. */
+export async function findUnverifiedUser(username: string): Promise<{ id: string; address: string } | null> {
+  const rows = await getDb()
+    .select({ id: {{ table.const }}.id, address: {{ table.const }}.{{ address.key }} })
+    .from({{ table.const }})
+    .innerJoin(credentialsTable, eq(credentialsTable.userId, {{ table.const }}.id))
+    .where(and(eq({{ table.const }}.{{ username.key }}, username), isNull(credentialsTable.emailVerifiedAt)))
+    .limit(1);
+  const [row] = rows;
+  return row && row.address ? { id: row.id, address: row.address } : null;
+}
+
+/**
+ * Confirm the email address of a user with a valid token. Return false if
+ * the user has no password, or if the token is for another address. A
+ * second confirmation changes nothing, and returns true.
+ */
+export async function confirmVerification(found: { userId: string; tag: string }): Promise<boolean> {
+  const rows = await getDb()
+    .select({ address: {{ table.const }}.{{ address.key }}, emailVerifiedAt: credentialsTable.emailVerifiedAt })
+    .from({{ table.const }})
+    .innerJoin(credentialsTable, eq(credentialsTable.userId, {{ table.const }}.id))
+    .where(eq({{ table.const }}.id, found.userId))
+    .limit(1);
+  const [row] = rows;
+  if (!row || !row.address) return false;
+  const tag = addressTag(row.address);
+  if (tag.length !== found.tag.length || !timingSafeEqual(Buffer.from(tag), Buffer.from(found.tag))) return false;
+  if (row.emailVerifiedAt === null) {
+    await getDb().update(credentialsTable).set({ emailVerifiedAt: new Date() }).where(eq(credentialsTable.userId, found.userId));
+  }
+  return true;
+}

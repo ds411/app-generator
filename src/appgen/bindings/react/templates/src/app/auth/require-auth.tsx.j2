@@ -3,6 +3,9 @@
 import {{ "{ type ReactNode, useEffect }" if callback else "type { ReactNode }" }} from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router";
 
+{% if auth_pages.verify_email %}
+import { VerifyEmailForm } from "@/features/email-verification";
+{% endif %}
 {% if auth_pages.password_reset %}
 import { ResetPasswordForm } from "@/features/password-reset";
 {% endif %}
@@ -86,5 +89,13 @@ export function SignUpRoute() {
 export function ResetPasswordRoute() {
   const [params] = useSearchParams();
   return <ResetPasswordForm token={params.get("token") ?? ""} />;
+}
+{% endif %}
+{% if auth_pages.verify_email %}
+
+/** The page of the link that confirms the email address of a new user (ADR 0023). */
+export function VerifyEmailRoute() {
+  const [params] = useSearchParams();
+  return <VerifyEmailForm token={params.get("token") ?? ""} />;
 }
 {% endif %}

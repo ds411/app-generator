@@ -1,0 +1,75 @@
+{% set reset = definition.auth.password_reset %}
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set message_elements = ([reset.id] if reset else []) + ([verify.id] if verify else []) %}
+{{ trace_header(*message_elements) }}
+import "server-only";
+
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+{% endif %}
+// The messages of the sign-in to the users (ADR 0023): a subject, a text,
+// and a link. The app makes each message in the language of the request.
+// The delivery hook `messages.ext.ts` sends it.
+
+/** The title of the app in the messages. */
+const APP_TITLE = {{ app.title | tojson }};
+
+/** The kinds of the messages. */
+export type MessageKind = {{ ((['"password-reset"'] if reset else []) + (['"email-verification"'] if verify else [])) | join(" | ") }};
+
+/** A message of the sign-in to a user, with a link. */
+export type Message = {
+  kind: MessageKind;
+  /** The ID of the user. */
+  userId: string;
+  /** The address of the user: {% if definition.address_field() %}the email address{% else %}the user name{% endif %}. */
+  to: string;
+  /** The subject, with the title of the app. */
+  subject: string;
+  /** The text of the message. It holds the link. */
+  text: string;
+  link: string;
+};
+
+/** The user of a message: the ID, and the address. */
+export type MessageUser = { id: string; to: string };
+
+/** Return a message with a subject, and a text of two lines with the link between them. */
+async function message(kind: MessageKind, user: MessageUser, texts: () => [string, string, string], link: string): Promise<Message> {
+  const [subject, first, last] = {{ "await inRequestLanguage(texts)" if i18n else "texts()" }};
+  const text = `${first}\n\n${link}\n\n${last}\n`;
+  return { kind, userId: user.id, to: user.to, subject: `${APP_TITLE}: ${subject}`, text, link };
+}
+{% if reset %}
+
+/** Return the message with the reset link of a user. */
+export async function passwordResetMessage(user: MessageUser, link: string): Promise<Message> { {{ trace(reset.id) }}
+  return message(
+    "password-reset",
+    user,
+    () => [
+      {{ tr(js("Reset the password")) }},
+      {{ tr(js("Open the link to set a new password. The link is valid one time.")) }},
+      {{ tr(js("If you did not ask for a new password, ignore this message.")) }},
+    ],
+    link,
+  );
+}
+{% endif %}
+{% if verify %}
+
+/** Return the message with the link that confirms the email address of a new user. */
+export async function emailVerificationMessage(user: MessageUser, link: string): Promise<Message> { {{ trace(verify.id) }}
+  return message(
+    "email-verification",
+    user,
+    () => [
+      {{ tr(js("Confirm the email address")) }},
+      {{ tr(js("Open the link to confirm the email address of your new account.")) }},
+      {{ tr(js("If you did not make an account, ignore this message.")) }},
+    ],
+    link,
+  );
+}
+{% endif %}

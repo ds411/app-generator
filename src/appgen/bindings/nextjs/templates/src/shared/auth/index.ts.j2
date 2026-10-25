@@ -1,17 +1,20 @@
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set actions = (["confirmEmailVerificationAction"] if verify else []) + (["confirmPasswordResetAction"] if definition.auth.password_reset else []) + (["requestEmailVerificationAction"] if verify else []) + (["requestPasswordResetAction"] if definition.auth.password_reset else []) + (["signInAction"] if definition.auth.password else []) + ["signOutAction"] %}
 {{ trace_header(definition.auth.id) }}
-{% if definition.auth.password_reset %}
-import { confirmPasswordResetAction, requestPasswordResetAction, signInAction, signOutAction } from "./actions";
-{% elif definition.auth.password %}
-import { signInAction, signOutAction } from "./actions";
-{% else %}
-import { signOutAction } from "./actions";
-{% endif %}
+import { {{ actions | join(", ") }} } from "./actions";
 {% if definition.auth.password %}
 
-/** Sign in. Return null, or the message of the error. */
-export async function signIn(username: string, password: string): Promise<string | null> {
-  const result = await signInAction(username, password);
-  return result.ok ? null : result.error.message;
+/**
+ * The result of a sign-in: the user is signed in, or an error with its
+ * message.{% if verify %} `unverified`: the password is correct, but the user must
+ * confirm the email address first (ADR 0023).{% endif %}
+
+ */
+export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+
+/** Sign in with a user name and a password. */
+export async function signIn(username: string, password: string): Promise<SignInResult> {
+  return signInAction(username, password);
 }
 {% endif %}
 {% if definition.auth.providers %}
@@ -44,6 +47,20 @@ export async function requestPasswordReset(username: string): Promise<string | n
 /** Set a new password with the token of a reset link. Return null, or the message of the error. */
 export async function confirmPasswordReset(token: string, newPassword: string): Promise<string | null> {
   const result = await confirmPasswordResetAction(token, newPassword);
+  return result.ok ? null : result.error.message;
+}
+{% endif %}
+{% if verify %}
+
+/** Ask for a new link that confirms the email address. Return null, or the message of the error. */
+export async function requestEmailVerification(username: string): Promise<string | null> {
+  const result = await requestEmailVerificationAction(username);
+  return result.ok ? null : result.error.message;
+}
+
+/** Confirm the email address with the token of a link. Return null, or the message of the error. */
+export async function confirmEmailVerification(token: string): Promise<string | null> {
+  const result = await confirmEmailVerificationAction(token);
   return result.ok ? null : result.error.message;
 }
 {% endif %}
