@@ -1,8 +1,9 @@
 #!/bin/sh
 # Generate the project tracker with the FastAPI binding, and check the
 # output: install, lint, format, type check, tests, Docker image,
-# traces, and the smoke test (scripts/smoke_test.py: start the app and
-# request it), in Docker and with SQLite (--local, with the mock server of
+# traces, the calls of the clients of the third-party APIs
+# (scripts/api_calls.py), and the smoke test (scripts/smoke_test.py:
+# start the app and request it), in Docker and with SQLite (--local, with the mock server of
 # the third-party APIs, scripts/mock_api.py), the schema change on a
 # database with data (scripts/check_schema_change.py), the rate limit
 # that two processes share in Redis (scripts/check_shared_rate_limit.py),
@@ -102,6 +103,9 @@ docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-fastapi 
 cd "$root"
 step "appgen check"
 uv run --locked appgen check "$definition" "$out"
+
+step "calls of the third-party APIs"
+uv run --locked scripts/api_calls.py fastapi "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-fastapi

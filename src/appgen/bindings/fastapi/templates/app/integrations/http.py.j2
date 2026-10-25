@@ -1,21 +1,39 @@
 {{ trace_header("app") }}
+{% set oauth = "oauth2" in py_api_features %}
 """The HTTP client that the clients of the third-party APIs share.
 
 Each client in `app/integrations/<api>/client.py` sends its requests with
-`ApiClient.request`. An answer with an error status raises `ApiError`, and
-each request stops after a timeout.
+`ApiClient.request` (a JSON answer), `ApiClient.request_text` (a text
+answer), or `ApiClient.request_bytes` (a binary answer). An answer with an
+error status raises `ApiError`, and each request stops after a timeout.
+{% if oauth %}
+An API with OAuth 2.0 gets its access tokens with the client credentials
+flow (`ClientCredentials`).
+{% endif %}
 """
 
+{% if oauth %}
+import asyncio
+{% endif %}
+import datetime as dt
+import json
 import re
+{% if oauth %}
+import time
+{% endif %}
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import TracebackType
-from typing import Self, cast
+from typing import Self, TypedDict, Unpack, cast
 from urllib.parse import quote
 
 import httpx
+import pydantic
 
 DEFAULT_TIMEOUT = 10.0
 """The time in seconds after which a request stops, if the client gets no other time."""
+
+type _Part = tuple[str | None, bytes | str] | tuple[str | None, bytes | str, str]
 
 
 class ApiError(Exception):
@@ -28,6 +46,34 @@ class ApiError(Exception):
         self.status = status
         self.body = body
         """The body of the answer, as text."""
+
+
+@dataclass(frozen=True, slots=True)
+class ApiFile:
+    """A file of a multipart form: its name, its content, and its media type."""
+
+    name: str
+    content: bytes
+    content_type: str = "application/octet-stream"
+
+
+class RequestParts(TypedDict, total=False):
+    """The parameters and the body of a request.
+
+    `path` gives the values of the parameters of the path. A parameter of
+    `query`, `headers`, or `cookies` with the value None is not sent.
+    `body` is a JSON body, and `form` is a form body: a model or a mapping,
+    sent as `multipart/form-data` with `multipart`, else as
+    `application/x-www-form-urlencoded`.
+    """
+
+    path: Mapping[str, object]
+    query: Mapping[str, object]
+    headers: Mapping[str, object]
+    cookies: Mapping[str, object]
+    body: object
+    form: object
+    multipart: bool
 
 
 class ApiClient:
@@ -43,9 +89,15 @@ class ApiClient:
         timeout: float = DEFAULT_TIMEOUT,
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
+{% if oauth %}
+        token: ClientCredentials | None = None,
+{% endif %}
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._params = dict(params or {})
+{% if oauth %}
+        self._token = token
+{% endif %}
         self._http = httpx.AsyncClient(
             base_url=base_url, timeout=timeout, headers=headers, transport=transport
         )
@@ -70,42 +122,235 @@ class ApiClient:
         """The timeout of each request."""
         return self._http.timeout
 
-    async def request(
-        self,
-        method: str,
-        url: str,
-        *,
-        path: Mapping[str, object] | None = None,
-        query: Mapping[str, object] | None = None,
-        headers: Mapping[str, object] | None = None,
-        body: object = None,
-    ) -> object:
+    async def request(self, method: str, url: str, **parts: Unpack[RequestParts]) -> object:
         """Send a request, and return the JSON body of the answer, or None if it has none.
 
-        `url` is the path of the operation, for example `/pets/{id}`. `path`
-        gives the values of its parameters. A parameter of `query` or
-        `headers` with the value None is not sent. Raise ApiError if the
-        answer has an error status.
+        `url` is the path of the operation, for example `/pets/{id}`. Raise
+        ApiError if the answer has an error status.
         """
-        values = {name: quote(str(value), safe="") for name, value in (path or {}).items()}
-        url = re.sub(r"\{([^}]+)\}", lambda m: values[m.group(1)], url).lstrip("/")
-        params: dict[str, str | list[str]] = dict(self._params)
-        for name, value in (query or {}).items():
-            if isinstance(value, list):
-                params[name] = [_text(item) for item in cast(list[object], value)]
-            elif value is not None:
-                params[name] = _text(value)
-        sent = {name: _text(value) for name, value in (headers or {}).items() if value is not None}
-        response = await self._http.request(method, url, params=params, headers=sent, json=body)
-        if response.is_error:
-            raise ApiError(self.api, response.status_code, response.text)
+        response = await self._send(method, url, "application/json", parts)
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
 
+    async def request_text(
+        self, method: str, url: str, *, accept: str = "text/plain", **parts: Unpack[RequestParts]
+    ) -> str:
+        """Send a request, and return the body of the answer as text."""
+        return (await self._send(method, url, accept, parts)).text
+
+    async def request_bytes(
+        self,
+        method: str,
+        url: str,
+        *,
+        accept: str = "application/octet-stream",
+        **parts: Unpack[RequestParts],
+    ) -> bytes:
+        """Send a request, and return the body of the answer as bytes."""
+        return (await self._send(method, url, accept, parts)).content
+
+    async def _send(
+        self, method: str, url: str, accept: str, parts: RequestParts
+    ) -> httpx.Response:
+        values = {name: quote(str(value), safe="") for name, value in parts.get("path", {}).items()}
+        url = re.sub(r"\{([^}]+)\}", lambda m: values[m.group(1)], url).lstrip("/")
+        params: dict[str, str | list[str]] = dict(self._params)
+        for name, value in parts.get("query", {}).items():
+            if isinstance(value, list):
+                params[name] = [_text(item) for item in cast(list[object], value)]
+            elif value is not None:
+                params[name] = _text(value)
+        headers = {
+            name: _text(value)
+            for name, value in parts.get("headers", {}).items()
+            if value is not None
+        }
+        headers["Accept"] = accept
+        cookies = [
+            f"{name}={quote(_text(value), safe=_COOKIE_SAFE)}"
+            for name, value in parts.get("cookies", {}).items()
+            if value is not None
+        ]
+        if cookies:
+            headers["Cookie"] = "; ".join(cookies)
+        data: dict[str, list[str]] | None = None
+        files: list[tuple[str, _Part]] | None = None
+        if "form" in parts:
+            fields = _form_fields(parts["form"])
+            if parts.get("multipart"):
+                files = [(name, _multipart_part(value)) for name, value in fields]
+            else:
+                data = {}
+                for name, value in fields:
+                    data.setdefault(name, []).append(_form_text(value))
+
+        async def send(token: str | None = None) -> httpx.Response:
+            if token is not None:
+                headers["Authorization"] = f"Bearer {token}"
+            return await self._http.request(
+                method,
+                url,
+                params=params,
+                headers=headers,
+                json=parts.get("body"),
+                data=data,
+                files=files,
+            )
+
+{% if oauth %}
+        if self._token is None:
+            response = await send()
+        else:
+            token = await self._token.get(self._http)
+            response = await send(token)
+            if response.status_code == 401:
+                # The API did not accept the token: get a new token, one time.
+                self._token.reset(token)
+                response = await send(await self._token.get(self._http))
+{% else %}
+        response = await send()
+{% endif %}
+        if response.is_error:
+            raise ApiError(self.api, response.status_code, response.text)
+        return response
+{% if oauth %}
+
+
+class ClientCredentials:
+    """The access tokens of the client credentials flow of OAuth 2.0.
+
+    The source keeps one token, and gets a new token a little before the
+    token ends. Two requests at the same time wait for the same token.
+    """
+
+    def __init__(
+        self, api: str, token_url: str, client_id: str, client_secret: str, scopes: list[str]
+    ) -> None:
+        self.api = api
+        self.token_url = token_url
+        """The token URL. A path is under the base URL of the client."""
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scopes = scopes
+        self._token: tuple[str, float] | None = None
+        self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def get(self, http: httpx.AsyncClient) -> str:
+        """Return the access token, and get a new token with `http` when it has ended."""
+        token = self._valid()
+        if token is not None:
+            return token
+        async with self._loop_lock():
+            token = self._valid()
+            return token if token is not None else await self._request(http)
+
+    def reset(self, token: str) -> None:
+        """Forget a token that the API did not accept, so that `get` gets a new token."""
+        if self._token is not None and self._token[0] == token:
+            self._token = None
+
+    def _valid(self) -> str | None:
+        if self._token is not None and time.monotonic() < self._token[1]:
+            return self._token[0]
+        return None
+
+    def _loop_lock(self) -> asyncio.Lock:
+        """Return the lock of the event loop that runs: a lock works in one loop only."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            self._lock, self._loop = asyncio.Lock(), loop
+        return self._lock
+
+    async def _request(self, http: httpx.AsyncClient) -> str:
+        data = {"grant_type": "client_credentials"}
+        if self.scopes:
+            data["scope"] = " ".join(self.scopes)
+        # HTTP Basic authentication of the client (RFC 6749, section 2.3.1).
+        auth = (quote(self.client_id, safe=""), quote(self.client_secret, safe=""))
+        url = self.token_url.lstrip("/")
+        headers = {"Accept": "application/json"}
+        response = await http.post(url, data=data, auth=auth, headers=headers)
+        if response.is_error:
+            raise ApiError(self.api, response.status_code, response.text)
+        answer: object = response.json()
+        values = cast(dict[str, object], answer) if isinstance(answer, dict) else {}
+        value = values.get("access_token")
+        if not isinstance(value, str):
+            raise ApiError(self.api, response.status_code, "The token answer has no access_token.")
+        expires_in = values.get("expires_in")
+        seconds = expires_in if isinstance(expires_in, int | float) else 3600
+        self._token = (value, time.monotonic() + max(seconds - 30, 0))
+        return value
+
+
+_TOKEN_SOURCES: dict[tuple[str, str, str, tuple[str, ...]], ClientCredentials] = {}
+
+
+def client_credentials(
+    api: str, base_url: str, token_url: str, client_id: str, client_secret: str, scopes: list[str]
+) -> ClientCredentials:
+    """Return the token source of a client.
+
+    The clients with the same base URL, token URL, client ID, and scopes
+    share one source, so that the process keeps one token for them.
+    """
+    key = (base_url, token_url, client_id, tuple(scopes))
+    source = _TOKEN_SOURCES.get(key)
+    if source is None:
+        source = ClientCredentials(api, token_url, client_id, client_secret, scopes)
+        _TOKEN_SOURCES[key] = source
+    return source
+
+
+def clear_tokens() -> None:
+    """Forget the token sources and their tokens, for example between two tests."""
+    _TOKEN_SOURCES.clear()
+{% endif %}
+
+
+_COOKIE_SAFE = "-_.!~*'()"
+"""The characters of a cookie value that the client does not percent-encode."""
+
 
 def _text(value: object) -> str:
-    """Return a value as the text of a query parameter or a header."""
+    """Return a value as the text of a query parameter, a header, or a cookie."""
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def _form_fields(form: object) -> list[tuple[str, object]]:
+    """Return the fields of a form, with one field for each item of a list."""
+    if isinstance(form, pydantic.BaseModel):
+        model = type(form).model_fields
+        values = {(f.serialization_alias or n): getattr(form, n) for n, f in model.items()}
+    else:
+        values = dict(cast(Mapping[str, object], form))
+    fields: list[tuple[str, object]] = []
+    for name, value in values.items():
+        items = cast(list[object], value) if isinstance(value, list) else [value]
+        fields += [(name, item) for item in items if item is not None]
+    return fields
+
+
+def _form_text(value: object) -> str:
+    """Return a value of a form field as text: an object as JSON, a date in ISO 8601."""
+    if isinstance(value, pydantic.BaseModel):
+        return value.model_dump_json(by_alias=True)
+    if isinstance(value, dict):
+        return json.dumps(_JSON.dump_python(cast(dict[str, object], value), mode="json"))
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return _text(value)
+
+
+def _multipart_part(value: object) -> _Part:
+    """Return a field of a multipart form for httpx: a file, or a text without a file name."""
+    if isinstance(value, ApiFile):
+        return (value.name, value.content, value.content_type)
+    return (None, _form_text(value))
+
+
+_JSON = pydantic.TypeAdapter(object)

@@ -59,9 +59,28 @@ class ApiSecurity(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     scheme: Text
-    """A key of `components.securitySchemes` of the document: an API key or a bearer token."""
-    env: EnvName
-    """The environment variable that holds the secret."""
+    """A key of `components.securitySchemes` of the document: an API key, a bearer token, or
+    OAuth 2.0 with the client credentials flow."""
+    env: EnvName | None = None
+    """The environment variable that holds the API key or the bearer token."""
+    client_id_env: EnvName | None = None
+    """OAuth 2.0: the environment variable that holds the client ID."""
+    client_secret_env: EnvName | None = None
+    """OAuth 2.0: the environment variable that holds the client secret."""
+    scopes: list[Text] = pydantic.Field(default_factory=list[Text])
+    """OAuth 2.0: the scopes of the access token."""
+
+    @property
+    def secret_env(self) -> str | None:
+        """The environment variable of the secret: the API key, the token, or the client
+        secret."""
+        return self.env if self.env is not None else self.client_secret_env
+
+    @property
+    def variables(self) -> list[tuple[str, str]]:
+        """The key and the environment variable of each variable of the credential."""
+        keys = ("env", "client_id_env", "client_secret_env")
+        return [(key, value) for key in keys if (value := getattr(self, key)) is not None]
 
 
 class ApiOperation(Element):

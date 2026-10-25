@@ -103,7 +103,11 @@ DOCUMENT: dict[str, Any] = {
             },
             "get": {
                 "operationId": "listPets",
-                "parameters": [{"name": "session", "in": "cookie", "schema": {"type": "string"}}],
+                "parameters": [
+                    {"name": "session", "in": "cookie", "schema": {"type": "object"}},
+                    {"name": "filter", "in": "querystring", "schema": {"type": "string"}},
+                ],
+                "requestBody": {"content": {"application/xml": {}}},
                 "responses": {"200": {"description": "Pets.", "content": {"text/csv": {}}}},
             },
         },
@@ -262,9 +266,12 @@ def test_the_selection_reports_what_a_client_cannot_send_or_read(tmp_path: Path)
     spec = read_document(write_document(tmp_path, DOCUMENT)).select(["listPets"])
 
     assert [problem for _, problem in spec.problems] == [
-        "The parameter 'session' is in a cookie. The clients send only path, query, and "
-        "header parameters.",
-        "The answer 200 is not JSON. The clients read only JSON answers.",
+        "The cookie parameter 'session' is not a text, a number, or a boolean. The clients "
+        "send only such cookie parameters.",
+        "The parameter 'filter' is in a querystring. The clients send only path, query, "
+        "header, and cookie parameters.",
+        "The request body is not JSON, a form, or a multipart form. The clients send only "
+        "these bodies.",
     ]
 
 
@@ -410,10 +417,7 @@ def test_the_security_scheme_exists_and_suits_the_clients(
 def test_an_operation_that_a_client_cannot_call_is_an_error(tmp_path: Path) -> None:
     found = definition(tmp_path, PETS.replace("[getPet, addPet]", "[listPets]"))
 
-    assert codes(found) == [
-        ("unsuitable-operation", "apis.pets.operations.listPets"),
-        ("unsuitable-operation", "apis.pets.operations.listPets"),
-    ]
+    assert codes(found) == [("unsuitable-operation", "apis.pets.operations.listPets")] * 3
 
 
 def test_an_exposed_operation_takes_each_parameter_as_a_query_parameter(tmp_path: Path) -> None:
@@ -471,9 +475,12 @@ def test_the_manifest_records_the_hash_of_each_document(tmp_path: Path) -> None:
 
     manifest = read_manifest(out)
     assert manifest is not None
+    hashes = {name: api.openapi.hash for name, api in found.apis.items() if api.openapi}
     assert manifest.documents == {
-        "apis/exchange-rates.openapi.json": found.apis["exchange_rates"].openapi.hash,  # pyright: ignore[reportOptionalMemberAccess]
-        "apis/public-holidays.openapi.yaml": found.apis["holidays"].openapi.hash,  # pyright: ignore[reportOptionalMemberAccess]
+        "apis/documents.openapi.yaml": hashes["documents"],
+        "apis/exchange-rates.openapi.json": hashes["exchange_rates"],
+        "apis/finance.openapi.yaml": hashes["finance"],
+        "apis/public-holidays.openapi.yaml": hashes["holidays"],
     }
 
 

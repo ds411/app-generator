@@ -71,6 +71,10 @@ spec:
             {{ trace(api.id) }}
             - name: {{ api.url_env }}
               value: {{ api.base_url | tojson }}
+{% if api.client_id_env %}
+            - name: {{ api.client_id_env }}
+              value: ""
+{% endif %}
 {% endfor %}
             # The secrets. In Cloud Run, `name` is a secret of Secret Manager
             # and `key` its version. In Knative, `name` is a Kubernetes Secret

@@ -623,12 +623,48 @@
           "$ref": "#/$defs/Text"
         },
         "env": {
-          "$ref": "#/$defs/EnvName"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "client_id_env": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "client_secret_env": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scopes": {
+          "items": {
+            "$ref": "#/$defs/Text"
+          },
+          "title": "Scopes",
+          "type": "array"
         }
       },
       "required": [
-        "scheme",
-        "env"
+        "scheme"
       ],
       "title": "ApiSecurity",
       "type": "object"

@@ -15,11 +15,17 @@ and closes it after use (`async with`).
 
 BASE_URL = {{ api.base_url | tojson }}
 """The base URL of the first server of the OpenAPI document."""
+{% if api.credential == "oauth2" %}
+TOKEN_URL = {{ api.token_url | tojson }}
+"""The token URL of the client credentials flow of the document. A path is under the base URL."""
+SCOPES = {{ api.scopes | list | tojson }}
+"""The scopes of the access token."""
+{% endif %}
 {% for m in api.methods %}
-{% if m.result_type %}
+{% if m.json_result %}
 {{ m.adapter }} = pydantic.TypeAdapter({{ m.result_type }})
 {% endif %}
-{% if m.body_type %}
+{% if m.json_body %}
 {{ m.body_adapter }} = pydantic.TypeAdapter({{ m.body_type }})
 {% endif %}
 {% endfor %}
@@ -33,6 +39,9 @@ class {{ api.client }}(ApiClient):
     def __init__(
         self,
         base_url: str = BASE_URL,
+{% if api.credential == "oauth2" %}
+        client_id: str = "",
+{% endif %}
 {% if api.credential %}
         {{ api.secret_arg }}: str = "",
 {% endif %}
@@ -49,6 +58,13 @@ class {{ api.client }}(ApiClient):
 {% elif api.credential == "query" %}
         params = {{ "{" }}{{ api.credential_name | tojson }}: api_key} if api_key else None
         super().__init__(base_url, timeout=timeout, params=params, transport=transport)
+{% elif api.credential == "oauth2" %}
+        token = (
+            client_credentials(self.api, base_url, TOKEN_URL, client_id, client_secret, SCOPES)
+            if client_secret
+            else None
+        )
+        super().__init__(base_url, timeout=timeout, token=token, transport=transport)
 {% else %}
         super().__init__(base_url, timeout=timeout, transport=transport)
 {% endif %}

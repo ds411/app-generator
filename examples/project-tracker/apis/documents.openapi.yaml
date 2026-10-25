@@ -1,0 +1,86 @@
+# The OpenAPI document of a documents API: the project tracker uploads
+# the attachments of the projects, sends feedback, exports the tasks as
+# CSV, and downloads the reports as PDF. The operations show the bodies
+# and the answers that are not JSON (a multipart form, a form, a text,
+# and binary data). The checks call them on the mock server
+# (scripts/mock_api.py).
+openapi: 3.1.0
+info:
+  title: Documents API
+  version: "1.0"
+  description: The attachments, the exports, and the reports of the projects.
+servers:
+  - url: https://documents.example.com/v1
+paths:
+  /attachments:
+    post:
+      operationId: uploadAttachment
+      summary: Upload a file as an attachment of a project.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, project]
+              properties:
+                file: { type: string, format: binary, description: The file. }
+                project: { type: string, description: The key of the project. }
+                tags: { type: array, items: { type: string } }
+      responses:
+        "201":
+          description: The attachment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+              example: { id: att-1, name: plan.txt, size: 14 }
+  /feedback:
+    post:
+      operationId: sendFeedback
+      summary: Send feedback about the app.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+                rating: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        "204": { description: The feedback arrived. }
+  /exports/tasks:
+    get:
+      operationId: exportTasks
+      summary: Export the tasks of a project as CSV.
+      parameters:
+        - { name: project, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The tasks, one on each line.
+          content:
+            text/csv:
+              schema: { type: string }
+              example: "title,status\nWrite the plan,done\n"
+  /reports/{project}:
+    get:
+      operationId: downloadReport
+      summary: Download the report of a project as PDF.
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/pdf:
+              schema: { type: string, contentMediaType: application/pdf }
+components:
+  schemas:
+    Attachment:
+      type: object
+      required: [id, name, size]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        size: { type: integer, description: The size in bytes. }

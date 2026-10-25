@@ -189,8 +189,9 @@ uv run appgen generate examples/project-tracker/app.yaml -b react -o /tmp/tracke
 cd /tmp/tracker-react && pnpm install && pnpm dev
 ```
 
-`appgen generate` gives a warning for the API `exchange_rates`: it has a
-secret, so the React app has no client for it.
+The APIs `exchange_rates` and `finance` have a secret, so the React app
+calls them through the FastAPI app (`expose: true`). With mock data,
+their clients also give the example answers.
 
 ### Run in Docker
 
@@ -308,6 +309,22 @@ the demo does not call the real API.
 
    The answer has the new `due_date`. The mock server records the
    request of the operation: open <http://localhost:8430/_requests>.
+
+The mock server also gives the tokens of the API `finance` (OAuth 2.0)
+for each client ID and client secret. To call it, add
+`FINANCE_API_URL=http://localhost:8430/finance`, `FINANCE_CLIENT_ID`,
+and `FINANCE_CLIENT_SECRET` to the settings of the app. The page
+`/budget` of the Next.js app needs these settings too.
+
+`scripts/api_calls.py` calls the APIs `documents` and `finance` from an
+app that you generated and installed: a multipart form with a file, a
+form, a text answer, a binary answer, and an operation with OAuth 2.0
+and a cookie parameter. It checks the requests on the mock server. The
+check scripts run it:
+
+```sh
+uv run scripts/api_calls.py fastapi /tmp/tracker-fastapi
+```
 
 The smoke test with `--local` does these steps (see below).
 

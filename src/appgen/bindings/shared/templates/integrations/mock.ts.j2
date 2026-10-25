@@ -14,6 +14,9 @@ export const MOCK_ROUTES: readonly MockRoute[] = [
     path: {{ m.path_pattern }},
     status: {{ m.mock_status }},
     example: {{ m.example_json | indent(4) }},
+{% if m.mock_media %}
+    media: {{ m.mock_media | tojson }},
+{% endif %}
   },
 {% endfor %}
 ];

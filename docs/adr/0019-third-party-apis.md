@@ -1,6 +1,7 @@
 # 0019. Third-party APIs from OpenAPI documents
 
-- Date: 2026-10-24
+- Date: 2026-10-24 (forms, files, text and binary answers, cookies, and
+  OAuth 2.0: 2026-10-25)
 - Deciders: Maintainers
 
 ## Status
@@ -46,16 +47,19 @@ We looked at two ways to read the documents:
 
 - A new optional top-level section `apis` maps an API name to an API:
   the path of its OpenAPI document, the environment variable of its base
-  URL (`base_url_env`), the optional security (`scheme` and `env`), and
-  the operations that the app calls.
+  URL (`base_url_env`), the optional security (`scheme` and `env`, or
+  for OAuth 2.0 `client_id_env`, `client_secret_env`, and `scopes`),
+  and the operations that the app calls.
 - `operations` is a list of operation IDs, or a mapping from operation
   ID to an operation with an optional `description`. The loader turns
   the list into the mapping, so that each operation is an element with
   the ID `apis.<name>.operations.<operation_id>`. An operation ID that
   is not a valid ID segment is an error (`invalid-name`).
 - The security names a security scheme of the document. The clients
-  support an API key in a header or a query parameter, and a bearer
-  token. The secret comes from the environment variable in `env`.
+  support an API key in a header or a query parameter, a bearer token,
+  and OAuth 2.0 with the client credentials flow. The secret comes from
+  the environment variable in `env`, or in `client_secret_env` for
+  OAuth 2.0.
 - A custom operation can name the APIs that its logic calls (`apis` of
   the operation). The bindings give the clients of these APIs to the
   extension file of the operation.
@@ -78,7 +82,8 @@ We looked at two ways to read the documents:
   document does not have (`unknown-reference`), a security scheme that
   the clients do not support (`unsuitable-security`), and an operation
   that a client cannot call (`unsuitable-operation`), for example an
-  operation with a body that is not JSON, or with a cookie parameter.
+  operation with an XML body, or with a cookie parameter that is an
+  object.
 
 ### The normal form
 
@@ -96,15 +101,52 @@ We looked at two ways to read the documents:
   a sample from the schema. The mock data and the generated tests use
   it, so that the checks do not call the real API.
 
+### Content types, cookies, and OAuth 2.0
+
+- The normal form keeps the kind of the request body (`json`, `form`
+  for `application/x-www-form-urlencoded`, or `multipart` for
+  `multipart/form-data`) and the kind of the answer (`json`, `text` for
+  `text/*`, or `binary`), with the media type of the answer. When the
+  document gives more than one media type, JSON comes first. The client
+  sends the media type of the answer in the header `Accept`.
+- The schema of a form is an object with properties. A form holds only
+  texts, numbers, booleans, and lists of these. A multipart form can
+  also hold files and objects (as JSON text). A file is a string with
+  `format: binary`, or with `contentMediaType` in OpenAPI 3.1. It is a
+  `Blob` in TypeScript (a `File` gives its name), and an `ApiFile` with
+  a name, the content, and a media type in Python, because a multipart
+  part needs a file name.
+- A text answer is a string, and a binary answer is a `Blob` in
+  TypeScript and `bytes` in Python. The example of a text answer is the
+  example of the document or a fixed text, and the example of a binary
+  answer is the bytes of a fixed text.
+- A cookie parameter is a text, a number, or a boolean. The server
+  clients send it in the header `Cookie`, percent-encoded as
+  `encodeURIComponent` does it. A browser cannot set a cookie for
+  another site, so in the React app an API with a cookie parameter is a
+  gap, as an API with a secret is, unless the API has `expose`.
+- For OAuth 2.0, the security scheme must have the client credentials
+  flow, else the validator reports `unsuitable-security`. The token URL
+  comes from the document. A token URL that is a path is under the base
+  URL of the API, so that the mock server and a test server can give
+  the tokens. Each scope in `scopes` must be a scope of the flow.
+- The client authenticates with HTTP Basic (RFC 6749, section 2.3.1),
+  and keeps the token until 30 seconds before it ends. Each process has
+  one token source for each base URL, token URL, client ID, and scopes.
+  Two requests at the same time wait for the same token request: a lock
+  in Python, and a shared promise in TypeScript. After an answer with
+  the status 401, the client gets a new token one time, and sends the
+  request again.
+
 ### The clients
 
 - The FastAPI app and the Next.js app call the APIs on the server. The
   Next.js clients import `server-only`, so that a secret cannot get
   into the code of the browser.
 - The React app has no server, and a browser app cannot keep a secret.
-  Thus only an API without a secret gets a client. An API with a secret
-  is a gap: an extension file `src/shared/api/<api>/client.ext.ts` with
-  gap traces. `appgen generate` also gives a warning with a hint: call
+  Thus only an API without a secret and without a cookie parameter gets
+  a client. Another API is a gap: an extension file
+  `src/shared/api/<api>/client.ext.ts` with gap traces. `appgen generate` also gives a warning with a hint: call
   the API in a custom operation of the FastAPI app, and set
   `x-react-data: api`. The new field `warnings` of the binding contract
   gives such warnings.
@@ -122,16 +164,21 @@ We looked at two ways to read the documents:
   the user, and with mock data it gives the examples. Thus an exposed
   API is not a gap, and `appgen generate` gives no warning for it. The
   validator rejects an exposed operation with a parameter that a query
-  parameter cannot hold.
+  parameter cannot hold, a form body, or an answer that is not JSON,
+  because the endpoints take and give JSON.
 
 ## Consequences
 
 - A definition with `apis` gives the same output on each run, without a
   network. A change of a document changes its hash in the manifest.
-- The clients cover the common parts of REST APIs. They do not support
-  other content types, cookie parameters, multipart bodies, or OAuth
-  flows. The validator reports these cases, so that the author can call
-  such an operation from hand-written code.
+- The clients cover the common parts of REST APIs: JSON, forms, and
+  multipart forms, text and binary answers, cookie parameters, and
+  OAuth 2.0 with the client credentials flow. They do not support other
+  bodies (for example XML), the other OAuth flows, OpenID Connect, or
+  mutual TLS. The validator reports these cases, so that the author can
+  call such an operation from hand-written code.
+- Each process keeps its own token. Two instances of an app get two
+  tokens, and a token that the API revokes costs one failed request.
 - The reader checks less than a full validator of the specification. A
   document that an OpenAPI validator rejects can pass, if the parts that
   the clients use are valid.

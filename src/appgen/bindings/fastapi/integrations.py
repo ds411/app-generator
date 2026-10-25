@@ -19,6 +19,7 @@ from appgen.bindings.shared.integrations import exposed_prefix
 from appgen.dsl.apis import Api
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.openapi import (
+    EXAMPLE_TEXT,
     AnySchema,
     ArraySchema,
     ClientSpec,
@@ -51,6 +52,15 @@ _FORMATS = {"date": "dt.date", "date-time": "dt.datetime", "uuid": "uuid.UUID"}
 # The local names of the generated tests: a parameter of a method cannot
 # have them, because the tests give each argument a variable of its name.
 _TEST_NAMES = frozenset({"adapter", "error", "expected", "requests", "result", "transport"})
+# The location of each kind of parameter, and its keyword in `ApiClient.request`.
+_PART_KEYWORDS = (
+    ("path", "path"),
+    ("query", "query"),
+    ("header", "headers"),
+    ("cookie", "cookies"),
+)
+_FILE_SAMPLE = {"name": "example.txt", "content": EXAMPLE_TEXT}
+"""The sample of a file of a multipart form, as `ApiFile` validates it."""
 
 
 def python_name(name: str, taken: set[str], reserved: frozenset[str] = frozenset()) -> str:
@@ -222,6 +232,21 @@ class PyApiMethod:
     query_model: PyApiModel | None = None
     """The model of the query parameters of the endpoint, or None for an operation without
     parameters."""
+    body_kind: str = "json"
+    """`json`, `form`, or `multipart`."""
+    answer: str = "json"
+    """`json`, `text`, or `binary`."""
+    answer_media: str = "application/json"
+
+    @property
+    def json_result(self) -> bool:
+        """True if the method validates a JSON answer with a type adapter."""
+        return self.result_type is not None and self.answer == "json"
+
+    @property
+    def json_body(self) -> bool:
+        """True if the method sends a JSON body with a type adapter."""
+        return self.body_type is not None and self.body_kind == "json"
 
     @property
     def path_pattern(self) -> str:
@@ -268,18 +293,27 @@ class PyApiMethod:
     def body_lines(self) -> list[str]:
         """Return the statements of the method."""
         args = [json.dumps(self.method.upper()), json.dumps(self.path)]
-        for location, keyword_ in (("path", "path"), ("query", "query"), ("header", "headers")):
+        for location, keyword_ in _PART_KEYWORDS:
             found = [p for p in self.parameters if p.location == location]
             if found:
                 items = ", ".join(f"{json.dumps(p.name)}: {p.attr}" for p in found)
                 args.append(f"{keyword_}={{{items}}}")
-        if self.body_type is not None:
+        if self.json_body:
             dump = f'{self.body_adapter}.dump_python(body, mode="json", by_alias=True)'
             if not self.body_required:
                 dump += " if body is not None else None"
             args.append(f"body={dump}")
+        elif self.body_type is not None:
+            # A form without a body sends no fields.
+            args.append("form=body" if self.body_required else "form=body or {}")
+            if self.body_kind == "multipart":
+                args.append("multipart=True")
         if self.result_type is None:
             return [call("await ", "self.request", args, 8)]
+        if self.answer != "json":
+            method = "self.request_text" if self.answer == "text" else "self.request_bytes"
+            args.append(f"accept={json.dumps(self.answer_media)}")
+            return [call("return await ", method, args, 8)]
         return [
             call("data = await ", "self.request", args, 8),
             f"return {self.adapter}.validate_python(data)",
@@ -382,7 +416,7 @@ class PyApi:
     secret_setting: str | None
     secret_env: str | None
     credential: str | None
-    """`header`, `query`, or `bearer`."""
+    """`header`, `query`, `bearer`, or `oauth2`."""
     credential_name: str | None
     """The name of the header or the query parameter of an API key."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
@@ -391,6 +425,13 @@ class PyApi:
     """True: the app has an endpoint for each operation (`apis.<api>.expose`)."""
     prefix: str = ""
     """The path of the endpoints of an exposed API, for example `/apis/exchange-rates`."""
+    client_id_setting: str | None = None
+    """OAuth 2.0: the attribute of the settings with the client ID."""
+    client_id_env: str | None = None
+    token_url: str = ""
+    """OAuth 2.0: the token URL of the client credentials flow. A path is under the base URL."""
+    scopes: tuple[str, ...] = ()
+    """OAuth 2.0: the scopes of the access token."""
 
     @property
     def dependency(self) -> str:
@@ -399,6 +440,8 @@ class PyApi:
     def construction(self) -> str:
         """Return the statement of the dependency that creates the client from the settings."""
         args = [f"settings.{self.url_setting}"]
+        if self.client_id_setting:
+            args.append(f"settings.{self.client_id_setting}")
         if self.secret_setting:
             args.append(f"settings.{self.secret_setting}")
         return call("client = ", self.client, args)
@@ -413,7 +456,7 @@ class PyApi:
 
     @property
     def secret_arg(self) -> str:
-        return "token" if self.credential == "bearer" else "api_key"
+        return {"bearer": "token", "oauth2": "client_secret"}.get(self.credential or "", "api_key")
 
     @property
     def model_names(self) -> list[str]:
@@ -438,20 +481,29 @@ class PyApi:
         types = [m.alias for m in self.models] + [
             f.type for m in self.models for f in (m.fields or [])
         ]
-        return ["import pydantic", *_std_imports(" ".join(types))]
+        text = " ".join(types)
+        lines = ["import pydantic", *_std_imports(text)]
+        if re.search(r"\bApiFile\b", text):
+            lines.append("from app.integrations.http import ApiFile")
+        return lines
 
     def client_imports(self) -> list[str]:
         """Return the import lines of `client.py`."""
         text = self.client_types
+        http = {"DEFAULT_TIMEOUT", "ApiClient"}
+        if re.search(r"\bApiFile\b", text):
+            http.add("ApiFile")
+        if self.credential == "oauth2":
+            http.add("client_credentials")
         lines = [
             "from collections.abc import AsyncIterator",
             "from typing import Annotated",
             "from fastapi import Depends, Request",
             "from app.core.config import Settings",
-            "from app.integrations.http import DEFAULT_TIMEOUT, ApiClient",
+            from_import("app.integrations.http", http),
             *_std_imports(text),
         ]
-        if self.methods:
+        if any(m.json_result or m.json_body for m in self.methods):
             lines += ["import httpx", "import pydantic"]
         else:
             lines.append("import httpx")
@@ -513,15 +565,22 @@ class PyApi:
         results = [m.result_type for m in self.methods if m.result_type]
         text = " ".join(samples + results)
         mocks = {"mock_transport", "EXAMPLES"} if results else {"mock_transport"}
+        http = {"DEFAULT_TIMEOUT", "ApiError"}
+        if self.credential == "oauth2":
+            http.add("clear_tokens")
+        if re.search(r"\bApiFile\b", text):
+            http.add("ApiFile")
         lines = [
             "import re",
             "import httpx",
             "import pytest",
-            "from app.integrations.http import DEFAULT_TIMEOUT, ApiError",
+            from_import("app.integrations.http", http),
             f"from app.integrations.{self.module}.client import {self.client}",
             from_import("tests.integrations.mocks", mocks),
             *_std_imports(text),
         ]
+        if self.credential == "oauth2":
+            lines.append("import asyncio")
         if "pydantic." in text or results:
             lines.append("import pydantic")
         models = self.used_models(text)
@@ -541,6 +600,8 @@ class PyApi:
 
     def _arguments(self) -> list[str]:
         args = [json.dumps(self.test_url)]
+        if self.credential == "oauth2":
+            args.append('"client"')
         if self.credential:
             args.append('"secret"')
         return args
@@ -566,15 +627,37 @@ class PyApi:
                 f'r"{m.path_pattern}"',
                 str(m.status_code),
                 json.dumps(m.operation_id),
+                json.dumps(m.answer if m.result_type else "json"),
             ]
             lines.append(call("", "", args, 8, ","))
         return lines
+
+    @property
+    def token_pattern(self) -> str:
+        """A regular expression of the path of the token URL, for the mock transport."""
+        if self.token_url.startswith("/"):
+            return "^" + re.escape(self.token_url) + "$"
+        path = re.sub(r"^[a-z]+://[^/]+", "", self.token_url) or "/"
+        return "^" + re.escape(path) + "$"
 
     @property
     def examples_json(self) -> str:
         """The example answer of each operation, as JSON text for the tests."""
         data = {m.operation_id: json.loads(m.example) for m in self.methods}
         return json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True)
+
+
+def py_features(apis: dict[str, PyApi]) -> frozenset[str]:
+    """Return what the HTTP client of the app needs for these APIs: `oauth2`, `files`."""
+    found: set[str] = set()
+    for api in apis.values():
+        if api.credential == "oauth2":
+            found.add("oauth2")
+        if "ApiFile" in api.client_types or any(
+            "ApiFile" in f.type for m in api.models for f in m.fields or []
+        ):
+            found.add("files")
+    return frozenset(found)
 
 
 def python_apis(definition: AppDefinition) -> dict[str, PyApi]:
@@ -606,7 +689,10 @@ def _api(name: str, api: Api) -> PyApi:
     )
     credential: str | None = None
     if scheme is not None:
-        credential = "bearer" if scheme.type == "http" else scheme.location
+        credential = {"http": "bearer", "oauth2": "oauth2"}.get(scheme.type, scheme.location)
+    security = api.security
+    secret_env = security.secret_env if security else None
+    client_id_env = security.client_id_env if security else None
     module = snake(name)
     py = PyApi(
         name=name,
@@ -618,10 +704,14 @@ def _api(name: str, api: Api) -> PyApi:
         base_url=document.base_url if document is not None else "",
         url_setting=api.base_url_env.lower(),
         url_env=api.base_url_env,
-        secret_setting=api.security.env.lower() if api.security else None,
-        secret_env=api.security.env if api.security else None,
+        secret_setting=secret_env.lower() if secret_env else None,
+        secret_env=secret_env,
         credential=credential,
         credential_name=scheme.parameter if scheme is not None else None,
+        client_id_setting=client_id_env.lower() if client_id_env else None,
+        client_id_env=client_id_env,
+        token_url=(scheme.token_url or "") if scheme is not None else "",
+        scopes=tuple(security.scopes) if security else (),
     )
     types = _Types(spec.schemas)
     for named in spec.schemas:
@@ -698,20 +788,52 @@ def _method(
         body_type=body_type,
         body_required=operation.body_required,
         body_sample=body_sample,
-        result_type=types.type(operation.result, base + "Result") if operation.result else None,
+        result_type=_result_type(operation, types),
         status=operation.status,
         example=json.dumps(operation.example, ensure_ascii=False),
+        body_kind=operation.body_kind,
+        answer=operation.answer,
+        answer_media=operation.answer_media,
     )
+
+
+def _result_type(operation: Operation, types: _Types) -> str | None:
+    if operation.result is None:
+        return None
+    if operation.answer == "binary":
+        return "bytes"
+    return types.type(operation.result, pascal(operation.id) + "Result")
 
 
 def _typed_sample(schema: Schema, type_: str, spec: ClientSpec, types: _Types) -> PySample:
     """Return a valid value of a type, for the generated tests."""
-    value = sample(schema, spec)
+    value = _with_files(schema, sample(schema, spec), spec)
     if re.search(r"\b(dt|uuid)\.", type_) or any(
-        n in types.models for n in re.findall(r"\w+", type_)
+        n in types.models or n == "ApiFile" for n in re.findall(r"\w+", type_)
     ):
         return PySample(value, type_)
     return PySample(value, None)
+
+
+def _with_files(schema: Schema, value: object, spec: ClientSpec) -> object:
+    """Return a sample with a file sample for each binary string."""
+    match schema:
+        case Ref(name):
+            return _with_files(spec.schema(name).schema, value, spec)
+        case ScalarSchema("string", "binary"):
+            return dict(_FILE_SAMPLE)
+        case ArraySchema(items) if isinstance(value, list):
+            return [_with_files(items, item, spec) for item in cast(list[object], value)]
+        case ObjectSchema(properties) if isinstance(value, dict):
+            found = cast(dict[str, object], value)
+            schemas = {p.name: p.schema for p in properties}
+            return {
+                k: _with_files(schemas[k], v, spec) if k in schemas else v for k, v in found.items()
+            }
+        case UnionSchema(options):
+            return _with_files(options[0], value, spec)
+        case _:
+            return value
 
 
 class _Types:
@@ -750,6 +872,8 @@ class _Types:
                 if top:
                     return literal
                 return self.alias(context, literal)
+            case ScalarSchema("string", "binary"):
+                return "str" if query else "ApiFile"
             case ScalarSchema(kind, format_):
                 if kind == "string":
                     return _FORMATS.get(format_ or "", "str")

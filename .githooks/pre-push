@@ -145,8 +145,8 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'scripts/check_schema_change.py' 'scripts/mock_oidc.py' 'scripts/check_provider_sign_in.py' \
     'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' \
     'tests/fixtures/provider-sign-in.yaml' 'tests/fixtures/account-security.yaml' \
-    'scripts/smoke_test.py' 'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' \
-    '.githooks/*'; then
+    'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
+    'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps fastapi"
 fi
 
@@ -155,6 +155,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-nextjs.sh' \
     'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' 'scripts/smoke_test.py' 'ui-tests/*' \
     'tests/fixtures/seed-data*' 'scripts/seed_test.py' \
+    'scripts/mock_api.py' 'scripts/api_calls.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps nextjs"
 fi
@@ -162,7 +163,7 @@ fi
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'tests/fixtures/seed-data*' \
+    'tests/fixtures/seed-data*' 'scripts/mock_api.py' 'scripts/api_calls.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps react"
 fi
@@ -170,7 +171,8 @@ fi
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/fastapi/*' \
     'src/appgen/bindings/shared/*' 'examples/project-tracker/*' 'scripts/check-react-api.sh' \
-    'scripts/api_client_test.py' 'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
+    'scripts/api_client_test.py' 'scripts/mock_api.py' 'scripts/sandbox.env' 'pyproject.toml' \
+    'uv.lock' '.githooks/*'; then
     apps="$apps react-api"
 fi
 
@@ -178,7 +180,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/nextjs/*' \
     'src/appgen/bindings/shared/*' 'examples/project-tracker/*' 'scripts/check-translations.sh' \
     'scripts/translation_test.py' 'scripts/untranslated_text.mjs' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
+    'scripts/mock_api.py' 'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps translations"
 fi
 

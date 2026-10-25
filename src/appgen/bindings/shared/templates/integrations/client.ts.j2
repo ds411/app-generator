@@ -8,10 +8,20 @@
 import "server-only";
 
 {% endif %}
+{% set oauth = server and api.credential == "oauth2" %}
 {% if endpoint %}
 import { API_URL, apiFetch } from "@/shared/api/http";
 {% endif %}
+{% if oauth %}
+import {
+  clientCredentials,
+  HttpClient,
+  tokenUrl,
+  type ClientOptions,
+} from "@/shared/api/third-party";
+{% else %}
 import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
+{% endif %}
 {% set types = api.used_types() %}
 {% if mock or types %}
 
@@ -25,6 +35,11 @@ import type { {{ types | join(", ") }} } from "./types";
 
 /** The base URL of the first server of the OpenAPI document. */
 export const {{ api.base_url_const }} = {{ api.base_url | tojson }};
+{% if oauth %}
+
+/** The token URL of the client credentials flow of the document. A path is under the base URL. */
+export const {{ api.token_const }} = {{ api.token_url | tojson }};
+{% endif %}
 
 /**
  * The client of the API `{{ api.name }}` ({{ api.title }}), with one method for each
@@ -43,6 +58,23 @@ export class {{ api.client }} {
   private readonly http: HttpClient;
 
   constructor(options: ClientOptions = {}) {
+{% if oauth %}
+    const baseUrl = options.baseUrl ?? {{ api.base_url_const }};
+    this.http = new HttpClient({{ api.name | tojson }}, baseUrl, {
+      token: options.secret
+        ? clientCredentials({{ api.name | tojson }}, {
+            tokenUrl: tokenUrl({{ api.token_const }}, baseUrl),
+            clientId: options.clientId ?? "",
+            clientSecret: options.secret,
+            scopes: {{ api.scopes | list | tojson }},
+            timeoutMs: options.timeoutMs,
+            fetch: options.fetch,
+          })
+        : undefined,
+      timeoutMs: options.timeoutMs,
+      fetch: options.fetch,
+    });
+{% else %}
     this.http = new HttpClient({{ api.name | tojson }}, options.baseUrl ?? {{ api.base_url_const }}, {
 {% if server and api.credentials() %}
       {{ api.credentials() }}
@@ -50,6 +82,7 @@ export class {{ api.client }} {
       timeoutMs: options.timeoutMs,
       fetch: options.fetch,
     });
+{% endif %}
   }
 
   /** The time limit of a request, in milliseconds. */
@@ -94,7 +127,11 @@ export class {{ api.client }} {
 }
 
 /**
-{% if server %}
+{% if server and oauth %}
+ * Return a client with the settings of the environment: the base URL in
+ * `{{ api.url_env }}`, the client ID in `{{ api.client_id_env }}`, and the client
+ * secret in `{{ api.secret_env }}`.
+{% elif server %}
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`{% if api.secret_env %}, and the secret in `{{ api.secret_env }}`{% endif %}.
 {% elif mock %}
@@ -112,6 +149,9 @@ export function {{ api.factory }}(): {{ api.client }} {
   return new {{ api.client }}({
 {% if server %}
     baseUrl: process.env.{{ api.url_env }} || undefined,
+{% if oauth %}
+    clientId: process.env.{{ api.client_id_env }},
+{% endif %}
 {% if api.secret_env %}
     secret: process.env.{{ api.secret_env }},
 {% endif %}

@@ -158,6 +158,25 @@ apis:
       getLatestRates: {}
       convertAmount:
         description: Convert a budget to another currency.
+  documents:
+    description: The attachments, the exports, and the reports of the projects.
+    # A multipart form, a form, a text answer, and a binary answer.
+    document: apis/documents.openapi.yaml
+    base_url_env: DOCUMENTS_API_URL
+    operations: [uploadAttachment, sendFeedback, exportTasks, downloadReport]
+  finance:
+    description: The budgets of the projects.
+    document: apis/finance.openapi.yaml
+    base_url_env: FINANCE_API_URL
+    # OAuth 2.0 with the client credentials flow: the server clients get the tokens.
+    security:
+      scheme: oauth
+      client_id_env: FINANCE_CLIENT_ID
+      client_secret_env: FINANCE_CLIENT_SECRET
+      scopes: [budgets:read]
+    # A browser cannot keep the secret or set the cookie of the API.
+    expose: true
+    operations: [getBudget]
 
 pages:
   dashboard:
@@ -216,6 +235,10 @@ pages:
     path: /exchange-rates
     title: Exchange rates
     content: { view: latest_rates }
+  budget:
+    path: /budget
+    title: Budget
+    content: { view: project_budget }
 
 ui:
   theme:
@@ -750,6 +773,15 @@ ui:
       sections:
         summary: { title: Base currency, fields: [base, date], columns: 2 }
 
+    project_budget:
+      kind: detail
+      # The server clients send the access token of OAuth 2.0 and the cookie `tenant`.
+      source: apis.finance.operations.getBudget
+      params: { project: APP, tenant: acme }
+      header: { title: project, subtitle: currency }
+      sections:
+        money: { title: Money, fields: [amount, spent], columns: 2 }
+
   forms:
     new_project:
       entity: Project
@@ -1022,6 +1054,9 @@ translations:
         Global: Landesweit
         Types: Arten
         Search holidays: Feiertage suchen
+        Money: Geld
+        Amount: Betrag
+        Spent: Ausgegeben
         Base currency: Basiswährung
         Base: Basis
         New project: Neues Projekt

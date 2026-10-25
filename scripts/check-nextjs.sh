@@ -1,7 +1,8 @@
 #!/bin/sh
 # Generate the project tracker with the Next.js binding, and check the
-# output: install, lint, type check, build, Docker image, traces, and
-# the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
+# output: install, lint, type check, build, Docker image, traces, the
+# calls of the clients of the third-party APIs (scripts/api_calls.py),
+# and the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
 # app, request it, and run the Playwright tests in ui-tests/). Then the
 # smoke test runs the built app with PGlite (--local), without Docker.
 # Then check the rate limit that two processes share in Redis
@@ -84,6 +85,9 @@ docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-nextjs .
 cd "$root"
 step "appgen check"
 uv run --locked appgen check "$definition" "$out"
+
+step "calls of the third-party APIs"
+uv run --locked scripts/api_calls.py nextjs "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-nextjs --ui

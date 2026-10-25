@@ -1,6 +1,7 @@
 #!/bin/sh
 # Generate the project tracker with the React binding, and check the
-# output: install, lint, type check, build, Docker image, traces, and
+# output: install, lint, type check, build, Docker image, traces, the
+# calls of the client of a third-party API (scripts/api_calls.py), and
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
 # app, request it, and run the Playwright tests in ui-tests/). Then it
 # generates tests/fixtures/seed-data.yaml, and runs lint, type check, and
@@ -76,6 +77,9 @@ docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-react . 
 cd "$root"
 step "appgen check"
 uv run --locked appgen check "$definition" "$out"
+
+step "calls of the third-party APIs"
+uv run --locked scripts/api_calls.py react "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py react --app "$out" --image appgen-check-react --ui

@@ -1,5 +1,8 @@
 {% set server = binding.name == "nextjs" %}
 {% set mock = binding.name == "react" and not react.api %}
+{% set features = ts_features(ts_apis) %}
+{% set forms = "form" in features or "multipart" in features %}
+{% set oauth = server and "oauth2" in features %}
 {{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
 {% if server %}
 import "server-only";
@@ -29,8 +32,12 @@ export interface ClientOptions {
   /** The base URL. The default is the first server of the OpenAPI document. */
   baseUrl?: string;
 {% if server %}
-  /** The API key or the bearer token of an API with security. */
+  /** The API key, the bearer token, or the client secret of an API with security. */
   secret?: string;
+{% if oauth %}
+  /** The client ID of an API with OAuth 2.0. */
+  clientId?: string;
+{% endif %}
 {% endif %}
   /** The time limit of a request, in milliseconds. */
   timeoutMs?: number;
@@ -45,10 +52,37 @@ export interface RequestParts {
   path?: Record<string, Value>;
   query?: Record<string, Value | readonly Value[]>;
   headers?: Record<string, Value>;
+{% if "cookie" in features %}
+  /** The cookie parameters, in the header `Cookie`. */
+  cookies?: Record<string, Value>;
+{% endif %}
+  /** A JSON body. */
   body?: unknown;
+{% if forms %}
+  /** A form body: an object with a value for each field. */
+  form?: object;
+  /** True: send the form as `multipart/form-data`, else as `application/x-www-form-urlencoded`. */
+  multipart?: boolean;
+{% endif %}
+{% if "text" in features or "binary" in features %}
+  /** How the client reads the answer: as JSON (the default), as text, or as a `Blob`. */
+  answer?: "json" | "text" | "binary";
+  /** The media type of the answer, for the header `Accept`. */
+  accept?: string;
+{% endif %}
 }
+{% if oauth %}
 
-/** The HTTP part of the clients: it sends JSON requests and reads JSON answers. */
+/** The source of the access tokens of an API with OAuth 2.0. */
+export interface TokenSource {
+  /** Return the access token, and get a new one when it has ended. */
+  get(): Promise<string>;
+  /** Forget a token that the API did not accept, so that `get` gets a new one. */
+  reset(token: string): void;
+}
+{% endif %}
+
+/** The HTTP part of the clients: it sends the requests and reads the answers. */
 export class HttpClient {
   readonly timeoutMs: number;
 
@@ -58,6 +92,10 @@ export class HttpClient {
     private readonly options: {
       headers?: Record<string, string>;
       query?: Record<string, string>;
+{% if oauth %}
+      /** The access tokens of an API with OAuth 2.0. */
+      token?: TokenSource;
+{% endif %}
       timeoutMs?: number;
       fetch?: typeof fetch;
     } = {},
@@ -66,8 +104,13 @@ export class HttpClient {
   }
 
   /**
-   * Send a request, and return the JSON answer, or `null` for an answer
-   * without content. An error status throws an `ApiError`.
+   * Send a request, and return the answer: the JSON value, or `null` for an
+   * answer without content{% if "text" in features %}, or the text{% endif %}{% if "binary" in features %}, or a `Blob`{% endif %}. An error status throws an
+   * `ApiError`.
+{% if oauth %}
+   * With OAuth 2.0, the request sends the access token, and an answer with
+   * the status 401 gets a new token and sends the request one more time.
+{% endif %}
    */
   async request(method: string, path: string, parts: RequestParts = {}): Promise<unknown> {
     const filled = path.replace(/\{([^}]+)\}/g, (_match, name: string) =>
@@ -81,16 +124,54 @@ export class HttpClient {
       }
     }
     const headers = new Headers(this.options.headers);
+{% if "text" in features or "binary" in features %}
+    headers.set("Accept", parts.accept ?? "application/json");
+{% else %}
     headers.set("Accept", "application/json");
+{% endif %}
     for (const [name, value] of Object.entries(parts.headers ?? {})) {
       if (value !== null && value !== undefined) headers.set(name, String(value));
     }
+{% if "cookie" in features %}
+    const cookies = Object.entries(parts.cookies ?? {}).flatMap(([name, value]) =>
+      value === null || value === undefined ? [] : [`${name}=${encodeURIComponent(String(value))}`],
+    );
+    if (cookies.length) headers.set("Cookie", cookies.join("; "));
+{% endif %}
+{% if forms %}
+    let body: string | URLSearchParams | FormData | undefined;
+    if (parts.form !== undefined) {
+      // fetch sets the content type of the form, with the boundary of a multipart form.
+      body = parts.multipart ? multipartBody(parts.form) : formBody(parts.form);
+    } else if (parts.body !== undefined) {
+{% else %}
     let body: string | undefined;
     if (parts.body !== undefined) {
+{% endif %}
       headers.set("Content-Type", "application/json");
       body = JSON.stringify(parts.body);
     }
     const send = this.options.fetch ?? fetch;
+{% if oauth %}
+    const tokens = this.options.token;
+    let token = tokens ? await tokens.get() : undefined;
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (token !== undefined) headers.set("Authorization", `Bearer ${token}`);
+      response = await send(url, {
+        method,
+        headers,
+        body,
+        cache: "no-store",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (response.status !== 401 || tokens === undefined || token === undefined || attempt > 0) break;
+      // The API did not accept the token: get a new token, one time.
+      tokens.reset(token);
+      token = await tokens.get();
+    }
+    if (response === undefined) throw new ApiError(this.api, 0, "No answer.");
+{% else %}
     const response = await send(url, {
       method,
       headers,
@@ -98,11 +179,147 @@ export class HttpClient {
       cache: "no-store",
       signal: AbortSignal.timeout(this.timeoutMs),
     });
+{% endif %}
+{% if "text" in features or "binary" in features %}
+    if (!response.ok) throw new ApiError(this.api, response.status, await response.text());
+{% if "binary" in features %}
+    if (parts.answer === "binary") return await response.blob();
+{% endif %}
+    const text = await response.text();
+{% if "text" in features %}
+    if (parts.answer === "text") return text;
+{% endif %}
+{% else %}
     const text = await response.text();
     if (!response.ok) throw new ApiError(this.api, response.status, text);
+{% endif %}
     return text ? (JSON.parse(text) as unknown) : null;
   }
 }
+{% if forms %}
+
+/** Return the fields of a form, with one entry for each item of a list. */
+function formEntries(form: object): [string, unknown][] {
+  return Object.entries(form).flatMap(([name, value]: [string, unknown]) =>
+    (Array.isArray(value) ? (value as unknown[]) : [value])
+      .filter((item) => item !== null && item !== undefined)
+      .map((item): [string, unknown] => [name, item]),
+  );
+}
+
+/** Return a value of a form field as text: an object as JSON. */
+function formText(value: unknown): string {
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+{% if "form" in features %}
+
+/** Return a form as `application/x-www-form-urlencoded`. */
+function formBody(form: object): URLSearchParams {
+  const body = new URLSearchParams();
+  for (const [name, value] of formEntries(form)) body.append(name, formText(value));
+  return body;
+}
+{% endif %}
+{% if "multipart" in features %}
+
+/** Return a form as `multipart/form-data`: a `Blob` is a file, with its name if it is a `File`. */
+function multipartBody(form: object): FormData {
+  const body = new FormData();
+  for (const [name, value] of formEntries(form)) {
+    if (value instanceof Blob) body.append(name, value, value instanceof File ? value.name : name);
+    else body.append(name, formText(value));
+  }
+  return body;
+}
+{% endif %}
+{% endif %}
+{% if oauth %}
+
+/** The settings of the client credentials flow of OAuth 2.0. */
+export interface ClientCredentialsOptions {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: readonly string[];
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}
+
+/** The access tokens of the client credentials flow: one token at a time for each client. */
+class ClientCredentials implements TokenSource {
+  private token: { value: string; expires: number } | undefined;
+  private pending: Promise<string> | undefined;
+
+  constructor(
+    private readonly api: string,
+    private readonly options: ClientCredentialsOptions,
+  ) {}
+
+  get(): Promise<string> {
+    if (this.token !== undefined && Date.now() < this.token.expires) {
+      return Promise.resolve(this.token.value);
+    }
+    // Two requests at the same time wait for the same token.
+    this.pending ??= this.request().finally(() => {
+      this.pending = undefined;
+    });
+    return this.pending;
+  }
+
+  reset(token: string): void {
+    if (this.token?.value === token) this.token = undefined;
+  }
+
+  private async request(): Promise<string> {
+    const { tokenUrl, clientId, clientSecret, scopes } = this.options;
+    const body = new URLSearchParams({ grant_type: "client_credentials" });
+    if (scopes.length) body.set("scope", scopes.join(" "));
+    // HTTP Basic authentication of the client (RFC 6749, section 2.3.1).
+    const credentials = `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`;
+    const send = this.options.fetch ?? fetch;
+    const response = await send(tokenUrl, {
+      method: "POST",
+      headers: { Accept: "application/json", Authorization: `Basic ${btoa(credentials)}` },
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new ApiError(this.api, response.status, text);
+    const data = JSON.parse(text) as { access_token?: unknown; expires_in?: unknown };
+    if (typeof data.access_token !== "string") {
+      throw new ApiError(this.api, response.status, "The token answer has no access_token.");
+    }
+    const seconds = typeof data.expires_in === "number" ? data.expires_in : 3600;
+    // Get a new token a little before the end of this token.
+    this.token = { value: data.access_token, expires: Date.now() + Math.max(seconds - 30, 0) * 1000 };
+    return data.access_token;
+  }
+}
+
+/** The token source of each client of an API with OAuth 2.0, for the whole process. */
+const TOKEN_SOURCES = new Map<string, TokenSource>();
+
+/**
+ * Return the token source of a client. The clients with the same token
+ * URL, client ID, and scopes share one source, so that the process keeps
+ * one token for them.
+ */
+export function clientCredentials(api: string, options: ClientCredentialsOptions): TokenSource {
+  const key = JSON.stringify([options.tokenUrl, options.clientId, options.scopes]);
+  let source = TOKEN_SOURCES.get(key);
+  if (source === undefined) {
+    source = new ClientCredentials(api, options);
+    TOKEN_SOURCES.set(key, source);
+  }
+  return source;
+}
+
+/** Return the token URL of an API: a path is under the base URL. */
+export function tokenUrl(url: string, baseUrl: string): string {
+  return url.startsWith("/") ? baseUrl.replace(/\/+$/, "") + url : url;
+}
+{% endif %}
 {% if server and ui_views.api_views %}
 
 /** The answer of an operation for a view of API data: the data, or the message of the error. */
@@ -132,6 +349,10 @@ export interface MockRoute {
   status: number;
   /** The example answer of the OpenAPI document. */
   example: unknown;
+{% if "text" in features or "binary" in features %}
+  /** The media type of a text or a binary answer: the example is its text. */
+  media?: string;
+{% endif %}
 }
 
 /**
@@ -147,6 +368,14 @@ export function mockFetch(routes: readonly MockRoute[]): typeof fetch {
     const route = routes.find((item) => item.method === method && item.path.test(url.pathname));
     if (route === undefined) return new Response(null, { status: 404 });
     if ([204, 205, 304].includes(route.status)) return new Response(null, { status: route.status });
+{% if "text" in features or "binary" in features %}
+    if (route.media !== undefined) {
+      return new Response(String(route.example), {
+        status: route.status,
+        headers: { "Content-Type": route.media },
+      });
+    }
+{% endif %}
     return new Response(JSON.stringify(route.example), {
       status: route.status,
       headers: { "Content-Type": "application/json" },

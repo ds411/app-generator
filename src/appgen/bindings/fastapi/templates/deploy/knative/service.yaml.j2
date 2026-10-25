@@ -64,6 +64,10 @@ spec:
             {{ trace(api.id) }}
             - name: {{ api.url_env }}
               value: {{ api.base_url | tojson }}
+{% if api.client_id_env %}
+            - name: {{ api.client_id_env }}
+              value: ""
+{% endif %}
 {% endfor %}
 {% if py.providers %}
             # The URL of the API for the browsers: the providers send the users back to it.

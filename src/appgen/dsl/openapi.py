@@ -2,8 +2,9 @@
 
 The reader knows the parts of OpenAPI 3.0 and 3.1 that the clients of
 the bindings need: the paths and their operations, the parameters, the
-JSON bodies of the requests and the answers, the schemas, the examples,
-and the security schemes. It resolves the local `$ref`s, and it rejects
+bodies of the requests (JSON, forms, and multipart forms) and of the
+answers (JSON, text, and binary data), the schemas, the examples, and
+the security schemes. It resolves the local `$ref`s, and it rejects
 a remote `$ref`, so that the generator reads only local files.
 
 `OpenApiDocument.select` gives the selected operations with the schemas
@@ -31,8 +32,18 @@ from appgen.dsl.source import DataPath, SourceMap, read_yaml
 SUPPORTED_VERSIONS = ("3.0", "3.1")
 HTTP_METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
 SCHEMAS_PREFIX = "#/components/schemas/"
+FORM_MEDIA = "application/x-www-form-urlencoded"
+MULTIPART_MEDIA = "multipart/form-data"
+EXAMPLE_TEXT = "appgen example"
+"""The example of a text answer without an example, and the content of the example of a binary
+answer: the mocks send its UTF-8 bytes."""
 
-type ParameterLocation = Literal["path", "query", "header"]
+type ParameterLocation = Literal["path", "query", "header", "cookie"]
+type BodyKind = Literal["json", "form", "multipart"]
+"""How the client sends a body: as JSON, as a form (`application/x-www-form-urlencoded`), or
+as a multipart form (`multipart/form-data`)."""
+type AnswerKind = Literal["json", "text", "binary"]
+"""How the client reads an answer: as JSON, as text (`text/*`), or as binary data."""
 type ScalarType = Literal["string", "integer", "number", "boolean", "null"]
 type Scalar = str | int | float | bool | None
 
@@ -133,14 +144,20 @@ class Operation:
     description: str | None
     parameters: tuple[Parameter, ...]
     body: Schema | None
-    """The JSON body of the request, or None."""
+    """The body of the request, or None. A form body is an object."""
     body_required: bool
     status: str
     """The status of the answer that the client reads, for example `200`."""
     result: Schema | None
-    """The JSON body of the answer, or None for an answer without a body."""
+    """The body of the answer, or None for an answer without a body. A text answer is a string,
+    and a binary answer is a string with the format `binary`."""
     example: JsonValue
-    """The example answer of the document, or a sample of the result schema."""
+    """The example answer of the document, or a sample of the result schema. The example of a
+    binary answer is `EXAMPLE_TEXT`."""
+    body_kind: BodyKind = "json"
+    answer: AnswerKind = "json"
+    answer_media: str = "application/json"
+    """The media type of the answer, for the header `Accept`, for example `text/csv`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,12 +171,22 @@ class SecurityScheme:
     """Where an `apiKey` goes: `header`, `query`, or `cookie`."""
     parameter: str | None = None
     """The name of the header or the query parameter of an `apiKey`."""
+    flows: tuple[str, ...] = ()
+    """The flows of an `oauth2` scheme, for example `clientCredentials`."""
+    token_url: str | None = None
+    """The token URL of the client credentials flow. A path (`/oauth/token`) is under the base
+    URL of the API."""
+    scopes: tuple[str, ...] = ()
+    """The scopes of the client credentials flow."""
 
     @property
     def supported(self) -> bool:
-        """True for an API key in a header or a query parameter, and for a bearer token."""
+        """True for an API key in a header or a query parameter, for a bearer token, and for
+        OAuth 2.0 with the client credentials flow."""
         if self.type == "apiKey":
             return self.location in ("header", "query") and bool(self.parameter)
+        if self.type == "oauth2":
+            return self.token_url is not None
         return self.type == "http" and self.scheme == "bearer"
 
 
@@ -375,12 +402,20 @@ class _Reader:
             if not isinstance(kind, str):
                 raise self.error((*at, "type"), "A security scheme needs a 'type'.")
             http = scheme.get("scheme")
+            flows = scheme.get("flows")
+            flows = cast(dict[str, object], flows) if isinstance(flows, dict) else {}
+            client = flows.get("clientCredentials")
+            client = cast(dict[str, object], client) if isinstance(client, dict) else {}
+            scopes = client.get("scopes")
             schemes[name] = SecurityScheme(
                 name=name,
                 type=kind,
                 scheme=http.lower() if isinstance(http, str) else None,
                 location=_text(scheme.get("in")),
                 parameter=_text(scheme.get("name")),
+                flows=tuple(flows),
+                token_url=_text(client.get("tokenUrl")) if kind == "oauth2" else None,
+                scopes=tuple(cast(dict[str, object], scopes)) if isinstance(scopes, dict) else (),
             )
         return OpenApiDocument(
             path=self.path,
@@ -541,6 +576,11 @@ def type_name(text: str) -> str:
 _JSON = re.compile(r"^application/(?:[\w.+-]+\+)?json(?:;.*)?$")
 
 
+def _media_type(key: str) -> str:
+    """Return a media type in lower case, without its parameters."""
+    return key.split(";")[0].strip().lower()
+
+
 class _Builder:
     """Convert the selected operations and their schemas to the normal form."""
 
@@ -558,16 +598,25 @@ class _Builder:
         parameters: list[Parameter] = []
         for value in cast(list[dict[str, object]], data.get("parameters", [])):
             name, location = str(value["name"]), str(value["in"])
-            if location not in ("path", "query", "header"):
+            if location not in ("path", "query", "header", "cookie"):
                 self.problems.append(
                     (
                         operation_id,
                         f"The parameter '{name}' is in a {location}. "
-                        "The clients send only path, query, and header parameters.",
+                        "The clients send only path, query, header, and cookie parameters.",
                     )
                 )
                 continue
             schema = self.schema(value.get("schema", {}), base + type_name(name))
+            if location == "cookie" and not query_value(schema, self.spec(), item=True):
+                self.problems.append(
+                    (
+                        operation_id,
+                        f"The cookie parameter '{name}' is not a text, a number, or a boolean. "
+                        "The clients send only such cookie parameters.",
+                    )
+                )
+                continue
             parameters.append(
                 Parameter(
                     name=name,
@@ -579,37 +628,48 @@ class _Builder:
             )
         body: Schema | None = None
         body_required = False
+        body_kind: BodyKind = "json"
         request = data.get("requestBody")
         if request is not None:
             request_data = self.resolve(request)
-            media = self.json_media(request_data.get("content"))
-            if media is None:
+            found = self.request_media(request_data.get("content"))
+            if found is None:
                 self.problems.append(
-                    (operation_id, "The request body is not JSON. The clients send only JSON.")
+                    (
+                        operation_id,
+                        "The request body is not JSON, a form, or a multipart form. The clients "
+                        "send only these bodies.",
+                    )
                 )
             else:
+                body_kind, media = found
                 body = self.schema(media.get("schema", {}), base + "Body")
                 body_required = request_data.get("required") is True
-        status, answer = self.success(data.get("responses"))
+                problem = self.form_problem(body, body_kind)
+                if problem is not None:
+                    self.problems.append((operation_id, problem))
+                    body = None
+        status, response = self.success(data.get("responses"))
         result: Schema | None = None
         example: JsonValue = None
-        if answer is not None:
-            content = answer.get("content")
+        answer: AnswerKind = "json"
+        answer_media = "application/json"
+        if response is not None:
+            content = response.get("content")
             if isinstance(content, dict) and content:
-                media = self.json_media(cast(dict[str, object], content))
-                if media is None:
-                    self.problems.append(
-                        (
-                            operation_id,
-                            f"The answer {status} is not JSON. The clients read only JSON answers.",
-                        )
-                    )
-                else:
+                answer, answer_media, media = self.answer_media(cast(dict[str, object], content))
+                if answer == "json":
                     result = self.schema(media.get("schema", {}), base + "Result")
                     example = self.example(media)
-        spec = ClientSpec((), tuple(self.schemas.values()))
+                elif answer == "text":
+                    result = ScalarSchema("string")
+                    found_example = self.example(media)
+                    example = found_example if isinstance(found_example, str) else EXAMPLE_TEXT
+                else:
+                    result = ScalarSchema("string", "binary")
+                    example = EXAMPLE_TEXT
         if result is not None and example is None:
-            example = sample(result, spec)
+            example = sample(result, self.spec())
         return Operation(
             id=operation_id,
             method=method,
@@ -622,7 +682,33 @@ class _Builder:
             status=status,
             result=result,
             example=example,
+            body_kind=body_kind,
+            answer=answer,
+            answer_media=answer_media,
         )
+
+    def spec(self) -> ClientSpec:
+        """Return the named schemas so far, to resolve a `Ref`."""
+        return ClientSpec((), tuple(self.schemas.values()))
+
+    def form_problem(self, body: Schema, kind: BodyKind) -> str | None:
+        """Return why a client cannot send a body as a form, or None."""
+        if kind == "json":
+            return None
+        spec = self.spec()
+        properties = object_properties(body, spec)
+        label = "form" if kind == "form" else "multipart form"
+        if properties is None:
+            return f"The {label} body is not an object with properties."
+        if kind == "multipart":
+            return None
+        for prop in properties:
+            if not query_value(prop.schema, spec) or is_file(prop.schema, spec):
+                return (
+                    f"The property '{prop.name}' of the form body is not a text, a number, a "
+                    "boolean, or a list of these. Send a file or an object in a multipart form."
+                )
+        return None
 
     def resolve(self, value: object) -> dict[str, object]:
         seen: set[str] = set()
@@ -637,13 +723,31 @@ class _Builder:
             value = _follow(self.root, ref)
         return {}
 
-    def json_media(self, content: object) -> dict[str, object] | None:
+    def request_media(self, content: object) -> tuple[BodyKind, dict[str, object]] | None:
+        """Return the kind and the media of the body that the client sends: JSON first, then a
+        form, then a multipart form."""
         if not isinstance(content, dict):
             return None
-        for media_type, media in cast(dict[str, object], content).items():
-            if _JSON.match(media_type.lower()):
-                return self.resolve(media)
+        media = {_media_type(key): value for key, value in cast(dict[str, object], content).items()}
+        for key, value in media.items():
+            if _JSON.match(key):
+                return "json", self.resolve(value)
+        for kind, key in (("form", FORM_MEDIA), ("multipart", MULTIPART_MEDIA)):
+            if key in media:
+                return cast(BodyKind, kind), self.resolve(media[key])
         return None
+
+    def answer_media(self, content: dict[str, object]) -> tuple[AnswerKind, str, dict[str, object]]:
+        """Return the kind, the media type, and the media of the answer that the client reads:
+        JSON first, then text, then binary data."""
+        for key, value in content.items():
+            if _JSON.match(_media_type(key)):
+                return "json", key, self.resolve(value)
+        for key, value in content.items():
+            if _media_type(key).startswith("text/"):
+                return "text", key, self.resolve(value)
+        key, value = next(iter(content.items()))
+        return "binary", key, self.resolve(value)
 
     def success(self, responses: object) -> tuple[str, dict[str, object] | None]:
         """Return the status and the data of the first success answer."""
@@ -774,6 +878,9 @@ class _Builder:
                 return MapSchema(AnySchema())
             case "array":
                 return ArraySchema(self.schema(data.get("items", {}), context + "Item"))
+            case "string" if "contentMediaType" in data and "contentEncoding" not in data:
+                # OpenAPI 3.1 gives the media type of binary data in place of a format.
+                return ScalarSchema("string", "binary")
             case "string" | "integer" | "number" | "boolean" | "null":
                 return ScalarSchema(kind, _text(data.get("format")))
             case _:
@@ -878,6 +985,18 @@ def query_value(schema: Schema, spec: ClientSpec, *, item: bool = False) -> bool
         case UnionSchema(options):
             return all(query_value(option, spec, item=item) for option in options)
         case MapSchema() | ObjectSchema():
+            return False
+
+
+def is_file(schema: Schema, spec: ClientSpec) -> bool:
+    """Return True for binary data (a string with the format `binary`), or a list of it: a file
+    of a multipart form."""
+    match resolved(schema, spec):
+        case ScalarSchema("string", "binary"):
+            return True
+        case ArraySchema(items):
+            return is_file(items, spec)
+        case _:
             return False
 
 

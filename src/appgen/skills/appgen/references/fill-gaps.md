@@ -92,6 +92,9 @@ of the entity in snake case, for example `bookings`.
   base URL and the secret from the environment. Call it in an operation
   or in a new server action (`"use server"`), never in a client
   component. An error status throws `ApiError` of `@/shared/api/third-party`.
+  A file of a multipart form is a `Blob` (a `File` gives its name), a
+  text answer is a `string`, and a binary answer is a `Blob`. With
+  OAuth 2.0, the client gets and renews its tokens itself.
 - The components are React client components. Load data with
   `<entity>Api` of `@/entities/<entity>` (for example
   `bookingApi.list()`), which calls the server actions, and with
@@ -128,8 +131,8 @@ of the entity in snake case, for example `bookings`.
 | A custom form widget (`widget: custom`)                            | `src/features/<form>-form/ui/<field>-widget.ext.tsx`      | `id`, `value`, `onChange`, and `disabled`.                  |
 | A custom form rule (`kind: custom`)                                | `src/features/<form>-form/model/<rule>-rule.ext.ts`       | The values of the form. Return `true` if they are valid.    |
 | A custom action (`kind: custom`)                                   | `src/features/<owner>-actions/model/<action>-action.ext.ts` | As in the Next.js app.                                    |
-| A third-party API with a secret (`security`)                       | `src/shared/api/<api>/client.ext.ts`                      | Nothing: a browser app cannot keep the secret. Set `expose: true` on the API, and run `appgen generate` again: the React app then gets a client, and the gap goes away. Or call the API in a custom operation of the FastAPI app (`apis: [<api>]`), and set `x-react-data: api`. Then change the kind of the traces from `gap` to `manual`. |
-| A view of API data of an API with a secret (`source`)             | `src/widgets/<view>/ui/<view>-view.ext.tsx`               | `route` (the path parameters of the page) if the view has a `$route` parameter. Set `expose: true` on the API, and run `appgen generate` again: the gap goes away. With `x-react-data: api` in `app`, the view then calls the FastAPI app. |
+| A third-party API with a secret (`security`) or a cookie parameter | `src/shared/api/<api>/client.ext.ts`                      | Nothing: a browser app cannot keep the secret, or set a cookie for another site. Set `expose: true` on the API, and run `appgen generate` again: the React app then gets a client, and the gap goes away. Or call the API in a custom operation of the FastAPI app (`apis: [<api>]`), and set `x-react-data: api`. Then change the kind of the traces from `gap` to `manual`. |
+| A view of API data of an API with a secret or a cookie parameter (`source`) | `src/widgets/<view>/ui/<view>-view.ext.tsx`      | `route` (the path parameters of the page) if the view has a `$route` parameter. Set `expose: true` on the API, and run `appgen generate` again: the gap goes away. With `x-react-data: api` in `app`, the view then calls the FastAPI app. |
 
 - The app uses mock data in the browser. Read and change the data with
   `<entity>Api` of `@/entities/<entity>`, for example
@@ -137,7 +140,7 @@ of the entity in snake case, for example `bookings`.
   a component with `useResource` of `@/shared/lib/use-resource`.
 - `list`, `subscribe`, `useResource`, and the view states work as in
   the Next.js app.
-- A third-party API without a secret has a client in `@/shared/api/<api>`,
+- A third-party API without a secret and without a cookie parameter has a client in `@/shared/api/<api>`,
   for example `holidaysClient()`. With mock data, it gives the example
   answers of the OpenAPI document and sends no request. With
   `x-react-data: api`, the browser calls the API at the base URL of the
@@ -175,10 +178,13 @@ of the entity in snake case, for example `bookings`.
 - A client of a third-party API is in `app/integrations/<api>/client.py`,
   with one async method for each operation of the API in the
   definition, and the Pydantic models in `models.py`. An error status
-  raises `ApiError` of `app.integrations.http`. The generated tests
-  give the operation a client with a mock transport
-  (`tests/integrations/mocks.py`), which answers with the examples of
-  the OpenAPI document.
+  raises `ApiError` of `app.integrations.http`. A file of a multipart
+  form is an `ApiFile` (`name`, `content` in bytes, and `content_type`)
+  of `app.integrations.http`, a text answer is a `str`, and a binary
+  answer is `bytes`. With OAuth 2.0, the client gets and renews its
+  tokens itself. The generated tests give the operation a client with a
+  mock transport (`tests/integrations/mocks.py`), which answers with the
+  examples of the OpenAPI document.
 - With `translations`, translate the message with `t` of `app.core.i18n`,
   for example `ProblemError(409, t("The booking is cancelled already."))`,
   and add the message as a key of each language. The response is in the

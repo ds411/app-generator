@@ -3,9 +3,8 @@
 {{ trace_header(*plan.element_ids()) }}
 /*
  * The view `{{ name }}` shows the answer of the operation
- * `{{ plan.method.operation_id }}` of the API `{{ plan.api.name }}`. The API has a secret
- * (`{{ plan.api.secret_env }}`), and a browser app cannot keep a secret, so
- * this app has no client for the API.
+ * `{{ plan.method.operation_id }}` of the API `{{ plan.api.name }}`.
+ * {{ ("The API %s, so this app has no client for the API." | format(plan.api.server_reason)) | wordwrap(73, break_long_words=False, wrapstring="\n * ", break_on_hyphens=False) }}
  *
  * TODO(appgen): set `expose: true` on the API: then appgen generates the
  * view, and with `x-react-data: api` in the section `app`, the FastAPI
