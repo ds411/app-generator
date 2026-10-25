@@ -1,0 +1,61 @@
+{{ trace_header(definition.auth.sign_up.verify_email.id) }}
+"use client";
+
+import { type FormEvent, useState } from "react";
+
+import { confirmEmailVerification } from "@/shared/auth";
+import { Link } from "@/shared/lib/router";
+
+/**
+ * The page of the link that confirms the email address of a new user
+ * (ADR 0023). The user confirms with a button: a program that opens the
+ * links of a message does not confirm the address.
+ */
+export function VerifyEmailForm({ token }: { token: string }) {
+  const [error, setError] = useState<string | null>(token ? null : {{ tr(js("The link is not valid, or has ended.")) }});
+  const [done, setDone] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    const message = await confirmEmailVerification(token);
+    setPending(false);
+    setError(message);
+    setDone(message === null);
+  }
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+      <form onSubmit={submit} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+        <h1 className="text-xl font-semibold">{{ jsx_text("Confirm the email address") }}</h1>
+        {done ? (
+          <p role="status" className="text-sm">
+            {{ jsx_text("The email address is confirmed. Sign in with your password.") }}
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {{ jsx_text("Confirm that the email address of the new account is yours.") }}
+            </p>
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={pending || !token}
+              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {{ jsx_text("Confirm the email address") }}
+            </button>
+          </>
+        )}
+        <Link href="/sign-in" className="text-sm font-medium underline underline-offset-4">
+          {{ jsx_text("Go to the sign-in") }}
+        </Link>
+      </form>
+    </main>
+  );
+}

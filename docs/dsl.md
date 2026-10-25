@@ -1222,6 +1222,21 @@ transaction, and starts the session. The React app with
 `x-react-data: api` calls `POST /auth/sign-up`. The React app with mock
 data keeps a new user only in the browser tab.
 
+With `verify_email`, the sign-up of the Next.js app and of the React app
+with `x-react-data: api` shows a message instead of the start page: the
+new user opens the link in the message first. The public page
+`/verify-email` is the page of the link: a button confirms the address,
+so that a program that opens the links of a message does not confirm
+it. After a sign-in with the correct password of an unverified user, the
+sign-in page shows a button that sends a new link. The Next.js app uses
+the same token rules as the FastAPI app, and the link starts with
+`PUBLIC_URL`. Its extension file `src/shared/auth/messages.ext.ts`
+(`deliverMessage`) delivers the messages of the verification and of the
+password reset, with the stub of the FastAPI app. The React app calls
+the endpoints of the FastAPI app: set `EMAIL_VERIFY_URL` to its page
+`/verify-email`. The React app with mock data has no verification: the
+sign-up signs in at once.
+
 With `password_reset`, the Next.js app and the React app with
 `x-react-data: api` have the public pages `/forgot-password` (it asks
 for a reset link) and `/reset-password` (the page of the link: it sets a
@@ -1229,9 +1244,8 @@ new password), and the sign-in page links to the first one. The React
 app calls the endpoints of the FastAPI app: set `PASSWORD_RESET_URL` to
 its page `/reset-password`. The Next.js app uses the same token rules
 as the FastAPI app, and the link starts with `PUBLIC_URL`. Its
-extension file `src/shared/auth/password-reset.ext.ts` delivers the
-link, with the same stub. The React app with mock data has no reset
-pages.
+extension file `src/shared/auth/messages.ext.ts` delivers the link,
+with the same stub. The React app with mock data has no reset pages.
 
 With `providers`, the sign-in page of each front end has a button for
 each provider, with its `title`. With `password: false`, the page has
@@ -1417,6 +1431,22 @@ use in the app does not show.
   `The password is changed. Sign in with the new password.`,
   `The reset link is not valid, was used, or has ended.`,
   `The request failed.`.
+- The verification of the email address:
+  `Open the link in the message to confirm the email address.`,
+  `Confirm the email address first: open the link in the message.`,
+  `Send the link again`,
+  `If the user name needs a confirmation, the user gets a message with a link.`,
+  `Confirm the email address`,
+  `Confirm that the email address of the new account is yours.`,
+  `The email address is confirmed. Sign in with your password.`,
+  `The link is not valid, or has ended.`.
+- The messages to the users of the Next.js app (the subject is the
+  title of the app and a text): `Reset the password`,
+  `Open the link to set a new password. The link is valid one time.`,
+  `If you did not ask for a new password, ignore this message.`,
+  `Confirm the email address`,
+  `Open the link to confirm the email address of your new account.`,
+  `If you did not make an account, ignore this message.`.
 - The page of an unknown path and the stubs of the generation gaps:
   `This page does not exist`, `Make sure that the address is correct.`,
   `Go to the start page`, `Not available yet.`,

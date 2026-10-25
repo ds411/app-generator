@@ -75,6 +75,12 @@ export type ExpectedAuth = {
     password: string;
     /** The labels of the menu items that the role of a new user sees. */
     menu: string[];
+    /**
+     * The verification of the email address (ADR 0023), only if the app has
+     * the page of the link: the widget of the address, and the log of the app
+     * with the links.
+     */
+    verifyEmail?: { addressId: string; serverLog: string } | null;
   };
   /** The password reset (ADR 0017), only if the app has the reset pages. */
   passwordReset?: {

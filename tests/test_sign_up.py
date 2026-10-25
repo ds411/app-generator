@@ -6,11 +6,14 @@ from textwrap import dedent
 import pytest
 
 from appgen.bindings import fastapi, nextjs, react
-from appgen.dsl import DefinitionError, load_definition, load_definition_text, validate_definition
+from appgen.dsl import DefinitionError, load_definition_text, validate_definition
 from appgen.gen.binding import Binding
 from appgen.gen.generator import generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "room-booking" / "app.yaml"
+# The example without the verification of the email address: tests/test_email_verification.py
+# has the tests of the verification.
+EXAMPLE_TEXT = EXAMPLE.read_text().replace("    verify_email: true\n", "")
 
 BASE = dedent(
     """\
@@ -101,7 +104,7 @@ def test_no_page_takes_the_sign_up_path() -> None:
 
 
 def test_the_fastapi_app_has_a_sign_up_endpoint() -> None:
-    definition = load_definition(EXAMPLE)
+    definition = load_definition_text(EXAMPLE_TEXT, "app.yaml")
     files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
     auth = files["app/core/auth.py"]
     assert '    "/sign-up", status_code=201, responses=problem_responses(409, 422)' in auth
@@ -130,8 +133,8 @@ def test_the_fastapi_app_of_roles_without_a_sign_up_has_no_sign_up_tests() -> No
     assert "sign_up" not in tests
 
 
-def files(binding: Binding, text: str | None = None) -> dict[str, str]:
-    definition = load_definition_text(text, "app.yaml") if text else load_definition(EXAMPLE)
+def files(binding: Binding, text: str = EXAMPLE_TEXT) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml")
     return {f.path: f.content for f in generate(definition, binding).files}
 
 
@@ -179,7 +182,7 @@ def test_the_react_sign_up_calls_the_api_or_adds_a_mock_user() -> None:
     assert 'role: "member", passwordHash: await passwordHash(password) };' in auth
     assert "if (!user || !(await passwordMatches(user, password))) {" in auth
     assert '{ path: "/sign-up", element: <SignUpRoute /> },' in mock["src/app/router.tsx"]
-    text = EXAMPLE.read_text().replace("app:\n", "app:\n  x-react-data: api\n", 1)
+    text = EXAMPLE_TEXT.replace("app:\n", "app:\n  x-react-data: api\n", 1)
     api = files(react.BINDING, text)
     sign_up = api["src/features/sign-up/api/sign-up.ts"]
     assert 'await apiRequest("POST", "/auth/sign-up", {' in sign_up
@@ -194,7 +197,7 @@ def test_the_react_sign_up_calls_the_api_or_adds_a_mock_user() -> None:
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
 def test_without_a_sign_up_the_front_ends_have_no_sign_up_page(binding: Binding) -> None:
     sign_up = "  sign_up:\n    fields: [name, email, team]\n    default_role: member\n"
-    text = EXAMPLE.read_text().replace(sign_up, "")
+    text = EXAMPLE_TEXT.replace(sign_up, "")
     app = files(binding, text)
     assert not [path for path in app if "sign-up" in path]
     assert "/sign-up" not in app["src/features/sign-in/ui/sign-in-form.tsx"]

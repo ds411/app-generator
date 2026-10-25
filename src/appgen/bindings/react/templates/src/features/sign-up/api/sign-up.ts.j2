@@ -1,6 +1,24 @@
 {% set plan = ui_forms.sign_up %}
 {{ trace_header(plan.element_id) }}
-{% if react.api %}
+{% if react.api and definition.auth.sign_up.verify_email %}
+import { apiRequest } from "@/shared/api";
+
+import type { SignUpInput } from "../model/schema";
+
+/**
+ * Make a new user with the API (`POST /auth/sign-up`). The API sends a
+ * message with a link that confirms the email address, and the user signs
+ * in after the confirmation (ADR 0023).
+ */
+export async function signUp(input: SignUpInput): Promise<void> { {{ trace(definition.auth.sign_up.verify_email.id) }}
+  await apiRequest("POST", "/auth/sign-up", {
+{% for f in plan.fields %}
+    {{ f.name }}: input.{{ f.key }},
+{% endfor %}
+    password: input.password,
+  });
+}
+{% elif react.api %}
 import { apiRequest } from "@/shared/api";
 import { startSession } from "@/shared/auth";
 

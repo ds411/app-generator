@@ -1,3 +1,4 @@
+{% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {{ trace_header(definition.auth.id) }}
 "use server";
 
@@ -11,7 +12,12 @@ import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
 {% endif %}
 
+{% if verify %}
+import { confirmVerification, findUnverifiedUser, readVerificationToken, sendVerification } from "./email-verification";
+{% endif %}
 {% if definition.auth.password_reset %}
+import { passwordResetMessage } from "./messages";
+import { deliverMessage } from "./messages.ext";
 import {
   MIN_PASSWORD_LENGTH,
   RESET_SECONDS,
@@ -20,7 +26,6 @@ import {
   readResetToken,
   resetTokenMatches,
 } from "./password-reset";
-import { deliverPasswordReset } from "./password-reset.ext";
 import { SESSION_COOKIE, checkPassword, publicUrl, setPassword, startSession } from "./session";
 {% elif definition.auth.password %}
 import { SESSION_COOKIE, checkPassword, startSession } from "./session";
@@ -31,20 +36,44 @@ import { SESSION_COOKIE } from "./session";
 
 const signInSchema = z.object({ username: z.string().min(1).max(320), password: z.string().min(1).max(200) });
 
-/** Sign in with a user name and a password, and set the session cookie. */
-export async function signInAction(username: string, password: string): Promise<ActionResult<null>> {
+/**
+ * Sign in with a user name and a password, and set the session cookie.
+ * A wrong password gives the status `error`.{% if verify %} The correct password of a
+ * user who did not confirm the email address gives the status `unverified`
+ * (ADR 0023), so the answer tells the state of the account only to a caller
+ * who knows the password.{% endif %}
+
+ */
+export async function signInAction(
+  username: string,
+  password: string,
+): Promise<{ status: "signed-in" } | { status: "error" | "unverified"; message: string }> {
   const input = signInSchema.safeParse({ username, password });
+{% if verify %}
+  const user = input.success ? await checkPassword(input.data.username, input.data.password) : null;
+  if (user === null) {
+{% else %}
   const userId = input.success ? await checkPassword(input.data.username, input.data.password) : null;
   if (userId === null) {
+{% endif %}
 {% if i18n %}
     const message = await inRequestLanguage(() => {{ tr(js("The user name or the password is not correct.")) }});
-    return { ok: false, error: { name: "Error", message } };
+    return { status: "error", message };
 {% else %}
-    return { ok: false, error: { name: "Error", message: "The user name or the password is not correct." } };
+    return { status: "error", message: "The user name or the password is not correct." };
 {% endif %}
   }
+{% if verify %}
+  if (!user.verified) {
+    {{ trace(verify.id) }}
+    const message = {{ "await inRequestLanguage(() => " if i18n }}{{ tr(js("Confirm the email address first: open the link in the message.")) }}{{ ")" if i18n }};
+    return { status: "unverified", message };
+  }
+  await startSession(user.id);
+{% else %}
   await startSession(userId);
-  return { ok: true, data: null };
+{% endif %}
+  return { status: "signed-in" };
 }
 {% endif %}
 
@@ -68,7 +97,7 @@ export async function requestPasswordResetAction(username: string): Promise<Acti
     try {
       const token = makeResetToken(user.id, user.passwordHash, Math.floor(Date.now() / 1000) + RESET_SECONDS);
       const link = `${publicUrl()}/reset-password?token=${encodeURIComponent(token)}`;
-      await deliverPasswordReset({ id: user.id, username: input.data.username }, link);
+      await deliverMessage(await passwordResetMessage({ id: user.id, to: user.to }, link));
     } catch (error) {
       console.error(error);
       return { ok: false, error: { name: "Error", message: "The app could not send the reset link." } };
@@ -88,6 +117,39 @@ export async function confirmPasswordResetAction(token: string, newPassword: str
     return { ok: false, error: { name: "Error", message: "The reset link is not valid, was used, or has ended." } };
   }
   await setPassword(found.userId, input.data.newPassword);
+  return { ok: true, data: null };
+}
+{% endif %}
+{% if verify %}
+
+const verificationRequestSchema = z.object({ username: z.string().min(1).max(320) });
+const verificationSchema = z.object({ token: z.string().min(1).max(1000) });
+
+/** Send a new link that confirms the email address (ADR 0023). The answer is the same for each user name. */
+export async function requestEmailVerificationAction(username: string): Promise<ActionResult<null>> { {{ trace(verify.id) }}
+  const input = verificationRequestSchema.safeParse({ username });
+  if (!input.success) {
+    return { ok: false, error: { name: "Error", message: {{ "await inRequestLanguage(() => " if i18n }}{{ tr(js("Enter a value.")) }}{{ ")" if i18n }} } };
+  }
+  const user = await findUnverifiedUser(input.data.username);
+  if (user !== null) {
+    try {
+      await sendVerification(user);
+    } catch (error) {
+      console.error(error);
+      return { ok: false, error: { name: "Error", message: {{ "await inRequestLanguage(() => " if i18n }}{{ tr(js("The request failed.")) }}{{ ")" if i18n }} } };
+    }
+  }
+  return { ok: true, data: null };
+}
+
+/** Confirm the email address of a user with the token of a link. A second confirmation changes nothing. */
+export async function confirmEmailVerificationAction(token: string): Promise<ActionResult<null>> { {{ trace(verify.id) }}
+  const input = verificationSchema.safeParse({ token });
+  const found = input.success ? readVerificationToken(input.data.token) : null;
+  if (found === null || !(await confirmVerification(found))) {
+    return { ok: false, error: { name: "Error", message: {{ "await inRequestLanguage(() => " if i18n }}{{ tr(js("The link is not valid, or has ended.")) }}{{ ")" if i18n }} } };
+  }
   return { ok: true, data: null };
 }
 {% endif %}

@@ -361,7 +361,8 @@ workflows:
 
 # The members sign in with their email address and a password. Anyone
 # can see the list of rooms. A new member signs up with a name, an
-# email address, and a team, and gets the role `member`. A member who
+# email address, and a team, gets the role `member`, and confirms the
+# email address with a link before the first sign-in. A member who
 # forgets the password gets a reset link that is valid for 30 minutes.
 auth:
   user_entity: Member
@@ -373,6 +374,7 @@ auth:
   sign_up:
     fields: [name, email, team]
     default_role: member
+    verify_email: true
   password_reset:
     token_minutes: 30
   # The members can also sign in with the account of the company. A first

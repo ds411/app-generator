@@ -79,6 +79,27 @@ makes the next migration with `alembic revision --autogenerate`
   element that sends messages, and the stub of ADR 0017: the log with
   `ENVIRONMENT=development`, else 501. It replaces
   `app/core/password_reset_ext.py`.
+- The front ends:
+  - With the verification, the sign-up form shows a message instead of
+    the start page. The public page `/verify-email` is the page of the
+    link. It confirms the address only after a click on a button: a
+    program that opens the links of a message (for example the scanner
+    of a mail service) does not confirm the address.
+  - The sign-in of a user who is not verified shows the message of the
+    error and the button "Send the link again". The status of the
+    sign-in (`signed-in`, `error`, or `unverified`) is the result of
+    `signIn` in all apps.
+  - Next.js: server actions with the same rules as the FastAPI app (the
+    purpose prefix, the tag of the address, the column with the default
+    "now", the transaction of the sign-up, and the provider). The link
+    starts with `PUBLIC_URL`. `src/shared/auth/messages.ts` makes the
+    messages, and the extension file `src/shared/auth/messages.ext.ts`
+    (`deliverMessage(message)`) replaces
+    `src/shared/auth/password-reset.ext.ts`.
+  - React with `x-react-data: api`: the pages call the endpoints of the
+    FastAPI app. `EMAIL_VERIFY_URL` is the page `/verify-email` of the
+    React app. With mock data, no server sends the links, so the sign-up
+    signs in at once, as before.
 
 ## Consequences
 
@@ -86,9 +107,11 @@ makes the next migration with `alembic revision --autogenerate`
   sign-in. In production, the stub gives 501 for each sign-up until a
   developer writes the delivery.
 - An app of an earlier version keeps its file
-  `app/core/password_reset_ext.py`, because appgen never deletes an
-  extension file. The developer moves the delivery to
-  `app/core/messages_ext.py`, and deletes the old file.
+  `app/core/password_reset_ext.py` (FastAPI) or
+  `src/shared/auth/password-reset.ext.ts` (Next.js), because appgen
+  never deletes an extension file. The developer moves the delivery to
+  `app/core/messages_ext.py` or `src/shared/auth/messages.ext.ts`, and
+  deletes the old file.
 - The time of the verification is in the table of the credentials. A
   user without a password (a user of a provider) has no row, and needs
   no verification. A change of the address with the endpoints of the

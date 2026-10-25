@@ -29,6 +29,10 @@ _CUSTOM_OP = "element.kind == 'custom'"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 _DEPLOY_TARGET = Literal["kubernetes", "knative"]
 """A deployment target (`DEPLOY_TARGETS`)."""
+_VERIFY_EMAIL = (
+    "definition.auth and definition.auth.sign_up and definition.auth.sign_up.verify_email"
+)
+_MESSAGES = f"definition.auth and (definition.auth.password_reset or ({_VERIFY_EMAIL}))"
 
 # The app shell: the layouts, the menus, the breadcrumbs, and the search
 # (shared templates, see `appgen.bindings.shared.ui`). Each layout with
@@ -277,12 +281,32 @@ BINDING = Binding(
             )
             for template, path in (
                 ("src/shared/auth/password-reset.ts.j2", "src/shared/auth/password-reset.ts"),
-                (
-                    "src/shared/auth/password-reset.ext.ts.j2",
-                    "src/shared/auth/password-reset.ext.ts",
-                ),
                 ("app/forgot-password/page.tsx.j2", "app/forgot-password/page.tsx"),
                 ("app/reset-password/page.tsx.j2", "app/reset-password/page.tsx"),
+            )
+        ),
+        # One delivery hook for the messages of the password reset and of the verification of
+        # the email address (ADR 0023).
+        *(
+            Output(
+                template=template,
+                path=path,
+                when=_MESSAGES,
+                extension=template.endswith(".ext.ts.j2"),
+            )
+            for template, path in (
+                ("src/shared/auth/messages.ts.j2", "src/shared/auth/messages.ts"),
+                ("src/shared/auth/messages.ext.ts.j2", "src/shared/auth/messages.ext.ts"),
+            )
+        ),
+        *(
+            Output(template=template, path=path, when=_VERIFY_EMAIL)
+            for template, path in (
+                (
+                    "src/shared/auth/email-verification.ts.j2",
+                    "src/shared/auth/email-verification.ts",
+                ),
+                ("app/verify-email/page.tsx.j2", "app/verify-email/page.tsx"),
             )
         ),
         *(
@@ -378,6 +402,7 @@ BINDING = Binding(
         | {"translations", "language"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
+        | {"email_verification"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),

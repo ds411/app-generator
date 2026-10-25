@@ -1,8 +1,8 @@
 // The front ends show only the pages and the operations that the role of
-// the user allows (ADR 0012), a new user can sign up (ADR 0016), a user
-// can reset the password (ADR 0017), a user of an owner rule sees only
-// the records of the user (ADR 0018), and a user signs in with a provider
-// (ADR 0020).
+// the user allows (ADR 0012), a new user can sign up (ADR 0016) and
+// confirm the email address (ADR 0023), a user can reset the password
+// (ADR 0017), a user of an owner rule sees only the records of the user
+// (ADR 0018), and a user signs in with a provider (ADR 0020).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -96,10 +96,35 @@ test("the sign-up page shows the fields of a new user", async ({ page }, testInf
   await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", modeOf(testInfo.project.name), "sign-up.png"]);
 });
 
+/** Return the links of a kind that the app sent to an address, from the log of the app. */
+function messageLinks(serverLog: string, kind: string, to: string): string[] {
+  const prefix = `The ${kind} link of ${to}: `;
+  const lines = readFileSync(serverLog, "utf8").split("\n").filter((line) => line.includes(prefix));
+  return lines.map((line) => line.split(prefix)[1]?.trim() ?? "");
+}
+
+/**
+ * Wait for a new link of a kind in the log of the app, and return it. Two
+ * links of the same second can be equal, so the test counts the links.
+ */
+async function newMessageLink(serverLog: string, kind: string, to: string, before: number): Promise<string> {
+  await expect.poll(() => messageLinks(serverLog, kind, to).length).toBeGreaterThan(before);
+  return messageLinks(serverLog, kind, to).at(-1) ?? "";
+}
+
+test("the page of the verification link asks for a confirmation", async ({ page }, testInfo) => {
+  test.skip(!auth?.signUp?.verifyEmail, "The app has no page of the verification link.");
+  await page.goto("/verify-email?token=example");
+  await expect(page.getByRole("heading", { name: "Confirm the email address" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", modeOf(testInfo.project.name), "verify-email.png"]);
+});
+
 test("a new user signs up, and sees the menu of the default role", async ({ page }, testInfo) => {
   const signUp = auth?.signUp;
   test.skip(!signUp || testInfo.project.name !== "light", "One sign-up in the light mode.");
   if (!signUp) return;
+  const valueOf = (id: string, n: string) => signUp.fields.find((field) => field.id === id)?.value.replaceAll("{n}", n) ?? "";
   const fill = async (n: string) => {
     for (const field of signUp.fields) {
       await page.locator(`#${field.id}`).fill(field.value.replaceAll("{n}", n));
@@ -117,19 +142,35 @@ test("a new user signs up, and sees the menu of the default role", async ({ page
   // The route announcer of Next.js is an alert too, outside the main element.
   await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-up");
-  await fill(String(Date.now()));
+  const n = String(Date.now());
+  await fill(n);
   await page.getByRole("button", { name: "Sign up" }).click();
-  await page.waitForURL((url) => url.pathname === "/");
-  await page.waitForLoadState("networkidle");
+  const verify = signUp.verifyEmail;
+  if (verify) {
+    // The app sends a link, and the user signs in only after the confirmation.
+    const username = valueOf(signUp.usernameId, n);
+    const address = valueOf(verify.addressId, n);
+    await expect(page.getByRole("main").getByRole("status")).toBeVisible();
+    await newMessageLink(verify.serverLog, "email-verification", address, 0);
+    await page.goto("/sign-in");
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(signUp.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
+    // A new link.
+    await page.getByRole("button", { name: "Send the link again" }).click();
+    await expect(page.getByRole("main").getByRole("status")).toBeVisible();
+    const link = await newMessageLink(verify.serverLog, "email-verification", address, 1);
+    await page.goto(link);
+    await page.getByRole("button", { name: "Confirm the email address" }).click();
+    await expect(page.getByRole("main").getByRole("status")).toBeVisible();
+    await signIn(page, username, signUp.password);
+  } else {
+    await page.waitForURL((url) => url.pathname === "/");
+    await page.waitForLoadState("networkidle");
+  }
   expect(await menuLabels(page)).toEqual(signUp.menu);
 });
-
-/** Return the last reset link of a user in the log of the app. */
-function resetLink(serverLog: string, username: string): string | undefined {
-  const prefix = `The password reset link of ${username}: `;
-  const lines = readFileSync(serverLog, "utf8").split("\n").filter((line) => line.includes(prefix));
-  return lines.at(-1)?.split(prefix)[1]?.trim();
-}
 
 test("the password reset pages ask for a link, and set a new password", async ({ page }, testInfo) => {
   const reset = auth?.passwordReset;
@@ -149,25 +190,19 @@ test("the password reset pages ask for a link, and set a new password", async ({
   if (testInfo.project.name !== "light") return;
 
   // Ask for a link, and find it in the log of the app.
-  const before = resetLink(reset.serverLog, reset.username);
+  const before = messageLinks(reset.serverLog, "password-reset", reset.username).length;
   await page.goto("/forgot-password");
   await page.locator('input[name="username"]').fill(reset.username);
   await page.getByRole("button", { name: "Send the link" }).click();
   await expect(page.getByRole("main").getByRole("status")).toBeVisible();
-  let link: string | undefined;
-  await expect
-    .poll(() => {
-      link = resetLink(reset.serverLog, reset.username);
-      return link !== undefined && link !== before;
-    })
-    .toBe(true);
+  const link = await newMessageLink(reset.serverLog, "password-reset", reset.username, before);
   // Set a new password with the link. The link is valid only one time.
   const password = `new-password-${Date.now()}`;
   for (const [value, result] of [
     [password, "status"],
     [`${password}-2`, "alert"],
   ] as const) {
-    await page.goto(link ?? "");
+    await page.goto(link);
     await page.locator('input[name="password"]').fill(value);
     await page.getByRole("button", { name: "Set the password" }).click();
     await expect(page.getByRole("main").getByRole(result)).toBeVisible();

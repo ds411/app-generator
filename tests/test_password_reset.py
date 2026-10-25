@@ -119,15 +119,15 @@ def test_the_nextjs_app_has_the_reset_pages_with_the_token_rules_of_the_api() ->
     assert "return sign(`password-reset.${body}`);" in reset
     assert "const payload = { sub: userId, exp: expires, pwd: passwordTag(passwordHash) };" in reset
     actions = app["src/shared/auth/actions.ts"]
-    assert "await deliverPasswordReset({ id: user.id, username: input.data.username }, link);" in (
-        actions
-    )
+    message = "passwordResetMessage({ id: user.id, to: user.to }, link)"
+    assert f"await deliverMessage(await {message});" in actions
     assert "if (found === null || !(await resetTokenMatches(found))) {" in actions
     assert "await setPassword(found.userId, input.data.newPassword);" in actions
-    delivery = app["src/shared/auth/password-reset.ext.ts"]
-    assert delivery.startswith("// Created by appgen once.")
-    assert "// @trace:gap auth.password_reset file" in delivery
-    assert 'if (process.env.ENVIRONMENT === "development") {' in delivery
+    hook = app["src/shared/auth/messages.ext.ts"]
+    assert hook.startswith("// Created by appgen once.")
+    assert "// @trace:gap auth.password_reset file" in hook
+    assert 'if (process.env.ENVIRONMENT === "development") {' in hook
+    assert "src/shared/auth/password-reset.ext.ts" not in app
     assert "PUBLIC_URL=http://localhost:3000" in app[".env.example"]
     sign_in = app["src/features/sign-in/ui/sign-in-form.tsx"]
     assert '<Link href="/forgot-password"' in sign_in

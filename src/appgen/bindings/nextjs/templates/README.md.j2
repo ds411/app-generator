@@ -180,14 +180,21 @@ authorization code flow with PKCE. Register the redirect URI
 {% if definition.auth.sign_up %}
 New users make an account on `/sign-up`.
 {% endif %}
+{% if definition.auth.sign_up and definition.auth.sign_up.verify_email %}
+A new user confirms the email address before the first sign-in: the
+app sends a message with a link to `/verify-email`. The link is valid
+for {{ definition.auth.sign_up.verify_email.token_minutes }} minutes.
+{% endif %}
 {% if definition.auth.password_reset %}
 A user who forgets the password asks for a reset link on
 `/forgot-password`. The link opens `/reset-password`, and is valid for
-{{ definition.auth.password_reset.token_minutes }} minutes and one time. Write the delivery of the link (for
-example an email) in `src/shared/auth/password-reset.ext.ts`. Until
-then, with `ENVIRONMENT=development`, the app writes the link to the
-log. Set `PUBLIC_URL` to the URL of the app for the browsers: the links
-use it.
+{{ definition.auth.password_reset.token_minutes }} minutes and one time.
+{% endif %}
+{% if definition.auth.password_reset or (definition.auth.sign_up and definition.auth.sign_up.verify_email) %}
+Write the delivery of the messages (for example an email) in
+`src/shared/auth/messages.ext.ts`. Until then, with
+`ENVIRONMENT=development`, the app writes the links to the log. Set
+`PUBLIC_URL` to the URL of the app for the browsers: the links use it.
 {% endif %}
 {% endif %}
 

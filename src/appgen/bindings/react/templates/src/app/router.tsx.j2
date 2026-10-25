@@ -26,7 +26,7 @@ import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{
 
 {% endif %}
 {% if definition.auth %}
-import { {% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %} } from "./auth/require-auth";
+import { {% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %}{% if auth_pages.verify_email %}, VerifyEmailRoute{% endif %} } from "./auth/require-auth";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
@@ -46,6 +46,9 @@ export const router = createBrowserRouter([
 {% if auth_pages.password_reset %}
   { path: "/forgot-password", element: <ForgotPasswordForm /> }, {{ trace(definition.auth.password_reset.id) }}
   { path: "/reset-password", element: <ResetPasswordRoute /> }, {{ trace(definition.auth.password_reset.id) }}
+{% endif %}
+{% if auth_pages.verify_email %}
+  { path: "/verify-email", element: <VerifyEmailRoute /> }, {{ trace(definition.auth.sign_up.verify_email.id) }}
 {% endif %}
 {% for layout_name in used_layouts %}
   {

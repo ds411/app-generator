@@ -1,6 +1,7 @@
 {% set key = definition.auth.username_field | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
 {% set sign_up = definition.auth.sign_up %}
+{% set verify = sign_up.verify_email if sign_up else none %}
 {% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
 {{ trace_header(definition.auth.id) }}
 {% if react.api %}
@@ -9,7 +10,7 @@
 // browser tab.{% if role_key %} The checks of the roles in the browser only hide what the
 // API refuses: the API checks each request.{% endif %}
 
-import { {{ "API_URL, " if definition.auth.providers }}apiRequest, setAccessToken } from "@/shared/api";
+import { {{ "API_URL, " if definition.auth.providers }}{{ "ApiError, " if verify }}apiRequest, setAccessToken } from "@/shared/api";
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
@@ -37,6 +38,10 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 {% if definition.auth.password_reset %}
 // The password reset needs a server that sends the reset links (ADR 0017),
 // so an app with mock data has no reset pages. {{ trace(definition.auth.password_reset.id) }}
+{% endif %}
+{% if verify %}
+// The verification of the email address needs a server that sends the
+// links too (ADR 0023), so the sign-up of an app with mock data signs in at once. {{ trace(verify.id) }}
 {% endif %}
 
 {% if role_key %}
@@ -191,16 +196,29 @@ export async function startSession(token: string): Promise<void> {
 }
 
 {% if definition.auth.password %}
-/** Sign in with the API. Return null, or the message of the error. */
-export async function signIn(username: string, password: string): Promise<string | null> {
+/**
+ * The result of a sign-in: the user is signed in, or an error with its
+ * message.{% if verify %} `unverified`: the password is correct, but the user must
+ * confirm the email address first (ADR 0023).{% endif %}
+
+ */
+export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+
+/** Sign in with the API. */
+export async function signIn(username: string, password: string): Promise<SignInResult> {
   try {
     const token = (await apiRequest("POST", "/auth/sign-in", { username, password })) as { access_token: string };
     await startSession(token.access_token);
   } catch (error) {
     setAccessToken(null);
-    return error instanceof Error ? error.message : {{ tr(js("The sign-in failed.")) }};
+{% if verify %}
+    if (error instanceof ApiError && error.status === 403) {
+      return { status: "unverified", message: error.message }; {{ trace(verify.id) }}
+    }
+{% endif %}
+    return { status: "error", message: error instanceof Error ? error.message : {{ tr(js("The sign-in failed.")) }} };
   }
-  return null;
+  return { status: "signed-in" };
 }
 {% endif %}
 {% if definition.auth.providers %}
@@ -260,6 +278,28 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
   return null;
 }
 {% endif %}
+{% if verify %}
+
+/** Ask the API for a new link that confirms the email address (`POST /auth/verify-email`). Return null, or the message of the error. */
+export async function requestEmailVerification(username: string): Promise<string | null> { {{ trace(verify.id) }}
+  try {
+    await apiRequest("POST", "/auth/verify-email", { username });
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+  return null;
+}
+
+/** Confirm the email address with the token of a link (`POST /auth/verify-email/confirm`). Return null, or the message of the error. */
+export async function confirmEmailVerification(token: string): Promise<string | null> { {{ trace(verify.id) }}
+  try {
+    await apiRequest("POST", "/auth/verify-email/confirm", { token });
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+  return null;
+}
+{% endif %}
 
 /** Sign out. */
 export async function signOut(): Promise<void> {
@@ -275,8 +315,11 @@ export async function signOut(): Promise<void> {
 }
 {% else %}
 {% if definition.auth.password %}
-/** Sign in. Return null, or the message of the error. */
-export async function signIn(username: string, password: string): Promise<string | null> {
+/** The result of a sign-in: the user is signed in, or an error with its message. */
+export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+
+/** Sign in with the password of a mock user. */
+export async function signIn(username: string, password: string): Promise<SignInResult> {
 {% if sign_up %}
   const user = allUsers().find((item) => item.username === username);
   if (!user || !(await passwordMatches(user, password))) {
@@ -284,14 +327,14 @@ export async function signIn(username: string, password: string): Promise<string
   const user = users.find((item) => item.username === username);
   if (!user || password !== MOCK_PASSWORD) {
 {% endif %}
-    return {{ tr(js("The user name or the password is not correct.")) }};
+    return { status: "error", message: {{ tr(js("The user name or the password is not correct.")) }} };
   }
   try {
     window.sessionStorage.setItem(STORAGE_KEY, user.id);
   } catch {
-    return {{ tr(js("The browser does not keep the session.")) }};
+    return { status: "error", message: {{ tr(js("The browser does not keep the session.")) }} };
   }
-  return null;
+  return { status: "signed-in" };
 }
 {% endif %}
 {% if definition.auth.providers %}

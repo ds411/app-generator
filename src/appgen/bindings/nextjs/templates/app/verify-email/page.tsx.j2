@@ -1,0 +1,12 @@
+{{ trace_header(definition.auth.sign_up.verify_email.id) }}
+import type { Metadata } from "next";
+
+import { VerifyEmailForm } from "@/features/email-verification";
+
+export const metadata: Metadata = { title: "Confirm the email address" };
+
+/** The page of the link that confirms the email address of a new user (ADR 0023). */
+export default async function Route({ searchParams }: PageProps<"/verify-email">) {
+  const { token } = await searchParams;
+  return <VerifyEmailForm token={typeof token === "string" ? token : ""} />;
+}
