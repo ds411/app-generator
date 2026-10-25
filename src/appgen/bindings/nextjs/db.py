@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.dsl.rules import EntityUniqueRule
 from appgen.gen.naming import camel, snake
@@ -478,8 +478,22 @@ class SeedJoin:
 
 
 @dataclass(frozen=True, slots=True)
+class SeedRecord:
+    """A seed record of the definition (ADR 0021), as a TypeScript object literal."""
+
+    element_id: str
+    """The element of the record, for example `seed.Room.records.a101`."""
+    row: str
+
+
+@dataclass(frozen=True, slots=True)
 class SeedTable:
-    """The seed records of a table, as TypeScript object literals."""
+    """The seed records of a table, as TypeScript object literals.
+
+    `records`, `record_links`, and `record_joins` are the seed records of
+    the definition. `rows`, `links`, and `joins` are the generated
+    records, which go only into empty tables.
+    """
 
     table: Table
     rows: list[str]
@@ -487,6 +501,11 @@ class SeedTable:
     links: list[str]
     """The optional foreign keys of the rows (`id` and the keys), to set after all inserts."""
     joins: list[SeedJoin]
+    seed_id: str | None = None
+    """The seed element of the entity, for example `seed.Room`, if the definition has one."""
+    records: list[SeedRecord] = field(default_factory=list[SeedRecord])
+    record_links: list[str] = field(default_factory=list[str])
+    record_joins: list[SeedJoin] = field(default_factory=list[SeedJoin])
 
     @property
     def const(self) -> str:
@@ -497,59 +516,99 @@ class SeedTable:
     def links_const(self) -> str:
         return self.const + "Links"
 
+    @property
+    def records_const(self) -> str:
+        """The TypeScript name of the seed records of the definition, for example `roomRecords`."""
+        return self.table.const.removesuffix("Table") + "Records"
+
+    @property
+    def record_links_const(self) -> str:
+        return self.records_const.removesuffix("Records") + "RecordLinks"
+
 
 def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTable]:
     """Return the seed records of each table, in an order that the required foreign keys permit.
 
     The records are the mock records of the shared generator
     (`appgen.bindings.shared.mock_data`), so the Next.js seed and the
-    React mock data agree. A table comes after the tables that its
+    React mock data agree. The seed records of the definition come first
+    in the mock records: they go into `records`, with the element of each
+    record for its trace. A table comes after the tables that its
     required foreign keys refer to. The optional foreign keys are links:
     the seed sets them after it inserts all rows, so a cycle or a
     reference to the same table is no problem.
     """
     data = mock_data(definition)
+    seeds = seed_records(definition)
     by_entity = {table.entity: table for table in tables}
     result: dict[str, SeedTable] = {}
     for table in tables:
         entity = definition.entities[table.entity]
-        rows: list[str] = []
-        links: list[str] = []
-        joins = [SeedJoin(join, []) for join in table.join_tables]
-        for record in data[table.entity]:
-            row = [("id", json.dumps(record["id"]))]
-            link: list[tuple[str, str]] = []
-            for field_name, spec in entity.stored_fields.items():
-                row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
-            for name, relation in entity.relations.items():
-                if relation.kind not in ("many_to_one", "one_to_one"):
-                    continue
-                if not _stores(definition, table.entity, name, relation):
-                    continue
-                key, value = f"{camel(name)}Id", record.get(name)
-                if relation.required:
-                    row.append((key, json.dumps(value)))
-                else:
-                    row.append((key, "null"))
-                    if value is not None:
-                        link.append((key, json.dumps(value)))
-            rows.append(_ts_object(row))
-            if link:
-                links.append(_ts_object([("id", json.dumps(record["id"])), *link]))
-            for seed_join in joins:
-                name = seed_join.join.relation_name.split(".", 1)[1]
-                targets: list[str] = record.get(name) or []
-                for target in targets:
-                    seed_join.rows.append(
-                        _ts_object(
-                            [
-                                (seed_join.join.left_key, json.dumps(record["id"])),
-                                (seed_join.join.right_key, json.dumps(target)),
-                            ]
-                        )
-                    )
-        result[table.entity] = SeedTable(table, rows, links, joins)
+        seed = definition.seed.get(table.entity)
+        keys = list(seed.records) if seed is not None else []
+        generated = _SeedRows(definition, table)
+        fixed = _SeedRows(definition, table)
+        for index, record in enumerate(data[table.entity]):
+            (fixed if index < len(seeds.get(table.entity, [])) else generated).add(entity, record)
+        result[table.entity] = SeedTable(
+            table,
+            generated.rows,
+            generated.links,
+            generated.joins,
+            seed_id=seed.id if seed is not None else None,
+            records=[
+                SeedRecord(f"{seed.id}.records.{key}", row)
+                for key, row in zip(keys, fixed.rows, strict=True)
+                if seed is not None
+            ],
+            record_links=fixed.links,
+            record_joins=fixed.joins,
+        )
     return [result[entity] for entity in _insert_order(definition, by_entity)]
+
+
+class _SeedRows:
+    """The rows, the links, and the join rows of some records of a table."""
+
+    def __init__(self, definition: AppDefinition, table: Table) -> None:
+        self.definition = definition
+        self.table = table
+        self.rows: list[str] = []
+        self.links: list[str] = []
+        self.joins = [SeedJoin(join, []) for join in table.join_tables]
+
+    def add(self, entity: Entity, record: dict[str, Any]) -> None:
+        row = [("id", json.dumps(record["id"]))]
+        link: list[tuple[str, str]] = []
+        for field_name, spec in entity.stored_fields.items():
+            row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
+        for name, relation in entity.relations.items():
+            if relation.kind not in ("many_to_one", "one_to_one"):
+                continue
+            if not _stores(self.definition, self.table.entity, name, relation):
+                continue
+            key, value = f"{camel(name)}Id", record.get(name)
+            if relation.required:
+                row.append((key, json.dumps(value)))
+            else:
+                row.append((key, "null"))
+                if value is not None:
+                    link.append((key, json.dumps(value)))
+        self.rows.append(_ts_object(row))
+        if link:
+            self.links.append(_ts_object([("id", json.dumps(record["id"])), *link]))
+        for seed_join in self.joins:
+            name = seed_join.join.relation_name.split(".", 1)[1]
+            targets: list[str] = record.get(name) or []
+            for target in targets:
+                seed_join.rows.append(
+                    _ts_object(
+                        [
+                            (seed_join.join.left_key, json.dumps(record["id"])),
+                            (seed_join.join.right_key, json.dumps(target)),
+                        ]
+                    )
+                )
 
 
 def _insert_order(definition: AppDefinition, tables: dict[str, Table]) -> list[str]:

@@ -4,9 +4,11 @@
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
 # app, request it, and run the Playwright tests in ui-tests/). Then the
 # smoke test runs the built app with PGlite (--local), without Docker.
-# Last, check the rate limit that two processes share in Redis
+# Then check the rate limit that two processes share in Redis
 # (scripts/check_shared_rate_limit.py), and the deployment files of each
-# target against their schemas (scripts/check_deploy_files.py).
+# target against their schemas (scripts/check_deploy_files.py). Last,
+# generate tests/fixtures/seed-data.yaml, and run lint, type check,
+# appgen check, and the seed test (scripts/seed_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -31,12 +33,17 @@ set -eu
 definition=examples/project-tracker/app.yaml
 root=$(pwd)
 
+# The app of the seed data fixture (ADR 0021), in a temporary folder.
+seed_definition=tests/fixtures/seed-data.yaml
+seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-seed.XXXXXX")
+
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
+    trap 'rm -rf "$seed_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out"' EXIT
 fi
 
 step() {
@@ -90,5 +97,22 @@ uv run --locked scripts/check_shared_rate_limit.py nextjs "$out-rate-limit"
 
 step "deployment files"
 uv run --locked scripts/check_deploy_files.py nextjs
+
+step "generate $seed_definition in $seed_out"
+uv run --locked appgen generate "$seed_definition" -b nextjs -o "$seed_out" >/dev/null
+(
+    cd "$seed_out"
+    step "pnpm install (seed data)"
+    pnpm install --silent
+    step "pnpm lint (seed data)"
+    pnpm --silent lint
+    step "pnpm typecheck (seed data)"
+    pnpm --silent typecheck
+)
+step "appgen check (seed data)"
+uv run --locked appgen check "$seed_definition" "$seed_out"
+
+step "seed test"
+uv run --locked scripts/seed_test.py "$seed_definition" --app "$seed_out"
 
 step "passed"

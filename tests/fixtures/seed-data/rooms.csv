@@ -1,0 +1,4 @@
+key,code,capacity,price,bookable,checked_at,settings,office,features
+a101,A101,8,120.50,true,2026-01-05T09:00:00Z,"{""floor"": 1}",hq,screen;board
+a102,A102,4,,false,,,hq,
+l201,L201,12,99,true,,,lisbon,board

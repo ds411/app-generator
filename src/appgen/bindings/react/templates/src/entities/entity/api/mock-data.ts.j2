@@ -1,6 +1,25 @@
 {{ trace_header(element_id) }}
+{% set seed = definition.seed.get(name) %}
+{% if seed is none %}
 // Mock records from a fixed seed. Each relation refers to a record that
 // exists. Change the definition to change the data.
 import type { {{ name | pascal }} } from "../model/types";
 
 export const {{ name | camel }}MockData: readonly {{ name | pascal }}[] = {{ ts_value(mock[name], indent=2) }};
+{% else %}
+// The seed records of the definition, then the mock records from a fixed
+// seed. Each relation refers to a record that exists. Change the
+// definition to change the data.
+import type { {{ name | pascal }} } from "../model/types";
+
+{{ trace(seed.id) }}
+export const {{ name | camel }}MockData: readonly {{ name | pascal }}[] = [
+{% set keys = seed.records | list %}
+{% for record in mock[name] %}
+{% if loop.index0 < keys | length %}
+  {{ trace(seed.id ~ ".records." ~ keys[loop.index0]) }}
+{% endif %}
+  {{ ts_value(record, indent=2) | indent(2) }},
+{% endfor %}
+];
+{% endif %}

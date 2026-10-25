@@ -21,11 +21,11 @@ runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI.
-# The bindings exclude the seed until they use it (ADR 0021).
+# FastAPI excludes the seed until it uses it (ADR 0021).
 SEED = ["entity_seed", "seed_record"]
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": SEED,
-    "react": sorted(["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", *SEED]),
+    "nextjs": [],
+    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule"],
     "fastapi": sorted(["page", "ui", *SEED]),
 }
 

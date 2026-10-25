@@ -38,11 +38,13 @@ into `drizzle/`: keep them in version control. With
 
 `pnpm db:seed` fills the tables of `DATABASE_URL` with seed records,
 for example `DATABASE_URL=pglite:./.pglite pnpm db:seed`. The records
-come from the app definition, and are the same on each run. The seed
-adds records only if all tables are empty. Apply the migrations first.
-With `DATABASE_SEED=true`, the server adds the seed records when it
-starts, after the migrations. `src/shared/db/seed-data.ts` holds the
-records.
+come from the app definition, and are the same on each run. Apply the
+migrations first. The seed adds each record of the `seed` section of
+the definition that the database does not have (by ID), and does not
+change a record that it has. It adds the generated mock records only
+if all tables are empty. With `DATABASE_SEED=true`, the server
+runs the seed when it starts, after the migrations.
+`src/shared/db/seed-data.ts` holds the records.
 
 ### Local database
 

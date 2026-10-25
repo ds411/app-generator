@@ -15,6 +15,13 @@ each binding gets the same records.
 
 An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
+
+An entity with a seed in the definition (ADR 0021) has its seed records
+first, with their fixed IDs, and then the `mock` generated records of
+the seed (default: 0). A generated record can refer to a seed record.
+The generated records keep away from the values of the unique fields of
+the seed records, and from the partners of their `one_to_one`
+relations.
 """
 
 import operator
@@ -23,10 +30,11 @@ import re
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from appgen.dsl.model import AppDefinition, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
+from appgen.dsl.seed import link_keys, normal_value, record_id
 
 DEFAULT_COUNT = 12
 MOCK_COUNT_KEY = "x-mock-count"
@@ -88,26 +96,35 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
     Each record has `id`, one key for each field, and one key for each
     stored relation: the ID of the target (or None) for `many_to_one` and
     `one_to_one`, and a list of IDs for `many_to_many`. The keys are the
-    names of the definition; the templates convert them.
+    names of the definition; the templates convert them. The seed records
+    of the definition come first (see `seed_records`).
     """
+    seeds = seed_records(definition)
     ids: dict[str, list[str]] = {}
     for name, entity in definition.entities.items():
         rng = random.Random(f"{definition.app.name}:{name}:ids")
-        ids[name] = [_uuid(rng) for _ in range(_count(entity))]
+        fixed = [record["id"] for record in seeds.get(name, [])]
+        ids[name] = fixed + [_uuid(rng) for _ in range(_count(definition, name, entity))]
     data: dict[str, list[Record]] = {}
     for name, entity in definition.entities.items():
         rng = random.Random(f"{definition.app.name}:{name}")
-        records: list[Record] = []
+        records: list[Record] = [dict(record) for record in seeds.get(name, [])]
+        fixed = len(records)
         fields = entity.stored_fields
-        seen: dict[str, set[Any]] = {f: set() for f, field in fields.items() if field.unique}
+        seen: dict[str, set[Any]] = {
+            f: {r[f] for r in records if isinstance(r.get(f), str | int | float)}
+            for f, field in fields.items()
+            if field.unique
+        }
         source = next((f for f in SOURCE_FIELDS if f in fields), None)
         derived = [
             f
             for f, field in fields.items()
             if source is not None and f in DERIVED_FIELDS and field.type == "string"
         ]
-        for index, record_id in enumerate(ids[name]):
-            record: Record = {"id": record_id}
+        for position, generated_id in enumerate(ids[name][fixed:]):
+            index = fixed + position
+            record: Record = {"id": generated_id}
             for field_name, field in fields.items():
                 if field_name in derived:
                     record[field_name] = None  # Set after the source, in the same key order.
@@ -131,22 +148,91 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
                 targets = ids[relation.target]
                 if relation.kind == "many_to_one":
                     optional = not relation.required and rng.random() < 0.2
-                    record[relation_name] = None if optional else rng.choice(targets)
+                    record[relation_name] = None if optional or not targets else rng.choice(targets)
                 elif relation.kind == "one_to_one":
-                    taken = index < len(targets) and (relation.required or rng.random() < 0.8)
-                    record[relation_name] = targets[index] if taken else None
+                    # A partner of a seed record is not free.
+                    partners = {r.get(relation_name) for r in records[:fixed]}
+                    free = [target for target in targets if target not in partners]
+                    taken = position < len(free) and (relation.required or rng.random() < 0.8)
+                    record[relation_name] = free[position] if taken else None
                 elif relation.kind == "many_to_many":
-                    size = rng.randint(1, min(3, len(targets)))
-                    chosen = rng.sample(range(len(targets)), size)
-                    record[relation_name] = [targets[i] for i in sorted(chosen)]
+                    record[relation_name] = []
+                    if targets:
+                        size = rng.randint(1, min(3, len(targets)))
+                        chosen = rng.sample(range(len(targets)), size)
+                        record[relation_name] = [targets[i] for i in sorted(chosen)]
             records.append(record)
-        _fit_rules(entity, records)
+        _fit_rules(entity, records, fixed)
         data[name] = records
     return data
 
 
-def _fit_rules(entity: Entity, records: list[Record]) -> None:
+def seed_records(definition: AppDefinition) -> dict[str, list[Record]]:
+    """Return the seed records of the definition, by entity name, in the form of the mock records.
+
+    Each record has its fixed ID (`appgen.dsl.seed.record_id`), and the
+    values in their normal form. A field that the record does not give
+    has its default, or None. A relation has the ID of its target. A
+    `one_to_one` or a `many_to_many` relation with an inverse also gets
+    the links that the records on the other side give, so that both
+    sides have the same links.
+    """
+    app = definition.app.name
+    ids = {
+        name: {key: record_id(app, name, key) for key in seed.records}
+        for name, seed in definition.seed.items()
+    }
+    result: dict[str, list[Record]] = {}
+    for name, seed in definition.seed.items():
+        entity = definition.entities[name]
+        records: list[Record] = []
+        for key, seed_record in seed.records.items():
+            values = seed_record.values
+            record: Record = {"id": ids[name][key]}
+            for field_name, field in entity.stored_fields.items():
+                record[field_name] = normal_value(field, values.get(field_name, field.default))
+            for relation_name, relation in entity.relations.items():
+                targets = ids.get(relation.target, {})
+                keys = [k for k in link_keys(relation, values.get(relation_name)) if k in targets]
+                if relation.kind in ("many_to_one", "one_to_one"):
+                    record[relation_name] = targets[keys[0]] if keys else None
+                elif relation.kind == "many_to_many":
+                    record[relation_name] = [targets[k] for k in keys]
+            records.append(record)
+        result[name] = records
+    for name, records in result.items():
+        for relation_name, relation in definition.entities[name].relations.items():
+            inverse = definition.entities[relation.target].relations.get(relation.inverse or "")
+            if (
+                relation.kind not in ("one_to_one", "many_to_many")
+                or inverse is None
+                or inverse.kind != relation.kind
+                or relation.target not in result
+            ):
+                continue
+            by_id = {record["id"]: record for record in records}
+            for other in result[relation.target]:
+                value: Any = other[relation.inverse or ""]
+                partners = cast(list[Any], value) if isinstance(value, list) else [value]
+                for partner in partners:
+                    found = by_id.get(partner)
+                    if found is None:
+                        continue
+                    if relation.kind == "one_to_one" and found[relation_name] is None:
+                        found[relation_name] = other["id"]
+                    elif (
+                        relation.kind == "many_to_many" and other["id"] not in found[relation_name]
+                    ):
+                        found[relation_name].append(other["id"])
+    return result
+
+
+def _fit_rules(entity: Entity, records: list[Record], fixed: int = 0) -> None:
     """Change the mock records so that they keep the compare and the unique rules of the entity.
+
+    The first `fixed` records are seed records of the definition: the
+    function does not change them, but a generated record does not repeat
+    their values.
 
     A record that breaks an order rule (`lt`, `lte`, `gt`, `gte`) gets the
     two values swapped. For two date-times, the later value becomes 30 to
@@ -165,7 +251,7 @@ def _fit_rules(entity: Entity, records: list[Record]) -> None:
             )
             for index, record in enumerate(records):
                 a, b = record.get(rule.field), record.get(rule.other)
-                if a is None or b is None:
+                if a is None or b is None or index < fixed:
                     continue
                 if times:
                     start = datetime.strptime(str(record[earlier]), "%Y-%m-%dT%H:%M:%SZ")
@@ -178,9 +264,9 @@ def _fit_rules(entity: Entity, records: list[Record]) -> None:
                 f for f in rule.fields if f in entity.fields and entity.fields[f].type in _TEXTS
             ]
             seen: set[str] = set()
-            for record in records:
+            for index, record in enumerate(records):
                 key = repr([record.get(f) for f in rule.fields])
-                if key in seen and texts:
+                if key in seen and texts and index >= fixed:
                     field = entity.fields[texts[0]]
                     base = str(record.get(texts[0]) or "")
                     for number in range(2, 1000):
@@ -202,7 +288,12 @@ _SWAPS: dict[str, Callable[[Any, Any], bool]] = {
 _TEXTS = frozenset({"string", "text"})
 
 
-def _count(entity: Entity) -> int:
+def _count(definition: AppDefinition, name: str, entity: Entity) -> int:
+    """Return the number of generated records of an entity: `mock` of its seed, or else the count
+    of `x-mock-count`."""
+    seed = definition.seed.get(name)
+    if seed is not None:
+        return seed.mock
     count = entity.extensions.get(MOCK_COUNT_KEY, DEFAULT_COUNT)
     return count if isinstance(count, int) and count > 0 else DEFAULT_COUNT
 
