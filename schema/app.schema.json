@@ -2130,6 +2130,17 @@
           "title": "Records",
           "type": "object"
         },
+        "file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "mock": {
           "default": 0,
           "minimum": 0,

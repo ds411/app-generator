@@ -13,6 +13,7 @@ from appgen.dsl.crud import expand_crud
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.ids import element_id, index_elements, walk_elements
 from appgen.dsl.model import DSL_VERSION, RESERVED_SECTIONS, AppDefinition, is_extension_key
+from appgen.dsl.seed import read_seed_files
 from appgen.dsl.source import DataPath, SourceMap, YamlDocument, read_yaml, read_yaml_file
 
 _TYPE_MESSAGES = {
@@ -33,8 +34,10 @@ _STRING_ERRORS = frozenset({"string_type", "literal_error", "string_pattern_mism
 def load_definition(path: Path | str) -> AppDefinition:
     """Load an app definition file. Raise DefinitionError if it is not valid.
 
-    The loader reads the OpenAPI documents of the `apis` from the folder of
-    the file. The validator reports a document that is not valid.
+    The loader reads the OpenAPI documents of the `apis` and the data files
+    of the `seed` from the folder of the file. The validator reports a
+    document that is not valid. A data file that is not valid is an error
+    of the loader.
     """
     path = Path(path)
     return _load(read_yaml_file(path), path.parent)
@@ -45,8 +48,8 @@ def load_definition_text(
 ) -> AppDefinition:
     """Load an app definition from YAML text. Raise DefinitionError if it is not valid.
 
-    The loader reads the OpenAPI documents of the `apis` from `base_dir`,
-    by default the folder of `file`.
+    The loader reads the OpenAPI documents of the `apis` and the data files
+    of the `seed` from `base_dir`, by default the folder of `file`.
     """
     return _load(read_yaml(text, file), base_dir or Path(file).parent)
 
@@ -75,6 +78,8 @@ def _load(document: YamlDocument, base_dir: Path) -> AppDefinition:
         data = {k: v for k, v in sections.items() if k not in RESERVED_SECTIONS}
     data = expand_crud(data, source_map)
     diagnostics += expand_operations(data, source_map)
+    seed_diagnostics, seed_hashes = read_seed_files(data, source_map, base_dir)
+    diagnostics += seed_diagnostics
     definition: AppDefinition | None = None
     try:
         definition = AppDefinition.model_validate(data)
@@ -92,6 +97,8 @@ def _load(document: YamlDocument, base_dir: Path) -> AppDefinition:
     definition._index = index_elements(definition)  # pyright: ignore[reportPrivateUsage]
     for api in definition.apis.values():
         api.read_document(base_dir)
+    for name, seed in definition.seed.items():
+        seed._file_hash = seed_hashes.get(name)  # pyright: ignore[reportPrivateUsage]
     return definition
 
 

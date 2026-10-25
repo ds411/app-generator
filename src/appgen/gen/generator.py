@@ -51,7 +51,8 @@ class GenerationResult:
     stub_markers: tuple[str, ...] = ()
     """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
     documents: dict[str, str] = field(default_factory=dict[str, str])
-    """The hash of each OpenAPI document of the `apis`, by its path in the definition."""
+    """The hash of each file that the definition reads, by its path in the definition: the OpenAPI
+    documents of the `apis` (ADR 0019) and the data files of the `seed` (ADR 0021)."""
     warnings: list[str] = field(default_factory=list[str])
     """The warnings of the binding (`Binding.warnings`)."""
 
@@ -107,9 +108,16 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
         elements={e.id: e.kind for e in elements},
         stub_markers=binding.stub_markers,
         documents={
-            api.document: api.openapi.hash
-            for api in definition.apis.values()
-            if api.openapi is not None
+            **{
+                api.document: api.openapi.hash
+                for api in definition.apis.values()
+                if api.openapi is not None
+            },
+            **{
+                seed.file: seed.file_hash
+                for seed in definition.seed.values()
+                if seed.file is not None and seed.file_hash is not None
+            },
         },
         warnings=list(binding.warnings(definition)) if binding.warnings else [],
     )

@@ -58,7 +58,8 @@ class Manifest:
     stub_markers: tuple[str, ...] = ()
     """The text that the stubs of the extension files contain. Empty if the manifest has none."""
     documents: dict[str, str] = field(default_factory=dict[str, str])
-    """The hash of each OpenAPI document of the definition, by its path (ADR 0019)."""
+    """The hash of each file that the definition reads, by its path: the OpenAPI documents (ADR
+    0019) and the data files of the seed (ADR 0021)."""
 
     def to_json(self) -> str:
         """Return the manifest as JSON text, with sorted keys and a final newline."""
