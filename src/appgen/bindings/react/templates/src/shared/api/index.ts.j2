@@ -1,7 +1,16 @@
 {{ trace_header("app") }}
 {% if react.api %}
 export { API_URL, ApiError, accessToken, apiRequest, setAccessToken } from "./http";
-export { type ApiParam, type ApiParams, type ApiQuery, type ApiShape, HttpStore } from "./http-store";
+export {
+  type ApiParam,
+  type ApiParams,
+  type ApiQuery,
+  type ApiShape,
+  HttpStore,
+  type OptionSource,
+  type RecordOption,
+} from "./http-store";
+export { loadRelated, type RelatedKey, type RelatedStep, type RelatedStore } from "./related";
 {% else %}
 export { MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
 {% endif %}

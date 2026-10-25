@@ -46,15 +46,3 @@ export function useResource<T>(
   if (state.key !== key && !(keep && state.resource.status === "success")) return { status: "loading", reload };
   return { ...state.resource, reload };
 }
-
-/** Return one resource of two: it loads until both have their data, and fails if one fails. */
-export function combine<A, B>(first: Loaded<A>, second: Loaded<B>): Loaded<[A, B]> {
-  const reload = () => {
-    first.reload();
-    second.reload();
-  };
-  if (first.status === "error") return { status: "error", error: first.error, reload };
-  if (second.status === "error") return { status: "error", error: second.error, reload };
-  if (first.status === "loading" || second.status === "loading") return { status: "loading", reload };
-  return { status: "success", data: [first.data, second.data], reload };
-}

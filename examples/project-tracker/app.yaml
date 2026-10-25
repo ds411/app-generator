@@ -1064,6 +1064,7 @@ translations:
         Light: Hell
         Loading: Wird geladen
         Loading the board: Das Board wird geladen
+        Loading…: Wird geladen …
         Make sure that the address is correct.: Prüfen Sie, ob die Adresse richtig ist.
         Member: Mitglied
         Members: Mitglieder
@@ -1146,6 +1147,7 @@ translations:
         Select all: Alle auswählen
         Select records: Datensätze wählen
         Select the row: Zeile auswählen
+        Show more: Mehr anzeigen
         Sidebar: Seitenleiste
         Start date: Startdatum
         Suggestions: Vorschläge

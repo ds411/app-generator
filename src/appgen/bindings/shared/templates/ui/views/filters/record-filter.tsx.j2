@@ -1,0 +1,106 @@
+{{ trace_header("app") }}
+"use client";
+
+import { CheckIcon, PlusCircleIcon } from "lucide-react";
+import { useState } from "react";
+
+import type { OptionSource } from "@/shared/api";
+import { Button } from "@/shared/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/shared/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { useOptionLabels, useOptionSearch } from "@/shared/lib/use-options";
+import { cn } from "@/shared/lib/utils";
+
+type RecordFilterProps = {
+  label: string;
+  /** The records of the relation: the server searches them. */
+  source: OptionSource;
+  /** True if the filter takes many records. */
+  multiple?: boolean;
+  value: string[];
+  onChange: (value: string[]) => void;
+};
+
+/** The first records of a search on the server: the list asks again for each new text. */
+function RecordList({ label, source, multiple = false, value, onChange }: RecordFilterProps) {
+  const [text, setText] = useState("");
+  const { options, loading } = useOptionSearch(source, text);
+  const chosen = new Set(value);
+  return (
+    <Command shouldFilter={false}>
+      <CommandInput placeholder={label} value={text} onValueChange={setText} />
+      <CommandList{{ " label=" ~ jsx_attr("Suggestions") if i18n }}>
+        <CommandEmpty>{loading ? {{ tr(js("Loading…")) }} : {{ tr(js("No value has this name.")) }}}</CommandEmpty>
+        <CommandGroup>
+          {options.map((option) => {
+            const selected = chosen.has(option.value);
+            const next = multiple ? [...value, option.value] : [option.value];
+            return (
+              <CommandItem
+                key={option.value}
+                value={option.value}
+                onSelect={() => onChange(selected ? value.filter((item) => item !== option.value) : next)}
+              >
+                <span
+                  className={cn(
+                    "flex size-4 items-center justify-center rounded-[4px] border",
+                    selected ? "border-primary bg-primary text-primary-foreground" : "opacity-50",
+                  )}
+                >
+                  {selected && <CheckIcon className="size-3 text-primary-foreground" />}
+                </span>
+                {option.label}
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+        {value.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup>
+              <CommandItem onSelect={() => onChange([])} className="justify-center text-center">
+                {{ jsx_text("Clear the filter") }}
+              </CommandItem>
+            </CommandGroup>
+          </>
+        )}
+      </CommandList>
+    </Command>
+  );
+}
+
+/**
+ * A select filter of a relation, for a list endpoint with more records
+ * than one page: the server searches the records, and gives the names of
+ * the chosen records.
+ */
+export function RecordFilter(props: RecordFilterProps) {
+  const labels = useOptionLabels(props.source, props.value);
+  const names = props.value.map((id) => labels.get(id) ?? "…");
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 border-dashed">
+          <PlusCircleIcon />
+          {props.label}
+          {names.length > 0 && (
+            <span className="ms-1 rounded-sm bg-secondary px-1.5 text-xs font-normal">
+              {names.length > 2 ? {{ js_format("{count} chosen", count="names.length") }} : names.join(", ")}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        <RecordList {...props} />
+      </PopoverContent>
+    </Popover>
+  );
+}

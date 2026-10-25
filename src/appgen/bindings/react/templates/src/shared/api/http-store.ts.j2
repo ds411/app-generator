@@ -12,6 +12,20 @@ export type ApiShape = {
   filters: Readonly<Record<string, "one" | "list">>;
   /** The keys that the list endpoint can sort by. */
   sorts: readonly string[];
+  /** The key of the display field, and true if `q` of the list endpoint searches it. */
+  display: { key: string; search: boolean };
+};
+
+/** A choice of a record: its ID and its text. */
+export type RecordOption = { value: string; label: string };
+
+/**
+ * The options of a reference field or of a filter: the first records of a
+ * search on the server, and the options of the selected IDs.
+ */
+export type OptionSource = {
+  search(text: string): Promise<RecordOption[]>;
+  labels(ids: readonly string[]): Promise<RecordOption[]>;
 };
 
 /**
@@ -37,16 +51,25 @@ export type ApiQuery = {
 /** The largest page of the list endpoints. */
 const PAGE_LIMIT = 200;
 
+/** The count of the options that a search of a choice gives. */
+const OPTION_COUNT = 20;
+
+/** The most IDs in one request of `byIds`, for a short URL. */
+const ID_LIMIT = 100;
+
 /**
  * The records of one entity in the FastAPI app. The list endpoint filters,
  * searches, sorts, and pages the records: a view sends its query with
- * `page`, and loads one page.
+ * `page`, and loads one page. The store keeps the records that it loads,
+ * so that `byIds` asks only for the records that it does not have. A
+ * change of a record clears them.
  */
 export class HttpStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
 {
   private readonly listeners = new Set<() => void>();
   private readonly jsonNames: Record<string, string>;
+  private readonly known = new Map<string, T>();
 
   constructor(
     private readonly entity: string,
@@ -61,6 +84,59 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     const offset = (query.page - 1) * query.pageSize;
     const { items, total } = await this.load(query.params ?? {}, query.sort ?? [], offset, query.pageSize);
     return { items, total, page: query.page, pageSize: query.pageSize };
+  }
+
+  /** Load all records of the query parameters, for example the records of the dates of a calendar. */
+  async all(params: ApiParams, sort: readonly string[] = []): Promise<T[]> {
+    return (await this.load(params, sort, 0, Infinity)).items;
+  }
+
+  /**
+   * Return the records with the IDs, for example the related records of a
+   * page. One request (`id`) loads the IDs that the store does not have,
+   * for each ID_LIMIT IDs. An ID without a record is not in the result.
+   */
+  async byIds(ids: Iterable<string>): Promise<Map<string, T>> {
+    const wanted = [...new Set(ids)];
+    const missing = wanted.filter((id) => !this.known.has(id));
+    for (let start = 0; start < missing.length; start += ID_LIMIT) {
+      const part = missing.slice(start, start + ID_LIMIT);
+      await this.load({ id: part }, [], 0, part.length);
+    }
+    return new Map(
+      wanted.flatMap((id): [string, T][] => {
+        const record = this.known.get(id);
+        return record ? [[id, record]] : [];
+      }),
+    );
+  }
+
+  /**
+   * Return the first records of a choice, in the order of the display
+   * field. With a text, the list endpoint searches its words in the display
+   * field (`q`). An entity whose display field is not a text searches the
+   * first records in the browser.
+   */
+  async search(text: string): Promise<T[]> {
+    const words = text.trim();
+    const { key, search } = this.shape.display;
+    const name = this.jsonNames[key];
+    const sort = name && this.shape.sorts.includes(key) ? [name] : [];
+    if (search || !words) {
+      return (await this.load(words ? { q: words } : {}, sort, 0, OPTION_COUNT)).items;
+    }
+    const { items } = await this.load({}, sort, 0, PAGE_LIMIT);
+    const found = items.filter((item) => String((item as Record<string, unknown>)[key] ?? "").toLowerCase().includes(words.toLowerCase()));
+    return found.slice(0, OPTION_COUNT);
+  }
+
+  /** Return the options of the records for a choice, with the text of each record. */
+  options(label: (record: T) => string): OptionSource {
+    const option = (record: T): RecordOption => ({ value: record.id, label: label(record) });
+    return {
+      search: async (text) => (await this.search(text)).map(option),
+      labels: async (ids) => [...(await this.byIds(ids)).values()].map(option),
+    };
   }
 
   /**
@@ -175,7 +251,11 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
         items: Record<string, unknown>[];
         total: number;
       };
-      items.push(...page.items.map((item) => this.fromJson(item)));
+      for (const item of page.items) {
+        const record = this.fromJson(item);
+        this.known.set(record.id, record);
+        items.push(record);
+      }
       total = page.total;
       if (page.items.length === 0 || offset + items.length >= total) break;
     }
@@ -205,6 +285,7 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
   }
 
   private notify(): void {
+    this.known.clear();
     for (const listener of this.listeners) {
       listener();
     }

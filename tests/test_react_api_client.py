@@ -81,9 +81,8 @@ def test_the_key_takes_only_mock_or_api() -> None:
 def test_a_table_sends_its_filters_its_sort_and_its_page_to_the_api() -> None:
     output = files("project-tracker", "api")
     view = output["src/widgets/project-table/ui/project-table-view.tsx"]
-    assert (
-        "const listPage = useResource(JSON.stringify(query), () => projectApi.page(query)" in view
-    )
+    assert "      const page = await projectApi.page(query);\n" in view
+    assert "      return [page, await loadLookups(page.items)] as const;\n" in view
     assert "    q: filters.search,\n" in view
     assert "    status: filters.status.length > 0 ? filters.status : null,\n" in view
     assert "    owner_id: filters.owner,\n" in view
@@ -99,7 +98,7 @@ def test_a_table_sends_its_filters_its_sort_and_its_page_to_the_api() -> None:
 
 def test_a_card_list_loads_one_page_and_a_boolean_filter_sends_only_true() -> None:
     view = files("project-tracker", "api")["src/widgets/person-cards/ui/person-cards-view.tsx"]
-    assert "() => personApi.page(query)" in view
+    assert "await personApi.page(query)" in view
     assert "    active: filters.active || null,\n" in view
     assert "{rows.map((row) => (" in view
     assert "pageOf(" not in view
@@ -133,3 +132,100 @@ def test_a_field_path_is_a_quoted_parameter_name() -> None:
     view = next(content for path, content in output.items() if path.endswith("item-table-view.tsx"))
     assert re.search(r'\n    "owner\.team_id": filters\.\w+', view)
     assert '"owner.team.lead.name"' in view
+
+
+def test_a_view_loads_the_related_records_of_its_page_by_id() -> None:
+    output = files("project-tracker", "api")
+    view = output["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert '      store: personApi,\n      keys: [{ from: null, key: "ownerId" }],\n' in view
+    assert "return (await loadRelated(rows, RELATED)) as Lookups;" in view
+    store = output["src/shared/api/http-store.ts"]
+    assert "await this.load({ id: part }, [], 0, part.length);" in store
+    assert "src/shared/api/related.ts" in output
+
+
+def test_a_view_loads_the_related_records_of_related_records_in_stages() -> None:
+    text = (ROOT / "tests" / "fixtures" / "react-views.yaml").read_text()
+    text = text.replace("title: Views }", "title: Views, x-react-data: api }", 1)
+    output = {f.path: f.content for f in generate(load_definition_text(text), react.BINDING).files}
+    view = next(content for path, content in output.items() if path.endswith("item-table-view.tsx"))
+    stages = view.split("const RELATED: RelatedStep[][] = [")[1].split("\n];")[0]
+    # The owners and the tags of the items, then their teams. The leads of
+    # the teams are members too: `loadRelated` loads them in a next round.
+    member, team = stages.index('entity: "member"'), stages.index('entity: "team"')
+    assert member < team
+    assert '{ from: null, key: "ownerId" }' in stages
+    assert '{ from: null, key: "tags" }' in stages
+    assert '{ from: "team", key: "leadId" }' in stages
+    assert '{ from: "member", key: "teamId" }' in stages
+
+
+def test_a_relation_filter_searches_its_options_on_the_server() -> None:
+    output = files("project-tracker", "api")
+    view = output["src/widgets/project-table/ui/project-table-view.tsx"]
+    assert "<RecordFilter " in view
+    assert "source={personOptions}" in view
+    assert "src/shared/ui/filters/record-filter.tsx" in output
+    api = output["src/entities/person/api/person-api.ts"]
+    assert 'display: { key: "name", search: true },' in api
+    assert (
+        'export const personOptions = personApi.options((item) => String(item.name ?? ""));' in api
+    )
+    assert "  personOptions,\n" in output["src/entities/person/index.ts"]
+
+
+def test_a_form_searches_the_options_of_its_relations_on_the_server() -> None:
+    output = files("project-tracker", "api")
+    form = output["src/features/new-task-form/ui/new-task-form.tsx"]
+    assert 'import { personOptions } from "@/entities/person";' in form
+    assert "source={projectOptions}" in form
+    assert "loadLookups" not in form
+    widget = output["src/shared/ui/form-widgets/relation-select.tsx"]
+    assert "source: OptionSource;" in widget
+    assert "useOptionSearch(source, text)" in widget
+    assert "src/shared/lib/use-options.ts" in output
+    # A select of a relation is a search box too.
+    text = (ROOT / "tests" / "fixtures" / "react-forms.yaml").read_text()
+    text = re.sub(r"(?m)^app: \{ ", "app: { x-react-data: api, ", text, count=1)
+    forms = {f.path: f.content for f in generate(load_definition_text(text), react.BINDING).files}
+    shelf = next(c for p, c in forms.items() if "source={shelfOptions}" in c and p.endswith(".tsx"))
+    assert "<RelationSelect " in shelf
+
+
+def test_a_board_loads_one_page_for_each_column() -> None:
+    view = files("project-tracker", "api")["src/widgets/task-board/ui/task-board-view.tsx"]
+    assert 'params: { ...params, "status": column.value },' in view
+    assert "pageSize: sizes[column.value] ?? PAGE_SIZE," in view
+    assert "const count = columns[index]?.total ?? 0;" in view
+    assert ">\n                        Show more\n" in view or "Show more" in view
+
+
+def test_a_calendar_loads_the_records_of_the_shown_days() -> None:
+    output = files("room-booking", "api")
+    view = output["src/widgets/booking-calendar/ui/booking-calendar-view.tsx"]
+    # A required end: the records that end after the first day, and start before the last.
+    assert '    "ends_at_from": isoDay(addDays(first, -1)),\n' in view
+    assert '    "starts_at_to": isoDay(addDays(last, 1)),\n' in view
+    assert "const { first, last } = shownDays(anchor, mode);" in view
+    grid = output["src/shared/ui/calendar-grid.tsx"]
+    assert "export function shownDays(" in grid
+
+
+def test_a_detail_view_loads_the_related_records_of_its_record() -> None:
+    output = files("project-tracker", "api")
+    detail = output["src/widgets/project-detail/ui/project-detail-view.tsx"]
+    assert "lookups: (await loadRelated([record], RELATED)) as Lookups" in detail
+    assert "Api.list()" not in detail
+
+
+def test_no_view_or_form_of_the_api_loads_all_records() -> None:
+    output = files("project-tracker", "api")
+    loads = [
+        path
+        for path, content in output.items()
+        if path.startswith(("src/widgets/", "src/features/"))
+        # The dashboards compute their widgets in the browser until #340.
+        and not path.endswith("-dashboard.tsx")
+        and re.search(r"Api\.list\(\)", content)
+    ]
+    assert loads == []

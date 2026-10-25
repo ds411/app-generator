@@ -2,7 +2,9 @@
 "use client";
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+{% if not ui_views.server %}
 import { useState } from "react";
+{% endif %}
 
 {% if i18n %}
 import { dateTimeFormat, firstWeekday } from "@/shared/lib/format";
@@ -37,13 +39,13 @@ const rangeFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: 
 const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 {% endif %}
 
-function startOfDay(date: Date): Date {
+{{ "export " if ui_views.server }}function startOfDay(date: Date): Date {
   const result = new Date(date);
   result.setHours(0, 0, 0, 0);
   return result;
 }
 
-function addDays(date: Date, days: number): Date {
+{{ "export " if ui_views.server }}function addDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
@@ -70,11 +72,44 @@ function firstDay(anchor: Date, mode: CalendarMode): Date {
   return mode === "week" ? startOfWeek(anchor) : startOfWeek(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
 }
 
+{% if ui_views.server %}
+/** Return the first and the last day that the grid shows. */
+export function shownDays(anchor: Date, mode: CalendarMode): { first: Date; last: Date } {
+  const first = firstDay(anchor, mode);
+  return { first, last: addDays(first, DAY_COUNT[mode] - 1) };
+}
+
+{% endif %}
 /** Return true if an event is on a day: it starts before the day ends, and ends on or after the day. */
 function onDay(event: CalendarEvent, day: Date): boolean {
   return event.start < addDays(day, 1) && event.end >= day;
 }
 
+{% if ui_views.server %}
+/**
+ * The records of a view on a calendar, in a week or a month. Each day
+ * shows the records that start, last, or end on it, with their times. The
+ * view keeps the mode and the shown date, and loads the records of the
+ * shown days.
+ */
+export function CalendarGrid({
+  events,
+  mode,
+  anchor,
+  onModeChange: setMode,
+  onAnchorChange: setAnchor,
+  dateOnly,
+}: {
+  events: CalendarEvent[];
+  mode: CalendarMode;
+  /** A day of the shown week or month. */
+  anchor: Date;
+  onModeChange: (mode: CalendarMode) => void;
+  onAnchorChange: (anchor: Date) => void;
+  /** True if the records have dates without a time of day. */
+  dateOnly: boolean;
+}) {
+{% else %}
 /**
  * The records of a view on a calendar, in a week or a month. Each day
  * shows the records that start, last, or end on it, with their times.
@@ -91,6 +126,7 @@ export function CalendarGrid({
 }) {
   const [mode, setMode] = useState<CalendarMode>(initialMode);
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+{% endif %}
   const first = firstDay(anchor, mode);
   const days = Array.from({ length: DAY_COUNT[mode] }, (_, index) => addDays(first, index));
   const today = startOfDay(new Date()).getTime();
@@ -102,10 +138,15 @@ export function CalendarGrid({
 {% else %}
       : `${rangeFormat.format(first)} – ${rangeFormat.format(addDays(first, 6))}`;
 {% endif %}
+{% if ui_views.server %}
+  const move = (step: number) =>
+    setAnchor(mode === "month" ? new Date(anchor.getFullYear(), anchor.getMonth() + step, 1) : addDays(anchor, 7 * step));
+{% else %}
   const move = (step: number) =>
     setAnchor((date) =>
       mode === "month" ? new Date(date.getFullYear(), date.getMonth() + step, 1) : addDays(date, 7 * step),
     );
+{% endif %}
 
   return (
     <div className="space-y-3">

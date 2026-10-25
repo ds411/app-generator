@@ -1374,6 +1374,7 @@ use in the app does not show.
   `No value has this name.`, `Clear the filter`, `Clear {label}`.
 - Boards and calendars: `Move to`, `Drop a card here`,
   `The column has more than {limit} cards.`, `The card did not move.`,
+  `Show more` (a board of the API client),
   `Previous week`, `Next week`, `Previous month`, `Next month`, `Today`,
   `Calendar mode`, `Week`, `Month`.
 - Date pickers: `Navigation bar`, `Go to the next month`,
@@ -1382,7 +1383,8 @@ use in the app does not show.
 - Dashboards: `View all`, `No data yet`, `Other`, `None`.
 - Actions and forms: `Cancel`, `Close`, `Saved.`,
   `The action did not succeed.`, `The form did not save.`,
-  `Select a value`, `Search`, `No results.`, `Select a record`,
+  `Select a value`, `Search`, `No results.`, `Loading…` (a search on
+  the server), `Select a record`,
   `Select records`, `Clear`, `Remove {label}`, `Pick a date`, `Time`,
   `Command Palette`, `Search for a command to run...`.
 - The messages of the form fields: `Enter a value.`, `Select a value.`,

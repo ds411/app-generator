@@ -10,7 +10,10 @@ record (`row`) and the related records (`lookups`), for example
 The React app with the FastAPI app (`x-react-data: api`) gives the names
 of the list endpoints (`ListEndpoint`). Then a table or a card list sends
 its filters, its sort, and its page to the API, and loads one page
-(`ServerPlan`). The related records still come from the browser.
+(`ServerPlan`). A board loads one page for each column, and a calendar
+loads the records of the shown dates. The related records are the
+records of the IDs on the page (`RelatedStep`), and a select filter of a
+relation searches its options on the server.
 """
 
 import re
@@ -40,7 +43,7 @@ from appgen.dsl.ui.common import (
     OperationAction,
     States,
 )
-from appgen.dsl.ui.fields import resolve_path
+from appgen.dsl.ui.fields import SINGLE_KINDS, resolve_path
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
     BadgeSet,
@@ -151,6 +154,8 @@ class FilterPlan:
     multiple: bool = False
     options: str | None = None
     """A TypeScript expression of the options `{ value, label }[]` of a select."""
+    source: str | None = None
+    """For a select of a relation that searches the server: the options of the target."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,9 +261,32 @@ class ListEndpoint:
     """The names of the list endpoint of an entity, for the views that send their query to it."""
 
     params: dict[str, list[str]]
-    """The names of the query parameters of each element ID: a filter, a relation, or a tab."""
+    """The names of the query parameters of each element ID: a filter, a relation, a tab,
+    a board (the group field), or a calendar (the date ranges)."""
     sort_keys: frozenset[str]
     """The field paths that the endpoint can sort by. A sort key has the name of its path."""
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedKey:
+    """A key with the ID, or the list of IDs, of related records."""
+
+    source: str | None
+    """The camel-case name of the entity whose related records have the key, or None for the
+    records of the view."""
+    key: str
+
+
+@dataclass(slots=True)
+class RelatedStep:
+    """The related records of one entity that a view loads by ID (`loadRelated`)."""
+
+    entity: str
+    keys: list[RelatedKey] = field(default_factory=list[RelatedKey])
+
+    @property
+    def var(self) -> str:
+        return camel(self.entity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +309,10 @@ class ServerPlan:
     """The sort keys of the sort of the view, with `-` for descending order."""
     columns: dict[str, str] = field(default_factory=dict[str, str])
     """The sort key of each sortable column, by the ID of the column."""
+    group: str | None = None
+    """For a board: the query parameter of the group field."""
+    range: tuple[str, str] | None = None
+    """For a calendar: the query parameters of the first and of the last shown day."""
 
 
 @dataclass(slots=True)
@@ -332,6 +364,8 @@ class ViewPlan:
     """The Lucide icons that the view uses."""
     server: ServerPlan | None = None
     """The query that the view sends to the API, or None if the view reads all records."""
+    related: list[list[RelatedStep]] = field(default_factory=list[list[RelatedStep]])
+    """With a server plan: the related records that the view loads by ID, in stages."""
 
     @property
     def type(self) -> str:
@@ -340,6 +374,13 @@ class ViewPlan:
     @property
     def var(self) -> str:
         return camel(self.entity)
+
+    @property
+    def sources(self) -> list[str]:
+        """The entities whose options the select filters search on the server, sorted by name."""
+        return sorted(
+            {f.value.target for f in self.filters if f.source and f.value and f.value.target}
+        )
 
     def code(self) -> str:
         """Return the TypeScript expressions of the view, to find the helpers that they call.
@@ -443,8 +484,8 @@ class ViewContext:
     ) -> None:
         """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
 
-        With `endpoints` (the list endpoints by entity name), the tables and
-        the card lists send their query to the API.
+        With `endpoints` (the list endpoints by entity name), the list views
+        send their query to the API.
         """
         self.definition = definition
         self.with_forms = forms
@@ -465,7 +506,7 @@ class ViewContext:
         # A local import: the forms module imports this module.
         from appgen.bindings.shared.forms import FormContext
 
-        self.forms = FormContext(definition)
+        self.forms = FormContext(definition, server=bool(self.endpoints))
         self._details: dict[str, Any] = {}
         self._dashboards: dict[str, Any] = {}
         self._bars: dict[str, ActionBarPlan] = {}
@@ -479,7 +520,7 @@ class ViewContext:
 
     @property
     def server(self) -> bool:
-        """Return True if the tables and the card lists send their query to the API."""
+        """Return True if the views send their query to the API, and load related records by ID."""
         return bool(self.endpoints)
 
     @property
@@ -668,7 +709,10 @@ class ViewContext:
             found.add(kind)
             found |= plan.uses & values
             for f in plan.filters:
-                found.add("multi_select" if f.multiple else f.kind)
+                if f.source:
+                    found.add("record_select")
+                else:
+                    found.add("multi_select" if f.multiple else f.kind)
         for name in self.detail_views:
             found.add("detail")
             found |= self.detail_plan(name).uses & values
@@ -883,7 +927,10 @@ class ViewContext:
         plan.forms = self.form_refs(all_actions)
         plan.icons |= {a.action.icon for a in all_actions if a.action.icon}
         states = plan.states
-        plan.icons |= {s.icon for s in (states.empty, states.error) if s and s.icon}
+        # A calendar of the API shows its grid without records, and no empty state.
+        server_calendar = isinstance(view, CalendarView) and view.entity in self.endpoints
+        shown = (states.error,) if server_calendar else (states.empty, states.error)
+        plan.icons |= {s.icon for s in shown if s and s.icon}
         if isinstance(view, TableView):
             self._columns(plan, view)
         if isinstance(view, CardsView | BoardView):
@@ -895,18 +942,45 @@ class ViewContext:
         if plan.filters:
             plan.uses.add("filters")
         endpoint = self.endpoints.get(view.entity)
-        if endpoint is not None and isinstance(view, TableView | CardsView):
+        if endpoint is not None:
             plan.server = self._server(plan, view, endpoint)
+            plan.related = self.related(view.entity, paths + action_paths(view))
+            plan.lookups = sorted({*plan.lookups, *(s.entity for st in plan.related for s in st)})
         return plan
 
-    def _server(
-        self, plan: ViewPlan, view: TableView | CardsView, endpoint: ListEndpoint
-    ) -> ServerPlan:
+    def _server(self, plan: ViewPlan, view: View, endpoint: ListEndpoint) -> ServerPlan:
         """Return the query that a view sends to the list endpoint of its entity.
 
         A column without a sort key on the server cannot sort, and a sort of
-        the view without a sort key (a computed field) does not apply.
+        the view without a sort key (a computed field) does not apply. A
+        board sends the value of its group field for each column, and a
+        calendar the first and the last shown day.
         """
+        if isinstance(view, BoardView | CalendarView):
+            names = endpoint.params.get(view.id, [])
+            server = ServerPlan()
+            if isinstance(view, BoardView):
+                # The group field has the only parameter of the board.
+                wanted = names[:1] or [view.group_by]
+                server.group = wanted[0]
+                if view.sort is not None and view.sort.field in endpoint.sort_keys:
+                    server.sort.append(
+                        ("-" if view.sort.direction == "desc" else "") + view.sort.field
+                    )
+            else:
+                # A date range parameter has the name of its field path.
+                end = f"{view.end}_from"
+                first = end if end in names else f"{view.start}_from"
+                server.range = (first, f"{view.start}_to")
+                wanted = list(server.range)
+            missing = [name for name in wanted if name not in names]
+            if missing:
+                raise GenerationError(
+                    f"The list endpoint of {plan.entity} has no parameter {missing[0]} for "
+                    f"{view.id}."
+                )
+            return server
+        assert isinstance(view, TableView | CardsView)
         values: dict[str, list[str]] = {}
         for f in plan.filters:
             names = endpoint.params.get(f.element_id)
@@ -1122,6 +1196,60 @@ class ViewContext:
         """Return the related entities that the field paths of an entity go through."""
         return self._lookups(entity, paths)
 
+    def related(self, entity: str, paths: Iterable[str]) -> list[list[RelatedStep]]:
+        """Return the related records that the field paths of an entity read, in stages.
+
+        Each entity of `lookups_of` has a step with the keys that give the
+        IDs of its records. A step comes after the steps of the entities
+        whose records give its keys: the first stage reads only the records
+        of the view. In a cycle of relations, the first entity by name comes
+        first, and `loadRelated` loads the other IDs in a next round.
+        """
+        paths = list(paths)
+        steps = {name: RelatedStep(name) for name in sorted(self._lookups(entity, paths))}
+        for target, key in self._related_keys(entity, None, paths):
+            if key not in steps[target].keys:
+                steps[target].keys.append(key)
+        stages: list[list[RelatedStep]] = []
+        done: set[str] = set()
+        remaining = list(steps)
+        while remaining:
+            ready = [
+                name
+                for name in remaining
+                if all(
+                    k.source is None or k.source in done or k.source == camel(name)
+                    for k in steps[name].keys
+                )
+            ] or remaining[:1]
+            stages.append([steps[name] for name in ready])
+            done |= {camel(name) for name in ready}
+            remaining = [name for name in remaining if name not in ready]
+        return stages
+
+    def _related_keys(
+        self, entity: str, source: str | None, paths: Iterable[str]
+    ) -> list[tuple[str, RelatedKey]]:
+        """Return the target entity and the key of each relation of the field paths."""
+        found: list[tuple[str, RelatedKey]] = []
+        for path in paths:
+            current, holder = entity, source
+            for segment in path.split("."):
+                members = self.definition.entities[current]
+                relation = members.relations.get(segment)
+                if relation is None:
+                    computed = members.fields.get(segment)
+                    if computed is not None and computed.computed is not None:
+                        inner = expression_paths(parse_expression(computed.computed))
+                        found += self._related_keys(current, holder, inner)
+                    break
+                if relation.kind in SINGLE_KINDS:
+                    found.append((relation.target, RelatedKey(holder, camel(segment) + "Id")))
+                elif relation.kind == "many_to_many":
+                    found.append((relation.target, RelatedKey(holder, camel(segment))))
+                current, holder = relation.target, camel(relation.target)
+        return found
+
     def action_plans(
         self, entity: str, actions: Iterable[tuple[str, Action]], scope: str
     ) -> list[ActionPlan]:
@@ -1206,7 +1334,11 @@ class ViewContext:
                 value=value,
             )
         assert isinstance(filter_, SelectFilter)
-        options = self._options(value)
+        source = None
+        if self.server and value.target is not None:
+            options, source = None, f"{camel(value.target)}Options"
+        else:
+            options = self._options(value)
         if filter_.multiple:
             defaults = filter_.default if isinstance(filter_.default, list) else []
             default = js([str(item) for item in defaults if item is not None])
@@ -1227,6 +1359,7 @@ class ViewContext:
                 value=value,
                 multiple=True,
                 options=options,
+                source=source,
             )
         default_value = filter_.default
         default = js(str(default_value)) if isinstance(default_value, str | int) else "null"
@@ -1245,6 +1378,7 @@ class ViewContext:
             match=match,
             value=value,
             options=options,
+            source=source,
         )
 
     def _options(self, value: Value) -> str:
@@ -1356,6 +1490,12 @@ def _value_parts(code: str) -> set[str]:
 
 def _badge_name(camel_name: str | None, sets: dict[str, BadgeSet]) -> str | None:
     return next((name for name in sets if camel(name) == camel_name), None)
+
+
+def action_paths(view: View) -> list[str]:
+    """Return the field paths that the page parameters of the actions of a view read."""
+    actions = [*view.actions.values(), *getattr(view, "row_actions", {}).values()]
+    return [p for a in actions if isinstance(a, NavigateAction) for p in a.params.values()]
 
 
 def definition_display(entity: Entity) -> str:
@@ -1499,6 +1639,7 @@ def view_rules() -> tuple[Output, ...]:
                         ("filters", "date-range-filter", "'date_range' in ui_views.features"),
                         ("filters", "select-filter", "'select' in ui_views.features"),
                         ("filters", "multi-select-filter", "'multi_select' in ui_views.features"),
+                        ("filters", "record-filter", "'record_select' in ui_views.features"),
                     )
                 ),
             )

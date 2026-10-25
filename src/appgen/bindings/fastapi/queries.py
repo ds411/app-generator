@@ -13,9 +13,13 @@ subquery), and a sort key reads the related value with a correlated
 subquery. A computed field and a relation to many records have no sort
 key, because their values are not columns.
 
-A tab of a detail view that lists the records of a `many_to_many`
-relation adds `id`, a list of record IDs, to the list endpoint of the
-target. The React app sends it to load one page of the related records.
+Each list endpoint takes `id`, a list of record IDs: the React app
+sends it to load the related records of a page, and the records of a
+tab of a detail view that lists a `many_to_many` relation. `q` also
+searches the display field of the entity, so that a form can search the
+options of a reference field. A board adds a filter of its group field,
+so that it loads each column, and a calendar adds the date ranges of its
+start (and of its end), so that it loads the records of the shown dates.
 """
 
 from dataclasses import dataclass, field
@@ -24,9 +28,11 @@ from typing import TYPE_CHECKING
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call
 from appgen.bindings.shared.views import definition_display
 from appgen.dsl.model import AppDefinition
+from appgen.dsl.ui.fields import TEXT_TYPES
 from appgen.dsl.ui.views import (
     BoardView,
     BooleanFilter,
+    CalendarView,
     CardsView,
     DateRangeFilter,
     DetailTab,
@@ -299,12 +305,6 @@ class PyListQuery:
         return [k for k in self.sort_keys if k.ids]
 
     @property
-    def from_views(self) -> bool:
-        """True if a view adds a filter or a sort key to the endpoint."""
-        ids = [i for p in self.params for i in p.ids]
-        return any(i.startswith("ui.") for i in ids) or bool(self.view_sort_keys)
-
-    @property
     def sort_tests(self) -> bool:
         """True if the tests check the order of a sort key of a view."""
         return any(k.test for k in self.view_sort_keys)
@@ -322,6 +322,18 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
     Raise GenerationError if two parameters get the same name.
     """
     builder = _Builder(definition, entity)
+    builder.add(
+        PyParam(
+            "id",
+            "id",
+            "list[UUID]",
+            "in",
+            PyPath("id", (), entity),
+            [entity.id],
+            "The IDs of the records.",
+            test=_ID_TEST,
+        )
+    )
     for f in entity.filters:
         path = PyPath(f.name, (), entity, field=f)
         builder.add(PyParam(f.name, f.attr, f.read_type, "eq", path, [f.id]))
@@ -341,6 +353,10 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
         if isinstance(view, TableView | CardsView):
             for filter_ in view.filters.values():
                 builder.filter(filter_)
+        if isinstance(view, BoardView):
+            builder.board(view)
+        if isinstance(view, CalendarView):
+            builder.calendar(view)
         if isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
             builder.sort_key(view.sort.field, view.sort.id)
         if isinstance(view, TableView):
@@ -376,51 +392,63 @@ class _Builder:
             self.search_ids.append(filter_.id)
             return
         path = self.resolve(filter_.field)
-        name, attr = _names(path)
         if isinstance(filter_, DateRangeFilter):
-            for end, word in (("from", "first"), ("to", "last")):
-                existing = self.params.get(f"{name}_{end}")
-                if (
-                    existing is not None
-                    and existing.kind == end
-                    and existing.path.path == path.path
-                ):
-                    existing.ids.append(filter_.id)
-                    continue
-                description = f"The {word} day of `{path.path}`."
-                param = PyParam(f"{name}_{end}", f"{attr}_{end}", "dt.date", end, path)
-                param.ids, param.description, param.test = [filter_.id], description, _test(path)
-                self.add(param)
-            return
-        if isinstance(filter_, BooleanFilter):
-            kind, type_ = "eq", "bool"
+            self.date_range(path, filter_.id)
+        elif isinstance(filter_, BooleanFilter):
+            self.value(path, "eq", "bool", filter_.id)
         else:
-            kind, type_ = "in", f"list[{_value_type(path)}]"
+            self.value(path, "in", f"list[{_value_type(path)}]", filter_.id)
+
+    def value(self, path: PyPath, kind: str, type_: str, element_id: str) -> None:
+        """Add a filter by a value (`eq`) or by a list of values (`in`) of a path."""
+        name, attr = _names(path)
         existing = self.params.get(name)
         if existing is not None and existing.path.path == path.path:
             if kind == "in":
                 existing.kind, existing.type = kind, type_
-            existing.ids.append(filter_.id)
+            existing.ids.append(element_id)
             existing.test = existing.test or _test(path)
             return
-        self.add(PyParam(name, attr, type_, kind, path, [filter_.id], test=_test(path)))
+        self.add(PyParam(name, attr, type_, kind, path, [element_id], test=_test(path)))
+
+    def date_range(self, path: PyPath, element_id: str) -> None:
+        """Add the first and the last day of a date or a date-time path."""
+        name, attr = _names(path)
+        for end, word in (("from", "first"), ("to", "last")):
+            existing = self.params.get(f"{name}_{end}")
+            if existing is not None and existing.kind == end and existing.path.path == path.path:
+                existing.ids.append(element_id)
+                continue
+            description = f"The {word} day of `{path.path}`."
+            param = PyParam(f"{name}_{end}", f"{attr}_{end}", "dt.date", end, path)
+            param.ids, param.description, param.test = [element_id], description, _test(path)
+            self.add(param)
+
+    def board(self, view: BoardView) -> None:
+        """Add the filter of the group field of a board: the board loads each column."""
+        path = self.resolve(view.group_by)
+        self.value(path, "in", f"list[{_value_type(path)}]", view.id)
+
+    def calendar(self, view: CalendarView) -> None:
+        """Add the date ranges that a calendar sends for the shown days.
+
+        A calendar with a required end loads the records that start before
+        the last day and end after the first day. Else it loads the records
+        that start in the shown days.
+        """
+        self.date_range(self.resolve(view.start), view.id)
+        if view.end is not None:
+            end = self.resolve(view.end)
+            if end.field is not None and end.field.required:
+                self.date_range(end, view.id)
 
     def tab(self, owner: str, tab: DetailTab) -> None:
-        """Add `id` for a tab that lists the records of a `many_to_many` relation."""
+        """Trace `id` to a tab that lists the records of a `many_to_many` relation."""
         relation = self.definition.entities[owner].relations.get(tab.relation or "")
         if relation is None or relation.kind != "many_to_many":
             return
-        if relation.target != self.entity.name:
-            return
-        existing = self.params.get("id")
-        if existing is not None and existing.path.path == "id":
-            existing.ids.append(tab.id)
-            return
-        path = PyPath("id", (), self.entity)
-        description = "The IDs of the records."
-        self.add(
-            PyParam("id", "id", "list[UUID]", "in", path, [tab.id], description, test=_ID_TEST)
-        )
+        if relation.target == self.entity.name:
+            self.params["id"].ids.append(tab.id)
 
     def sort_key(self, path_text: str, element_id: str) -> None:
         path = self.resolve(path_text)
@@ -435,6 +463,14 @@ class _Builder:
         key = self.keys.setdefault(path_text, PySortKey(path_text, path))
         key.test = key.test or _test(path)
         key.ids.append(element_id)
+
+    def display(self) -> PyPath | None:
+        """Return the display field of the entity if it is a text: `q` searches it."""
+        name = definition_display(self.definition.entities[self.entity.name])
+        found = next((f for f in self.entity.fields if f.name == name), None)
+        if found is None or found.type not in TEXT_TYPES:
+            return None
+        return PyPath(name, (), self.entity, field=found)
 
     def resolve(self, path: str) -> PyPath:
         entity = self.entity
@@ -457,6 +493,11 @@ class _Builder:
 
     def done(self) -> PyListQuery:
         params = list(self.params.values())
+        display = self.display()
+        if display is not None:
+            self.search.setdefault(display.path, display)
+            assert display.field is not None
+            self.search_ids.append(display.field.id)
         if self.search:
             paths = list(self.search.values())
             fields = ", ".join(f"`{p.path}`" for p in paths)

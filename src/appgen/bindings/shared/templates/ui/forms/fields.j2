@@ -7,13 +7,14 @@
 {% set id = '"' ~ (prefix | kebab) ~ "-" ~ (f.name | kebab) ~ '"' %}
 {% set invalid = "Boolean(errors." ~ f.key ~ ")" %}
 {% set placeholder = (" placeholder=" ~ jsx_attr(f.placeholder)) if f.placeholder else "" %}
-{% set options = (f.key | snake | upper ~ "_OPTIONS") if not f.target else f.options | replace("lookups.", "related.") %}
+{% set options = (f.key | snake | upper ~ "_OPTIONS") if not f.target else (f.options or "") | replace("lookups.", "related.") %}
+{% set choices = ("source={" ~ f.source ~ "}") if f.source else ("options={" ~ options ~ "}") %}
 {% if f.widget == "custom" %}
 <{{ f.gap_name }} id={{ id }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value ?? {{ f.empty }})} disabled={busy} />
 {%- elif f.kind == "many" %}
-<RelationMultiSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+<RelationMultiSelect id={{ id }}{{ placeholder }} {{ choices }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.kind == "one" and f.widget != "select" and f.widget != "radio" %}
-<RelationSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
+<RelationSelect id={{ id }}{{ placeholder }} {{ choices }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "select" %}
 <OptionSelect id={{ id }}{{ placeholder }} options={ {{- options }}} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value as Values[{{ js(f.key) }}])}{% if not f.required %} clearable{% endif %} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "radio" %}

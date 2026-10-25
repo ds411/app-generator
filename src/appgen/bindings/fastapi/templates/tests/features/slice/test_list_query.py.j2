@@ -18,7 +18,7 @@ async def {{ fn }}(
 {% set selects = query.params | selectattr("kind", "eq", "in") | list %}
 """The tests of the filters, the search, and the sort of `{{ op.name }}`: GET {{ url }}.
 
-The parameters and the sort keys come from the views of the entity {{ e.name }}.
+The parameters and the sort keys come from the fields and the views of the entity {{ e.name }}.
 """
 
 {% set ns = namespace(lines=[

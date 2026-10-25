@@ -224,7 +224,7 @@ BINDING = Binding(
             template="tests/features/slice/test_list_query.py.j2",
             path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}_query.py",
             for_each="operation",
-            when="element.kind == 'list' and py.entity(element.entity).query.from_views",
+            when="element.kind == 'list'",
         ),
         Output(template="package.py.j2", path="app/integrations/__init__.py", when="py_apis"),
         Output(

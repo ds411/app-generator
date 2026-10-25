@@ -1,0 +1,57 @@
+{{ trace_header("app") }}
+import { useEffect, useState } from "react";
+
+import type { OptionSource, RecordOption } from "@/shared/api";
+
+/** The time to wait after a key, before a search asks the server. */
+const SEARCH_DELAY_MS = 200;
+
+/**
+ * Return the options of a search on the server: the first records that
+ * have the words of the text. A new text asks again, after a short delay.
+ */
+export function useOptionSearch(source: OptionSource, text: string): { options: RecordOption[]; loading: boolean } {
+  const [state, setState] = useState<{ text: string; options: RecordOption[] } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(
+      () => {
+        source.search(text).then(
+          (options) => active && setState({ text, options }),
+          () => active && setState({ text, options: [] }),
+        );
+      },
+      text === "" ? 0 : SEARCH_DELAY_MS,
+    );
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [source, text]);
+  return { options: state?.options ?? [], loading: state?.text !== text };
+}
+
+/** Return the texts of the records with the IDs, for example the selected records of a choice. */
+export function useOptionLabels(source: OptionSource, ids: readonly string[]): Map<string, string> {
+  const key = ids.join(",");
+  const [labels, setLabels] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => {
+    if (key === "") return;
+    let active = true;
+    source.labels(key.split(",")).then(
+      (options) => {
+        if (!active) return;
+        setLabels((current) => {
+          const next = new Map(current);
+          for (const option of options) next.set(option.value, option.label);
+          return next;
+        });
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [source, key]);
+  return labels;
+}

@@ -51,7 +51,11 @@ import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 import { useState } from "react";
 {% endif %}
 
+{% if plan.related and plan.lookups %}
+import { loadRelated, NotFoundError, type RelatedStep } from "@/shared/api";
+{% else %}
 import { NotFoundError } from "@/shared/api";
+{% endif %}
 {% for entity in ([plan.entity] + plan.lookups) | unique %}
 import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
@@ -70,7 +74,7 @@ import { formatValue } from "@/shared/lib/format";
 {% if plan.needs("pageHref") %}
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
-{% if plan.lookups %}
+{% if plan.lookups and plan.related is none %}
 import { byId } from "@/shared/lib/query";
 {% endif %}
 import { useResource } from "@/shared/lib/use-resource";
@@ -115,9 +119,19 @@ type ViewData = { record: {{ plan.type }}; lookups: Lookups };
 type ViewData = { record: {{ plan.type }} };
 {% endif %}
 
+{% if plan.related and plan.lookups %}
+{{ m.related_steps(plan.related) }}
+
+/** Read the record, and the related records that it shows: the records of their IDs. */
+async function load(id: string): Promise<ViewData> {
+  const record = await {{ plan.var }}Api.get(id);
+  return { record, lookups: (await loadRelated([record], RELATED)) as Lookups };
+{% else %}
 /** Read the record{% if plan.lookups %}, and the related records that its fields show{% endif %}. */
 async function load(id: string): Promise<ViewData> {
-{% if plan.lookups %}
+{% endif %}
+{% if plan.related and plan.lookups %}
+{% elif plan.lookups %}
   const [record, {% for entity in plan.lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
     {{ plan.var }}Api.get(id),
 {% for entity in plan.lookups %}

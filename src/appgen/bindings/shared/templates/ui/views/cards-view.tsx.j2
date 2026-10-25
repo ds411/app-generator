@@ -80,7 +80,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {{ m.action_lookups(plan) -}}
 {% if plan.filters %}
   const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
-{% if plan.filters | selectattr("kind", "eq", "select") | list %}
+{% if plan.filters | selectattr("options") | list %}
   const options = filterOptions(lookups);
 {% endif %}
 {% if not plan.server %}

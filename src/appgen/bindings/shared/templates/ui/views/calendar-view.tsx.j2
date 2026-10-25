@@ -5,7 +5,11 @@
 {{ trace_header(element_id) }}
 "use client";
 
+{% if plan.server %}
+{% set ui_lines = ['import { addDays, type CalendarEvent, CalendarGrid, type CalendarMode, shownDays, startOfDay } from "@/shared/ui/calendar-grid";', 'import { toDate } from "@/shared/lib/format";', 'import { isoDay, sortBy } from "@/shared/lib/query";'] %}
+{% else %}
 {% set ui_lines = ['import { type CalendarEvent, CalendarGrid } from "@/shared/ui/calendar-grid";', 'import { toDate } from "@/shared/lib/format";'] %}
+{% endif %}
 {{ m.imports(plan, "calendar", ui=ui_lines) }}
 
 {{ m.data(plan) }}
@@ -25,14 +29,16 @@ function toEvents(rows: {{ plan.type }}[], {{ lookups_param(cal.label ~ " " ~ (c
     if (start === null) return [];
 {% if cal.end %}
     const end = eventDate({{ cal.end.expr }});
-{% else %}
-    const end = null;
 {% endif %}
     return [
       {
         id: row.id,
         start,
+{% if cal.end %}
         end: end !== null && end > start ? end : start,
+{% else %}
+        end: start,
+{% endif %}
         label: {{ cal.label }},
 {% if cal.href %}
         href: {{ cal.href }},
@@ -43,24 +49,63 @@ function toEvents(rows: {{ plan.type }}[], {{ lookups_param(cal.label ~ " " ~ (c
   return sortBy(events, (event) => event.start.getTime());
 }
 
+{% if plan.server %}
+type ViewData = { records: {{ plan.type }}[]; lookups: Lookups };
+
+/**
+ * Load the records of the shown days, and their related records. The query
+ * adds one day at each end: the server compares the dates in UTC.
+ */
+async function loadDays(params: ApiParams, first: Date, last: Date): Promise<ViewData> {
+  const records = await {{ plan.var }}Api.all({
+    ...params,
+    {{ js(plan.server.range[0]) }}: isoDay(addDays(first, -1)),
+    {{ js(plan.server.range[1]) }}: isoDay(addDays(last, 1)),
+  });
+  return { records, lookups: await loadLookups(records) };
+}
+
+export type {{ name | pascal }}ViewProps = {
+  /** Query parameters of the list endpoint that the view adds, for example the records of one parent. */
+  params?: ApiParams;
+};
+{% else %}
 export type {{ name | pascal }}ViewProps = {
   /** Show only the records that pass this test, for example the records of one parent. */
   where?: (record: {{ plan.type }}) => boolean;
 };
+{% endif %}
 
 {% if view.title %}
 /** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
 {% endif %}
+{% if plan.server %}
+export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps) {
+  const [mode, setMode] = useState<CalendarMode>({{ js(cal.mode) }});
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+  const { first, last } = shownDays(anchor, mode);
+  const resource = useResource(
+    JSON.stringify([params, first, last]),
+    () => loadDays(params ?? {}, first, last),
+    subscribe,
+    { keep: true },
+  );
+{% else %}
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
+{% endif %}
 {% if plan.actions %}
 {{ m.runner(plan) }}
 {% endif %}
 
 {{ m.states(plan, "cards") }}
 
+{% if plan.server %}
+  const { records: all, lookups } = resource.data;
+{% else %}
   const { records, lookups } = resource.data;
   const all = where ? records.filter(where) : records;
+{% endif %}
 
   return (
     <div className="space-y-4">
@@ -71,11 +116,23 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
         ))}
       </div>
 {% endif %}
+{% if plan.server %}
+      {/* The grid shows the days without records too: the buttons of the grid show other days. */}
+      <CalendarGrid
+        events={toEvents(all, lookups)}
+        mode={mode}
+        anchor={anchor}
+        onModeChange={setMode}
+        onAnchorChange={setAnchor}
+        dateOnly={ {{- "true" if cal.date_only else "false" }}}
+      />
+{% else %}
       {all.length === 0 ? (
 {{ m.empty_state(plan) | indent(2, true) }}
       ) : (
         <CalendarGrid events={toEvents(all, lookups)} initialMode={{ js(cal.mode) }} dateOnly={ {{- "true" if cal.date_only else "false" }}} />
       )}
+{% endif %}
 {% if plan.actions %}
       {dialog}
 {% endif %}
