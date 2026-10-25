@@ -1,12 +1,18 @@
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{# The sign-in returns a status: only the password reset and the verification return an ActionResult. #}
+{% set results = definition.auth.password_reset or verify %}
 {{ trace_header(definition.auth.id) }}
 "use server";
 
 import { cookies } from "next/headers";
 {% if definition.auth.password %}
 import { z } from "zod";
+{% if results or i18n %}
 
+{% endif %}
+{% if results %}
 import type { ActionResult } from "@/shared/api";
+{% endif %}
 {% if i18n %}
 import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
