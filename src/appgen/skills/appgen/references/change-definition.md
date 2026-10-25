@@ -37,6 +37,9 @@ A new element does not change the IDs of the other elements, so the
 traces of the hand-written code stay valid. A new custom element gives
 a new gap with a new extension file. A new field needs a database
 migration in the FastAPI app (see [Database changes](#database-changes)).
+`translatable: true` on a field that exists also needs one: it adds the
+column `<field>_translations`, and the records keep their values in the
+default language.
 
 ## Rename an element
 

@@ -33,6 +33,10 @@ class {{ e.name }}(Record):
 {% for f in e.fields %}
     {{ trace(f.id) }}
     {{ f.column() }}
+{% if f.translatable %}
+    {{ trace(f.id) }}
+    {{ f.translations_column() }}
+{% endif %}
 {% endfor %}
 {% for r in e.relations %}
     {{ trace(r.id) }}

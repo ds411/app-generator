@@ -119,10 +119,22 @@ class PyField:
     """True if a test can compare the JSON value that it sends with the response."""
     sample: str
     """A Python expression for a valid JSON value. It can use the integer `n`."""
+    translatable: bool = False
+    """True if the records have a value in each language (ADR 0026)."""
 
     @property
     def aliased(self) -> bool:
         return self.attr != self.name
+
+    @property
+    def translations_attr(self) -> str:
+        """The attribute of the values of the other languages, for example `title_translations`."""
+        return f"{self.attr}_translations"
+
+    @property
+    def translations_name(self) -> str:
+        """The column and the JSON name of the values of the languages of a translatable field."""
+        return f"{self.name}_translations"
 
     @property
     def nullable(self) -> bool:
@@ -147,6 +159,58 @@ class PyField:
         if self.unique:
             args.append("unique=True")
         return call(f"{self.attr}: Mapped[{type_}] = ", "mapped_column", args)
+
+    def translations_column(self) -> str:
+        """Return the model attribute of the values of the other languages (a JSON object)."""
+        args = [f'"{self.translations_name}"'] if self.aliased else []
+        args.append("JSON_TYPE")
+        return call(
+            f"{self.translations_attr}: Mapped[dict[str, str] | None] = ", "mapped_column", args
+        )
+
+    def translations_migration_column(self) -> str:
+        """Return the `sa.Column` of the values of the other languages in the migration."""
+        args = [f'"{self.translations_name}"', _MIGRATION_TYPES["JSON_TYPE"], "nullable=True"]
+        return call("", "sa.Column", args, 8, ",")
+
+    @property
+    def text_rules(self) -> list[str]:
+        """The rules of a value of a translatable field, as the arguments of `Field`."""
+        return [f"{k}={v}" for k, v in self.constraints if k not in ("title", "description")]
+
+    @property
+    def text_type(self) -> str:
+        """The type of a value of a translatable field in one language, for example `TitleText`."""
+        return f"{pascal(self.name)}Text" if self.text_rules else "str"
+
+    def text_alias(self) -> str:
+        """Return the type alias of a value with the rules of the field, in the format of Ruff."""
+        field_call = f"Field({', '.join(self.text_rules)})"
+        line = f"{self.text_type} = Annotated[str, {field_call}]"
+        if len(line) <= LINE_LENGTH:
+            return line
+        if len(f"    str, {field_call}") <= LINE_LENGTH:
+            return f"{self.text_type} = Annotated[\n    str, {field_call}\n]"
+        rules = "".join(f"        {rule},\n" for rule in self.text_rules)
+        return f"{self.text_type} = Annotated[\n    str,\n    Field(\n{rules}    ),\n]"
+
+    def translations_declaration(self, mode: str) -> str:
+        """Return the declaration of the values of each language in a schema.
+
+        The keys are the codes of the languages. In the input, a value has
+        the rules of the field (`text_alias`), and null removes a translation.
+        """
+        default = "None"
+        if self.aliased:
+            default = f'Field(default=None, alias="{self.translations_name}")'
+        if mode == "read":
+            type_ = "dict[str, str] | None"
+        else:
+            type_ = f"dict[Language, {self.text_type} | None] | None"
+        line = f"{self.translations_attr}: {type_} = {default}"
+        if len(line) + 4 <= LINE_LENGTH:
+            return line
+        return f"{self.translations_attr}: (\n        {type_}\n    ) = {default}"
 
     def migration_column(self) -> str:
         """Return the `sa.Column` of the field in the migration."""
@@ -867,6 +931,45 @@ class PyEntity:
         return [o for o in self.operations if o.custom]
 
     @property
+    def translatable(self) -> list[PyField]:
+        """The translatable fields: the records have a value in each language (ADR 0026)."""
+        return [f for f in self.fields if f.translatable]
+
+    @property
+    def translatable_names(self) -> str:
+        """The attributes of the translatable fields, as the arguments of a call."""
+        return ", ".join(f'"{f.attr}"' for f in self.translatable)
+
+    @property
+    def required_translatable(self) -> list[PyField]:
+        """The required translatable fields: the default language must keep a value."""
+        return [f for f in self.translatable if f.required]
+
+    @property
+    def translations_query(self) -> bool:
+        """True if the reads take `translations=all`: the read schema has translatable fields.
+
+        The read schema has the translatable fields of the entity, and of
+        the records that it embeds.
+        """
+        return bool(self.translatable) or any(
+            self.target(r).translatable for r in self.embedded if r.target != self.name
+        )
+
+    def router_dependencies(self, op: PyOperation) -> list[str]:
+        """Return the dependencies of an operation in the router of the slice.
+
+        A protected operation needs the user. An operation that returns a
+        record with translatable fields, except a list, takes the query
+        parameter `translations` (ADR 0026). A list declares it in its query.
+        """
+        dependencies = [f"Depends({self.guard})"] if op.protected else []
+        returns = op.returns if op.custom else self.name if op.kind != "delete" else None
+        if op.kind != "list" and returns and self.app_entities[returns].translations_query:
+            dependencies.append("Depends(translations_query)")
+        return dependencies
+
+    @property
     def required_parents(self) -> list[PyRelation]:
         """The foreign keys that a test factory fills with a new record of the target."""
         return [r for r in self.fk_relations if r.required and r.target != self.name]
@@ -945,8 +1048,11 @@ class PyEntity:
         if self.owner_path is not None:
             for model in self.owner_path.models(self):
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
-        if self.translated:
-            lines.add("from app.core.i18n import t")
+        i18n = {"t"} if self.translated else set[str]()
+        if self.translatable:
+            i18n.add("store_translations")
+        if i18n:
+            lines.add(from_import("app.core.i18n", i18n))
         checks = {r.kind for r in self.check_rules}
         if checks:
             names = {"compare"} if "compare" in checks else set[str]()
@@ -971,14 +1077,20 @@ class PyEntity:
             n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
         }
         owner = op is not None and op.scope_action is not None
+        typing = {"Annotated"} | ({"Literal"} if self.translations_query else set[str]())
+        # Without sort keys, `SORTABLE` is an empty dict with a type.
+        typing |= set[str]() if query.sort_keys else {"Any"}
         lines = {
-            # Without sort keys, `SORTABLE` is an empty dict with a type.
-            "from typing import Annotated" + ("" if query.sort_keys else ", Any"),
+            from_import("typing", typing),
             "from fastapi import APIRouter, Depends, Query"
             if owner
             else "from fastapi import APIRouter, Query",
             "from pydantic import ConfigDict"
-            + (", Field" if any("Field(" in d for d in declarations) else ""),
+            + (
+                ", Field"
+                if self.translations_query or any("Field(" in d for d in declarations)
+                else ""
+            ),
             "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
             "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
@@ -1011,17 +1123,21 @@ class PyEntity:
                 "from app.core.access import RecordScope, scope_of",
                 f"from app.features.{self.slice} import repository",
             }
+        if self.translations_query:
+            lines.add("from app.core.i18n import TRANSLATIONS, show_translations")
         return import_block(lines)
 
     def router_imports(self) -> str:
         """Return the import block of the router module of the slice."""
         lines = {"from fastapi import APIRouter"}
-        if any(o.protected for o in self.operations):
-            lines |= {
-                "from fastapi import APIRouter, Depends",
-                f"from app.core.{self.guard_module} import {self.guard}",
-            }
+        dependencies = {d for o in self.operations for d in self.router_dependencies(o)}
+        if dependencies:
             lines.discard("from fastapi import APIRouter")
+            lines.add("from fastapi import APIRouter, Depends")
+        if any(o.protected for o in self.operations):
+            lines.add(f"from app.core.{self.guard_module} import {self.guard}")
+        if "Depends(translations_query)" in dependencies:
+            lines.add("from app.core.i18n import translations_query")
         if self.operations:
             lines.add(
                 from_import(f"app.features.{self.slice}", {o.module for o in self.operations})
@@ -1038,6 +1154,8 @@ class PyEntity:
         """Return the import block of the models module of the slice."""
         types = {f.model_type for f in self.fields} | {c.type for c in self.computed}
         sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
+        if self.translatable:
+            sa_types.add("JSON_TYPE")
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
@@ -1121,6 +1239,9 @@ class PyEntity:
             for m in ("create", "update", "read")
             for d in r.declarations(m)
         ]
+        declarations += [
+            f.translations_declaration(m) for f in self.translatable for m in ("create", "read")
+        ]
         pydantic = {"Field"} if any("Field(" in d for d in declarations) else set[str]()
         for name in ("AwareDatetime", "EmailStr", "JsonValue"):
             if name in types:
@@ -1128,15 +1249,26 @@ class PyEntity:
         if self.sign_up_fields is not None:
             # The password of the sign-up schema has a minimum length.
             pydantic.add("Field")
-        if self.not_null:
+        typing: set[str] = set()
+        if self.not_null or self.translatable:
             pydantic.add("model_validator")
-            lines.add("from typing import Self")
+            typing.add("Self")
+        if any(f.text_rules for f in self.translatable):
+            pydantic.add("Field")
+            typing.add("Annotated")
+        if typing:
+            lines.add(from_import("typing", typing))
         if pydantic:
             lines.add(from_import("pydantic", pydantic))
         core = {"InputModel", "ReadModel"}
         if self.not_null:
             core.add("reject_null")
         lines.add(from_import("app.core.schemas", core))
+        if self.translatable:
+            i18n = {"Language", "translated"}
+            if self.required_translatable:
+                i18n.add("reject_empty_default")
+            lines.add(from_import("app.core.i18n", i18n))
         if "UrlStr" in types:
             lines.add("from app.core.types import UrlStr")
         if self.enums:
@@ -1207,6 +1339,11 @@ class PyApp:
     @property
     def join_tables(self) -> list[PyJoinTable]:
         return [t for e in self.entities.values() for t in e.join_tables]
+
+    @property
+    def translatable(self) -> bool:
+        """True if an entity has a translatable field (ADR 0026)."""
+        return any(e.translatable for e in self.entities.values())
 
     @property
     def openapi_schemas(self) -> list[tuple[str, str]]:
@@ -1798,6 +1935,7 @@ def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
         sortable=f.type in _ORDERED_TYPES or f.type in ("boolean", "enum", "uuid"),
         exact=f.type in _EXACT_TYPES,
         sample=_sample(f, enum),
+        translatable=f.translatable,
     )
 
 

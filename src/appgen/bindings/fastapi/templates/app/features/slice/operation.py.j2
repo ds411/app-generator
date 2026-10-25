@@ -48,6 +48,9 @@ class {{ op.name | pascal }}Query(PageQuery):
 {% endfor %}
     {{ p.declaration() }}
 {% endfor %}
+{% if e.translations_query %}
+    translations: Literal["all"] | None = Field(default=None, description=TRANSLATIONS)
+{% endif %}
 {% if e.query.aliases %}
 
 
@@ -165,12 +168,18 @@ async def {{ op.name }}(
 {% else %}
     statement = select({{ e.name }})
 {% endif %}
+{% if e.translations_query %}
+    show_translations(query.translations)
+{% endif %}
 {% else %}
 async def {{ op.name }}(
     query: Annotated[{{ op.name | pascal }}Query, Query()], session: SessionDep
 ) -> Page[{{ e.name }}Read]:
     """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
     statement = select({{ e.name }})
+{% if e.translations_query %}
+    show_translations(query.translations)
+{% endif %}
 {% endif %}
 {% for p in e.query.params %}
 {% for line in p.where_lines() %}

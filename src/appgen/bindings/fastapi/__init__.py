@@ -228,6 +228,12 @@ BINDING = Binding(
             for_each="operation",
         ),
         Output(
+            template="tests/features/slice/test_translations.py.j2",
+            path=_TESTS + "/test_translations.py",
+            for_each="entity",
+            when="py.entity(name).translatable and i18n_test",
+        ),
+        Output(
             template="tests/features/slice/test_list_query.py.j2",
             path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}_query.py",
             for_each="operation",

@@ -19,7 +19,8 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-{% if py.entity_order() | map(attribute="fields") | sum(start=[]) | selectattr("sa_type", "equalto", "JSON_TYPE") | list %}
+{% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -37,6 +38,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
 {% for f in e.fields %}
         {{ f.migration_column() }}
+{% if f.translatable %}
+        {{ f.translations_migration_column() }}
+{% endif %}
 {% endfor %}
 {% for r, column in e.fk_columns %}
         {{ column }}

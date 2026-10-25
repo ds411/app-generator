@@ -3,6 +3,12 @@
 """The schemas of the entity {{ e.name }}: the input and the output of the API."""
 
 {{ e.schema_imports() }}
+{% for f in e.translatable if f.text_rules %}
+
+{{ trace(f.id) }}
+{{ f.text_alias() }}
+"""A value of the field `{{ f.name }}` in one language."""
+{% endfor %}
 
 
 class {{ e.name }}Create(InputModel):
@@ -11,6 +17,10 @@ class {{ e.name }}Create(InputModel):
 {% for f in e.fields %}
     {{ trace(f.id) }}
     {{ f.declaration("create") }}
+{% if f.translatable %}
+    {{ trace(f.id) }}
+    {{ f.translations_declaration("create") }}
+{% endif %}
 {% endfor %}
 {% for r in e.input_relations %}
     {{ trace(r.id) }}
@@ -18,6 +28,12 @@ class {{ e.name }}Create(InputModel):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% if e.required_translatable %}
+
+    @model_validator(mode="after")
+    def _reject_empty_default(self) -> Self:
+        return reject_empty_default(self, {{ e.required_translatable | map(attribute="attr") | map("tojson") | join(", ") }})
+{% endif %}
 
 
 class {{ e.name }}Update(InputModel):
@@ -26,6 +42,10 @@ class {{ e.name }}Update(InputModel):
 {% for f in e.fields %}
     {{ trace(f.id) }}
     {{ f.declaration("update") }}
+{% if f.translatable %}
+    {{ trace(f.id) }}
+    {{ f.translations_declaration("update") }}
+{% endif %}
 {% endfor %}
 {% for r in e.input_relations %}
     {{ trace(r.id) }}
@@ -39,6 +59,12 @@ class {{ e.name }}Update(InputModel):
     def _reject_null(self) -> Self:
         {{ e.reject_null_call() }}
 {% endif %}
+{% if e.required_translatable %}
+
+    @model_validator(mode="after")
+    def _reject_empty_default(self) -> Self:
+        return reject_empty_default(self, {{ e.required_translatable | map(attribute="attr") | map("tojson") | join(", ") }})
+{% endif %}
 
 
 class {{ e.name }}Read(ReadModel):
@@ -48,6 +74,10 @@ class {{ e.name }}Read(ReadModel):
 {% for f in e.fields %}
     {{ trace(f.id) }}
     {{ f.declaration("read") }}
+{% if f.translatable %}
+    {{ trace(f.id) }}
+    {{ f.translations_declaration("read") }}
+{% endif %}
 {% endfor %}
 {% for c in e.computed %}
     {{ trace(c.id) }}
@@ -59,6 +89,13 @@ class {{ e.name }}Read(ReadModel):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% if e.translatable %}
+
+    @model_validator(mode="after")
+    def _translate(self) -> Self:
+        """Give the translatable fields the values of the language of the request (ADR 0026)."""
+        return translated(self, {{ e.translatable_names }})
+{% endif %}
 {% if e.sign_up_fields is not none %}
 
 

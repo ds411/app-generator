@@ -133,7 +133,7 @@ async def add(
     values = data.model_dump(by_alias=False)
     if (owner := _owner(scope)) is not None:
         values["{{ e.owner.fk_attr }}"] = owner
-    await _apply(session, record, values)
+    await _apply(session, record, values{{ ", created=True" if e.translatable }})
 {% else %}
     await _apply(session, record, data.model_dump(by_alias=False))
 {% endif %}
@@ -141,7 +141,7 @@ async def add(
 async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     """Validate a new record, and add it to the session without a commit. Return the record."""
     record = {{ e.name }}(id=uuid4())
-    await _apply(session, record, data.model_dump(by_alias=False))
+    await _apply(session, record, data.model_dump(by_alias=False){{ ", created=True" if e.translatable }})
 {% endif %}
 {% if e.workflows %}
     check_workflows(record, None)
@@ -286,8 +286,22 @@ async def hide(
 
 
 {% endif %}
+{% if e.translatable %}
+async def _apply(
+    session: AsyncSession,
+    record: {{ e.name }},
+    values: dict[str, Any],
+    created: bool = False,
+) -> None:
+    """Set the values of a request on a record. Check that the related records exist.
+
+    A translatable field gets the value of the language of the request (ADR 0026).
+    """
+    store_translations(record, values, {{ e.translatable_names }}, created=created)
+{% else %}
 async def _apply(session: AsyncSession, record: {{ e.name }}, values: dict[str, Any]) -> None:
     """Set the values of a request on a record. Check that the related records exist."""
+{% endif %}
 {% for r in e.fk_relations %}
     {{ trace(r.id) }}
     if values.get("{{ r.fk_attr }}") is not None:

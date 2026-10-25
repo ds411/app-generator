@@ -233,6 +233,10 @@ default is `USD`. The views, the forms, and the stat widgets of the
 dashboards use the currency of the field. `appgen validate` rejects a
 code that is not an ISO 4217 code.
 
+`translatable: true` gives a `string` or `text` field a value in each
+language of `translations` (see
+[Values in each language](#values-in-each-language)).
+
 ```yaml
 # in: entities.Project
 fields:
@@ -1620,6 +1624,50 @@ the locale in `Content-Language`. The title and the detail of the
 problem details, and the message of each error of the input, are in the
 language (see the list below). With `x-react-data: api`, the API client
 of the React app sends the locale of the selected language.
+
+### Values in each language
+
+A `string` or `text` field with `translatable: true` has a value in each
+language of `translations`, for example the title of a task. The other
+fields have one value for all languages.
+
+```yaml
+entities:
+  Task:
+    fields:
+      title: { type: string, required: true, max_length: 200, translatable: true }
+      description: { type: text, translatable: true }
+```
+
+- The record keeps the value of the default language in the field, and
+  the values of the other languages in `<field>_translations`. A value
+  of another language is optional: without it, the app shows the value
+  of the default language.
+- The search, the sort, the filters, and `unique` use the value of the
+  default language.
+- The rules of the field, for example `max_length`, apply to the value
+  of each language. A `required` field needs a value in the default
+  language.
+- `appgen validate` reports `translatable` without the section
+  `translations`, on a field of another type, on a computed field, and
+  on a param of an operation (`invalid-option`). Another field or relation cannot have
+  the name `<field>_translations` (`duplicate-name`).
+
+The FastAPI app reads and writes the values in the language of the
+request:
+
+- A read gives the value of the language of the request in the field,
+  else the value of the default language. `<field>_translations` is
+  null. With the query parameter `translations=all`, it has the values
+  of all languages by their codes, the default language included.
+- A create or a change sets the value of the language of the request. A
+  new record without a value of the default language takes the value as
+  its default value too. `<field>_translations` sets the value of each
+  language that it gives. Null or an empty text removes the value of a
+  language that is not the default language.
+- An app that exists gets the new column with the next migration
+  (`alembic revision --autogenerate`). The records keep their values as
+  the values of the default language.
 
 ### Fixed texts
 

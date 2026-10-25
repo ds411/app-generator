@@ -421,7 +421,10 @@ the schema of a database that has data:
 4. Apply it: `uv run alembic upgrade head`. The data stays.
 
 `scripts/check_schema_change.py` runs these steps on a copy of the
-project tracker with SQLite, and checks that a record stays.
+project tracker with SQLite, and checks that a record stays. The change
+adds a field, and makes a field translatable: the next migration adds
+the column of its translations
+([ADR 0026](adr/0026-record-translations.md)).
 
 ## Shared templates
 
