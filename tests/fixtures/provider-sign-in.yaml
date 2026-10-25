@@ -1,6 +1,7 @@
 # An app whose users sign in only with OpenID Connect providers
-# (`auth.password: false`, ADR 0020). scripts/check-fastapi.sh checks the
-# FastAPI app of this definition.
+# (`auth.password: false`, ADR 0020), and an exposed API, whose endpoints
+# need a signed-in user. scripts/check-fastapi.sh checks the FastAPI app
+# of this definition.
 version: 0
 app:
   name: staff-notes
@@ -47,3 +48,10 @@ access:
       operations: [list_people, list_notes, create_note, read_note]
       records:
         Note: { owner: author, operations: [change] }
+apis:
+  exchange_rates:
+    document: ../../examples/project-tracker/apis/exchange-rates.openapi.json
+    base_url_env: EXCHANGE_RATES_API_URL
+    security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    expose: true
+    operations: [getLatestRates, convertAmount]

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from appgen.dsl.access import ALL, RecordRule
-from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES
+from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api
 from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
     PROVIDER_PATHS,
@@ -42,6 +42,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
+from appgen.dsl.openapi import query_value
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.translations import LOCALE, VALUE
@@ -911,6 +912,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                 f"The clients cannot call the operation '{operation_id}': {problem}",
                 api.operations[operation_id],
             )
+        if api.expose:
+            yield from _check_exposed(api)
         security = api.security
         if security is None:
             continue
@@ -1317,6 +1320,28 @@ def _check_seed_targets(definition: AppDefinition) -> Iterator[Diagnostic]:
                         hint=f"Add a record to 'seed.{target_name}.records', or set "
                         f"'seed.{target_name}.mock'.",
                     )
+
+
+def _check_exposed(api: Api) -> Iterator[Diagnostic]:
+    """The endpoint of an exposed operation takes each parameter as a query parameter."""
+    spec = api.spec
+    for operation in spec.operations:
+        names: set[str] = set()
+        for parameter in operation.parameters:
+            problem: str | None = None
+            if parameter.name in names:
+                problem = f"two parameters have the name '{parameter.name}'"
+            elif not query_value(parameter.schema, spec):
+                problem = f"a query parameter cannot hold the parameter '{parameter.name}'"
+            names.add(parameter.name)
+            if problem is not None:
+                yield _error(
+                    "unsuitable-operation",
+                    f"The FastAPI app cannot expose the operation '{operation.id}': {problem}. "
+                    "Its endpoint takes each parameter as a query parameter.",
+                    api.operations[operation.id],
+                    hint="Remove 'expose', or call the operation in a custom operation.",
+                )
 
 
 CHECKS: list[Check] = [

@@ -33,6 +33,11 @@ _ROUTES: dict[str, list[tuple[str, str, int, str]]] = {
 {% endfor %}
 }
 """The method, the path pattern, the status, and the operation ID of each operation."""
+{% if py_apis.values() | selectattr("expose") | list %}
+
+FAILURES: dict[str, int] = {}
+"""The error status of each API whose mock dependency fails, for the tests of the endpoints."""
+{% endif %}
 
 
 def mock_transport(

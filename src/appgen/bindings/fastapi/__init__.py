@@ -243,6 +243,17 @@ BINDING = Binding(
             path=_INTEGRATION + "/client.py",
             for_each="api",
         ),
+        Output(
+            template="app/integrations/api/router.py.j2",
+            path=_INTEGRATION + "/router.py",
+            for_each="api",
+            when="py_apis[name].expose",
+        ),
+        Output(
+            template="app/integrations/endpoints.py.j2",
+            path="app/integrations/endpoints.py",
+            when="py_apis.values() | selectattr('expose') | list",
+        ),
         Output(template="package.py.j2", path="tests/integrations/__init__.py", when="py_apis"),
         Output(
             template="tests/integrations/mocks.py.j2",
@@ -259,6 +270,12 @@ BINDING = Binding(
             path="tests/integrations/test_{{ py_apis[name].module }}.py",
             for_each="api",
             when="py_apis[name].methods",
+        ),
+        Output(
+            template="tests/integrations/test_endpoints.py.j2",
+            path="tests/integrations/test_{{ py_apis[name].module }}_endpoints.py",
+            for_each="api",
+            when="py_apis[name].expose",
         ),
         Output(template="tests/factories.py.j2", path="tests/factories.py"),
         Output(

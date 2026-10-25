@@ -1,0 +1,32 @@
+{{ trace_header(element_id) }}
+{% set api = py_apis[name] %}
+"""The endpoints of the API `{{ api.name }}` ({{ api.title }}) for the front ends.
+
+Each endpoint calls one operation of the API with the client of the app,
+so that a front end can use the API without its secret
+(`apis.{{ api.name }}.expose`). The endpoint takes the parameters of the
+operation as query parameters, and its body as the body. An error of the
+API gives the status 502.
+"""
+
+{{ py.imports(api.router_imports()) }}
+
+{{ py.call("router = ", "APIRouter", ["prefix=" ~ py.string(api.prefix), "tags=[" ~ py.string(api.title) ~ "]"], 0) }}
+{% for m in api.methods %}
+{% if m.query_model %}
+
+
+{% for line in m.query_model.lines() %}
+{{ line }}
+{% endfor %}
+{% endif %}
+
+
+{{ trace(m.id) }}
+{{ m.route() }}
+{{ m.endpoint_signature(api.dependency_type) }}
+    {{ m.docstring() | join("\n") | indent(4) }}
+{% for line in m.endpoint_lines() %}
+    {{ line }}
+{% endfor %}
+{% endfor %}

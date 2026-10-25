@@ -110,6 +110,19 @@ We looked at two ways to read the documents:
   gives such warnings.
 - With mock data, the React client answers each call with the example
   answer of the operation, and sends no request.
+- `expose: true` on an API gives the FastAPI app an endpoint for each
+  operation: `/apis/<api>/<operation>`, in kebab case. The endpoint
+  calls the operation with the client of the FastAPI app, which has the
+  secret, and gives the answer. It takes all parameters as query
+  parameters and the body as its body, so that each client can call it
+  in the same way. An error of the API gives 502. With `auth`, the
+  endpoints need a signed-in user, and the rate limit applies to them.
+  The React app then has a client for the API, also with a secret: with
+  `x-react-data: api`, the client calls the endpoints with the token of
+  the user, and with mock data it gives the examples. Thus an exposed
+  API is not a gap, and `appgen generate` gives no warning for it. The
+  validator rejects an exposed operation with a parameter that a query
+  parameter cannot hold.
 
 ## Consequences
 

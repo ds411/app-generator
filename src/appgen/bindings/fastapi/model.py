@@ -1027,9 +1027,11 @@ class PyApp:
         """Return a `from` import with the names in the order of the Ruff import sorter."""
         return from_import(module, set(names))
 
-    def call(self, prefix: str, func: str, args: list[str], indent: int = 4) -> str:
+    def call(
+        self, prefix: str, func: str, args: list[str], indent: int = 4, suffix: str = ""
+    ) -> str:
         """Return a call on one line if it fits, else with one argument on each line."""
-        return call(prefix, func, args, indent)
+        return call(prefix, func, args, indent, suffix)
 
     def string(self, value: str) -> str:
         """Return a text as a Python string literal, with the quotes of the Ruff formatter."""

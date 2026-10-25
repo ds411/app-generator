@@ -8,7 +8,8 @@ serves each API under its name: the base URL of the API `holidays` is
 status 404.
 
 `GET /_requests` gives the recorded requests as JSON: the API, the
-operation ID, the method, the path under the base URL, and the query.
+operation ID, the method, the path under the base URL, the query, and
+the headers (with lower case names).
 The answers allow all origins (CORS), so that a browser app can call
 the server.
 
@@ -184,6 +185,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "method": self.command,
                 "path": path,
                 "query": urllib.parse.parse_qs(url.query),
+                "headers": {name.lower(): value for name, value in self.headers.items()},
             }
         )
         if route is None:

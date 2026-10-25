@@ -4,10 +4,18 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+{% set exposed = py_apis.values() | selectattr("expose") | list %}
+{% if definition.auth and exposed %}
+from fastapi import Depends, FastAPI
+{% else %}
 from fastapi import FastAPI
+{% endif %}
 from fastapi.middleware.cors import CORSMiddleware
 
-{% if definition.auth %}
+{% if definition.auth and exposed %}
+from app.core.auth import current_user
+from app.core.auth import router as auth_router
+{% elif definition.auth %}
 from app.core.auth import router as auth_router
 {% endif %}
 from app.core.config import Settings
@@ -30,6 +38,11 @@ from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 
 {{ trace(e.id) }}
 from app.features.{{ e.slice }}.router import router as {{ e.slice }}_router
+{% endfor %}
+{% for api in exposed | sort(attribute="module") %}
+
+{{ trace(api.id) }}
+from app.integrations.{{ api.module }}.router import router as {{ api.module }}_router
 {% endfor %}
 from app.models import configure_models
 
@@ -102,6 +115,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% for e in py.entity_order() %}
     {{ trace(e.id) }}
     app.include_router({{ e.slice }}_router)
+{% endfor %}
+{% for api in exposed %}
+    {{ trace(api.id) }}
+{% if definition.auth %}
+    app.include_router({{ api.module }}_router, dependencies=[Depends(current_user)])
+{% else %}
+    app.include_router({{ api.module }}_router)
+{% endif %}
 {% endfor %}
     return app
 

@@ -1,10 +1,15 @@
 {% set api = ts_apis[name] %}
 {% set server = binding.name == "nextjs" %}
 {% set mock = binding.name == "react" and not react.api %}
+{# The React app calls an exposed API through the FastAPI app (`expose`). #}
+{% set endpoint = binding.name == "react" and react.api and api.exposed %}
 {{ trace_header(element_id) }}
 {% if server %}
 import "server-only";
 
+{% endif %}
+{% if endpoint %}
+import { API_URL, apiFetch } from "@/shared/api/http";
 {% endif %}
 import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
 {% set types = api.used_types() %}
@@ -28,13 +33,18 @@ export const {{ api.base_url_const }} = {{ api.base_url | tojson }};
  *
  * {{ api.description }}
 {% endif %}
+{% if endpoint %}
+ *
+ * The client calls the endpoints of the FastAPI app, which call the API
+ * with its secret (`apis.{{ api.name }}.expose`).
+{% endif %}
  */
 export class {{ api.client }} {
   private readonly http: HttpClient;
 
   constructor(options: ClientOptions = {}) {
     this.http = new HttpClient({{ api.name | tojson }}, options.baseUrl ?? {{ api.base_url_const }}, {
-{% if api.credentials() %}
+{% if server and api.credentials() %}
       {{ api.credentials() }}
 {% endif %}
       timeoutMs: options.timeoutMs,
@@ -55,8 +65,8 @@ export class {{ api.client }} {
 {% endfor %}
    */
   async {{ m.name }}({{ m.arguments() }}): Promise<{{ m.returns }}> {
-{% set parts = m.request_lines() %}
-{% set call = "this.http.request(" ~ (m.method.upper() | tojson) ~ ", " ~ (m.path | tojson) %}
+{% set parts = m.request_lines(endpoint) %}
+{% set call = "this.http.request(" ~ (m.method.upper() | tojson) ~ ", " ~ ((m.endpoint if endpoint else m.path) | tojson) %}
 {% if m.result_type %}
 {% if parts %}
     const data = await {{ call }}, {
@@ -90,6 +100,9 @@ export class {{ api.client }} {
 {% elif mock %}
  * Return a client with the mock data of the app: it answers each call with
  * the example of the OpenAPI document, and sends no request to the API.
+{% elif endpoint %}
+ * Return a client of the FastAPI app, with the URL in `VITE_API_URL`. The
+ * client sends the token of the signed-in user.
 {% else %}
  * Return a client with the settings of the build: the base URL in
  * `{{ api.browser_env }}`.
@@ -104,6 +117,9 @@ export function {{ api.factory }}(): {{ api.client }} {
 {% endif %}
 {% elif mock %}
     fetch: mockFetch(MOCK_ROUTES),
+{% elif endpoint %}
+    baseUrl: API_URL,
+    fetch: apiFetch,
 {% else %}
     baseUrl: import.meta.env.{{ api.browser_env }} || undefined,
 {% endif %}

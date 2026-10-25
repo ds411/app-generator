@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -127,9 +128,14 @@ def test_the_created_gaps_are_the_open_gaps_of_the_check(
 
 
 def test_the_summary_lists_each_gap_of_an_extension_file(tmp_path: Path) -> None:
-    # A browser app has no client for an API with a secret: one stub has
-    # a gap for the API and for each of its operations.
-    code, output = _generate(tmp_path, definition=EXAMPLE, binding="react")
+    # A browser app has no client for an API with a secret that the
+    # FastAPI app does not expose: one stub has a gap for the API and for
+    # each of its operations.
+    folder = tmp_path / "definition"
+    shutil.copytree(EXAMPLE.parent, folder)
+    definition = folder / "app.yaml"
+    definition.write_text(definition.read_text().replace("    expose: true\n", ""))
+    code, output = _generate(tmp_path / "out", definition=definition, binding="react")
     assert code == 0, output
     created = _created_gaps(output)
 

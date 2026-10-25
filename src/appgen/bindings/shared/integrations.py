@@ -10,7 +10,7 @@ clients of the two apps agree.
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from appgen.dsl.apis import Api
 from appgen.dsl.model import AppDefinition
@@ -40,6 +40,11 @@ _RESERVED_METHODS = frozenset({"constructor", "http", "timeoutMs"})
 # The characters of a path that a regular expression must escape.
 _REGEX_SPECIAL = re.compile(r"[\\^$.|?*+()[\]{}/]")
 _SCALARS = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean"}
+
+
+def exposed_prefix(api: str) -> str:
+    """Return the path of the endpoints of an exposed API in the FastAPI app (`expose`)."""
+    return "/apis/" + kebab(api)
 
 
 def ts_key(name: str) -> str:
@@ -120,6 +125,9 @@ class TsMethod:
     status: str
     example: object
     """The example answer of the document."""
+    endpoint: str = ""
+    """The path of the endpoint of the FastAPI app for an exposed API, for example
+    `/apis/holidays/get-public-holidays`."""
 
     @property
     def params_optional(self) -> bool:
@@ -159,12 +167,18 @@ class TsMethod:
     def returns(self) -> str:
         return self.result_type or "void"
 
-    def request_lines(self) -> list[str]:
-        """Return the keys of the request parts object, one on each line."""
+    def request_lines(self, exposed: bool = False) -> list[str]:
+        """Return the keys of the request parts object, one on each line.
+
+        The endpoint of an exposed API (`exposed`) takes all parameters in its query.
+        """
         lines: list[str] = []
+        if exposed and self.parameters:
+            items = ", ".join(f"{ts_key(p.name)}: {p.access}" for p in self.parameters)
+            lines.append(f"query: {{ {items} }},")
         for location, key in (("path", "path"), ("query", "query"), ("header", "headers")):
             found = [p for p in self.parameters if p.location == location]
-            if found:
+            if found and not exposed:
                 items = ", ".join(f"{ts_key(p.name)}: {p.access}" for p in found)
                 lines.append(f"{key}: {{ {items} }},")
         if self.body_type is not None:
@@ -203,6 +217,10 @@ class TsApi:
     credential_name: str | None
     types: list[TsType] = field(default_factory=list[TsType])
     methods: list[TsMethod] = field(default_factory=list[TsMethod])
+    exposed: bool = False
+    """True: the FastAPI app has an endpoint for each operation (`apis.<api>.expose`)."""
+    prefix: str = ""
+    """The path of the endpoints of an exposed API in the FastAPI app."""
 
     @property
     def browser_env(self) -> str:
@@ -271,13 +289,18 @@ def _api(name: str, api: Api) -> TsApi:
         secret_env=api.security.env if api.security else None,
         credential=credential,
         credential_name=scheme.parameter if scheme is not None else None,
+        exposed=api.expose,
+        prefix=exposed_prefix(name) if api.expose else "",
     )
     taken = {s.name for s in spec.schemas}
     ts.types = sorted((_named(s) for s in spec.schemas), key=lambda t: t.name)
     methods: set[str] = set()
     for operation in spec.operations:
         description = api.operations[operation.id].description or operation.description
-        ts.methods.append(_method(api, operation, description, taken, methods))
+        method = _method(api, operation, description, taken, methods)
+        if api.expose:
+            method = replace(method, endpoint=f"{ts.prefix}/{kebab(operation.id)}")
+        ts.methods.append(method)
     return ts
 
 

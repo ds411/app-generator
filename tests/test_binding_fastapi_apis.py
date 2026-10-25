@@ -188,6 +188,68 @@ def test_a_bearer_token_an_inline_body_and_an_answer_without_content(
     assert "client = PetsClient(settings.pets_api_url, settings.pets_api_token)" in client
 
 
+def test_an_exposed_api_gets_an_endpoint_for_each_operation(tracker: dict[str, str]) -> None:
+    router = tracker["app/integrations/exchange_rates/router.py"]
+    assert 'APIRouter(prefix="/apis/exchange-rates", tags=["Exchange Rates API"])' in router
+    assert "class GetLatestRatesQuery(pydantic.BaseModel):" in router
+    assert "    symbols: list[str] | None = None\n" in router
+    assert '"/get-latest-rates",\n    operation_id="exchange_rates_get_latest_rates",' in router
+    assert "    query: Annotated[GetLatestRatesQuery, Query()],\n) -> Rates:" in router
+    assert "return await client.get_latest_rates(query.base, symbols=query.symbols)" in router
+    assert "    body: Annotated[ConversionRequest, Body()],\n) -> Conversion:" in router
+    assert "except API_ERRORS as error:\n        raise bad_gateway(client, error)" in router
+    endpoints = tracker["app/integrations/endpoints.py"]
+    assert "API_ERRORS = (ApiError, httpx.HTTPError, ValueError)" in endpoints
+    assert "The API {api} answered with the status {status}." in endpoints
+    main = tracker["app/main.py"]
+    module = "app.integrations.exchange_rates.router"
+    assert f"from {module} import router as exchange_rates_router" in main
+    assert "    app.include_router(exchange_rates_router)\n" in main
+    # The API `holidays` has no `expose`.
+    assert "app/integrations/holidays/router.py" not in tracker
+    assert "holidays_router" not in main
+    tests = tracker["tests/integrations/test_exchange_rates_endpoints.py"]
+    assert 'params: dict[str, Any] = {"base": "string"}' in tests
+    assert 'monkeypatch.setitem(FAILURES, "exchange_rates", 503)' in tests
+    assert "assert_problem(response, 502)" in tests
+    assert "anonymous_client" not in tests
+    mocks = tracker["tests/integrations/mocks.py"]
+    assert "FAILURES: dict[str, int] = {}" in mocks
+    failing = 'mock_transport("exchange_rates", status=FAILURES.get("exchange_rates"))'
+    assert f"transport={failing}," in mocks
+    assert 'transport=mock_transport("holidays"))' in mocks
+    assert "/apis/exchange-rates/get-latest-rates" in tracker["README.md"]
+
+
+def test_the_endpoints_take_the_parameters_by_their_names_and_need_a_user(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pets.json").write_text(json.dumps(DOCUMENT))
+    auth = """\
+  Person:
+    fields:
+      email: { type: email, required: true, unique: true }
+auth: { user_entity: Person, username_field: email }
+"""
+    text = BASE.replace("operations:\n", auth.split("auth:")[0] + "operations:\n")
+    text += "auth:" + auth.split("auth:")[1] + PETS + "    expose: true\n"
+    definition = load_definition_text(text, str(tmp_path / "app.yaml"))
+    files = _files(generate(definition, find_binding("fastapi")))
+    router = files["app/integrations/pets/router.py"]
+    assert 'result_: str | None = pydantic.Field(default=None, alias="result")' in router
+    assert 'x_trace: str | None = pydantic.Field(default=None, alias="X-Trace")' in router
+    assert "    id: str\n" in router
+    assert "client.get_pet(query.id, result_=query.result_, x_trace=query.x_trace)" in router
+    assert '    "/delete-pet",\n    status_code=204,\n' in router
+    main = files["app/main.py"]
+    assert "from fastapi import Depends, FastAPI" in main
+    assert "app.include_router(pets_router, dependencies=[Depends(current_user)])" in main
+    tests = files["tests/integrations/test_pets_endpoints.py"]
+    assert 'params: dict[str, Any] = {"id": "string"}' in tests
+    assert "async def test_the_endpoints_need_a_signed_in_user(" in tests
+    assert "assert_problem(response, 401)" in tests
+
+
 def test_an_app_without_apis_has_no_clients() -> None:
     definition = load_definition_text(BASE.split("operations:")[0])
     files = _files(generate(definition, find_binding("fastapi")))

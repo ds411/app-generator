@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, from_import
+from appgen.bindings.shared.integrations import exposed_prefix
 from appgen.dsl.apis import Api
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.openapi import (
@@ -31,7 +32,8 @@ from appgen.dsl.openapi import (
     UnionSchema,
     sample,
 )
-from appgen.gen.naming import constant, pascal, snake
+from appgen.gen.naming import constant, kebab, pascal, snake
+from appgen.gen.render import GenerationError
 
 # Names that a field or a parameter cannot have: they hide a name of
 # Pydantic, of the client, or of a module that the generated code uses.
@@ -96,13 +98,20 @@ class PyApiField:
     required: bool
     description: str | None
 
-    def line(self) -> str:
-        """Return the declaration of the field in the model."""
+    def line(self, query: bool = False) -> str:
+        """Return the declaration of the field in the model.
+
+        A field of a query model has an `alias`: FastAPI reads the query
+        parameter of that name.
+        """
         type_ = self.type if self.required else _optional(self.type)
         args: list[str] = []
         if self.attr != self.name:
             alias = json.dumps(self.name, ensure_ascii=False)
-            args += [f"validation_alias={alias}", f"serialization_alias={alias}"]
+            if query:
+                args.append(f"alias={alias}")
+            else:
+                args += [f"validation_alias={alias}", f"serialization_alias={alias}"]
         if not self.required:
             args.insert(0, "default=None")
         if not args:
@@ -122,6 +131,8 @@ class PyApiModel:
     """The fields of a model, or None for a type alias."""
     alias: str = ""
     """The type of a type alias."""
+    query: bool = False
+    """True for the model of the query parameters of an endpoint."""
 
     def lines(self) -> list[str]:
         if self.fields is None:
@@ -129,15 +140,19 @@ class PyApiModel:
         lines = [f"class {self.name}(pydantic.BaseModel):"]
         lines.append(f'    """{self.description or f"The schema {self.name}."}"""')
         lines.append("")
-        lines.append("    model_config = pydantic.ConfigDict(")
-        lines.append(
-            "        validate_by_name=True, validate_by_alias=True, serialize_by_alias=True"
-        )
-        lines.append("    )")
+        if self.query:
+            config = "pydantic.ConfigDict(validate_by_name=True, validate_by_alias=True)"
+            lines.append(f"    model_config = {config}")
+        else:
+            lines.append("    model_config = pydantic.ConfigDict(")
+            lines.append(
+                "        validate_by_name=True, validate_by_alias=True, serialize_by_alias=True"
+            )
+            lines.append("    )")
         if self.fields:
             lines.append("")
         for f in self.fields:
-            lines.append(f"    {f.line()}")
+            lines.append(f"    {f.line(self.query)}")
             if f.description:
                 lines.append(f'    """{f.description}"""')
         return lines
@@ -200,6 +215,13 @@ class PyApiMethod:
     status: str
     example: str
     """The example answer as JSON text."""
+    endpoint_path: str = ""
+    """The path of the endpoint of an exposed API, after the prefix, for example `/get-pets`."""
+    endpoint_id: str = ""
+    """The operation ID of the endpoint in the OpenAPI document of the app."""
+    query_model: PyApiModel | None = None
+    """The model of the query parameters of the endpoint, or None for an operation without
+    parameters."""
 
     @property
     def path_pattern(self) -> str:
@@ -281,6 +303,65 @@ class PyApiMethod:
         """Return the assertion of the test that the request has the path of the operation."""
         return call("assert ", "re.match", [f'r"{self.path_pattern}"', "requests[0].url.path"])
 
+    def route(self) -> str:
+        """Return the route decorator of the endpoint of an exposed API."""
+        args = [json.dumps(self.endpoint_path)]
+        if self.result_type is None:
+            args.append("status_code=204")
+        args += [f"operation_id={json.dumps(self.endpoint_id)}", "responses=problem_responses(502)"]
+        return call("@router.", self.method, args, 0)
+
+    def endpoint_signature(self, dependency: str) -> str:
+        """Return the signature of the endpoint function. `dependency` is the client type."""
+        args = [f"client: {dependency}"]
+        if self.query_model is not None:
+            args.append(f"query: Annotated[{self.query_model.name}, Query()]")
+        if self.body_type is not None:
+            type_ = self.body_type if self.body_required else _optional(self.body_type)
+            default = "" if self.body_required else " = None"
+            args.append(f"body: Annotated[{type_}, Body()]{default}")
+        return call("async def ", self.name, args, 0, f" -> {self.result_type or 'None'}:")
+
+    def endpoint_lines(self) -> list[str]:
+        """Return the statements of the endpoint function: the call of the client method."""
+        args = [f"query.{p.attr}" for p in self.parameters if p.required]
+        if self.body_type is not None and self.body_required:
+            args.append("body")
+        if self.body_type is not None and not self.body_required:
+            args.append("body=body")
+        args += [f"{p.attr}=query.{p.attr}" for p in self.parameters if not p.required]
+        prefix = "return await " if self.result_type else "await "
+        return [
+            "try:",
+            "    " + call(prefix, f"client.{self.name}", args, 8),
+            "except API_ERRORS as error:",
+            "    raise bad_gateway(client, error) from error",
+        ]
+
+    def endpoint_request(self, prefix: str, url: str, client: str = "client") -> str:
+        """Return the request of the test of the endpoint, with the samples of the arguments."""
+        args = [json.dumps(self.method.upper()), json.dumps(url)]
+        if any(p.required for p in self.parameters):
+            args.append("params=params")
+        if self.body_sample is not None:
+            args.append("json=body")
+        return call(prefix, f"{client}.request", args, 4)
+
+    def endpoint_sample_lines(self, indent: int = 4) -> list[str]:
+        """Return the statements of the test that give the query and the body of a request."""
+        lines: list[str] = []
+        # A query parameter has a value: a parameter of any type gets a text.
+        params = {
+            p.name: "string" if p.sample.value is None else p.sample.value
+            for p in self.parameters
+            if p.required
+        }
+        if params:
+            lines.append(_formatted(params, "params: dict[str, Any] = ", "", indent))
+        if self.body_sample is not None:
+            lines.append(_formatted(self.body_sample.value, "body: Any = ", "", indent))
+        return lines
+
 
 @dataclass(slots=True)
 class PyApi:
@@ -306,6 +387,10 @@ class PyApi:
     """The name of the header or the query parameter of an API key."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
     methods: list[PyApiMethod] = field(default_factory=list[PyApiMethod])
+    expose: bool = False
+    """True: the app has an endpoint for each operation (`apis.<api>.expose`)."""
+    prefix: str = ""
+    """The path of the endpoints of an exposed API, for example `/apis/exchange-rates`."""
 
     @property
     def dependency(self) -> str:
@@ -375,6 +460,53 @@ class PyApi:
             lines.append(from_import(f"app.integrations.{self.module}.models", set(models)))
         return lines
 
+    def router_imports(self) -> list[str]:
+        """Return the import lines of `router.py`, the endpoints of an exposed API."""
+        types = [m.result_type or "" for m in self.methods]
+        types += [m.body_type or "" for m in self.methods]
+        types += [f.type for m in self.methods if m.query_model for f in m.query_model.fields or []]
+        text = " ".join(types)
+        fastapi = {"APIRouter"}
+        if any(m.query_model for m in self.methods):
+            fastapi.add("Query")
+        if any(m.body_type for m in self.methods):
+            fastapi.add("Body")
+        lines = [
+            from_import("fastapi", fastapi),
+            "from app.core.errors import problem_responses",
+            "from app.integrations.endpoints import API_ERRORS, bad_gateway",
+            f"from app.integrations.{self.module}.client import {self.dependency_type}",
+            *_std_imports(text),
+        ]
+        if len(fastapi) > 1:
+            lines.append("from typing import Annotated")
+        if any(m.query_model for m in self.methods) or "pydantic." in text:
+            lines.append("import pydantic")
+        models = self.used_models(text)
+        if models:
+            lines.append(from_import(f"app.integrations.{self.module}.models", set(models)))
+        return lines
+
+    def endpoint_test_imports(self) -> list[str]:
+        """Return the import lines of the test of the endpoints of an exposed API."""
+        results = " ".join(m.result_type for m in self.methods if m.result_type)
+        mocks = {"FAILURES", "EXAMPLES"} if results else {"FAILURES"}
+        lines = [
+            "import pytest",
+            "from httpx import AsyncClient",
+            from_import("tests.integrations.mocks", mocks),
+            "from tests.problems import assert_problem",
+            *_std_imports(results),
+        ]
+        if any(m.endpoint_sample_lines() for m in self.methods):
+            lines.append("from typing import Any")
+        if results:
+            lines.append("import pydantic")
+        models = self.used_models(results)
+        if models:
+            lines.append(from_import(f"app.integrations.{self.module}.models", set(models)))
+        return lines
+
     def test_imports(self) -> list[str]:
         """Return the import lines of the test of the client."""
         samples = [line for m in self.methods for line in m.sample_lines()]
@@ -415,7 +547,10 @@ class PyApi:
 
     def mock_construction(self) -> str:
         """Return the statement of the mock dependency that creates the client."""
-        transport = f"transport=mock_transport({json.dumps(self.name)})"
+        name = json.dumps(self.name)
+        transport = f"transport=mock_transport({name})"
+        if self.expose:
+            transport = f"transport=mock_transport({name}, status=FAILURES.get({name}))"
         return call("client = ", self.client, [*self._arguments(), transport])
 
     def test_construction(self) -> str:
@@ -491,12 +626,41 @@ def _api(name: str, api: Api) -> PyApi:
     types = _Types(spec.schemas)
     for named in spec.schemas:
         py.models.append(types.model(named))
-    py.models += types.aliases
-    py.models.sort(key=lambda m: m.name)
     for operation in spec.operations:
         description = api.operations[operation.id].description or operation.description
         py.methods.append(_method(api, operation, description, types, spec))
+    if api.expose and py.methods:
+        _expose(py, spec, types)
+    py.models += types.aliases
+    py.models.sort(key=lambda m: m.name)
     return py
+
+
+def _expose(py: PyApi, spec: ClientSpec, types: _Types) -> None:
+    """Give each method of an exposed API its endpoint: the path and the query model."""
+    py.expose = True
+    py.prefix = exposed_prefix(py.name)
+    paths: dict[str, str] = {}
+    for method, operation in zip(py.methods, spec.operations, strict=True):
+        method.endpoint_path = "/" + kebab(operation.id)
+        if method.endpoint_path in paths:
+            raise GenerationError(
+                f"The operations '{paths[method.endpoint_path]}' and '{operation.id}' of the "
+                f"API '{py.name}' give the same endpoint {py.prefix}{method.endpoint_path}."
+            )
+        paths[method.endpoint_path] = operation.id
+        method.endpoint_id = f"{py.module}_{method.name.rstrip('_')}"
+        if not operation.parameters:
+            continue
+        fields: list[PyApiField] = []
+        for parameter, p in zip(operation.parameters, method.parameters, strict=True):
+            context = pascal(operation.id) + pascal(parameter.name)
+            type_ = types.type(parameter.schema, context, query=True)
+            fields.append(PyApiField(p.attr, p.name, type_, p.required, p.description))
+        name = types.unique(pascal(operation.id) + "Query")
+        method.query_model = PyApiModel(
+            name, f"The query parameters of the endpoint of `{operation.id}`.", fields, query=True
+        )
 
 
 def _method(
@@ -576,7 +740,8 @@ class _Types:
         ]
         return PyApiModel(named.name, description, fields)
 
-    def type(self, schema: Schema, context: str, top: bool = False) -> str:
+    def type(self, schema: Schema, context: str, top: bool = False, *, query: bool = False) -> str:
+        """Return the Python type of a schema. With `query`, any value is a text (`str`)."""
         match schema:
             case Ref(name):
                 return name
@@ -590,13 +755,23 @@ class _Types:
                     return _FORMATS.get(format_ or "", "str")
                 return _SCALARS[kind]
             case ArraySchema(items):
-                return f"list[{self.type(items, context + 'Item')}]"
+                return f"list[{self.type(items, context + 'Item', query=query)}]"
             case MapSchema(values):
-                return f"dict[str, {self.type(values, context + 'Value')}]"
+                return f"dict[str, {self.type(values, context + 'Value', query=query)}]"
             case UnionSchema(options):
-                return " | ".join(self.type(o, context) for o in options)
+                return " | ".join(self.type(o, context, query=query) for o in options)
             case AnySchema() | ObjectSchema():
-                return "pydantic.JsonValue"
+                return "str" if query else "pydantic.JsonValue"
+
+    def unique(self, wanted: str) -> str:
+        """Return a name that no model or type alias has, and take it."""
+        name = wanted
+        number = 2
+        while name in self.names:
+            name = f"{wanted}{number}"
+            number += 1
+        self.names.add(name)
+        return name
 
     def alias(self, context: str, literal: str) -> str:
         for alias in self.aliases:
