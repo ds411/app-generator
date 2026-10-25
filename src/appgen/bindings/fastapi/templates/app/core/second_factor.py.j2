@@ -1,0 +1,386 @@
+{% set sf = definition.auth.second_factor %}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set required = sf.required_roles and definition.access %}
+{{ trace_header(sf.id) }}
+"""The second factor of the sign-in (ADR 0024): the codes of an authenticator app.
+
+The codes follow RFC 6238 (TOTP): HMAC-SHA-1, 6 digits, and a new code
+each 30 seconds. A user turns the factor on in two steps: `POST
+/auth/second-factor/setup` gives a new secret and its `otpauth://` URI,
+and `POST /auth/second-factor/confirm` with a valid code turns it on and
+gives 10 recovery codes one time. Then a sign-in with the password gives
+a challenge, and `POST /auth/sign-in/second-factor` with the challenge
+and a code, or a recovery code, gives the token. Each code is valid one
+time. After 5 wrong codes in a row, the app refuses the codes of the user
+for 15 minutes.
+
+The table `credentials` keeps the secret encrypted with a key from
+`AUTH_SECRET`, and only the SHA-256 hashes of the recovery codes.
+"""
+
+import base64
+import hashlib
+import hmac
+import secrets
+import struct
+import time
+from datetime import UTC, datetime
+from typing import Annotated
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+{{ py.from_import("app.core.auth", ["Credential", "CurrentUser", "Token", "make_token", "read_challenge", "read_token", "signing_key"] + (["second_factor_required"] if required else [])) }}
+from app.core.db import SessionDep, commit
+from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+
+ISSUER = {{ py.string(app.title) }}
+"""The name of the app in the authenticator app."""
+DIGITS = 6
+PERIOD = 30
+"""The seconds of a time step: each step has a new code."""
+DRIFT_STEPS = 1
+"""The time steps before and after the current one that the app accepts: the clock difference."""
+SECRET_BYTES = 20
+RECOVERY_CODES = 10
+MAX_FAILURES = 5
+"""The wrong codes in a row after which the app refuses the codes of the user for a time."""
+LOCK_SECONDS = 900
+
+
+def totp_code(secret: bytes, step: int) -> str:
+    """Return the code of a time step (RFC 4226 and RFC 6238)."""
+    digest = hmac.new(secret, struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(value % 10**DIGITS).zfill(DIGITS)
+
+
+def current_step() -> int:
+    """Return the current time step."""
+    return int(time.time()) // PERIOD
+
+
+def matching_step(secret: bytes, code: str, last_step: int | None) -> int | None:
+    """Return the time step of a valid code that the user did not use yet, else None."""
+    now = current_step()
+    for step in range(now - DRIFT_STEPS, now + DRIFT_STEPS + 1):
+        if last_step is not None and step <= last_step:
+            continue
+        if hmac.compare_digest(totp_code(secret, step), code):
+            return step
+    return None
+
+
+def _keys(key: bytes) -> tuple[bytes, bytes]:
+    # Two keys from AUTH_SECRET: one encrypts the secrets, and one checks them.
+    encrypt = hmac.new(key, b"totp-secret.encrypt", hashlib.sha256).digest()
+    check = hmac.new(key, b"totp-secret.check", hashlib.sha256).digest()
+    return encrypt, check
+
+
+def seal_secret(key: bytes, secret: bytes) -> str:
+    """Return a secret encrypted with a key from `AUTH_SECRET`, and with a check tag.
+
+    The key stream is HMAC-SHA-256 of a random nonce, so each value is
+    different. The tag is HMAC-SHA-256 of the nonce and the encrypted
+    secret: a changed value, or another `AUTH_SECRET`, gives no secret.
+    """
+    encrypt, check = _keys(key)
+    nonce = secrets.token_bytes(16)
+    stream = hmac.new(encrypt, nonce, hashlib.sha256).digest()
+    box = bytes(a ^ b for a, b in zip(secret, stream[: len(secret)], strict=True))
+    tag = hmac.new(check, nonce + box, hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(nonce + box + tag).decode()
+
+
+def open_secret(key: bytes, sealed: str) -> bytes | None:
+    """Return the secret of a sealed value, or None if the value or the key is not correct."""
+    encrypt, check = _keys(key)
+    try:
+        data = base64.urlsafe_b64decode(sealed)
+    except ValueError:
+        return None
+    nonce, box, tag = data[:16], data[16:-16], data[-16:]
+    if len(nonce) != 16 or len(tag) != 16:
+        return None
+    if not hmac.compare_digest(tag, hmac.new(check, nonce + box, hashlib.sha256).digest()[:16]):
+        return None
+    stream = hmac.new(encrypt, nonce, hashlib.sha256).digest()
+    return bytes(a ^ b for a, b in zip(box, stream[: len(box)], strict=True))
+
+
+def secret_text(secret: bytes) -> str:
+    """Return a secret in base32, as an authenticator app reads it."""
+    return base64.b32encode(secret).decode().rstrip("=")
+
+
+def otpauth_uri(secret: bytes, account: str) -> str:
+    """Return the `otpauth://` URI of a secret, for a QR code."""
+    label = quote(f"{ISSUER}:{account}", safe="")
+    issuer = quote(ISSUER, safe="")
+    query = f"secret={secret_text(secret)}&issuer={issuer}&algorithm=SHA1&digits={DIGITS}"
+    return f"otpauth://totp/{label}?{query}&period={PERIOD}"
+
+
+def _normal(code: str) -> str:
+    return code.replace("-", "").replace(" ", "").lower()
+
+
+def recovery_hash(code: str) -> str:
+    """Return the SHA-256 hash of a recovery code, without its dashes and spaces."""
+    return hashlib.sha256(_normal(code).encode()).hexdigest()
+
+
+def new_recovery_codes() -> list[str]:
+    """Return new recovery codes: 16 random base32 characters (80 bits) each."""
+    codes: list[str] = []
+    for _ in range(RECOVERY_CODES):
+        text = base64.b32encode(secrets.token_bytes(10)).decode().lower()
+        codes.append("-".join(text[i : i + 4] for i in range(0, 16, 4)))
+    return codes
+
+
+def use_recovery_code(credential: Credential, code: str) -> bool:
+    """Remove a recovery code of a user. Return False if the user has no such code."""
+    hashes = (credential.recovery_codes or "").split()
+    found = recovery_hash(code)
+    for stored in hashes:
+        if hmac.compare_digest(stored, found):
+            hashes.remove(stored)
+            credential.recovery_codes = " ".join(hashes)
+            return True
+    return False
+
+
+async def check_code(session: AsyncSession, key: bytes, credential: Credential, code: str) -> None:
+    """Accept a code of the authenticator app or a recovery code one time.
+
+    A wrong code gives 401. After too many wrong codes in a row, the
+    codes of the user give 429 for a time.
+    """
+    now = int(time.time())
+    if credential.totp_locked_until is not None and credential.totp_locked_until > now:
+        {{ py.problem(429, "Too many wrong codes. Try again later.", 8) }}
+    secret = open_secret(key, credential.totp_secret) if credential.totp_secret else None
+    code = code.strip()
+    step = None
+    if secret is not None and len(code) == DIGITS and code.isdigit():
+        step = matching_step(secret, code, credential.totp_last_step)
+    if step is not None:
+        credential.totp_last_step = step
+    elif not use_recovery_code(credential, code):
+        credential.totp_failures += 1
+        if credential.totp_failures >= MAX_FAILURES:
+            credential.totp_locked_until = now + LOCK_SECONDS
+            credential.totp_failures = 0
+        await commit(session)
+        {{ py.problem(401, "The code is not correct.", 8) }}
+    credential.totp_failures = 0
+    credential.totp_locked_until = None
+    await commit(session)
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def _setup_user(
+    request: Request,
+    session: SessionDep,
+    challenge: str | None,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> {{ u.name }}:
+    """Return the user of a challenge of the sign-in, or the signed-in user. Else give 401."""
+    key = signing_key(request)
+    if challenge is not None:
+        user_id = read_challenge(key, challenge)
+    else:
+        user_id = read_token(key, credentials.credentials) if credentials else None
+    user = await session.get({{ u.name }}, user_id) if user_id else None
+    if user is None:
+        {{ py.problem(401, "Sign in to use this endpoint.", 8) }}
+    return user
+
+
+async def _credential(session: AsyncSession, user: {{ u.name }}) -> Credential:
+    credential = await session.get(Credential, user.id)
+    if credential is None:
+        {{ py.problem(409, "The second factor needs a password. Set a password first.", 8) }}
+    return credential
+
+
+class SecondFactorCode(BaseModel):
+    """The challenge of the sign-in, and a code of the authenticator app or a recovery code."""
+
+    challenge: str = Field(min_length=1, max_length=1000)
+    code: str = Field(min_length=6, max_length=40)
+
+
+class SecondFactorStatus(BaseModel):
+    """The state of the second factor of the signed-in user."""
+
+    enabled: bool
+    required: bool
+    """True if the role of the user must use the second factor."""
+    recovery_codes_left: int
+
+
+class SetupRequest(BaseModel):
+    """The challenge of a sign-in that must turn on the second factor, or none with a token."""
+
+    challenge: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class Setup(BaseModel):
+    """A new secret: as text, and as an `otpauth://` URI for a QR code."""
+
+    secret: str
+    uri: str
+
+
+class SetupConfirmation(BaseModel):
+    """A code of the new secret. With the challenge of the sign-in, the answer has a token."""
+
+    code: str = Field(min_length=DIGITS, max_length=DIGITS, pattern=r"^[0-9]+$")
+    challenge: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class SecondFactorOn(BaseModel):
+    """The recovery codes, which the app shows only one time, and the token of a sign-in."""
+
+    recovery_codes: list[str]
+    token: Token | None = None
+
+
+class CodeConfirmation(BaseModel):
+    """A code of the authenticator app or a recovery code."""
+
+    code: str = Field(min_length=6, max_length=40)
+
+
+router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+@router.post(
+    "/sign-in/second-factor",
+    responses=problem_responses(400, 401, 422, 429),
+    operation_id="sign_in_second_factor",
+)
+async def sign_in_second_factor(
+    data: SecondFactorCode, request: Request, session: SessionDep
+) -> Token:
+    """Return a token for the challenge of a sign-in and a code, or a recovery code."""
+    key = signing_key(request)
+    user_id = read_challenge(key, data.challenge)
+    credential = await session.get(Credential, user_id) if user_id else None
+    if credential is None or credential.totp_enabled_at is None:
+        {{ py.problem(400, "The sign-in has ended. Sign in again.", 8) }}
+    await check_code(session, key, credential, data.code)
+    return Token(access_token=make_token(key, credential.user_id))
+
+
+@router.get("/second-factor", responses=problem_responses(401), operation_id="read_second_factor")
+async def read_second_factor(user: CurrentUser, session: SessionDep) -> SecondFactorStatus:
+    """Return the state of the second factor of the signed-in user."""
+    credential = await session.get(Credential, user.id)
+    enabled = credential is not None and credential.totp_enabled_at is not None
+    codes = len((credential.recovery_codes or "").split()) if credential and enabled else 0
+    {{ "required = second_factor_required(user)" if required else "required = False" }}
+    return SecondFactorStatus(enabled=enabled, required=required, recovery_codes_left=codes)
+
+
+@router.post(
+    "/second-factor/setup",
+    responses=problem_responses(401, 409, 422),
+    operation_id="set_up_second_factor",
+)
+async def set_up_second_factor(
+    data: SetupRequest,
+    request: Request,
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> Setup:
+    """Give a new secret for the authenticator app. A valid code of it turns the factor on.
+
+    The signed-in user sends a token. A sign-in that must turn on the
+    factor sends its challenge instead.
+    """
+    user = await _setup_user(request, session, data.challenge, credentials)
+    credential = await _credential(session, user)
+    if credential.totp_enabled_at is not None:
+        {{ py.problem(409, "The second factor is on.", 8) }}
+    secret = secrets.token_bytes(SECRET_BYTES)
+    credential.totp_secret = seal_secret(signing_key(request), secret)
+    await commit(session)
+    return Setup(secret=secret_text(secret), uri=otpauth_uri(secret, user.{{ username.attr }}))
+
+
+@router.post(
+    "/second-factor/confirm",
+    responses=problem_responses(400, 401, 409, 422),
+    operation_id="confirm_second_factor",
+)
+async def confirm_second_factor(
+    data: SetupConfirmation,
+    request: Request,
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> SecondFactorOn:
+    """Turn on the second factor with a code of the new secret, and give the recovery codes."""
+    key = signing_key(request)
+    user = await _setup_user(request, session, data.challenge, credentials)
+    credential = await _credential(session, user)
+    if credential.totp_enabled_at is not None:
+        {{ py.problem(409, "The second factor is on.", 8) }}
+    secret = open_secret(key, credential.totp_secret) if credential.totp_secret else None
+    step = matching_step(secret, data.code, None) if secret else None
+    if step is None:
+        {{ py.problem(400, "The code is not correct.", 8) }}
+    codes = new_recovery_codes()
+    credential.totp_enabled_at = datetime.now(UTC)
+    credential.totp_last_step = step
+    credential.totp_failures = 0
+    credential.recovery_codes = " ".join(recovery_hash(code) for code in codes)
+    await commit(session)
+    token = Token(access_token=make_token(key, user.id)) if data.challenge else None
+    return SecondFactorOn(recovery_codes=codes, token=token)
+
+
+@router.post(
+    "/second-factor/disable",
+    status_code=204,
+    responses=problem_responses(401, 403, 409, 422, 429),
+    operation_id="disable_second_factor",
+)
+async def disable_second_factor(
+    data: CodeConfirmation, request: Request, user: CurrentUser, session: SessionDep
+) -> None:
+    """Turn off the second factor of the signed-in user with a code, or a recovery code."""
+{% if required %}
+    if second_factor_required(user):
+        {{ py.problem(403, "Your role must use a second factor.", 8) }}
+{% endif %}
+    credential = await session.get(Credential, user.id)
+    if credential is None or credential.totp_enabled_at is None:
+        {{ py.problem(409, "The second factor is off.", 8) }}
+    await check_code(session, signing_key(request), credential, data.code)
+    remove_second_factor(credential)
+    await commit(session)
+
+
+def remove_second_factor(credential: Credential) -> None:
+    """Turn off the second factor of a credential, and delete its secret and recovery codes."""
+    credential.totp_secret = None
+    credential.totp_enabled_at = None
+    credential.totp_last_step = None
+    credential.totp_failures = 0
+    credential.totp_locked_until = None
+    credential.recovery_codes = None

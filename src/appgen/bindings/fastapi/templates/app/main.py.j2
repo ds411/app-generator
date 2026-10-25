@@ -29,10 +29,14 @@ from app.core.logging import RequestLogMiddleware, configure_logging
 {% if py.providers %}
 from app.core.providers import router as providers_router
 {% endif %}
+{% set sf = definition.auth.second_factor if definition.auth and definition.auth.password else none %}
 {% if py.redis %}
 from app.core.rate_limit import Limiter, RateLimiter, RateLimitMiddleware, RedisRateLimiter
 {% else %}
 from app.core.rate_limit import RateLimiter, RateLimitMiddleware
+{% endif %}
+{% if sf %}
+from app.core.second_factor import router as second_factor_router
 {% endif %}
 {% for e in py.entity_order() | sort(attribute="slice") %}
 
@@ -111,6 +115,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% endfor %}
 {% if py.providers %}
     app.include_router(providers_router)
+{% endif %}
+{% if sf %}
+    {{ trace(sf.id) }}
+    app.include_router(second_factor_router)
 {% endif %}
 {% for e in py.entity_order() %}
     {{ trace(e.id) }}

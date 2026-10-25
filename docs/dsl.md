@@ -1194,6 +1194,9 @@ auth:
     verify_email: true
   password_reset:
     token_minutes: 30
+  second_factor:
+    totp: true
+    required_roles: [admin]
   providers:
     company:
       title: Company account
@@ -1234,6 +1237,15 @@ auth:
   is off by default. `token_minutes` (5 to 1440, default 60) is the
   time that a link stays valid. A link is valid only one time. The
   delivery of the message (for example an email) is a generation gap.
+- `second_factor` lets each user with a password turn on a second factor
+  of the sign-in: the codes of an authenticator app
+  ([ADR 0024](adr/0024-second-factor.md)). It is off by default.
+  `totp: true` selects the time-based one-time passwords of RFC 6238,
+  the only method now. With `access`, `required_roles` names the roles
+  that must use it: their first sign-in turns it on. The role of the
+  sign-up can be one of them only with `verify_email`, because without
+  it the sign-up starts a session at once. A sign-in with a provider
+  does not ask for the second factor.
 - `providers` are OpenID Connect providers that the users can sign in
   with, for example the sign-in of the company
   ([ADR 0020](adr/0020-providers.md)). The name of a provider is a
@@ -1251,11 +1263,12 @@ auth:
   `title` (default: the name) is the text on the sign-in button.
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
-  have `sign_up` or `password_reset`.
+  have `sign_up`, `password_reset`, or `second_factor`.
 - No page can use the path `/sign-in`, `/sign-up` with a sign-up,
   `/verify-email` with `verify_email`, `/forgot-password` and
-  `/reset-password` with a password reset, or a path under `/auth/` with
-  providers: they are the pages of the front ends.
+  `/reset-password` with a password reset, `/second-factor` with a
+  second factor, or a path under `/auth/` with providers: they are the
+  pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -1277,6 +1290,19 @@ extension file `app/core/messages_ext.py` delivers the messages of both
 kinds: its stub writes the link to the log with
 `ENVIRONMENT=development`, and gives 501 in production. The subject and
 the text of a message are in the language of the request. With
+`second_factor`, `POST /auth/second-factor/setup` gives a new secret
+and its `otpauth://` URI, and `POST /auth/second-factor/confirm` with a
+valid code turns the factor on and gives 10 recovery codes one time.
+Then `POST /auth/sign-in` gives a challenge for 5 minutes, not a token,
+and `POST /auth/sign-in/second-factor` with the challenge and a code,
+or a recovery code, gives the token. Each code and each recovery code
+is valid one time. After 5 wrong codes in a row, the codes of the user
+give 429 for 15 minutes. A user of a required role gets the challenge
+of the setup, and turns the factor on with it. `GET
+/auth/second-factor` gives the state of the factor, `POST
+/auth/second-factor/disable` with a code turns it off, and `python -m
+app.cli disable-second-factor <user name>` turns it off for a user who
+lost the codes. With
 `providers`, `GET /auth/providers/<name>/start` sends the browser to the
 provider (the authorization code flow with PKCE), and `GET
 /auth/providers/<name>/callback` checks the ID token (the signature
@@ -1611,6 +1637,12 @@ to translate one. The rules and the workflows give their own messages.
   `Confirm the email address first: open the link in the message.`,
   `If the user name needs a confirmation, the user gets a message with a link.`,
   `The link is not valid, or has ended.`.
+- The second factor: `The code is not correct.`,
+  `Too many wrong codes. Try again later.`,
+  `The sign-in has ended. Sign in again.`,
+  `The second factor needs a password. Set a password first.`,
+  `The second factor is on.`, `The second factor is off.`,
+  `Your role must use a second factor.`.
 - The messages to the users (the subject is the title of the app and a
   text): `Reset the password`,
   `Open the link to set a new password. The link is valid one time.`,
