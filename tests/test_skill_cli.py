@@ -165,7 +165,7 @@ def test_the_front_matter_follows_the_agent_skills_format() -> None:
     assert len(text.splitlines()) <= 500
 
 
-def test_the_description_names_the_four_tasks() -> None:
+def test_the_description_names_the_five_tasks() -> None:
     description = front_matter((SKILL / "SKILL.md").read_text(encoding="utf-8"))["description"]
 
     for words in (
@@ -175,6 +175,7 @@ def test_the_description_names_the_four_tasks() -> None:
         "write a new app definition",
         "change the app definition",
         "fill the generation gaps",
+        "add seed records",
     ):
         assert words in description
 

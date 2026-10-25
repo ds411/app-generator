@@ -18,6 +18,7 @@ SKILL = SKILLS / "appgen"
 _FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.DOTALL | re.MULTILINE)
 _SPAN = re.compile(r"`([^`]+)`")
 _COMMENT = re.compile(r"<!--\s*(.*?)\s*-->")
+_DATA_FILE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.(csv|yaml|yml|json)")
 
 MADE_FROM_DOCS = {"references/dsl.md"}
 """The files of the skill that a script makes from the docs of the repository."""
@@ -92,6 +93,20 @@ def code_blocks(text: str, language: str) -> list[CodeBlock]:
             index = end
         index += 1
     return blocks
+
+
+def data_files(text: str) -> dict[str, str]:
+    """Return the data files of a Markdown text, by their paths.
+
+    A data file is a fenced code block with its relative path in a comment
+    on the line before, for example `<!-- data/rooms.csv -->`.
+    """
+    files: dict[str, str] = {}
+    for language in ("csv", "yaml", "json"):
+        for block in code_blocks(text, language):
+            if block.comment and _DATA_FILE.fullmatch(block.comment):
+                files[block.comment] = block.content
+    return files
 
 
 def cli_commands() -> dict[tuple[str, ...], Command]:

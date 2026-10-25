@@ -145,7 +145,8 @@ A relative path to `schema/app.schema.json` also works.
 format, for Claude Code, Codex, and other agents. It tells an agent how
 to use the CLI (validate a definition, fix the diagnostics, generate an
 app, and check its traces), how to write a new definition, how to change
-a definition, and how to fill the generation gaps. The skill is a part
+a definition, how to fill the generation gaps, and how to add seed
+records (the data that the apps start with). The skill is a part
 of the package, so each version of appgen has its own skill.
 [ADR 0015](docs/adr/0015-agent-skills.md) describes the design.
 

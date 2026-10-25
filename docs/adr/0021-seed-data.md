@@ -125,6 +125,15 @@ We looked at three forms of the records:
 - Until a binding uses the seed, it excludes the kinds `entity_seed` and
   `seed_record`, so that it makes no gaps for them.
 
+### The skill
+
+- The skill has a fifth task, with its own reference
+  (`references/seed-data.md`): turn the data of a task, for example a
+  table or a CSV file, into seed records. The reference tells how to
+  choose between `records` and a data file, how to choose the record
+  keys, how to convert the values, and how each binding loads the
+  records.
+
 ## Consequences
 
 - An author gives real start data, and refers to other records by key,
