@@ -72,6 +72,12 @@ The pages `/forgot-password` and `/reset-password` use `POST
 `PASSWORD_RESET_URL` of the FastAPI app to the page `/reset-password`
 of this app, for example `http://localhost:5173/reset-password`.
 {% endif %}
+{% if definition.auth.second_factor %}
+The page `/second-factor` turns the second factor of the user on and
+off with the endpoints `/auth/second-factor/...`, and the sign-in asks
+for a code with `POST /auth/sign-in/second-factor`. The browser makes
+the QR code of the secret.
+{% endif %}
 {% endif %}
 
 {% endif %}

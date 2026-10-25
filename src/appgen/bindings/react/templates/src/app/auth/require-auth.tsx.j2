@@ -6,6 +6,9 @@ import { Navigate, useLocation, useSearchParams } from "react-router";
 {% if auth_pages.verify_email %}
 import { VerifyEmailForm } from "@/features/email-verification";
 {% endif %}
+{% if auth_pages.second_factor %}
+import { SecondFactorPage } from "@/features/second-factor";
+{% endif %}
 {% if auth_pages.password_reset %}
 import { ResetPasswordForm } from "@/features/password-reset";
 {% endif %}
@@ -97,5 +100,15 @@ export function ResetPasswordRoute() {
 export function VerifyEmailRoute() {
   const [params] = useSearchParams();
   return <VerifyEmailForm token={params.get("token") ?? ""} />;
+}
+{% endif %}
+{% if auth_pages.second_factor %}
+
+/** The page of the second factor of the signed-in user (ADR 0024), or the sign-in page. */
+export function SecondFactorRoute() {
+  if (currentUserId() === null) {
+    return <Navigate to={`/sign-in?next=${encodeURIComponent("/second-factor")}`} replace />;
+  }
+  return <SecondFactorPage />;
 }
 {% endif %}

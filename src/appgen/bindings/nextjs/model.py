@@ -123,6 +123,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.TABLE_PACKAGES
     if definition.auth is not None and definition.auth.providers:
         dependencies |= versions.PROVIDER_PACKAGES
+    if definition.auth is not None and definition.auth.second_factor is not None:
+        dependencies |= versions.SECOND_FACTOR_PACKAGES
     if uses_redis(definition):
         dependencies |= versions.REDIS_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}

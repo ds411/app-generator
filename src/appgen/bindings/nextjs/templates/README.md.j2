@@ -192,6 +192,15 @@ A user who forgets the password asks for a reset link on
 `/forgot-password`. The link opens `/reset-password`, and is valid for
 {{ definition.auth.password_reset.token_minutes }} minutes and one time.
 {% endif %}
+{% if definition.auth.second_factor %}
+Each user turns on a second factor on `/second-factor`: the codes of an
+authenticator app, and 10 recovery codes.{% if definition.access and definition.auth.second_factor.required_roles %} The roles
+{{ definition.auth.second_factor.required_roles | join(", ") }} must use it.{% endif %} The table `credentials` keeps the
+secret encrypted with `AUTH_SECRET`: a new `AUTH_SECRET` makes the
+secrets unreadable, and the users sign in with a recovery code. To turn
+off the factor of a user who lost the codes, set `totp_enabled_at` of
+the user in the table `credentials` to null.
+{% endif %}
 {% if definition.auth.password_reset or (definition.auth.sign_up and definition.auth.sign_up.verify_email) %}
 Write the delivery of the messages (for example an email) in
 `src/shared/auth/messages.ext.ts`. Until then, with

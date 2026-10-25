@@ -6,7 +6,7 @@ from textwrap import dedent
 
 from typer.testing import CliRunner
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs, react
 from appgen.cli import app
 from appgen.dsl import load_definition, load_definition_text, validate_definition
 from appgen.gen.generator import generate
@@ -175,3 +175,88 @@ def test_the_check_covers_the_second_factor_without_a_gap(tmp_path: Path) -> Non
     report = json.loads(result.output)
     assert "auth.second_factor" not in [g["id"] for g in report["gaps"]]
     assert report["uncovered"] == []
+
+
+def front_end_files(binding: str, text: str | None = None) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml") if text else load_definition(FIXTURE)
+    target = {"nextjs": nextjs.BINDING, "react": react.BINDING}[binding]
+    return {f.path: f.content for f in generate(definition, target).files}
+
+
+def test_the_front_ends_have_the_page_and_the_code_step_of_the_sign_in() -> None:
+    for binding in ("nextjs", "react"):
+        files = front_end_files(binding)
+        assert '"uqr": "0.1.3"' in files["package.json"]
+        page = files["src/features/second-factor/ui/second-factor-page.tsx"]
+        assert "disableSecondFactor, readSecondFactor" in page
+        assert 'import { encode } from "uqr";' in files["src/features/second-factor/ui/qr-code.tsx"]
+        sign_in = files["src/features/sign-in/ui/sign-in-form.tsx"]
+        assert 'if (result.status === "second-factor") {' in sign_in
+        assert "await signInWithCode(challenge," in sign_in
+        assert "<SecondFactorSetup secret={secret} challenge={challenge}" in sign_in
+
+
+def test_the_top_bar_links_to_the_page_of_the_second_factor() -> None:
+    definition = load_definition(Path(__file__).parent.parent / "examples/room-booking/app.yaml")
+    for target in (nextjs.BINDING, react.BINDING):
+        files = {f.path: f.content for f in generate(definition, target).files}
+        layouts = [v for k, v in files.items() if k.endswith("-layout.tsx")]
+        assert layouts and all("<SecondFactorLink />" in layout for layout in layouts)
+
+
+def test_the_nextjs_app_has_the_rules_of_the_fastapi_app() -> None:
+    files = front_end_files("nextjs")
+    module = files["src/shared/auth/second-factor.ts"]
+    assert 'const REQUIRED_ROLES: ReadonlySet<string> = new Set(["admin"]);' in module
+    assert 'createHmac("sha1", secret).update(counter).digest()' in module
+    assert "const MAX_FAILURES = 5;" in module
+    assert "return sign(`second-factor.${body}`);" in module
+    actions = files["src/shared/auth/second-factor-actions.ts"]
+    assert "export async function signInWithCodeAction(" in actions
+    assert "if (await secondFactorRequired(userId)) return failed(" in actions
+    assert "inRequestLanguage" in actions
+    assert (
+        'status: "second-factor", challenge: makeChallenge(user.id)'
+        in files["src/shared/auth/actions.ts"]
+    )
+    schema = files["src/shared/db/schema/credentials.ts"]
+    assert 'totpFailures: integer("totp_failures").notNull().default(0),' in schema
+    assert 'totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),' in schema
+    assert 'await requirePageUser("/second-factor");' in files["app/second-factor/page.tsx"]
+
+
+def test_the_react_app_calls_the_api_or_shows_a_demonstration() -> None:
+    files = front_end_files("react")
+    auth = files["src/shared/auth/index.ts"]
+    assert "async function acceptCode(" in auth
+    assert 'REQUIRED_ROLES.has(user.role ?? "") ? "setup" : null' in auth
+    assert "/auth/second-factor" not in auth
+    assert (
+        '{ path: "/second-factor", element: <SecondFactorRoute /> },' in files["src/app/router.tsx"]
+    )
+    text = FIXTURE.read_text().replace(
+        "  title: Club desk\n", "  title: Club desk\n  x-react-data: api\n"
+    )
+    api = front_end_files("react", text)["src/shared/auth/index.ts"]
+    for call in (
+        'apiRequest("POST", "/auth/sign-in/second-factor", { challenge, code })',
+        'apiRequest("GET", "/auth/second-factor")',
+        'apiRequest("POST", "/auth/second-factor/setup", { challenge })',
+        'apiRequest("POST", "/auth/second-factor/confirm", { code, challenge })',
+        'apiRequest("POST", "/auth/second-factor/disable", { code })',
+    ):
+        assert call in api
+    assert "acceptCode" not in api
+
+
+def test_without_the_second_factor_the_front_ends_have_no_second_factor() -> None:
+    text = (
+        FIXTURE.read_text()
+        .replace("  second_factor:\n    totp: true\n", "")
+        .replace("    required_roles: [admin]\n", "")
+    )
+    for binding in ("nextjs", "react"):
+        files = front_end_files(binding, text)
+        assert not [path for path in files if "second-factor" in path]
+        assert "uqr" not in files["package.json"]
+        assert "second-factor" not in files["src/features/sign-in/ui/sign-in-form.tsx"]

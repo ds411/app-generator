@@ -82,6 +82,19 @@ standard library of Python and in `node:crypto`.
   factor.
 - FastAPI: `app/core/second_factor.py` has the codes, the encryption,
   and the endpoints. `app/core/auth.py` gives the challenge.
+- The front ends have the page `/second-factor` of the signed-in user
+  and a link to it in the top bar. The page turns the factor on with the
+  QR code and the key, shows the recovery codes one time, and turns the
+  factor off. After the password of a user with the factor, the sign-in
+  page asks for a code or a recovery code, and a user of a required role
+  turns the factor on first. The browser makes the QR code, so the
+  secret goes to no service on the network.
+- Next.js: `src/shared/auth/second-factor.ts` has the codes and the
+  encryption with `node:crypto`, and server actions in
+  `src/shared/auth/second-factor-actions.ts` follow the rules of the
+  FastAPI app. The React app with `x-react-data: api` calls the
+  endpoints of the FastAPI app. The React app with mock data has the
+  factor as a demonstration in the browser tab, as its mock sign-in.
 
 ## Consequences
 
@@ -97,5 +110,6 @@ standard library of Python and in `node:crypto`.
 - An attacker with the password can lock the codes of a user for 15
   minutes. The user must then change the password, because the attacker
   has it.
-- The front ends get the pages of the second factor in a later change:
-  a page of the account, and the second step of the sign-in.
+- The front ends have the package `uqr` for the QR code. The package is
+  small and has no dependencies. A QR code service on the network would
+  get the secret.

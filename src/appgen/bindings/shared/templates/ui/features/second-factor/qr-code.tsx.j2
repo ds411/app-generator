@@ -1,0 +1,19 @@
+{{ trace_header(definition.auth.second_factor.id) }}
+import { encode } from "uqr";
+
+/**
+ * A QR code of a text, as an SVG image. The app makes it in the browser:
+ * the secret of the second factor goes to no service on the network. The
+ * code is black on white with a quiet zone of 4 modules in both color
+ * modes, so that each camera reads it.
+ */
+export function QrCode({ value, label }: { value: string; label: string }) {
+  const { data, size } = encode(value, { ecc: "M", border: 4 });
+  const path = data.flatMap((row, y) => row.map((dark, x) => (dark ? `M${x} ${y}h1v1h-1z` : ""))).join("");
+  return (
+    <svg role="img" aria-label={label} viewBox={`0 0 ${size} ${size}`} shapeRendering="crispEdges" className="size-48 self-center rounded-md">
+      <rect width={size} height={size} fill="#ffffff" />
+      <path d={path} fill="#000000" />
+    </svg>
+  );
+}

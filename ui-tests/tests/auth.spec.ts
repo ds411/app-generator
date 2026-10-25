@@ -2,10 +2,12 @@
 // the user allows (ADR 0012), a new user can sign up (ADR 0016) and
 // confirm the email address (ADR 0023), a user can reset the password
 // (ADR 0017), a user of an owner rule sees only the records of the user
-// (ADR 0018), and a user signs in with a provider (ADR 0020).
+// (ADR 0018), a user signs in with a provider (ADR 0020), and a user turns
+// on a second factor and signs in with a code (ADR 0024).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { expect, type Page, test } from "@playwright/test";
@@ -249,3 +251,72 @@ for (const provider of auth?.providers ?? []) {
     expect(await menuLabels(page)).toEqual(provider.menu);
   });
 }
+
+/** Return the code of a base32 key in a time step (RFC 6238), as an authenticator app makes it. */
+function totpCode(key: string, step: number): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bits = Array.from(key, (char) => alphabet.indexOf(char).toString(2).padStart(5, "0")).join("");
+  const secret = Buffer.from((bits.match(/.{8}/g) ?? []).map((byte) => parseInt(byte, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const digest = createHmac("sha1", secret).update(counter).digest();
+  const offset = (digest.at(-1) ?? 0) & 0x0f;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+/** Return the current time step of the codes: 30 seconds. */
+function currentStep(): number {
+  return Math.floor(Date.now() / 30_000);
+}
+
+test("a user turns on the second factor, and signs in with a code", async ({ page }, testInfo) => {
+  const factor = auth?.secondFactor;
+  test.skip(!factor || testInfo.project.name !== "light", "One check in the light mode.");
+  if (!factor) return;
+  const password = auth?.password ?? "";
+  await signIn(page, factor.username, password);
+  await page.getByRole("link", { name: "Second factor" }).click();
+  await page.waitForURL((url) => url.pathname === "/second-factor");
+  await page.getByRole("button", { name: "Turn on" }).click();
+  await expect(page.getByRole("img", { name: "QR code of the key" })).toBeVisible();
+  const key = (await page.locator("#second-factor-key").innerText()).trim();
+  const code = page.locator('input[name="code"]');
+  // A wrong code does not turn on the factor.
+  const valid = [-1, 0, 1, 2].map((offset) => totpCode(key, currentStep() + offset));
+  await code.fill(["000000", "111111", "222222", "333333", "444444"].find((value) => !valid.includes(value)) ?? "");
+  await page.getByRole("button", { name: "Turn on" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
+  await code.fill(totpCode(key, currentStep()));
+  await page.getByRole("button", { name: "Turn on" }).click();
+  const recoveryCodes = page.getByRole("list", { name: "Recovery codes" }).getByRole("listitem");
+  await expect(recoveryCodes).toHaveCount(10);
+  const [first = "", second = ""] = (await recoveryCodes.allInnerTexts()).map((text) => text.trim());
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("main").getByRole("status")).toHaveText("The second factor is on.");
+
+  /** Sign out, and sign in with the password and a code. */
+  const signInWithCode = async (value: () => string) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.waitForURL((url) => url.pathname === "/sign-in");
+    await page.locator('input[name="username"]').fill(factor.username);
+    await page.locator('input[name="password"]').fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(code).toBeVisible();
+    await code.fill(value());
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL((url) => url.pathname === "/");
+    await page.waitForLoadState("networkidle");
+  };
+  // The code of the confirmation is used: the code of the next time step signs in.
+  await signInWithCode(() => totpCode(key, currentStep() + 1));
+  expect(await menuLabels(page)).toEqual(factor.menu);
+  // A recovery code signs in one time.
+  await signInWithCode(() => first);
+  await page.goto("/second-factor");
+  await expect(page.getByText("Recovery codes left: 9")).toBeVisible();
+  // A recovery code turns off the factor.
+  await code.fill(second);
+  await page.getByRole("button", { name: "Turn off" }).click();
+  await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
+});

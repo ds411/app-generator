@@ -33,6 +33,7 @@ _VERIFY_EMAIL = (
     "definition.auth and definition.auth.sign_up and definition.auth.sign_up.verify_email"
 )
 _MESSAGES = f"definition.auth and (definition.auth.password_reset or ({_VERIFY_EMAIL}))"
+_SECOND_FACTOR = "definition.auth and definition.auth.second_factor"
 
 # The app shell: the layouts, the menus, the breadcrumbs, and the search
 # (shared templates, see `appgen.bindings.shared.ui`). Each layout with
@@ -310,6 +311,17 @@ BINDING = Binding(
             )
         ),
         *(
+            Output(template=template, path=path, when=_SECOND_FACTOR)
+            for template, path in (
+                ("src/shared/auth/second-factor.ts.j2", "src/shared/auth/second-factor.ts"),
+                (
+                    "src/shared/auth/second-factor-actions.ts.j2",
+                    "src/shared/auth/second-factor-actions.ts",
+                ),
+                ("app/second-factor/page.tsx.j2", "app/second-factor/page.tsx"),
+            )
+        ),
+        *(
             Output(template=template, path=path, when="definition.auth and definition.auth.sign_up")
             for template, path in (
                 (
@@ -404,7 +416,7 @@ BINDING = Binding(
         | {"translations", "language"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
-        | {"email_verification"}
+        | {"email_verification", "second_factor"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
         | {"entity_seed", "seed_record"}

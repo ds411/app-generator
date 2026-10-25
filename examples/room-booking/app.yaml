@@ -389,6 +389,10 @@ auth:
       default_role: member
       claims:
         name: name
+  # Each member can turn on a second factor: the codes of an authenticator
+  # app on the phone.
+  second_factor:
+    totp: true
 
 # An admin may do all. A member may read the rooms, the amenities, and
 # the bookings, and book rooms, but may not change the rooms, the

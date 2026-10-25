@@ -4,6 +4,9 @@ import { Outlet } from "react-router";
 {% if i18n %}
 import { LanguageSwitch } from "@/features/switch-language";
 {% endif %}
+{% if auth_pages.second_factor %}
+import { SecondFactorLink } from "@/features/second-factor";
+{% endif %}
 {% if definition.auth %}
 import { SignOutButton } from "@/features/sign-out";
 {% endif %}
@@ -27,6 +30,9 @@ export function RootLayout() {
 {% endif %}
 {% if react.mode_toggle %}
 {% if extras %}  {% endif %}        <ModeToggle />
+{% endif %}
+{% if auth_pages.second_factor %}
+          <SecondFactorLink />
 {% endif %}
 {% if definition.auth %}
           <SignOutButton />

@@ -26,7 +26,9 @@ test proves it for the room booking example (`examples/room-booking`):
    only the records of the user, and that the form of a new record does
    not show the owner. For each provider that makes users (ADR 0020), it
    signs in with the button of the provider, and compares the menu with
-   the menu of the role of the new user. Next.js signs in through the
+   the menu of the role of the new user. With a second factor (ADR 0024),
+   a user turns it on, signs out, and signs in with a code that the test
+   computes from the key on the page. Next.js signs in through the
    mock provider of scripts/mock_oidc.py. React with mock data signs in
    a mock user at once.
 4. The binding `react-api` is the React app with `x-react-data: api` and
@@ -231,6 +233,31 @@ def expected_password_reset(
     return {"username": users[-1][auth.username_field], "serverLog": str(app / "server.log")}
 
 
+def expected_second_factor(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
+    """Return the values of the second factor: a user apart from the users of the other tests.
+
+    The test turns on the factor on the page `/second-factor`, signs out,
+    and signs in with a code that it computes from the key on the page
+    (ADR 0024). The React app with mock data keeps the factor in the
+    browser tab, as a demonstration.
+    """
+    auth, access = definition.auth, definition.access
+    assert auth is not None and access is not None
+    if auth.second_factor is None:
+        return None
+    users = [
+        u for u in mock_data(definition)[auth.user_entity] if u[auth.username_field] not in used
+    ]
+    user = users[-1]
+    role = user.get(access.role_field)
+    if not isinstance(role, str) or role in auth.second_factor.required_roles:
+        raise AuthUiTestError("The user of the second factor needs a role that may turn it off.")
+    return {
+        "username": user[auth.username_field],
+        "menu": menu_labels(definition, Permissions(definition, role)),
+    }
+
+
 def entity_pages(
     definition: AppDefinition, entity: str, allowed: Permissions
 ) -> tuple[str | None, str | None]:
@@ -381,6 +408,9 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         )
     owner_rules = expected_owner_rules(binding, definition)
     used = {check["username"] for check in [*roles, *owner_rules]}
+    password_reset = expected_password_reset(binding, definition, app, used)
+    if password_reset is not None:
+        used.add(password_reset["username"])
     anonymous = Permissions(definition, None)
     public = next(
         definition.pages[n] for n in auth.public_pages if "{" not in definition.pages[n].path
@@ -396,7 +426,8 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
             "actions": [a for a in page_actions(definition, anonymous) if a["path"] == public.path],
         },
         "signUp": expected_sign_up(binding, definition, app),
-        "passwordReset": expected_password_reset(binding, definition, app, used),
+        "passwordReset": password_reset,
+        "secondFactor": expected_second_factor(definition, used),
         "ownerRules": owner_rules,
         "providers": expected_providers(binding, definition),
     }

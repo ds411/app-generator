@@ -34,7 +34,8 @@ export class UnauthorizedError extends Error {
   }
 }
 
-function secret(): string {
+/** Return AUTH_SECRET: the key of the signed texts{{ " and of the secrets of the second factor" if definition.auth.second_factor }}. */
+export function authSecret(): string {
   const value = process.env.AUTH_SECRET;
   if (!value) {
     throw new Error("Set AUTH_SECRET to sign the sessions.");
@@ -44,7 +45,7 @@ function secret(): string {
 
 /** Return the signature of a text with AUTH_SECRET. */
 export function sign(body: string): string {
-  return createHmac("sha256", secret()).update(body).digest("base64url");
+  return createHmac("sha256", authSecret()).update(body).digest("base64url");
 }
 
 /** Return a signed session token for a user. */
