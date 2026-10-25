@@ -90,6 +90,8 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
 - The skill is text for agents, not a contract. The tests find a missing
   or an unknown name, a wrong JSON example, a wrong exit code, and a
   wrong default, but not a wrong description in the prose. An evaluation
-  with agent tasks shows if the text is enough.
+  with agent tasks shows if the text is enough:
+  `scripts/evaluate_skill.py` prepares, runs, and scores the tasks, and
+  `docs/evaluation-skills.md` gives the results.
 - Agents without a shell cannot use the skill. An MCP server can cover
   them later, with the reference files as its resources.

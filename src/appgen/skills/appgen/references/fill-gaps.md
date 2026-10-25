@@ -192,9 +192,18 @@ of the entity in snake case, for example `bookings`.
 - The generated test of a custom operation accepts the status 501 of the
   stub and the result of the logic. Write the tests of your logic in a
   new file, for example `tests/features/<slice>/test_<operation>_logic.py`.
+- The factories of `tests/factories.py` (`make_<entity>(session, **values)`)
+  give a value to each field, also to the optional fields, and the
+  values change with each call. In a test of your logic, give each value
+  that the test needs, for example
+  `make_task(session, status="todo", completed_at=None)`.
 - After a change to the definition that changes the database, make a
   migration: `uv run alembic revision --autogenerate -m "<change>"`.
   It needs a database with the migrations that exist (see "Database
   changes" in [change-definition.md](change-definition.md)).
 - Test: `uv sync`, `uv run ruff check`, `uv run ruff format --check`,
   `uv run pyright`, and `uv run pytest`.
+- By default, `uv run pytest` starts Postgres with Testcontainers, so
+  Docker must run. Without Docker, use SQLite:
+  `TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest`.
+  Do not skip the tests of the database.

@@ -181,12 +181,15 @@ the app folder:
    rename as a drop and an add: change it to a rename to keep the data,
    `op.rename_table("members", "persons")` for an entity, or
    `op.alter_column(..., new_column_name=...)` for a field. After the
-   rename of a table, also rename its constraints for Postgres
-   (`ALTER TABLE ... RENAME CONSTRAINT`), because their names contain
-   the table name, for example `pk_members` and `uq_members_email`.
+   rename of a table, also rename its constraints, because their names
+   contain the table name, for example `pk_members` and
+   `uq_members_email`. On Postgres, use `ALTER TABLE ... RENAME CONSTRAINT`.
+   SQLite cannot rename a constraint: in `op.batch_alter_table`, drop
+   each unique constraint and create it again with the new name.
 4. `uv run alembic upgrade head` applies it. `uv run pytest` runs
    `tests/test_migrations.py`, which compares the migrations with the
-   models.
+   models. Without Docker, use SQLite for the tests:
+   `TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest`.
 5. `uv run python -m app.cli seed` adds the seed records that the
    database does not have, for example new records of `seed`. It
    changes no record that exists.

@@ -1,10 +1,15 @@
 # Evaluation of the agent skill
 
-This report records three tasks that an agent did with only the
-installed skill of appgen (#260, milestone M15). It shows if the text of
-the skill (`src/appgen/skills/appgen/`) gives an agent enough context to
-write, change, and fill an app definition, and it lists the problems
-that the runs showed and the fix of each problem.
+This report records the tasks that agents did with only the installed
+skill of appgen. It shows if the text of the skill
+(`src/appgen/skills/appgen/`) gives an agent enough context to write,
+change, and fill an app definition, and it lists the problems that the
+runs showed and the fix of each problem.
+
+The first part records the manual runs of three tasks (#260, milestone
+M15). The second part records three runs of each task with two models,
+and a fourth task, with the script `scripts/evaluate_skill.py` (#319,
+milestone M22): see [Repeated runs with the script](#repeated-runs-with-the-script).
 
 ## Contents
 
@@ -15,6 +20,7 @@ that the runs showed and the fix of each problem.
 - [Run 3: fill two gaps](#run-3-fill-two-gaps)
 - [Problems and fixes](#problems-and-fixes)
 - [Runs after the fixes](#runs-after-the-fixes)
+- [Repeated runs with the script](#repeated-runs-with-the-script)
 - [Limits](#limits)
 
 ## Summary
@@ -285,10 +291,191 @@ command against the README of the generated FastAPI app, the summary of
 `appgen generate`, the data API and the view states against the
 generated front ends, and the missing `test` script.
 
+## Repeated runs with the script
+
+The runs of the first part were manual, and each task ran one to three
+times with one model. `scripts/evaluate_skill.py` (#319) prepares,
+runs, and scores the tasks, so that a task can run more times and with
+other models, and the results compare.
+
+### Method of the script
+
+- `prepare <task> <folder>` copies the example of the task without its
+  extension files, generates the app, and adds the files of the task,
+  for example the hand-written code of `cancel_booking` for
+  `change-definition`. It installs the skill into an empty home folder
+  (`appgen skills install --scope user`). The prompts of the tasks are in
+  [evaluation/skill-tasks/](evaluation/skill-tasks/): the first three
+  are the prompts of the first part.
+- `run <folder> --model <model>` starts Claude Code in print mode
+  (`claude -p`) in the work folder, with the empty home folder and the
+  permission mode `bypassPermissions`. The work folder has only the
+  definition, the app, and the files of the task. The script writes the
+  session (`log.jsonl`) and its summary (`run.json`) outside the work
+  folder.
+- `score <folder>` writes `score.json`. The run passes when the
+  definition is valid, `appgen check` reports no invalid traces, the
+  gaps of the task are closed, a new `appgen generate` into a copy of
+  the app writes no file (no manual edits, and the app is generated
+  from the last definition), the tests of the app pass,
+  and the checks of the task pass (for example, no entity `Member` and
+  a field `phone` of `Person`). The FastAPI tests ran on SQLite
+  (`TEST_DATABASE_URL`), because the machine of the runs had no Docker.
+- `report <folder>...` prints the table of the runs below.
+- `tests/test_evaluate_skill.py` runs `prepare` and `score` on each
+  task, before and after a solution that the test writes. No test and
+  no hook runs an agent, because the runs cost money.
+
+All runs were on 2026-10-25, with appgen 0.1.0 (installed as a tool
+from the branch of #319), Claude Code 2.1.310, and the models
+`claude-sonnet-5-5` and `claude-opus-5-5`. The first runs of
+`new-definition`, `change-definition`, and `fill-gaps` used main at
+`e51f88a` with the script. The first runs of `seed-csv` used main at
+`1c9d234` (after #316) with the script and the fixes of the first runs.
+The runs after the fixes used main at `b8f0ea0` or `1c9d234` with the
+script and the fixes. The work folders and the logs of the runs are
+not in the repository.
+
+### Results
+
+| Task | Model | Passed | Turns | Time (s) | Cost (USD) |
+| ---- | ----- | -----: | ----: | -------: | ---------: |
+| `new-definition` | `claude-sonnet-5-5` | 1 of 3 | 7 to 9 | 49 to 52 | 0.14 to 0.15 |
+| `new-definition` | `claude-opus-5-5` | 3 of 3 | 11 to 16 | 58 to 81 | 0.40 to 0.51 |
+| `change-definition` | `claude-sonnet-5-5` | 2 of 3 | 16 to 17 | 106 to 153 | 0.21 to 0.24 |
+| `change-definition` | `claude-opus-5-5` | 3 of 3 | 21 to 25 | 176 to 221 | 0.63 to 0.88 |
+| `fill-gaps` | `claude-sonnet-5-5` | 3 of 3 | 11 to 12 | 99 to 109 | 0.17 to 0.18 |
+| `fill-gaps` | `claude-opus-5-5` | 3 of 3 | 15 to 18 | 95 to 137 | 0.46 to 0.52 |
+| `seed-csv` | `claude-sonnet-5-5` | 3 of 3 | 6 to 7 | 14 to 15 | 0.10 |
+| `seed-csv` | `claude-opus-5-5` | 3 of 3 | 8 to 10 | 54 to 70 | 0.25 to 0.29 |
+
+In all 24 runs, the definition was valid, `appgen check` reported no
+invalid traces, the gaps of the task were closed, and no agent edited a
+generated file. Each failed run failed only the tests of the app. Of the
+18 runs that changed the definition, 17 got a valid definition at the
+first `appgen validate`. In the other run (`change-definition`,
+`claude-opus-5-5`, run 1), the agent wrote `type: phone`. The diagnostic
+`invalid-value` listed the field types, and the agent changed the field
+to a `string` with a `pattern`.
+
+`claude-opus-5-5` took more turns and about three times the cost, and
+passed all 12 runs. `claude-sonnet-5-5` was faster, and passed 9 of 12.
+
+Each run, from the output of `report`:
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | ----------- | ------ |
+| new-definition-claude-sonnet-5-5-1 | new-definition | claude-sonnet-5-5 | 8 | 52 | 0.15 | 1 | yes | yes | yes | yes | no | yes | no |
+| new-definition-claude-sonnet-5-5-2 | new-definition | claude-sonnet-5-5 | 7 | 49 | 0.15 | 1 | yes | yes | yes | yes | no | yes | no |
+| new-definition-claude-sonnet-5-5-3 | new-definition | claude-sonnet-5-5 | 9 | 52 | 0.14 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| new-definition-claude-opus-5-5-1 | new-definition | claude-opus-5-5 | 14 | 58 | 0.42 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| new-definition-claude-opus-5-5-2 | new-definition | claude-opus-5-5 | 11 | 62 | 0.40 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| new-definition-claude-opus-5-5-3 | new-definition | claude-opus-5-5 | 16 | 81 | 0.51 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-sonnet-5-5-1 | change-definition | claude-sonnet-5-5 | 16 | 106 | 0.21 | 1 | yes | yes | yes | yes | no | yes | no |
+| change-definition-claude-sonnet-5-5-2 | change-definition | claude-sonnet-5-5 | 16 | 111 | 0.22 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-sonnet-5-5-3 | change-definition | claude-sonnet-5-5 | 17 | 153 | 0.24 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-opus-5-5-1 | change-definition | claude-opus-5-5 | 21 | 209 | 0.63 | 2 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-opus-5-5-2 | change-definition | claude-opus-5-5 | 25 | 221 | 0.88 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-opus-5-5-3 | change-definition | claude-opus-5-5 | 22 | 176 | 0.71 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-sonnet-5-5-1 | fill-gaps | claude-sonnet-5-5 | 12 | 100 | 0.18 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-sonnet-5-5-2 | fill-gaps | claude-sonnet-5-5 | 12 | 99 | 0.18 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-sonnet-5-5-3 | fill-gaps | claude-sonnet-5-5 | 11 | 109 | 0.17 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-opus-5-5-1 | fill-gaps | claude-opus-5-5 | 16 | 136 | 0.51 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-opus-5-5-2 | fill-gaps | claude-opus-5-5 | 18 | 137 | 0.52 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| fill-gaps-claude-opus-5-5-3 | fill-gaps | claude-opus-5-5 | 15 | 95 | 0.46 | 0 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-1 | seed-csv | claude-sonnet-5-5 | 6 | 15 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-2 | seed-csv | claude-sonnet-5-5 | 6 | 14 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-3 | seed-csv | claude-sonnet-5-5 | 7 | 14 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-opus-5-5-1 | seed-csv | claude-opus-5-5 | 10 | 54 | 0.29 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-opus-5-5-2 | seed-csv | claude-opus-5-5 | 10 | 70 | 0.28 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-opus-5-5-3 | seed-csv | claude-opus-5-5 | 8 | 58 | 0.25 | 1 | yes | yes | yes | yes | yes | yes | yes |
+
+### Problems and fixes of the repeated runs
+
+The three failed runs had one cause: the agent did not run the tests of
+the database. The generated FastAPI tests start Postgres with
+Testcontainers, so they need Docker, and the skill did not say how to
+run them without Docker. `claude-opus-5-5` found `TEST_DATABASE_URL` in
+the README of the app and ran the tests on SQLite in each of its 6
+FastAPI runs. `claude-sonnet-5-5` did so in 1 of 6 runs. In the other
+runs, it saw the errors of Testcontainers and stopped. The failures
+were in the hand-written code and in the migration of the agent, so the
+tests would have shown them.
+
+| # | Problem | Runs | Fix |
+| - | ------- | ---- | --- |
+| 6 | The skill did not tell how to run the FastAPI tests without Docker. | `claude-sonnet-5-5`: `new-definition` 1 and 2, `change-definition` 1 | Step 7 of the CLI loop in `SKILL.md`, the FastAPI section of `fill-gaps.md`, and step 4 of the database section of `change-definition.md` give `TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest`. A test checks the command against the README and `tests/conftest.py` of the generated app. |
+| 7 | The agent tested its operation `return_loan` with a loan of `make_loan(session)`, and expected no return date. The factories give a value to each field, also to the optional fields, so the operation gave 409. | `claude-sonnet-5-5`: `new-definition` 1 and 2 | `fill-gaps.md` says that the factories give a value to each field, and gives the example `make_task(session, status="todo", completed_at=None)`. A test checks the statement against `tests/payloads.py` and `tests/factories.py`. |
+| 8 | `change-definition.md` told to rename the constraints of a renamed table "for Postgres". On SQLite, the unique constraint kept its old name `uq_members_email`, and `tests/test_migrations.py` failed. | `claude-sonnet-5-5`: `change-definition` 1 | The step tells to make each unique constraint again with its new name in `op.batch_alter_table` on SQLite. Two other runs of `claude-sonnet-5-5` did so without the text, and passed. |
+| 9 | `claude-sonnet-5-5` did not build the React app in the runs of `seed-csv`, and said so in its answer. Step 7 of the CLI loop tells to build and test the app. | `claude-sonnet-5-5`: `seed-csv` 1 to 3 | No fix. The task changed only the definition, the data files, and the generated files, and the app built in each score. A change of step 8 of `seed-data.md` to "Generate, check, and build and test the app" did not change it in 3 more runs, so the skill keeps its text. |
+
+### Runs after the fixes
+
+The fixes 6 to 8 were installed into new home folders, and
+`claude-sonnet-5-5` ran `new-definition`, `change-definition`, and
+`seed-csv` again, three times each, with the same prompts. The runs of
+`new-definition` had the fixes 6 and 7. The runs of `change-definition`
+had the fixes 6 to 8. The runs of `seed-csv` had the test change of
+step 8 (problem 9), which is not in the skill.
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | ----------- | ------ |
+| new-definition-claude-sonnet-5-5-fixed-1 | new-definition | claude-sonnet-5-5 | 10 | 43 | 0.12 | 2 | yes | yes | yes | yes | yes | yes | yes |
+| new-definition-claude-sonnet-5-5-fixed-2 | new-definition | claude-sonnet-5-5 | 10 | 44 | 0.16 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| new-definition-claude-sonnet-5-5-fixed-3 | new-definition | claude-sonnet-5-5 | 9 | 37 | 0.14 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-sonnet-5-5-fixed-1 | change-definition | claude-sonnet-5-5 | 15 | 78 | 0.22 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-sonnet-5-5-fixed-2 | change-definition | claude-sonnet-5-5 | 16 | 83 | 0.22 | 2 | yes | yes | yes | yes | yes | yes | yes |
+| change-definition-claude-sonnet-5-5-fixed-3 | change-definition | claude-sonnet-5-5 | 13 | 85 | 0.19 | 2 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-fixed-1 | seed-csv | claude-sonnet-5-5 | 6 | 17 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-fixed-2 | seed-csv | claude-sonnet-5-5 | 6 | 15 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+| seed-csv-claude-sonnet-5-5-fixed-3 | seed-csv | claude-sonnet-5-5 | 6 | 13 | 0.10 | 1 | yes | yes | yes | yes | yes | yes | yes |
+
+All 9 runs passed. In each FastAPI run, the agent ran the tests with
+`TEST_DATABASE_URL` (fix 6), as the skill tells. In `new-definition`,
+one run wrote a test of the logic of its operation, with
+`make_loan(session, returned_on=None)` (fix 7). The other two runs wrote
+no test of the logic. In `change-definition`, each migration made the
+unique constraint again on SQLite (fix 8). In one run of
+`new-definition`, the first `appgen validate` reported
+`display_field: id`, because `id` is not a field of the definition. The
+agent fixed it in one step.
+
+### Seed records from a CSV file
+
+The task `seed-csv` gives the room-booking example with the binding
+`react`, and a file `rooms.csv`: an export with the columns `Room`,
+`Floor`, `Seats`, `Rate per hour (EUR)`, and `Equipment`. The columns
+are not the field names, the file has no column `key`, and the
+equipment is text, not the keys of `Amenity` records. The check of the
+task loads the definition with its data files, and compares the seed
+records of `Room` with the file: the names, the floors, the seats, the
+rates (Borealis has no rate), and the amenities. It also checks that the
+mock data of the React app has the rooms.
+
+Each of the 9 runs read `references/seed-data.md` and did the steps of
+the reference:
+
+- It mapped the columns to the fields `name`, `floor`, `capacity`, and
+  `hourly_rate`, and the equipment to the relation `amenities`.
+- It added `Amenity` seed records for the 3 kinds of equipment, because
+  each target of a relation needs a seed record.
+- It took the record keys from the names (`atlas`, `video_conference`),
+  and left out the rate of Borealis.
+- It kept `rooms.csv` as it was. 5 runs wrote a new data file
+  `data/rooms.csv` in the format of the reference, with `file`, and 4
+  runs wrote the records in `records`.
+
+No run needed a second `appgen validate`.
+
 ## Limits
 
-- Task 1 ran once, task 2 three times, and task 3 two times, with one
-  model. Another model, or another run, can make other mistakes.
+- In the first part, task 1 ran once, task 2 three times, and task 3
+  two times, with one model. The repeated runs ran each task three
+  times with two models. Other models, or more runs, can make other
+  mistakes.
+- The repeated runs used SQLite for the FastAPI tests, because the
+  machine had no Docker. A migration that works on SQLite can fail on
+  Postgres.
 - In the first three runs, the work folders also had the prompt file and
   the log of the session. The agents of run 2 and run 3 listed them,
   and the agent of run 2 read the prompt file. The files have no text

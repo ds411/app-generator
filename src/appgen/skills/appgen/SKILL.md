@@ -130,7 +130,9 @@ Do these steps for each change to a definition:
    `appgen generate`: its line `Gaps created` lists only the gaps of the
    extension files that the run created, and not the open gaps of
    earlier runs.
-7. Build and test the app with the commands of its README.
+7. Build and test the app with the commands of its README. Run all
+   tests. Without Docker, the FastAPI tests use SQLite:
+   `TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest`.
 
 ### The JSON of `appgen validate`
 
