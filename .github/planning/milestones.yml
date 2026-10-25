@@ -353,3 +353,139 @@
     **Demo:** `appgen generate tests/fixtures/project-tracker.yaml -b fastapi -o out`, then `appgen check tests/fixtures/project-tracker.yaml out`.
 
     **Depends on:** M15.
+
+- title: "M21: Custom seed data"
+  description: |
+    **Goal:** An app author gives the seed records of an app in the definition or in data files, and each generated app loads them.
+
+    **Scope**
+    - In: a top-level `seed` section with records for each entity, inline or from local YAML, JSON, or CSV files, the validation of the records against the fields, the relations, and the rules, the seed records in the React mock data and in the Next.js seed, a seed command for the FastAPI app, and a skill reference for seed data.
+    - Out: Updates or deletes of records that exist (the seed only adds records). Values in more than one language (M28). Passwords in the definition: the seed users keep `SEED_PASSWORD`. Data files on a server (URLs).
+
+    **Exit criteria**
+    - [ ] `appgen validate` reports a seed record with a wrong value, a missing required field, or a reference to a record that does not exist, at the line of the record in the definition or in the data file.
+    - [ ] The React mock data, the Next.js seed, and the seed command of the FastAPI app give the seed records of the definition, with the same IDs in the three apps.
+    - [ ] The trace check covers each `seed` element.
+    - [ ] With only the skill, an agent adds seed records from a CSV file, and `appgen check` reports no invalid traces.
+
+    **Demo:** `appgen generate` for the seed data fixture with each binding, then the records of the definition in the React app, in the Next.js app after `pnpm db:seed`, and in the FastAPI app after `uv run python -m app.cli seed`.
+
+    **Depends on:** None.
+
+- title: "M22: Skill checks"
+  description: |
+    **Goal:** The tests of the skill find a wrong statement in the skill, not only a wrong name, and the evaluation of the skill gives results for more runs and for more than one model.
+
+    **Scope**
+    - In: checks of the JSON examples, the exit codes, and the defaults that the skill gives, checks of the YAML fragments of the DSL reference, a script that prepares and scores the agent tasks of the evaluation, and three runs of each task with two models, a task for seed data included.
+    - Out: An MCP server (M14). Agent runs in the pre-push hook, because they cost money. A check of the prose of the skill by a model.
+
+    **Exit criteria**
+    - [ ] A test fails when a JSON example of the skill has a key that the command does not give, or leaves out a key that the command gives.
+    - [ ] A test fails when the skill gives a wrong exit code or a wrong default of an option.
+    - [ ] Each YAML fragment of `docs/dsl.md` is valid in a base definition, or has a marker with a reason.
+    - [ ] `docs/evaluation-skills.md` gives the results of three runs of each task with two models.
+
+    **Demo:** `uv run pytest tests/test_skill_cli.py tests/test_docs.py`, and `uv run scripts/evaluate_skill.py score <task> <folder>`.
+
+    **Depends on:** M21 (the task for seed data).
+
+- title: "M23: API views and clients"
+  description: |
+    **Goal:** A view shows the data of a third-party API without hand-written code, and the clients call more kinds of operations.
+
+    **Scope**
+    - In: views with the data of an API operation in Next.js and React, endpoints of the FastAPI app that call an API with a secret for the React app, form and multipart bodies, text and binary answers, cookie parameters, and the OAuth 2.0 client credentials flow.
+    - Out: Forms that send data to an API (a custom operation does this). OAuth flows with a user (authorization code) for the third-party APIs. OpenAPI documents on a server. Calls to the real APIs in the checks.
+
+    **Exit criteria**
+    - [ ] A view of the project tracker shows the public holidays of the mock server in Next.js and in React, without hand-written code.
+    - [ ] The React app with `x-react-data: api` calls an API with a secret through the FastAPI app, and `appgen generate` gives no gap and no warning for it.
+    - [ ] The checks call an operation with a multipart body, an operation with a cookie parameter, and an operation with a client credentials token on the mock server.
+
+    **Demo:** The project tracker with the view of the public holidays in Next.js and React, and the network log of the browser.
+
+    **Depends on:** None.
+
+- title: "M24: Account security"
+  description: |
+    **Goal:** The sign-in of the generated apps checks the email address of a new user, has a second factor, and sends its messages without hand-written code.
+
+    **Scope**
+    - In: the verification of the email address after a sign-up, a second factor with time-based one-time passwords (TOTP) and recovery codes, and the delivery of the messages of the sign-in by SMTP.
+    - Out: Other second factors (passkeys, SMS). Mail services with an HTTP API: the delivery hook stays a generation gap for them. A protection in the React app with mock data: it has no server (ADR 0011).
+
+    **Exit criteria**
+    - [ ] A new user cannot sign in before the user opens the link of the verification message, in the FastAPI and the Next.js apps.
+    - [ ] A user with a second factor signs in with the password and a TOTP code, in each app.
+    - [ ] With the SMTP delivery, the checks receive the reset and the verification messages in a mock SMTP server, and `appgen check` reports no gap for the delivery.
+
+    **Demo:** The room booking example: sign up, open the link of the message in the mock SMTP server, turn on the second factor, and sign in with a code.
+
+    **Depends on:** None.
+
+- title: "M25: Record rules"
+  description: |
+    **Goal:** The record rules of a role express the usual conditions of real apps: the values of fields, the members of a team, and the records in embedded relations.
+
+    **Scope**
+    - In: field conditions in the record rules, owners through a path of relations (for example the members of the team of a project), the rules in the embedded relations of the FastAPI app, and the same rules in the Next.js and the React apps.
+    - Out: A general expression language for rules. Rules that compare two fields of a record. Row-level security of the database.
+
+    **Exit criteria**
+    - [ ] A role with a field condition sees and changes only the records that the condition allows, in each app.
+    - [ ] A member sees only the records of the teams of the member, through a path of relations, in each app.
+    - [ ] An embedded relation of the FastAPI app shows no record that the rules of the role hide.
+
+    **Demo:** A member signs in, and sees only the records of the teams of the member, and only the records with the values of the condition.
+
+    **Depends on:** None.
+
+- title: "M26: Large lists everywhere"
+  description: |
+    **Goal:** The React app with the FastAPI app loads only the records that a page shows, also for the related records, the boards, the calendars, the forms, and the dashboards, and the FastAPI app can use the full-text search of Postgres.
+
+    **Scope**
+    - In: requests by ID for the related records, a server search for the options of the reference fields, boards and calendars that load by column and by date range, the values of the dashboards on the server, and a full-text search in the FastAPI app.
+    - Out: A search engine (for example OpenSearch). The Next.js app: it reads the database on the server.
+
+    **Exit criteria**
+    - [ ] With more records than one page, the network log of the React app shows no request that loads all pages of an entity, on each page of the project tracker.
+    - [ ] Each `stat` and `chart` widget of a dashboard gets its value with one request, and the value is the same as with mock data.
+    - [ ] With `x-fastapi-search: fulltext`, the search finds a record by a word of a text field on Postgres, and the tests on SQLite pass with the default search.
+
+    **Demo:** The React app with the FastAPI app and 500 tasks, and the network log of the browser.
+
+    **Depends on:** None.
+
+- title: "M27: Next.js production"
+  description: |
+    **Goal:** The Next.js app has the production settings of the FastAPI app: a rate limit and deployment files.
+
+    **Scope**
+    - In: a rate limit of the server actions and the route handlers, in memory or in Redis, a health route, and deployment files for Kubernetes and Knative (Cloud Run).
+    - Out: A rate limit of the React app: it has no server, so the API or the gateway limits the requests. Other platforms.
+
+    **Exit criteria**
+    - [ ] The Next.js app gives status 429 after the limit, and two processes share the limit in Redis.
+    - [ ] The check of the Next.js app validates the deployment files of each target against their schemas.
+
+    **Demo:** `scripts/check-nextjs.sh` with Redis, and the files in `deploy/` of the generated app.
+
+    **Depends on:** None.
+
+- title: "M28: Record translations and right-to-left languages"
+  description: |
+    **Goal:** The front ends show languages from right to left, and the author can mark text fields whose values have a translation for each language.
+
+    **Scope**
+    - In: the direction of each language, the layout of the front ends from right to left, UI tests in a language from right to left, and text fields with values in each language in the three bindings.
+    - Out: Static routes of the Next.js app with translations: the pages read the database and the cookie of each request (ADR 0010). Machine translation of the values. Values in more than one language in the seed records.
+
+    **Exit criteria**
+    - [ ] With a language from right to left, the pages of the React and the Next.js apps have `dir="rtl"`, and the UI tests compare the pages with approved screenshots in that language.
+    - [ ] A translatable field shows the value of the selected language, or the value of the default language when the record has no translation, in each app.
+
+    **Demo:** The project tracker in a test language from right to left, and the title of a task in two languages.
+
+    **Depends on:** None.
