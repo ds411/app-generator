@@ -1461,32 +1461,59 @@ access:
 - The public operations and pages of `auth` stay open to all users. A
   user without a role, or with a role that is not in `roles`, may use
   only the public parts.
-- `records` gives the role owner rules ([ADR 0018](https://github.com/ds411/app-generator/blob/main/docs/adr/0018-owner-rules.md)):
-  for each entity, the role uses only the records that its user owns.
-  `owner` is a many-to-one relation of the entity to the user entity.
+- `records` gives the role record rules ([ADR 0018](https://github.com/ds411/app-generator/blob/main/docs/adr/0018-owner-rules.md),
+  [ADR 0025](https://github.com/ds411/app-generator/blob/main/docs/adr/0025-record-rules.md)): for each entity, the role uses
+  only some of the records. A rule has `owner`, `where`, or both.
   `operations` is `read` (the lists and the reads), `change` (the
   creates, the changes, the deletes, and the custom operations), or both
-  (the default). A rule for `read` also applies to the changes. All
-  rules of an entity use the same relation. A rule does not apply to the
-  public operations.
+  (the default). A rule for `read` also applies to the changes. A rule
+  does not apply to the public operations.
+- `owner` gives the records of the user. It is a relation of the entity
+  to the user entity, or a path of relations with dots, such as
+  `project.team.members`. Each step is a `many_to_one` or a
+  `many_to_many` relation, and the last step goes to the user entity.
+  All rules of an entity with an `owner` use the same `owner`.
+- `where` gives the records with some values: a value or a list of
+  values for each field. The field is a stored `string`, `text`,
+  `email`, `url`, `integer`, `boolean`, or `enum` field, and each value
+  suits the field.
+
+```yaml
+# not valid alone: the entities Task, Project, and Team are not in the base example
+records:
+  Project: { owner: team.members, operations: [read] }
+  Task:
+    owner: project.team.members
+    where: { status: [open, in_progress] }
+```
+
+Here the role reads the projects of its teams, and uses the open tasks of
+these projects. A rule with `owner` and `where` gives the records that
+suit both.
 
 The FastAPI app gives 403 for an operation that the role may not call.
-With an owner rule, a list gives only the records of the user, a read,
-a change, a delete, or a custom operation on another record gives 404,
-and a create sets the owner to the user.
+With a record rule, a list gives only the records of the rule, and a
+read, a change, a delete, or a custom operation on another record gives
+404. A create or a change that gives a record out of the rule gives
+403, and the record does not change. With an `owner` of one relation, a
+create sets the owner to the user. With a path, the request gives the
+first relation, and the path must lead to the user.
+An embedded record of another entity follows the rules of that entity
+too: a hidden embedded record of one is `null` and its ID stays, and an
+embedded list leaves out the hidden records.
 The Next.js app shows "not found" for a page, and gives an error for a
 server action. The React app (mock data) does the same checks in the
 browser, so they are a demonstration, not a protection.
 The menus, the page search, the links, and the actions of the front
 ends show only the pages and the operations that the role allows. A
 group of a menu without an allowed page does not show.
-The front ends apply the owner rules too. The server actions of the
-Next.js app use only the records of the user, and a detail page of a
-record of another user shows "not found". The React app shows the
-records that the FastAPI app gives, and with mock data the mock store
-applies the rules in the browser, as a demonstration. For a user of an
-owner rule, the create and update forms do not show the owner field,
-and a new record belongs to the user.
+The front ends apply the rules with an `owner` of one relation and no
+`where`. The server actions of the Next.js app use only the records of
+the user, and a detail page of a record of another user shows "not
+found". The React app shows the records that the FastAPI app gives, and
+with mock data the mock store applies the rules in the browser, as a
+demonstration. For a user of an owner rule, the create and update forms
+do not show the owner field, and a new record belongs to the user.
 
 ## translations
 
@@ -1710,7 +1737,9 @@ to translate one. The rules and the workflows give their own messages.
 - The sign-in and the access checks: `Sign in to use this endpoint.`,
   `The user name or the password is not correct.`,
   `The current password is not correct.`,
-  `Your role may not do this operation.`, `The server has no AUTH_SECRET.`,
+  `Your role may not do this operation.`,
+  `Your role may not give a record these values.`,
+  `The server has no AUTH_SECRET.`,
   `If the user name exists, the user gets a message with a reset link.`,
   `The reset link is not valid, was used, or has ended.`.
 - The verification of the email address:

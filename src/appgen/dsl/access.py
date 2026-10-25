@@ -13,15 +13,43 @@ type RecordAction = Literal["read", "change"]
 """`read`: the lists and the reads. `change`: the creates, the changes, and the deletes."""
 
 
-class RecordRule(Element):
-    """An owner rule: the role uses only the records of an entity that its user owns (ADR 0018).
+type ConditionValue = pydantic.StrictStr | pydantic.StrictInt | pydantic.StrictBool
+"""A value of a condition of a record rule: a text, an integer, or a boolean."""
 
-    The owner of a record is the user of a many-to-one relation of the
-    entity to the user entity.
+type ConditionValues = Annotated[list[ConditionValue], pydantic.Field(min_length=1)]
+"""The values of a condition with more than one value: the field has one of them."""
+
+OWNER_PATH_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$"
+"""A relation, or a path of relations with dots, for example `project.team.members`."""
+
+
+class RecordRule(Element):
+    """A record rule: the role uses only some records of an entity (ADR 0018, ADR 0025).
+
+    The records of the rule belong to the user (`owner`), and have the
+    values of the conditions (`where`). A rule needs `owner`, `where`,
+    or both.
     """
 
-    owner: MemberName
-    """A many-to-one relation of the entity to the user entity."""
+    owner: Annotated[str, pydantic.StringConstraints(pattern=OWNER_PATH_PATTERN)] | None = None
+    """A relation or a path of relations to the user entity, for example `project.team.members`.
+
+    Each step is a relation of the entity of the step before. The last
+    step is a `many_to_one` or a `many_to_many` relation to the user
+    entity. A record belongs to each user at the end of the path.
+    """
+    where: dict[MemberName, ConditionValue | ConditionValues] = pydantic.Field(
+        default_factory=dict[str, "ConditionValue | ConditionValues"]
+    )
+    """The conditions: a value of a field, or a list of values (one of them), by field name."""
+
+    def conditions(self) -> dict[str, list[str | int | bool]]:
+        """Return the conditions with a list of values for each field, in source order."""
+        return {
+            name: list(value) if isinstance(value, list) else [value]
+            for name, value in self.where.items()
+        }
+
     operations: Annotated[list[RecordAction], pydantic.Field(min_length=1)] = pydantic.Field(
         default_factory=lambda: ["read", "change"]
     )
@@ -41,7 +69,7 @@ class Role(Element):
     )
     """The pages that the role may open, or `["*"]` for all pages."""
     records: dict[EntityName, RecordRule] = pydantic.Field(default_factory=dict[str, RecordRule])
-    """The owner rules of the role, by entity: the role uses only the records of its user."""
+    """The record rules of the role, by entity: the role uses only the records of the rule."""
 
     def allows_operation(self, name: str) -> bool:
         """Return True if the role may call an operation."""

@@ -64,6 +64,10 @@ type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 STRING_TYPES = frozenset({"string", "text", "email", "url"})
 NUMBER_TYPES = frozenset({"integer", "decimal"})
 SINGLE_KINDS = frozenset({"many_to_one", "one_to_one"})
+OWNER_KINDS = frozenset({"many_to_one", "many_to_many"})
+"""The kinds of the last relation of the owner of a record rule (ADR 0025)."""
+CONDITION_TYPES = frozenset({"string", "text", "email", "url", "integer", "boolean", "enum"})
+"""The field types that a condition of a record rule can use (ADR 0025)."""
 INVERSE_KINDS = {
     "many_to_one": "one_to_many",
     "one_to_many": "many_to_one",
@@ -884,11 +888,14 @@ def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
     owners: dict[str, str] = {}
     for role in access.roles.values():
         for name, rule in role.records.items():
+            if rule.owner is None:
+                continue
             first = owners.setdefault(name, rule.owner)
             if first != rule.owner:
                 yield _error(
                     "invalid-value",
-                    f"All owner rules of '{name}' must use the same relation: '{first}'.",
+                    f"All record rules of '{name}' with an owner must use the same owner: "
+                    f"'{first}'.",
                     rule,
                     at="owner",
                 )
@@ -897,24 +904,118 @@ def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
 def _check_record_rule(
     definition: AppDefinition, users: str, name: str, rule: RecordRule
 ) -> Iterator[Diagnostic]:
-    """The entity exists, and its owner is a many-to-one relation to the user entity."""
+    """The entity exists, the owner path ends at the user entity, and the conditions suit."""
     entity = definition.entities.get(name)
     if entity is None:
         yield _missing(rule, "", "entity", name, definition.entities)
         return
+    if rule.owner is None and not rule.where:
+        yield _error(
+            "missing-key",
+            "A record rule needs 'owner', 'where', or both.",
+            rule,
+            hint="Add for example 'owner: <relation to the user>' or 'where: { status: open }'.",
+        )
     if len(set(rule.operations)) != len(rule.operations):
         yield _error(
             "duplicate-name", "The names in 'operations' must be unique.", rule, at="operations"
         )
-    relation = entity.relations.get(rule.owner)
-    if relation is None:
-        yield _missing(rule, "owner", "relation", rule.owner, entity.relations)
-    elif relation.kind != "many_to_one" or relation.target != users:
+    if rule.owner is not None:
+        yield from _check_owner_path(definition, users, name, rule, rule.owner)
+    for field_name, values in rule.conditions().items():
+        yield from _check_condition(entity, rule, field_name, values)
+
+
+def _check_owner_path(
+    definition: AppDefinition, users: str, name: str, rule: RecordRule, path: str
+) -> Iterator[Diagnostic]:
+    """Each step is a many-to-one or a many-to-many relation. The last step goes to the users."""
+    current = name
+    relation = None
+    for step in path.split("."):
+        entity = definition.entities.get(current)
+        if entity is None:
+            # check_references reports the target of the relation of the step before.
+            return
+        relation = entity.relations.get(step)
+        if relation is None:
+            if step in entity.fields:
+                yield _error(
+                    "unsuitable-field",
+                    f"The step '{step}' of the owner is a field of '{current}', not a relation.",
+                    rule,
+                    at="owner",
+                )
+            else:
+                matches = difflib.get_close_matches(step, list(entity.relations), n=1)
+                yield _error(
+                    "unknown-reference",
+                    f"The relation '{step}' of '{current}' does not exist.",
+                    rule,
+                    at="owner",
+                    hint=f"Did you mean '{matches[0]}'?" if matches else None,
+                )
+            return
+        if relation.kind not in OWNER_KINDS:
+            yield _error(
+                "unsuitable-field",
+                f"Each step of the owner must be a many-to-one or a many-to-many relation, "
+                f"and '{current}.{step}' is a '{relation.kind}' relation.",
+                rule,
+                at="owner",
+                hint="A record gets its owner from the records that it refers to.",
+            )
+            return
+        current = relation.target
+    if relation is not None and relation.target != users:
         yield _error(
             "unsuitable-field",
-            f"The owner must be a many-to-one relation of '{name}' to the user entity '{users}'.",
+            f"The owner must end with a relation to the user entity '{users}'.",
             rule,
             at="owner",
+        )
+
+
+def _check_condition(
+    entity: Entity, rule: RecordRule, name: str, values: list[str | int | bool]
+) -> Iterator[Diagnostic]:
+    """The field of a condition is a stored field of a suitable type, and the values suit it."""
+    field = entity.fields.get(name)
+    if field is None:
+        yield _missing(rule, "where", "field", name, entity.stored_fields)
+        return
+    if field.computed is not None:
+        yield _error(
+            "unsuitable-field",
+            f"A condition cannot use the computed field '{name}': the records do not store it.",
+            rule,
+            at="where",
+        )
+        return
+    if field.type not in CONDITION_TYPES:
+        names = ", ".join(f"'{t}'" for t in sorted(CONDITION_TYPES))
+        yield _error(
+            "unsuitable-field",
+            f"A condition cannot use the '{field.type}' field '{name}'. It is for {names}.",
+            rule,
+            at="where",
+        )
+        return
+    for item in values:
+        if not _value_fits(field, item):
+            yield _error(
+                "invalid-value",
+                f"The field '{name}' does not allow the value {item!r}.",
+                rule,
+                at="where",
+                hint=f"Use one of {field.values}." if field.type == "enum" else None,
+            )
+    if len({repr(v) for v in values}) != len(values):
+        yield _error(
+            "duplicate-name",
+            f"The values of the condition '{name}' must be unique.",
+            rule,
+            at="where",
         )
 
 
@@ -1572,8 +1673,25 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         )
 
 
+def _value_fits(field: Field, value: object) -> bool:
+    """Return True if a value of a condition suits the type and the limits of a field."""
+    if not _fits(field, value):
+        return False
+    if isinstance(value, str):
+        low, high = field.min_length, field.max_length
+        return (low is None or len(value) >= low) and (high is None or len(value) <= high)
+    if isinstance(value, int) and not isinstance(value, bool):
+        low, high = field.min, field.max
+        return (low is None or value >= low) and (high is None or value <= high)
+    return True
+
+
 def _default_fits(field: Field) -> bool:
-    value = field.default
+    return _fits(field, field.default)
+
+
+def _fits(field: Field, value: object) -> bool:
+    """Return True if a value suits the type of a field."""
     match field.type:
         case "string" | "text" | "email" | "url":
             return isinstance(value, str)

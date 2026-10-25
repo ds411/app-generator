@@ -1,0 +1,189 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# Record rules with field conditions and owners through paths of
+# relations (ADR 0025). The members of a team see the projects and the
+# tasks of the projects of their teams, and only the open tasks. A
+# reviewer sees only the done tasks and the projects that are not
+# archived. scripts/check-fastapi.sh checks the FastAPI app of this
+# definition.
+version: 0
+
+app:
+  name: team-tasks
+  title: Team Tasks
+  description: The tasks of the projects of the teams.
+
+entities:
+  Person:
+    plural_label: People
+    crud:
+      views: [table]
+      forms: [create]
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+      role: { type: enum, values: [admin, member, reviewer], default: member }
+    relations:
+      teams: { kind: many_to_many, target: Team, inverse: members }
+
+  Team:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: name
+    fields:
+      name: { type: string, required: true, unique: true, max_length: 80 }
+    relations:
+      members: { kind: many_to_many, target: Person, inverse: teams }
+      projects:
+        kind: one_to_many
+        target: Project
+        inverse: team
+        # The read schema of a team has its projects as objects.
+        x-fastapi-embed: true
+
+  Project:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      archived: { type: boolean, default: false }
+    relations:
+      team:
+        kind: many_to_one
+        target: Team
+        required: true
+        on_delete: restrict
+        inverse: projects
+      tasks: { kind: one_to_many, target: Task, inverse: project }
+
+  Task:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      status: { type: enum, values: [open, in_progress, done], default: open }
+      priority: { type: integer, min: 1, max: 5, default: 3 }
+    relations:
+      project:
+        kind: many_to_one
+        target: Project
+        required: true
+        on_delete: cascade
+        inverse: tasks
+        # The read schema of a task has the project as an object.
+        x-fastapi-embed: true
+
+pages:
+  teams:
+    path: /
+    title: Teams
+    entity: Team
+    content: { view: team_table }
+    actions:
+      new_team: { kind: form, form: new_team, label: New team, icon: plus }
+  team_detail:
+    path: "/teams/{id}"
+    title: Team
+    entity: Team
+    content: { view: team_detail }
+  projects:
+    path: /projects
+    title: Projects
+    entity: Project
+    content: { view: project_table }
+    actions:
+      new_project: { kind: form, form: new_project, label: New project, icon: plus }
+  project_detail:
+    path: "/projects/{id}"
+    title: Project
+    entity: Project
+    content: { view: project_detail }
+  tasks:
+    path: /tasks
+    title: Tasks
+    entity: Task
+    content: { view: task_table }
+    actions:
+      new_task: { kind: form, form: new_task, label: New task, icon: plus }
+  task_detail:
+    path: "/tasks/{id}"
+    title: Task
+    entity: Task
+    content: { view: task_detail }
+    actions:
+      edit: { kind: form, form: edit_task, label: Edit, icon: pencil, variant: outline }
+  people:
+    path: /people
+    title: People
+    entity: Person
+    content: { view: person_table }
+    actions:
+      new_person: { kind: form, form: new_person, label: New person, icon: user-plus }
+
+ui:
+  navigation:
+    main:
+      items:
+        teams: { page: teams, icon: users }
+        projects: { page: projects, icon: folder }
+        tasks: { page: tasks, icon: list-checks }
+        people: { page: people, icon: user }
+  layouts:
+    app_shell:
+      sidebar: { navigation: main, title: Team Tasks, icon: list-checks }
+  defaults:
+    layout: app_shell
+
+auth:
+  user_entity: Person
+  username_field: email
+
+# An admin may do all. A member sees the teams, and the projects and the
+# open tasks of the teams of the member. A reviewer sees the done tasks,
+# and the projects that are not archived.
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+      pages: ["*"]
+    member:
+      label: Member
+      operations:
+        - list_people
+        - list_teams
+        - read_team
+        - list_projects
+        - read_project
+        - list_tasks
+        - read_task
+        - create_task
+        - update_task
+        - delete_task
+      pages: [teams, team_detail, projects, project_detail, tasks, task_detail]
+      records:
+        Project: { owner: team.members, operations: [read] }
+        Task:
+          owner: project.team.members
+          where: { status: [open, in_progress] }
+    reviewer:
+      label: Reviewer
+      operations:
+        - list_people
+        - list_teams
+        - read_team
+        - list_projects
+        - read_project
+        - list_tasks
+        - read_task
+        - update_task
+      pages: [teams, team_detail, projects, project_detail, tasks, task_detail]
+      records:
+        Project: { where: { archived: false } }
+        Task: { where: { status: done } }

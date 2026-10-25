@@ -5,7 +5,8 @@
 
 ## Status
 
-Accepted
+Accepted. [ADR 0025](0025-record-rules.md) adds conditions, owner paths, and
+the rules for embedded records.
 
 ## Context
 

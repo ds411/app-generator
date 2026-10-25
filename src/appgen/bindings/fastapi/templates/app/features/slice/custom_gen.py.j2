@@ -8,7 +8,7 @@ The logic of the operation is in `{{ op.name }}_ext.py`, which appgen creates
 once and never changes.
 """
 
-{% set owner = op.owner_action %}
+{% set owner = op.scope_action %}
 {% set lines = [
     "from uuid import UUID",
     "from fastapi import APIRouter" ~ (", Depends" if owner),
@@ -34,16 +34,15 @@ once and never changes.
 {% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ (names | sort | join(", "))] %}
 {% endif %}
 {% if owner %}
-{% set lines = lines + ["from typing import Annotated", "from app.core.access import owner_of"] %}
+{% set lines = lines + ["from typing import Annotated", "from app.core.access import RecordScope, scope_of"] %}
 {% endif %}
 {{ py.imports(lines) }}
 
 router = APIRouter(prefix="{{ e.path }}")
 {% if owner %}
 
-{{ trace(e.owner.id) }}
-Owner = Annotated[UUID | None, Depends(owner_of("{{ e.name }}", "{{ owner }}"))]
-"""The user whose records the request may use (ADR 0018), or None for all records."""
+Scope = Annotated[RecordScope | None, Depends(scope_of("{{ owner }}"))]
+"""The records that the request may use (the record rules of the role, ADR 0025), or all."""
 {% endif %}
 
 
@@ -58,11 +57,11 @@ async def run_{{ op.name }}(
     {{ py_apis[api_name].param }}: {{ py_apis[api_name].dependency_type }},
 {% endfor %}
 {% if owner %}
-    owner: Owner,
+    scope: Scope,
 {% endif %}
 ) -> {{ op.returns_class or "None" }}:
     """{{ op.description or ("Run the operation " ~ op.name ~ " on a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.get(session, id{{ ", owner" if owner }})
+    record = await repository.get(session, id{{ ", scope" if e.scoped }})
 {% set ns = namespace(args=["session", "record"] + (["params"] if op.params else [])) %}
 {% for api_name in op.apis %}
 {% set ns.args = ns.args + [py_apis[api_name].param] %}
@@ -71,5 +70,11 @@ async def run_{{ op.name }}(
     await commit(session)
 {% if r %}
     result = await {{ "repository" if r.name == e.name else r.snake ~ "_repository" }}.get(session, result.id)
+{% if r.hides and owner %}
+    read = {{ op.returns_class }}.model_validate(result)
+    await {{ "repository" if r.name == e.name else r.snake ~ "_repository" }}.hide(session, [read], scope)
+    return read
+{% else %}
     return {{ op.returns_class }}.model_validate(result)
+{% endif %}
 {% endif %}

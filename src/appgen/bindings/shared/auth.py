@@ -71,15 +71,18 @@ class OwnerRule:
 def owner_rules(definition: AppDefinition) -> dict[str, OwnerRule]:
     """Return the owner of each entity that an owner rule of a role names, by entity.
 
-    All rules of an entity use the same relation (the validator checks it).
+    All rules of an entity with an owner use the same owner (the validator
+    checks it). Only a direct many-to-one owner counts (ADR 0018).
     """
     if definition.access is None:
         return {}
     found: dict[str, OwnerRule] = {}
     for role in definition.access.roles.values():
         for entity, rule in role.records.items():
-            relation = definition.entities[entity].relations[rule.owner]
-            found[entity] = OwnerRule(rule.owner, camel(rule.owner) + "Id", relation.id)
+            relation = definition.entities[entity].relations.get(rule.owner or "")
+            if relation is not None and relation.kind == "many_to_one":
+                assert rule.owner is not None
+                found[entity] = OwnerRule(rule.owner, camel(rule.owner) + "Id", relation.id)
     return found
 
 

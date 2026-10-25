@@ -1822,6 +1822,26 @@
       "title": "CompareRule",
       "type": "object"
     },
+    "ConditionValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "ConditionValues": {
+      "items": {
+        "$ref": "#/$defs/ConditionValue"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
     "Confirm": {
       "additionalProperties": false,
       "description": "A question that the user must confirm before an action runs.",
@@ -4904,13 +4924,40 @@
     },
     "RecordRule": {
       "additionalProperties": false,
-      "description": "An owner rule: the role uses only the records of an entity that its user owns (ADR 0018).\n\nThe owner of a record is the user of a many-to-one relation of the\nentity to the user entity.",
+      "description": "A record rule: the role uses only some records of an entity (ADR 0018, ADR 0025).\n\nThe records of the rule belong to the user (`owner`), and have the\nvalues of the conditions (`where`). A rule needs `owner`, `where`,\nor both.",
       "patternProperties": {
         "^x-": {}
       },
       "properties": {
         "owner": {
-          "$ref": "#/$defs/MemberName"
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "where": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ConditionValue"
+              },
+              {
+                "$ref": "#/$defs/ConditionValues"
+              }
+            ]
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Where",
+          "type": "object"
         },
         "operations": {
           "items": {
@@ -4921,9 +4968,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "owner"
-      ],
       "title": "RecordRule",
       "type": "object"
     },
