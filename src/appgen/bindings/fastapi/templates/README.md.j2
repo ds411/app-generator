@@ -255,7 +255,7 @@ the code of the feature.
 | `migrations/`           | The Alembic migrations.                              |
 | `app/features/<slice>/` | One slice for each entity.                           |
 {% if py_apis %}
-| `app/integrations/<api>/` | The client and the models of a third-party API.    |
+| `app/integrations/<api>/` | The client and the models of a third-party API, and the endpoints of an exposed API. |
 {% endif %}
 | `tests/`                | The tests, with one folder for each slice.           |
 
@@ -296,6 +296,28 @@ definition gets its clients as arguments of its function in the
 `_ext.py` file. The tests do not call the APIs: `tests/integrations/`
 has a mock transport that answers with the examples of the OpenAPI
 documents, and the tests of the operations get clients with it.
+{% set exposed = py_apis.values() | selectattr("expose") | list %}
+{% if exposed %}
+
+### Endpoints for the front ends
+
+The app has an endpoint for each operation of an exposed API
+(`expose: true`), so that a front end can use the API without its
+secret. The path of an endpoint is `/apis/<api>/<operation>` in kebab
+case, for example `{{ exposed[0].prefix }}{{ exposed[0].methods[0].endpoint_path }}`, and
+its method is the method of the operation. The endpoint takes the
+parameters of the operation as query parameters, and the body of the
+operation as its body. An error of the API gives 502.
+{% if definition.auth %}
+The endpoints need a signed-in user. The roles do not apply to them.
+{% endif %}
+
+| API | Endpoints |
+| --- | --------- |
+{% for api in exposed %}
+| `{{ api.name }}` | `{{ api.prefix }}/...` in `app/integrations/{{ api.module }}/router.py` |
+{% endfor %}
+{% endif %}
 
 {% endif %}
 ## Errors and pages

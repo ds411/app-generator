@@ -35,6 +35,25 @@ export function setAccessToken(token: string | null): void {
   }
 }
 
+{% if ts_apis.values() | selectattr("exposed") | list %}
+/**
+ * A `fetch` function for the clients of the exposed third-party APIs
+ * (`expose`), which call the endpoints of the FastAPI app: it adds the
+ * bearer token of the signed-in user{{ " and the selected language" if i18n }}.
+ */
+export const apiFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+{% if i18n %}
+  headers.set("Accept-Language", getLocale());
+{% endif %}
+  const token = accessToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(input, { ...init, headers });
+};
+
+{% endif %}
 /** An error response of the API. The message is the detail of the problem (RFC 9457). */
 export class ApiError extends Error {
   readonly status: number;

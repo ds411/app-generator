@@ -103,6 +103,11 @@
           ],
           "default": null
         },
+        "expose": {
+          "default": false,
+          "title": "Expose",
+          "type": "boolean"
+        },
         "operations": {
           "anyOf": [
             {

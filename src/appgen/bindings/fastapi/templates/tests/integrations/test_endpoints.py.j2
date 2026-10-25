@@ -1,0 +1,55 @@
+{{ trace_header(element_id) }}
+{% set api = py_apis[name] %}
+{% set first = api.methods[0] %}
+"""The tests of the endpoints of the API `{{ api.name }}` (`apis.{{ api.name }}.expose`).
+
+The tests call the endpoints with the mock client, which answers each
+operation with the example of the OpenAPI document.
+"""
+
+{{ py.imports(api.endpoint_test_imports()) }}
+
+pytestmark = pytest.mark.anyio
+{% for m in api.methods %}
+
+
+{{ trace(m.id) }}
+{{ py.call("async def ", "test_" ~ m.name.rstrip("_") ~ "_answers_with_the_answer_of_the_api", ["client: AsyncClient"], 0, " -> None:") }}
+{% for line in m.endpoint_sample_lines() %}
+    {{ line }}
+{% endfor %}
+    {{ m.endpoint_request("response = await ", api.prefix ~ m.endpoint_path) }}
+
+{% if m.result_type %}
+    assert response.status_code == 200, response.text
+    example = EXAMPLES[{{ api.name | tojson }}][{{ m.operation_id | tojson }}]
+    adapter = pydantic.TypeAdapter({{ m.result_type }})
+    expected = adapter.dump_python(adapter.validate_python(example), mode="json", by_alias=True)
+    assert response.json() == expected
+{% else %}
+    assert response.status_code == 204, response.text
+{% endif %}
+{% endfor %}
+
+
+async def test_an_error_of_the_api_gives_the_status_502(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(FAILURES, {{ api.name | tojson }}, 503)
+{% for line in first.endpoint_sample_lines() %}
+    {{ line }}
+{% endfor %}
+    {{ first.endpoint_request("response = await ", api.prefix ~ first.endpoint_path) }}
+
+    assert_problem(response, 502)
+{% if definition.auth %}
+
+
+async def test_the_endpoints_need_a_signed_in_user(anonymous_client: AsyncClient) -> None:
+{% for line in first.endpoint_sample_lines() %}
+    {{ line }}
+{% endfor %}
+    {{ first.endpoint_request("response = await ", api.prefix ~ first.endpoint_path, "anonymous_client") }}
+
+    assert_problem(response, 401)
+{% endif %}

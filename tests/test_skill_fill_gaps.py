@@ -23,6 +23,7 @@ SECTIONS = {"nextjs": "Next.js", "react": "React", "fastapi": "FastAPI"}
 DEFINITIONS = [
     *sorted((ROOT / "examples").glob("*/app.yaml")),
     ROOT / "tests" / "fixtures" / "react-gaps.yaml",
+    ROOT / "tests" / "fixtures" / "secret-api.yaml",
 ]
 TEST_COMMANDS = {
     "nextjs": ["pnpm lint", "pnpm typecheck", "pnpm build"],

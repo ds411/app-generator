@@ -302,6 +302,11 @@ app:
   `VITE_HOLIDAYS_API_URL`. The API must allow the origin of the app.
   With mock data, the client gives the example answers of the OpenAPI
   document instead.
+- The client of an exposed API (`expose: true`) calls the endpoints of
+  the FastAPI app (`/apis/<api>/<operation>`), with the bearer token of
+  the user, so the secret of the API stays in the FastAPI app.
+  `scripts/check-react-api.sh` calls such an endpoint, and checks that
+  the FastAPI app sends the API key to the mock server of the APIs.
 
 ## Extension files
 

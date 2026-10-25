@@ -100,9 +100,14 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     return {
         "api_entities": apis,
         # The browser cannot keep a secret: only the APIs without a secret
-        # get a client (ADR 0019).
-        "ts_apis": {name: a for name, a in third_party.items() if a.secret_env is None},
-        "ts_server_apis": {name: a for name, a in third_party.items() if a.secret_env is not None},
+        # get a client (ADR 0019), and the exposed APIs, which the FastAPI
+        # app calls with the secret (`expose`).
+        "ts_apis": {
+            name: a for name, a in third_party.items() if a.secret_env is None or a.exposed
+        },
+        "ts_server_apis": {
+            name: a for name, a in third_party.items() if a.secret_env is not None and not a.exposed
+        },
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -125,14 +130,18 @@ def context(definition: AppDefinition) -> dict[str, Any]:
 
 
 def warnings(definition: AppDefinition) -> Iterator[str]:
-    """Return a warning for each API with a secret: the React app has no client for it."""
+    """Return a warning for each API with a secret that the FastAPI app does not expose.
+
+    The React app has no client for such an API.
+    """
     for name, api in definition.apis.items():
-        if api.security is None:
+        if api.security is None or api.expose:
             continue
         yield (
             f"The API '{name}' has a secret ({api.security.env}), so the React app has no "
-            "client for it: a browser app cannot keep a secret. Hint: call the API in a "
-            f"custom operation of the FastAPI app (apis: [{name}]), and set "
+            "client for it: a browser app cannot keep a secret. Hint: set 'expose: true' on "
+            "the API, so that the FastAPI app calls the API for the React app, or call the "
+            f"API in a custom operation of the FastAPI app (apis: [{name}]). Then set "
             "'x-react-data: api' in the section 'app'."
         )
 

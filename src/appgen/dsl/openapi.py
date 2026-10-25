@@ -862,6 +862,25 @@ def _union(options: list[Schema]) -> Schema:
     return flat[0] if len(flat) == 1 else UnionSchema(tuple(flat))
 
 
+def query_value(schema: Schema, spec: ClientSpec, *, item: bool = False) -> bool:
+    """Return True if a query parameter can hold a value of the schema.
+
+    A query parameter holds a text: a scalar, an enum value, any value as
+    text, or a list of these. An object or a map cannot be a query value.
+    """
+    match schema:
+        case Ref(name):
+            return query_value(spec.schema(name).schema, spec, item=item)
+        case ScalarSchema() | AnySchema():
+            return True
+        case ArraySchema(items):
+            return not item and query_value(items, spec, item=True)
+        case UnionSchema(options):
+            return all(query_value(option, spec, item=item) for option in options)
+        case MapSchema() | ObjectSchema():
+            return False
+
+
 def walk(schema: Schema) -> Iterator[Schema]:
     """Yield a schema and each schema in it, without following a `Ref`."""
     yield schema

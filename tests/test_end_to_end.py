@@ -45,16 +45,11 @@ CUSTOM_UI = {
     "ui.dashboards.overview.widgets.workload",
     "ui.dashboards.overview.widgets.holidays",
 }
-# A browser app cannot keep a secret: the React app has no client for an
-# API with a secret, and marks it as a gap.
-SECRET_API = {
-    "apis.exchange_rates",
-    "apis.exchange_rates.operations.getLatestRates",
-    "apis.exchange_rates.operations.convertAmount",
-}
+# The React app has a client for the API with a secret, because the
+# FastAPI app exposes the API (`expose`): the API is not a gap.
 OPEN_GAPS: dict[str, set[str]] = {
     "nextjs": CUSTOM_OPERATIONS | CUSTOM_UI,
-    "react": CUSTOM_OPERATIONS | CUSTOM_UI | SECRET_API,
+    "react": CUSTOM_OPERATIONS | CUSTOM_UI,
     "fastapi": CUSTOM_OPERATIONS,
 }
 

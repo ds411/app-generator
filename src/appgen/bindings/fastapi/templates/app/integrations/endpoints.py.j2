@@ -1,0 +1,42 @@
+{{ trace_header(*(py_apis.values() | selectattr("expose") | map(attribute="id"))) }}
+"""The errors of the endpoints of the exposed APIs (`apis.<api>.expose`).
+
+Each endpoint calls an operation of a third-party API. An error of the API
+gives the status 502 (Bad Gateway). The message names the API and the
+status, but not the answer of the API, which the log has.
+"""
+
+import logging
+
+import httpx
+
+from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.integrations.http import ApiClient, ApiError
+
+logger = logging.getLogger(__name__)
+
+API_ERRORS = (ApiError, httpx.HTTPError, ValueError)
+"""The errors of a call of an API: an error status, a network error, or an answer
+that is not JSON or does not agree with the OpenAPI document (a ValueError)."""
+
+
+def bad_gateway(client: ApiClient, error: Exception) -> ProblemError:
+    """Log an error of an API, and return the error 502 of the endpoint."""
+    logger.warning("The API %s gave an error: %s", client.api, error)
+    if isinstance(error, ApiError):
+{% if i18n %}
+        message = t(
+            "The API {api} answered with the status {status}.",
+            api=client.api,
+            status=error.status,
+        )
+        return ProblemError(502, message)
+    return ProblemError(502, t("The API {api} gave no valid answer.", api=client.api))
+{% else %}
+        message = f"The API {client.api} answered with the status {error.status}."
+        return ProblemError(502, message)
+    return ProblemError(502, f"The API {client.api} gave no valid answer.")
+{% endif %}

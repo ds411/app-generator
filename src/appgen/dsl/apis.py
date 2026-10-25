@@ -104,6 +104,9 @@ class Api(Element):
     description: Text | None = None
     security: ApiSecurity | None = None
     """The credential of the requests. Without it, the requests have no credential."""
+    expose: bool = False
+    """True: the FastAPI app gets an endpoint for each operation (`/apis/<api>/<operation>`),
+    so that a front end can call the API without its secret."""
     operations: Annotated[
         dict[OperationId, ApiOperation],
         BeforeValidator(_operations_input),

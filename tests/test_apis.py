@@ -1,5 +1,6 @@
 """Tests of the `apis` section: the OpenAPI reader, the loader, and the validator (ADR 0019)."""
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -413,6 +414,37 @@ def test_an_operation_that_a_client_cannot_call_is_an_error(tmp_path: Path) -> N
         ("unsuitable-operation", "apis.pets.operations.listPets"),
         ("unsuitable-operation", "apis.pets.operations.listPets"),
     ]
+
+
+def test_an_exposed_operation_takes_each_parameter_as_a_query_parameter(tmp_path: Path) -> None:
+    exposed = PETS + "    expose: true\n"
+    assert codes(definition(tmp_path, exposed)) == []
+
+    document = copy.deepcopy(DOCUMENT)
+    nested = {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+    document["paths"]["/pets/{id}"]["get"]["parameters"] += [
+        {"name": "filter", "in": "query", "schema": {"$ref": "#/components/schemas/Pet"}},
+        {"name": "grid", "in": "query", "schema": nested},
+        {"name": "id", "in": "header", "schema": {"type": "string"}},
+    ]
+    found = definition(tmp_path, exposed, document)
+
+    diagnostics = validate_definition(found)
+    assert [(d.code, d.element_id) for d in diagnostics] == [
+        ("unsuitable-operation", "apis.pets.operations.getPet"),
+        ("unsuitable-operation", "apis.pets.operations.getPet"),
+        ("unsuitable-operation", "apis.pets.operations.getPet"),
+    ]
+    assert [d.message.split(": ", 1)[1] for d in diagnostics] == [
+        "a query parameter cannot hold the parameter 'filter'. "
+        "Its endpoint takes each parameter as a query parameter.",
+        "a query parameter cannot hold the parameter 'grid'. "
+        "Its endpoint takes each parameter as a query parameter.",
+        "two parameters have the name 'id'. "
+        "Its endpoint takes each parameter as a query parameter.",
+    ]
+    # Without `expose`, the client sends these parameters.
+    assert codes(definition(tmp_path, PETS, document)) == []
 
 
 def test_a_custom_operation_names_the_apis_that_it_calls(tmp_path: Path) -> None:

@@ -23,6 +23,9 @@ that the two generated apps work together:
    that the browser gets from the mock server of the third-party APIs
    (scripts/mock_api.py) through the generated client. The build sets
    the base URLs of the APIs to the mock server.
+7. Call the endpoint of an operation of the exposed API `exchange_rates`
+   (`expose: true`) in the FastAPI app: the app must call the mock
+   server with the API key, and give the example answer.
 
 Run it from the repository root:
 
@@ -70,6 +73,8 @@ PAGE_SIZE = 20
 PROJECT_COUNT = PAGE_SIZE + 5
 HOLIDAY_NAME = "Christmas Day"
 """A holiday of the example answers of the holidays API, which the dashboard widget shows."""
+SECRET = "check-secret"
+"""The secret of each API with a secret in the FastAPI app."""
 
 # Open a page, and wait until it shows a text. The arguments are the URL
 # and the text.
@@ -354,10 +359,19 @@ def api_client_test(out: Path) -> None:
     run("pnpm", "--silent", "typecheck", cwd=web)
     run("pnpm", "--silent", "lint", cwd=web)
 
-    api_env = {**database, "CORS_ORIGINS": json.dumps([WEB_URL])}
     uvicorn = ["uv", "run", "uvicorn", "app.main:app", "--port", str(API_PORT)]
     preview = ["pnpm", "exec", "vite", "preview", "--port", str(WEB_PORT), "--strictPort"]
-    with MockApi(load_definition(definition)) as mock:
+    loaded = load_definition(definition)
+    with MockApi(loaded) as mock:
+        # The FastAPI app calls the exposed APIs on the mock server, with
+        # their secrets.
+        secrets = {a.security.env: SECRET for a in loaded.apis.values() if a.security}
+        api_env = {
+            **database,
+            "CORS_ORIGINS": json.dumps([WEB_URL]),
+            **mock.env(),
+            **secrets,
+        }
         # The browser reads the base URLs of the APIs from the build variables.
         apis = {f"VITE_{name}": url for name, url in mock.env().items()}
         log("React: pnpm build with the mock server of the third-party APIs")
@@ -417,6 +431,26 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     if not calls:
         raise ApiClientError("The dashboard did not call the holidays API.")
     log(f"the dashboard called the holidays API {len(calls)} times")
+    check_exposed_api(mock)
+
+
+def check_exposed_api(mock: MockApi) -> None:
+    """Check that the FastAPI app calls the exposed API `exchange_rates` with its secret."""
+    url = f"{API_URL}/apis/exchange-rates/get-latest-rates?base=EUR&symbols=USD&symbols=GBP"
+    log(f"call {url}")
+    answer = request("GET", url)
+    expected = next(r.example for r in mock.routes if r.operation_id == "getLatestRates")
+    if answer != expected:
+        raise ApiClientError(f"The endpoint gave {answer}, not the example {expected}.")
+    calls = mock.calls("exchange_rates", "getLatestRates")
+    if len(calls) != 1:
+        raise ApiClientError(f"The FastAPI app called the API {len(calls)} times, not 1.")
+    call = cast(dict[str, Any], calls[0])
+    if call["query"] != {"base": ["EUR"], "symbols": ["USD", "GBP"]}:
+        raise ApiClientError(f"The FastAPI app sent the query {call['query']}.")
+    if call["headers"].get("x-api-key") != SECRET:
+        raise ApiClientError("The FastAPI app did not send the API key of the API.")
+    log("the FastAPI app called the exchange rates API with its API key")
 
 
 def main() -> int:

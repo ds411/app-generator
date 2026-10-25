@@ -584,6 +584,7 @@ apis:
     document: apis/exchange-rates.openapi.json
     base_url_env: EXCHANGE_RATES_API_URL
     security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    expose: true
     operations:
       getLatestRates: {}
       convertAmount: { description: Convert a budget to another currency. }
@@ -595,6 +596,7 @@ apis:
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
 | `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the secret. The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so `env` cannot have it. Without `security`, the requests have no credential. |
+| `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
 
@@ -614,11 +616,27 @@ apis:
   APIs as arguments. The Next.js app has a server-only client for each
   API in `src/shared/api/<api>/`, which the extension file imports.
 - The React app calls the APIs in the browser, and a browser app cannot
-  keep a secret. Thus only an API without `security` gets a client in
-  `src/shared/api/<api>/`. With mock data, the client gives the example
-  answers. For an API with `security`, `appgen generate` gives a
-  warning: call the API in a custom operation of the FastAPI app, and
-  set `x-react-data: api`.
+  keep a secret. Thus only an API without `security` or with `expose`
+  gets a client in `src/shared/api/<api>/`. With mock data, the client
+  gives the example answers. For an API with `security` and without
+  `expose`, `appgen generate` gives a warning: set `expose: true`, or
+  call the API in a custom operation of the FastAPI app, and set
+  `x-react-data: api`.
+- With `expose: true`, the FastAPI app has the endpoint
+  `/apis/<api>/<operation>` (in kebab case, for example
+  `/apis/exchange-rates/get-latest-rates`) for each operation, with the
+  method of the operation. The endpoint takes all parameters of the
+  operation as query parameters, with their names in the document, and
+  the body of the operation as its body. It gives the answer of the API.
+  An error of the API, an answer that does not agree with the document,
+  or no answer gives 502. With `auth`, the endpoints need a signed-in
+  user, but the roles do not apply to them. With `x-react-data: api`,
+  the client of the React app calls these endpoints, and sends the token
+  of the signed-in user.
+- An exposed API cannot have an operation with a parameter that a query
+  parameter cannot hold (an object, or a list of lists), or two
+  parameters with the same name (`unsuitable-operation`). Call such an
+  operation in a custom operation.
 - The environment variables of the apps (for example `DATABASE_URL`)
   are reserved. Two keys cannot use the same variable.
 
@@ -1449,6 +1467,9 @@ to translate one. The rules and the workflows give their own messages.
 - The rate limit: `Send not more than {limit} requests in each minute.`,
   and with the store in Redis
   `The store of the rate limit is not available. Try again later.`.
+- The endpoints of the exposed APIs:
+  `The API {api} answered with the status {status}.`,
+  `The API {api} gave no valid answer.`.
 
 ## Extension keys
 

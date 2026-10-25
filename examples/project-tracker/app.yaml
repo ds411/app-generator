@@ -152,6 +152,8 @@ apis:
     document: apis/exchange-rates.openapi.json
     base_url_env: EXCHANGE_RATES_API_URL
     security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    # The FastAPI app calls the API for the React app, which cannot keep the key.
+    expose: true
     operations:
       getLatestRates: {}
       convertAmount:

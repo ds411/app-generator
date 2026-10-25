@@ -1,6 +1,7 @@
 """The browser clients of the third-party APIs in the React app (ADR 0019)."""
 
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,11 @@ from appgen.dsl import load_definition, load_definition_text
 from appgen.gen import GenerationResult, find_binding, generate
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.yaml"
+EXPOSE = (
+    "    # The FastAPI app calls the API for the React app, which cannot keep the key.\n"
+    "    expose: true\n"
+)
+"""The lines of the example that expose the API `exchange_rates`."""
 
 
 def _files(result: GenerationResult) -> dict[str, str]:
@@ -21,6 +27,15 @@ def _files(result: GenerationResult) -> dict[str, str]:
 @pytest.fixture(scope="module")
 def mock_result() -> GenerationResult:
     return generate(load_definition(EXAMPLE), find_binding("react"))
+
+
+@pytest.fixture(scope="module")
+def unexposed_result() -> GenerationResult:
+    """The React app of the example, without `expose` on the API `exchange_rates`."""
+    text = EXAMPLE.read_text()
+    assert EXPOSE in text
+    definition = load_definition_text(text.replace(EXPOSE, ""), str(EXAMPLE))
+    return generate(definition, find_binding("react"))
 
 
 @pytest.fixture(scope="module")
@@ -63,9 +78,9 @@ def test_with_mock_data_the_client_gives_the_examples(mock_result: GenerationRes
 
 
 def test_an_api_with_a_secret_gets_no_client_but_a_gap_and_a_warning(
-    mock_result: GenerationResult,
+    unexposed_result: GenerationResult,
 ) -> None:
-    files = _files(mock_result)
+    files = _files(unexposed_result)
     assert not any(p.startswith("src/shared/api/exchange-rates/client.ts") for p in files)
     gap = files["src/shared/api/exchange-rates/client.ext.ts"]
     assert gap.splitlines()[1:4] == [
@@ -75,11 +90,46 @@ def test_an_api_with_a_secret_gets_no_client_but_a_gap_and_a_warning(
     ]
     assert "TODO(appgen)" in gap
     assert "EXCHANGE_RATES" not in files["src/shared/api/third-party.ts"]
-    assert len(mock_result.warnings) == 1
-    warning = mock_result.warnings[0]
+    assert len(unexposed_result.warnings) == 1
+    warning = unexposed_result.warnings[0]
     assert warning.startswith("The API 'exchange_rates' has a secret (EXCHANGE_RATES_API_KEY)")
+    assert "Hint: set 'expose: true' on the API" in warning
     assert "custom operation of the FastAPI app (apis: [exchange_rates])" in warning
     assert "'x-react-data: api'" in warning
+
+
+def test_with_mock_data_an_exposed_api_gets_a_client_with_the_examples(
+    mock_result: GenerationResult,
+) -> None:
+    files = _files(mock_result)
+    assert "src/shared/api/exchange-rates/client.ext.ts" not in files
+    client = files["src/shared/api/exchange-rates/client.ts"]
+    assert 'this.http.request("GET", "/latest", {' in client
+    assert "    fetch: mockFetch(MOCK_ROUTES),\n" in client
+    assert "options.secret" not in client
+    assert "src/shared/api/exchange-rates/mock.ts" in files
+    assert mock_result.warnings == []
+
+
+def test_with_api_data_an_exposed_api_calls_the_endpoints_of_the_fastapi_app(
+    api_files: dict[str, str],
+) -> None:
+    assert "src/shared/api/exchange-rates/mock.ts" not in api_files
+    client = api_files["src/shared/api/exchange-rates/client.ts"]
+    assert 'import { API_URL, apiFetch } from "@/shared/api/http";' in client
+    assert 'this.http.request("GET", "/apis/exchange-rates/get-latest-rates", {' in client
+    assert "      query: { base: params.base, symbols: params.symbols },\n" in client
+    assert 'this.http.request("POST", "/apis/exchange-rates/convert-amount", {' in client
+    assert "    baseUrl: API_URL,\n    fetch: apiFetch,\n" in client
+    assert "options.secret" not in client
+    http = api_files["src/shared/api/http.ts"]
+    assert "export const apiFetch: typeof fetch = (input, init) => {" in http
+    assert 'headers.set("Authorization", `Bearer ${token}`);' in http
+    assert "EXCHANGE_RATES" not in api_files["src/vite-env.d.ts"]
+    assert "EXCHANGE_RATES" not in api_files["Dockerfile"]
+    readme = api_files["README.md"]
+    assert "| `exchange_rates` | `exchangeRatesClient()` of" in readme
+    assert "`@/shared/api/exchange-rates` | `VITE_API_URL` |" in readme
 
 
 def test_with_api_data_the_browser_calls_the_api(api_files: dict[str, str]) -> None:
@@ -93,15 +143,19 @@ def test_with_api_data_the_browser_calls_the_api(api_files: dict[str, str]) -> N
     dockerfile = api_files["Dockerfile"]
     assert "ARG VITE_HOLIDAYS_API_URL=https://date.nager.at/api/v3\n" in dockerfile
     assert "ENV VITE_HOLIDAYS_API_URL=${VITE_HOLIDAYS_API_URL}\n" in dockerfile
-    assert "EXCHANGE_RATES" not in dockerfile
     assert (
         "| `holidays` | `holidaysClient()` of `@/shared/api/holidays` |" in api_files["README.md"]
     )
 
 
 def test_appgen_generate_prints_the_warnings(tmp_path: Path) -> None:
+    folder = tmp_path / "definition"
+    shutil.copytree(EXAMPLE.parent, folder)
+    definition = folder / "app.yaml"
+    definition.write_text(definition.read_text().replace(EXPOSE, ""))
     runner = CliRunner()
-    result = runner.invoke(app, ["generate", str(EXAMPLE), "-b", "react", "-o", str(tmp_path)])
+    out = tmp_path / "out"
+    result = runner.invoke(app, ["generate", str(definition), "-b", "react", "-o", str(out)])
     assert result.exit_code == 0, result.output
     assert "\nWarnings: 1\n  The API 'exchange_rates' has a secret" in result.output
 
