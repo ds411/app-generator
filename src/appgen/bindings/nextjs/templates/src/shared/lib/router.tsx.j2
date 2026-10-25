@@ -70,3 +70,11 @@ export function useParams(): Record<string, string | undefined> {
     [params],
   );
 }
+{% if ui_views.api_views %}
+
+/** Return a function that renders the current page again on the server, for example to call an API again. */
+export function useRefresh(): () => void {
+  const router = useRouter();
+  return () => router.refresh();
+}
+{% endif %}

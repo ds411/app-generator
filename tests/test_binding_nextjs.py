@@ -74,6 +74,9 @@ def test_the_fsd_layers_are_in_src_and_the_routes_in_app(result: GenerationResul
     assert "pages/README.md" in files
     routes = sorted(path for path in files if path.startswith("app/"))
     assert routes == [
+        "app/(app-shell)/exchange-rates/page.tsx",
+        "app/(app-shell)/holidays/page.tsx",
+        "app/(app-shell)/holidays/upcoming/page.tsx",
         "app/(app-shell)/layout.tsx",
         "app/(app-shell)/page.tsx",
         "app/(app-shell)/people/page.tsx",

@@ -697,6 +697,8 @@ apis:
   operation in a custom operation.
 - The environment variables of the apps (for example `DATABASE_URL`)
   are reserved. Two keys cannot use the same variable.
+- A view can show the answer of an operation without hand-written code:
+  see [Views of API data](#views-of-api-data).
 
 ## ui
 
@@ -896,7 +898,9 @@ pages:
 ### views
 
 A view shows the records of one entity. Each view has `kind`, `entity`,
-and optional `title`, `description`, `actions`, and `states`.
+and optional `title`, `description`, `actions`, and `states`. A view
+can also show the answer of an API operation in place of the records:
+see [Views of API data](#views-of-api-data).
 
 **Table** (`kind: table`):
 
@@ -994,6 +998,78 @@ ui:
       tabs:
         comments: { label: Comments, icon: message-square, relation: comments, view: comment_table }
         activity: { label: Activity, custom: true }
+```
+
+#### Views of API data
+
+A table, a card list, or a detail view can show the answer of an
+operation of an API (see [apis](#apis) and
+[ADR 0022](adr/0022-api-views.md)). The view has `source:
+apis.<api>.operations.<id>` in place of `entity`, and `params`: the
+value of each parameter of the operation, by its name in the document.
+A value is a literal, or `$route.<name>` for a path parameter of the
+page. Each required parameter needs a value, and the operation must
+have no body.
+
+- A table or a card list needs an answer that is a list of objects. If
+  the list is in a property of the answer, `items` names the property,
+  for example `data.items`.
+- A detail view needs an answer that is an object. It has `header`
+  (`title`, `subtitle`) and `sections` (`title`, `description`,
+  `fields`, `columns`). An answer that is null shows the empty state.
+- The columns, the card (`title`, `subtitle`, `fields`, `footer`), the
+  `sort`, and the search filters (`kind: search`, `fields`) name the
+  properties of an item, also nested properties with dots, for example
+  `author.name`. A column has `field` if its name is not the property. A
+  shown property holds a text, a number, a boolean, or a list of these.
+- The default format of a property comes from its schema: `date`,
+  `datetime`, `email`, `url`, `number`, `boolean`, `badge` for an enum,
+  else `text`.
+- The view sorts, searches, and pages (`pagination`) the loaded items.
+  Its items are not records, so it has no actions, no row actions, no
+  bulk actions, no selection, no tabs, and only search filters.
+- The page of the view has no `entity`, and its path has each `$route`
+  parameter of the view.
+
+The Next.js app calls the operation in the server component of the
+page, at each request, with the server client of the API. An error of
+the API shows the error state of the view. The React app calls the
+operation in the browser: with mock data, the view shows the example
+answer of the document. In the React app, the view of an API with a
+secret is a gap, unless the API has `expose: true`. With
+`x-react-data: api`, the view of an exposed API calls the FastAPI app.
+
+```yaml
+pages:
+  holidays: { path: /holidays, title: Public holidays, content: { view: public_holidays } }
+ui:
+  views:
+    public_holidays:
+      kind: table
+      source: apis.holidays.operations.getPublicHolidays
+      params: { year: 2026, countryCode: DE }
+      columns:
+        date: {}
+        name: { label: Holiday }
+        local_name: { field: localName }
+      sort: { field: date }
+      filters:
+        search: { kind: search, fields: [name, localName] }
+```
+
+```yaml
+pages:
+  country_holidays:
+    path: "/holidays/{country}"
+    title: Holidays of a country
+    content: { view: country_holidays }
+ui:
+  views:
+    country_holidays:
+      kind: cards
+      source: apis.holidays.operations.getNextPublicHolidays
+      params: { countryCode: $route.country }
+      card: { title: name, subtitle: date, fields: [localName] }
 ```
 
 ### forms

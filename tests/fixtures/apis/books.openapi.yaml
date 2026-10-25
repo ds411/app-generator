@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+  title: Books API
+  version: "1.0"
+  description: The books of a catalog, for the tests of the views of API data.
+servers:
+  - url: https://books.example.com/v1
+components:
+  securitySchemes:
+    ApiKeyAuth: { type: apiKey, in: header, name: X-Api-Key }
+  schemas:
+    Author:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        country: { type: [string, "null"] }
+    Book:
+      type: object
+      required: [isbn, title, published, format]
+      properties:
+        isbn: { type: string }
+        title: { type: string }
+        published: { type: string, format: date }
+        format: { type: string, enum: [hardcover, paperback, ebook] }
+        pages: { type: integer }
+        price: { type: number }
+        in-stock: { type: boolean }
+        website: { type: string, format: uri }
+        author: { $ref: "#/components/schemas/Author" }
+        tags: { type: array, items: { type: string } }
+    BookList:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Book" } }
+    BookPage:
+      type: object
+      required: [total]
+      properties:
+        total: { type: integer }
+        data: { $ref: "#/components/schemas/BookList" }
+paths:
+  /books:
+    get:
+      operationId: listBooks
+      summary: List the books of a genre.
+      parameters:
+        - { name: genre, in: query, schema: { type: string, enum: [fiction, science] } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: A page of books.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookPage" }
+              example:
+                total: 2
+                data:
+                  items:
+                    - isbn: "978-0-00-000001-1"
+                      title: The First Book
+                      published: "2024-03-01"
+                      format: hardcover
+                      pages: 320
+                      price: 24.5
+                      in-stock: true
+                      website: https://books.example.com/first
+                      author: { name: Ada Writer, country: GB }
+                      tags: [novel, classic]
+                    - isbn: "978-0-00-000002-8"
+                      title: The Second Book
+                      published: "2025-06-15"
+                      format: ebook
+                      author: { name: Bo Author, country: null }
+                      tags: []
+    post:
+      operationId: createBook
+      summary: Add a book.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Book" }
+      responses:
+        "201":
+          description: The new book.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+  /books/{isbn}:
+    get:
+      operationId: getBook
+      summary: Get one book, or null.
+      parameters:
+        - { name: isbn, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The book, or null if the catalog has no book with the ISBN.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Book"
+                  - type: "null"
+  /authors/{author}/books:
+    get:
+      operationId: listAuthorBooks
+      summary: List the books of an author.
+      parameters:
+        - { name: author, in: path, required: true, schema: { type: string } }
+        - { name: year, in: query, required: true, schema: { type: integer } }
+        - { name: genre, in: query, schema: { type: string, enum: [fiction, science] } }
+        - { name: signed, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The books.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Book" }

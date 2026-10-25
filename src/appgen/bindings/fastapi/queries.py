@@ -30,6 +30,7 @@ from appgen.bindings.shared.views import definition_display
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.ui.fields import TEXT_TYPES
 from appgen.dsl.ui.views import (
+    ApiViewBase,
     BoardView,
     BooleanFilter,
     CalendarView,
@@ -345,6 +346,8 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
         builder.keys[f.name] = PySortKey(f.name, PyPath(f.name, (), entity, field=f))
     views: list[View] = list(definition.ui.views.values()) if definition.ui is not None else []
     for view in views:
+        if isinstance(view, ApiViewBase):
+            continue
         if isinstance(view, DetailView):
             for tab in view.tabs.values():
                 builder.tab(view.entity, tab)

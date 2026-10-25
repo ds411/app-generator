@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from appgen.bindings.shared.typescript import members, param_type
 from appgen.dsl.model import AppDefinition, Field, Operation
+from appgen.dsl.ui.views import ViewBase
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel, kebab, pascal
 
@@ -135,7 +136,10 @@ def component_gap(definition: AppDefinition, element_id: str) -> GapSpec:
         return _form_widget_gap(definition, element_id, parts[2], parts[4])
     view_name = parts[2]
     assert definition.ui is not None
-    entity = definition.ui.views[view_name].entity
+    view = definition.ui.views[view_name]
+    # A view of API data has no custom parts.
+    assert isinstance(view, ViewBase)
+    entity = view.entity
     imports = [_entity_import(entity, pascal(entity))]
     params = [("record", pascal(entity))]
     if parts[3] == "tabs" and len(parts) == 5:
@@ -228,6 +232,8 @@ def action_gap(definition: AppDefinition, element_id: str) -> GapSpec:
         owner = parts[2]
         assert definition.ui is not None
         view = definition.ui.views[owner]
+        # A view of API data has no actions.
+        assert isinstance(view, ViewBase)
         is_record = group in ("row_actions", "bulk_actions") or view.kind == "detail"
         entity = view.entity if is_record else None
     prefix = {"row_actions": "row-", "bulk_actions": "bulk-"}.get(group, "")

@@ -140,6 +140,420 @@
       "title": "Api",
       "type": "object"
     },
+    "ApiCard": {
+      "additionalProperties": false,
+      "description": "The content of a card of API data.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/PropertyPath"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/PropertyPath"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "footer": {
+          "items": {
+            "$ref": "#/$defs/PropertyPath"
+          },
+          "title": "Footer",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "ApiCard",
+      "type": "object"
+    },
+    "ApiCardsView": {
+      "additionalProperties": false,
+      "description": "A grid of cards, one for each item of an API answer.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiSort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ApiSearchFilter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "cards",
+          "title": "Kind",
+          "type": "string"
+        },
+        "card": {
+          "$ref": "#/$defs/ApiCard"
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "card"
+      ],
+      "title": "ApiCardsView",
+      "type": "object"
+    },
+    "ApiColumn": {
+      "additionalProperties": false,
+      "description": "A column of a table of API data.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Format"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "align": {
+          "default": "start",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "sortable": {
+          "default": true,
+          "title": "Sortable",
+          "type": "boolean"
+        },
+        "hide_below": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakpointName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ApiColumn",
+      "type": "object"
+    },
+    "ApiDetailHeader": {
+      "additionalProperties": false,
+      "description": "The header of a detail view of API data.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ApiDetailHeader",
+      "type": "object"
+    },
+    "ApiDetailSection": {
+      "additionalProperties": false,
+      "description": "A card with properties of the answer.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/PropertyPath"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        },
+        "columns": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Columns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "ApiDetailSection",
+      "type": "object"
+    },
+    "ApiDetailView": {
+      "additionalProperties": false,
+      "description": "An object of an API answer in sections.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "detail",
+          "title": "Kind",
+          "type": "string"
+        },
+        "header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiDetailHeader"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ApiDetailSection"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Sections",
+          "type": "object"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "sections"
+      ],
+      "title": "ApiDetailView",
+      "type": "object"
+    },
     "ApiOperation": {
       "additionalProperties": false,
       "description": "An operation of the document that the app calls. Its name is the operation ID.",
@@ -162,6 +576,45 @@
       "title": "ApiOperation",
       "type": "object"
     },
+    "ApiSearchFilter": {
+      "additionalProperties": false,
+      "description": "A text search in properties of the loaded items.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "search",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/PropertyPath"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ApiSearchFilter",
+      "type": "object"
+    },
     "ApiSecurity": {
       "additionalProperties": false,
       "description": "The credential that the client sends with each request.",
@@ -178,6 +631,149 @@
         "env"
       ],
       "title": "ApiSecurity",
+      "type": "object"
+    },
+    "ApiSort": {
+      "additionalProperties": false,
+      "description": "The sort order of the items of an API answer.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/PropertyPath"
+        },
+        "direction": {
+          "$ref": "#/$defs/appgen__dsl__ui__views__Direction",
+          "default": "asc"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "title": "ApiSort",
+      "type": "object"
+    },
+    "ApiSource": {
+      "pattern": "^apis\\.[a-z][a-z0-9_]*\\.operations\\.[A-Za-z_][A-Za-z0-9_]*$",
+      "type": "string"
+    },
+    "ApiTableView": {
+      "additionalProperties": false,
+      "description": "A table of the items of an API answer.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiSort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ApiSearchFilter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ApiColumn"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Columns",
+          "type": "object"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "columns"
+      ],
+      "title": "ApiTableView",
       "type": "object"
     },
     "App": {
@@ -4160,6 +4756,10 @@
       ],
       "type": "string"
     },
+    "PropertyPath": {
+      "pattern": "^[^.\\s]+(?:\\.[^.\\s]+)*$",
+      "type": "string"
+    },
     "Provider": {
       "additionalProperties": false,
       "description": "An OpenID Connect provider for the sign-in (ADR 0020).\n\nThe app sends the user to the provider, and gets an ID token back: the\nauthorization code flow with PKCE. The claim `username_claim` of the\ntoken gives the user name. The app signs in the user with this user\nname, or with `create_users` makes a new user.",
@@ -5666,6 +6266,15 @@
         },
         {
           "$ref": "#/$defs/DetailView"
+        },
+        {
+          "$ref": "#/$defs/ApiTableView"
+        },
+        {
+          "$ref": "#/$defs/ApiCardsView"
+        },
+        {
+          "$ref": "#/$defs/ApiDetailView"
         }
       ]
     },

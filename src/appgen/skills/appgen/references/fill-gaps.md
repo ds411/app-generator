@@ -129,6 +129,7 @@ of the entity in snake case, for example `bookings`.
 | A custom form rule (`kind: custom`)                                | `src/features/<form>-form/model/<rule>-rule.ext.ts`       | The values of the form. Return `true` if they are valid.    |
 | A custom action (`kind: custom`)                                   | `src/features/<owner>-actions/model/<action>-action.ext.ts` | As in the Next.js app.                                    |
 | A third-party API with a secret (`security`)                       | `src/shared/api/<api>/client.ext.ts`                      | Nothing: a browser app cannot keep the secret. Set `expose: true` on the API, and run `appgen generate` again: the React app then gets a client, and the gap goes away. Or call the API in a custom operation of the FastAPI app (`apis: [<api>]`), and set `x-react-data: api`. Then change the kind of the traces from `gap` to `manual`. |
+| A view of API data of an API with a secret (`source`)             | `src/widgets/<view>/ui/<view>-view.ext.tsx`               | `route` (the path parameters of the page) if the view has a `$route` parameter. Set `expose: true` on the API, and run `appgen generate` again: the gap goes away. With `x-react-data: api` in `app`, the view then calls the FastAPI app. |
 
 - The app uses mock data in the browser. Read and change the data with
   `<entity>Api` of `@/entities/<entity>`, for example

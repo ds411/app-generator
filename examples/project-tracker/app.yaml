@@ -202,6 +202,20 @@ pages:
     title: People
     entity: Person
     content: { view: person_cards }
+  # The pages of API data (ADR 0022): each view shows the answer of an
+  # operation of a third-party API.
+  holidays:
+    path: /holidays
+    title: Public holidays
+    content: { view: public_holidays }
+  upcoming_holidays:
+    path: /holidays/upcoming
+    title: Upcoming holidays
+    content: { view: upcoming_holidays }
+  exchange_rates:
+    path: /exchange-rates
+    title: Exchange rates
+    content: { view: latest_rates }
 
 ui:
   theme:
@@ -700,6 +714,42 @@ ui:
       states:
         empty: { title: No comments yet, icon: message-square, action: new_comment }
 
+    # The views of API data: a view with a source shows the answer of the
+    # operation, with the values of its parameters in `params`.
+    public_holidays:
+      kind: table
+      source: apis.holidays.operations.getPublicHolidays
+      params: { year: 2026, countryCode: DE }
+      columns:
+        date: { label: Date, width: "{size.column_md}" }
+        name: { label: Holiday }
+        local_name: { field: localName, hide_below: md }
+        global: { label: Nationwide, align: center }
+        types: { sortable: false, hide_below: lg }
+      sort: { field: date }
+      filters:
+        search: { kind: search, label: Search holidays, fields: [name, localName] }
+
+    upcoming_holidays:
+      kind: cards
+      source: apis.holidays.operations.getNextPublicHolidays
+      params: { countryCode: DE }
+      card:
+        title: name
+        subtitle: date
+        fields: [localName, global]
+        footer: [types]
+      pagination: { page_size: 12 }
+
+    latest_rates:
+      kind: detail
+      # The Next.js app and the FastAPI app keep the key of the API. The
+      # React app calls the endpoint of the FastAPI app (`expose`).
+      source: apis.exchange_rates.operations.getLatestRates
+      params: { base: EUR }
+      sections:
+        summary: { title: Base currency, fields: [base, date], columns: 2 }
+
   forms:
     new_project:
       entity: Project
@@ -963,6 +1013,17 @@ translations:
         Task: Aufgabe
         Task board: Aufgabenboard
         People: Personen
+        Public holidays: Feiertage
+        Upcoming holidays: Kommende Feiertage
+        Exchange rates: Wechselkurse
+        Date: Datum
+        Holiday: Feiertag
+        Local name: Name in der Landessprache
+        Global: Landesweit
+        Types: Arten
+        Search holidays: Feiertage suchen
+        Base currency: Basiswährung
+        Base: Basis
         New project: Neues Projekt
         New task: Neue Aufgabe
         Open: Öffnen
@@ -1074,6 +1135,7 @@ translations:
         name@example.com: name@beispiel.de
         Next page: Nächste Seite
         Next public holidays: Nächste Feiertage
+        Nationwide: Landesweit
         'No': Nein
         No comments yet: Noch keine Kommentare
         No data yet: Noch keine Daten

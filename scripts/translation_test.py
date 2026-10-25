@@ -11,7 +11,9 @@ test proves it for the project tracker:
 2. Generate the app, and find the UI text in the code that does not
    call `t` (`scripts/untranslated_text.mjs`).
 3. Build and start the app: React with `vite preview`, Next.js with
-   `pnpm start` and PGlite.
+   `pnpm start` and PGlite. The APIs of the app point to the mock server
+   (`scripts/mock_api.py`): the views of API data show the example
+   answers.
 4. Run the UI test `ui-tests/tests/test-language.spec.ts`: it opens each
    page in the test language, with its search, the menu of a record, and
    a form with its date picker. Each text with a Latin letter must have
@@ -50,9 +52,10 @@ from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
+from mock_api import MockApi
 from smoke_test import expected_ui
 
 from appgen.bindings import nextjs, react
@@ -127,7 +130,8 @@ def test_definition(definition: AppDefinition, binding: str, folder: Path) -> Pa
 
 
 def ignored_texts(definition: AppDefinition) -> list[str]:
-    """Return the texts that are not UI text: the values of the records and the language names."""
+    """Return the texts that are not UI text: the values of the records, the values of the
+    example answers of the APIs (the views of API data), and the language names."""
     texts = {LABEL}
     if definition.translations is not None:
         texts |= {language.label for language in definition.translations.languages.values()}
@@ -136,7 +140,22 @@ def ignored_texts(definition: AppDefinition) -> list[str]:
             for value in record.values():
                 values: list[Any] = value if isinstance(value, list) else [value]
                 texts |= {item.strip() for item in values if isinstance(item, str)}
+    for api in definition.apis.values():
+        for operation in api.spec.operations:
+            texts |= set(_strings(operation.example))
     return sorted(texts)
+
+
+def _strings(value: object) -> Generator[str]:
+    """Yield the strings of a JSON value."""
+    if isinstance(value, str):
+        yield value.strip()
+    elif isinstance(value, list):
+        for item in cast(list[object], value):
+            yield from _strings(item)
+    elif isinstance(value, dict):
+        for item in cast(dict[str, object], value).values():
+            yield from _strings(item)
 
 
 def wait_for(binding: str, url: str) -> None:
@@ -157,10 +176,10 @@ def wait_for(binding: str, url: str) -> None:
 
 
 @contextmanager
-def started(binding: str, app: Path) -> Generator[None]:
-    """Start the built app, and stop it at the end."""
+def started(binding: str, app: Path, apis: dict[str, str]) -> Generator[None]:
+    """Start the built app, and stop it at the end. `apis` points the APIs to the mock server."""
     port = str(PORTS[binding])
-    env = {**os.environ, "PORT": port}
+    env = {**os.environ, "PORT": port, **apis}
     if binding == "react":
         command = ["pnpm", "exec", "vite", "preview", "--port", port, "--strictPort"]
     else:
@@ -278,7 +297,9 @@ def translation_test(binding: str, out: Path) -> None:
     run("pnpm", "install", "--silent", cwd=app)
     run("pnpm", "--silent", "build", cwd=app)
     test = load_definition(path)
-    with started(binding, app):
+    # The Next.js app calls the APIs of its views on the server: the mock
+    # server gives the example answers.
+    with MockApi(test) as mock, started(binding, app, mock.env()):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/")
         log(binding, "UI test of the test language (Playwright)")
         check_ui(binding, test)

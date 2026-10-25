@@ -5,13 +5,15 @@
 {% set dashboard = element.content.dashboard if element.content is not none and element.content.dashboard else none %}
 {% set form = element.content.form if element.content is not none else none %}
 {% set id_param = info.params[-1] if detail else none %}
+{# The server component of the route calls the operation of a view of API data (ADR 0022). #}
+{% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
 {{ trace_header(element_id) }}
 "use client";
 
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
 {% endif %}
-{% if (info.params and not view and not dashboard) or form %}
+{% if (info.params and not view and not dashboard and not api_view) or form %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
 {% if dashboard %}
@@ -24,6 +26,8 @@ import { {{ name | pascal }}PageActions } from "@/widgets/page-actions";
 import { PageHeader } from "@/widgets/page-header";
 {% if view or detail %}
 import { {{ (view or detail) | pascal }}View } from "@/widgets/{{ (view or detail) | kebab }}";
+{% elif api_view %}
+import { {{ api_view | pascal }}View, type {{ api_view | pascal }}ViewProps } from "@/widgets/{{ api_view | kebab }}";
 {% endif %}
 {% if custom %}
 
@@ -35,12 +39,16 @@ import { {{ name | pascal }}Content } from "./{{ info.slice }}-content.gen";
 {{ trace(action_id) }}
 
 {% endfor %}
+{% if api_view %}
+export function {{ info.component }}({ result }: {{ api_view | pascal }}ViewProps) {
+{% else %}
 export function {{ info.component }}() {
+{% endif %}
 {% if (custom and element.entity) or form %}
   const params = useParams();
 {% elif detail %}
   const { {{ id_param }} } = useParams();
-{% elif info.params and not view and not dashboard %}
+{% elif info.params and not view and not dashboard and not api_view %}
   const { {% for param in info.params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
 {% set regions = page_regions(element, page_actions | length > 0) %}
@@ -53,6 +61,8 @@ export function {{ info.component }}() {
 <{{ detail | pascal }}View id={ {{- id_param }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
 {% elif form %}
 <{{ form | pascal }}FormPage routeParams={params} /> {{ trace(element.content.id, jsx=True) }}
+{% elif api_view %}
+<{{ api_view | pascal }}View result={result} /> {{ trace(element.content.id, jsx=True) }}
 {% elif dashboard %}
 <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
 {% else %}

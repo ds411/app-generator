@@ -1,0 +1,382 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.api_view_plan(name) %}
+{% set view = plan.view %}
+{% set kind = view.kind %}
+{# The Next.js app calls the operation in the server component of the page (ADR 0022). #}
+{% set server = plan.server %}
+{% set code = plan.code() %}
+{% set route = plan.route_params | length > 0 %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ns = namespace(icons=[]) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if plan.filters %}{% set ns.icons = ns.icons + ["XIcon"] %}{% endif %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+{% if plan.filters or kind == "cards" %}
+import { useState } from "react";
+{% endif %}
+{% if kind == "table" %}
+import type { ColumnDef } from "@tanstack/react-table";
+{% endif %}
+
+{% if server %}
+import type { ViewAnswer } from "@/shared/api/third-party";
+{% endif %}
+{% set types = plan.type_names() %}
+{% if server %}
+import type { {{ types | join(", ") }} } from "{{ plan.module }}";
+{% else %}
+import { {{ plan.api.factory }}, {% for t in types %}type {{ t }}{{ ", " if not loop.last }}{% endfor %} } from "{{ plan.module }}";
+{% endif %}
+{% if plan.needs("formatValue") %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% set query = (["matchesSearch"] if plan.filters else []) + (["sortBy"] if plan.sort else []) + (["pageCount", "pageOf"] if kind == "cards" else []) %}
+{% if query %}
+import { {{ query | join(", ") }} } from "@/shared/lib/query";
+{% endif %}
+{% if server %}
+import { useRefresh } from "@/shared/lib/router";
+import type { Loaded } from "@/shared/lib/use-resource";
+{% else %}
+import { useResource } from "@/shared/lib/use-resource";
+{% endif %}
+{% if plan.filters %}
+import { Button } from "@/shared/ui/button";
+{% endif %}
+{% if kind == "cards" %}
+{% set card = plan.card %}
+{% set card_names = ["Card", "CardHeader", "CardTitle"] + (["CardDescription"] if card.subtitle else []) + (["CardContent"] if card.fields else []) + (["CardFooter"] if card.footer else []) %}
+import { {{ card_names | sort | join(", ") }} } from "@/shared/ui/card";
+{% elif kind == "detail" %}
+{% set titled = plan.sections | selectattr("title") | list %}
+{% set described = plan.sections | selectattr("description") | list %}
+{% set card_names = ["Card", "CardContent"] + (["CardHeader"] if titled or described else []) + (["CardTitle"] if titled else []) + (["CardDescription"] if described else []) %}
+import { {{ card_names | sort | join(", ") }} } from "@/shared/ui/card";
+{% endif %}
+{% if kind == "table" %}
+import { DataTable } from "@/shared/ui/data-table";
+{% endif %}
+{% if plan.filters %}
+import { SearchFilter } from "@/shared/ui/filters/search-filter";
+{% endif %}
+{% if kind == "cards" %}
+import { ListPagination } from "@/shared/ui/list-pagination";
+{% endif %}
+{% if "avatar" in plan.uses %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "badge" in plan.uses %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "formatted" in plan.uses %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% set state = ["ViewLoading", "ViewMessage"] %}
+{% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
+import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+
+/** The answer of the operation {{ plan.method.operation_id }} of the API {{ plan.api.name }}. */
+type Answer = {{ plan.answer_type }};
+{% if kind != "detail" %}
+
+/** An item of the answer, with its position as the key of its row. */
+type Row = { id: string; item: {{ plan.item_type }} };
+{% endif %}
+{% if not server %}
+
+{% if route %}
+/** Call the operation with the path parameters of the page. */
+function load(route: Record<string, string | undefined>): Promise<Answer> {
+{% else %}
+/** Call the operation. */
+function load(): Promise<Answer> {
+{% endif %}
+  return {{ plan.call }}; {{ trace(plan.method.id) }}
+}
+{% endif %}
+{% if plan.filters %}
+
+type Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: string;
+{% endfor %}
+};
+
+const INITIAL_FILTERS: Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: "", {{ trace(f.element_id) }}
+{% endfor %}
+};
+
+/** Return true if an item passes all filters. */
+function matches(item: {{ plan.item_type }}, filters: Filters): boolean {
+  return (
+{% for f in plan.filters %}
+    {{ f.match }}{{ " &&" if not loop.last }}
+{% endfor %}
+  );
+}
+{% endif %}
+{% if plan.sort %}
+
+/** Sort the items as the view defines: {{ plan.sort.path }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
+function sortItems(items: {{ plan.item_type }}[]): {{ plan.item_type }}[] { {{ trace(view.sort.id) }}
+  return sortBy(items, (item) => {{ plan.sort.expr }}{{ ", true" if plan.sort_desc }});
+}
+{% endif %}
+{% if kind == "table" %}
+
+/** The columns of the table. */
+const COLUMNS: ColumnDef<Row>[] = [
+{% for c in plan.columns %}
+  { {{ trace(c.element_id) }}
+    id: {{ js(c.name | camel) }},
+    header: {{ tr(js(c.header)) }},
+    accessorFn: ({ item }) => {{ c.value.expr }},
+    cell: ({ row: { original: { item } } }) => {{ c.cell }},
+{% if not c.sortable %}
+    enableSorting: false,
+{% else %}
+    sortUndefined: "last",
+{% endif %}
+{% if c.classes or c.width %}
+    meta: { {% if c.classes %}className: {{ js(c.classes) }}{% endif %}{% if c.classes and c.width %}, {% endif %}{% if c.width %}width: {{ js(c.width) }}{% endif %} },
+{% endif %}
+  },
+{% endfor %}
+];
+{% endif %}
+{% if kind != "detail" %}
+
+{% if view.pagination %}
+const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
+{% else %}
+const PAGE_SIZE = {{ plan.page_size }};
+{% endif %}
+const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+{% endif %}
+{% if kind == "cards" %}
+
+/** The card of one item. */
+function ItemCard({ item }: { item: {{ plan.item_type }} }) {
+  return (
+    <Card className="gap-3 py-4"> {{ trace(card.element_id, jsx=True) }}
+      <CardHeader className="px-4">
+        <CardTitle className="line-clamp-2 text-base leading-snug">{ {{- card.title -}} }</CardTitle>
+{% if card.subtitle %}
+        <CardDescription className="truncate">{{ card.subtitle }}</CardDescription>
+{% endif %}
+      </CardHeader>
+{% if card.fields %}
+      <CardContent className="px-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+{% for field_label, jsx in card.fields %}
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+            <dd className="truncate">{{ jsx }}</dd>
+          </div>
+{% endfor %}
+        </dl>
+      </CardContent>
+{% endif %}
+{% if card.footer %}
+      <CardFooter className="flex-wrap gap-2 px-4 text-sm text-muted-foreground">
+{% for jsx in card.footer %}
+        {{ jsx }}
+{% endfor %}
+      </CardFooter>
+{% endif %}
+    </Card>
+  );
+}
+{% endif %}
+{% if plan.props %}
+
+export type {{ name | pascal }}ViewProps = {
+{% if server %}
+  /** The answer of the operation, from the server component of the page. */
+  result: ViewAnswer<Answer>;
+{% else %}
+  /** The path parameters of the page, for the parameters of the operation. */
+  route: Record<string, string | undefined>;
+{% endif %}
+};
+{% endif %}
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% endif %}
+{% if server %}
+export function {{ name | pascal }}View({ result }: {{ name | pascal }}ViewProps) {
+  const refresh = useRefresh();
+  // The view gets the answer from the server, so it does not load. The retry renders the page again.
+  const resource = { ...result, reload: refresh } as Loaded<Answer>;
+{% elif route %}
+export function {{ name | pascal }}View({ route }: {{ name | pascal }}ViewProps) {
+  const resource = useResource(`{{ name }}:${JSON.stringify(route)}`, () => load(route));
+{% else %}
+export function {{ name | pascal }}View() {
+  const resource = useResource({{ js(name) }}, load);
+{% endif %}
+{% if plan.filters and kind == "table" %}
+  const [filters, updateFilters] = useState<Filters>(INITIAL_FILTERS);
+{% elif plan.filters %}
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+{% endif %}
+{% if kind == "cards" %}
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+{% endif %}
+{% if plan.filters and kind == "cards" %}
+
+  const updateFilters = (next: Filters) => {
+    setFilters(next);
+    setPage(1);
+  };
+{% endif %}
+
+{{ m.states(plan, kind) }}
+
+  const answer = resource.data;
+{% if kind == "detail" %}
+{% if plan.empty_answer %}
+  if (answer === null || answer === undefined) {
+    return (
+{{ m.empty_state(plan) }}
+    );
+  }
+{% endif %}
+  const item = answer;
+  return (
+    <div className="space-y-6">
+{% if plan.title or plan.subtitle %}
+      <div className="min-w-0 space-y-1">{% if view.header %} {{ trace(view.header.id, jsx=True) }}{% endif %}
+
+{% if plan.title %}
+        <h2 className="text-xl font-semibold tracking-tight">{ {{- plan.title -}} }</h2>
+{% endif %}
+{% if plan.subtitle %}
+        <div className="text-muted-foreground">{{ plan.subtitle }}</div>
+{% endif %}
+      </div>
+{% elif view.header %}
+      {{ trace(view.header.id, jsx=True) }}
+{% endif %}
+{% for s in plan.sections %}
+      <Card> {{ trace(s.element_id, jsx=True) }}
+{% if s.title or s.description %}
+        <CardHeader>
+{% if s.title %}
+          <CardTitle>{{ jsx_text(s.title) }}</CardTitle>
+{% endif %}
+{% if s.description %}
+          <CardDescription>{{ jsx_text(s.description) }}</CardDescription>
+{% endif %}
+        </CardHeader>
+{% endif %}
+        <CardContent>
+          <dl className={{ js(s.grid) }}>
+{% for field_label, jsx in s.fields %}
+            <div className="min-w-0 space-y-1">
+              <dt className="text-sm text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+              <dd className="break-words">{{ jsx }}</dd>
+            </div>
+{% endfor %}
+          </dl>
+        </CardContent>
+      </Card>
+{% endfor %}
+    </div>
+  );
+}
+{% else %}
+  const all = {{ plan.items }};
+{% if plan.filters %}
+  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+  const items = all.filter((item) => matches(item, filters));
+{% else %}
+  const items = all;
+{% endif %}
+  const rows: Row[] = {{ "sortItems(items)" if plan.sort else "items" }}.map((item, index) => ({ id: String(index), item }));
+{% if kind == "cards" %}
+  const pages = pageCount(rows.length, pageSize);
+  const current = Math.min(page, pages);
+{% endif %}
+
+  return (
+    <div className="space-y-4">
+{% if plan.filters %}
+      <div className="flex flex-wrap items-center gap-2">
+{% for f in plan.filters %}
+        <SearchFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% endfor %}
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+            {{ jsx_text("Reset") }}
+            <XIcon />
+          </Button>
+        )}
+      </div>
+{% endif %}
+      {all.length === 0 ? (
+{{ m.empty_state(plan) | indent(2, true) }}
+{% if plan.filters %}
+      ) : rows.length === 0 ? (
+        <ViewMessage
+          title={{ jsx_attr("No matching records") }}
+          text={{ jsx_attr("Change or reset the filters.") }}
+          action={
+            <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+              {{ jsx_text("Reset the filters") }}
+            </Button>
+          }
+        />
+{% endif %}
+      ) : (
+{% if kind == "table" %}
+        <DataTable
+          columns={COLUMNS}
+          data={rows}
+          pageSize={PAGE_SIZE}
+          pageSizes={PAGE_SIZES}
+{% if plan.filters %}
+          resetKey={JSON.stringify(filters)}
+{% endif %}
+        />
+{% else %}
+        <>
+{% if view.grid %}
+          <div className={{ js(grid_classes(view.grid)) }}> {{ trace(view.grid.id, jsx=True) }}
+{% for override in view.grid.responsive.values() %}
+            {{ trace(override.id, jsx=True) }}
+{% endfor %}
+{% else %}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+{% endif %}
+            {pageOf(rows, current, pageSize).map((row) => (
+              <ItemCard key={row.id} item={row.item} />
+            ))}
+          </div>
+          <ListPagination
+            page={current}
+            pageCount={pages}
+            pageSize={pageSize}
+            pageSizes={PAGE_SIZES}
+            total={rows.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </>
+{% endif %}
+      )}
+    </div>
+  );
+}
+{% endif %}

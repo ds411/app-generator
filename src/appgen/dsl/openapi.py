@@ -881,6 +881,88 @@ def query_value(schema: Schema, spec: ClientSpec, *, item: bool = False) -> bool
             return False
 
 
+def accepts(schema: Schema, value: Scalar, spec: ClientSpec) -> bool:
+    """Return True if a scalar is a valid value of a schema, or an item of a list schema.
+
+    An integer is also a valid number.
+    """
+    match schema:
+        case Ref(name):
+            return accepts(spec.schema(name).schema, value, spec)
+        case ScalarSchema(type_, _, enum):
+            kind = _scalar_type(value)
+            if enum:
+                return any(_scalar_type(v) == kind and v == value for v in enum)
+            return kind == type_ or (type_ == "number" and kind == "integer")
+        case ArraySchema(items):
+            return accepts(items, value, spec)
+        case UnionSchema(options):
+            return any(accepts(option, value, spec) for option in options)
+        case AnySchema():
+            return True
+        case MapSchema() | ObjectSchema():
+            return False
+
+
+def resolved(schema: Schema, spec: ClientSpec) -> Schema:
+    """Return a schema without its `Ref`, and without `null` in a union of one other option.
+
+    The result is the schema of a value that is not null.
+    """
+    seen: set[str] = set()
+    while True:
+        match schema:
+            case Ref(name) if name not in seen:
+                seen.add(name)
+                schema = spec.schema(name).schema
+            case UnionSchema(options):
+                others = [o for o in options if not _is_null(o)]
+                if len(others) != 1:
+                    return schema
+                schema = others[0]
+            case _:
+                return schema
+
+
+def nullable(schema: Schema, spec: ClientSpec) -> bool:
+    """Return True if a value of the schema can be null."""
+    seen: set[str] = set()
+    while isinstance(schema, Ref) and schema.name not in seen:
+        seen.add(schema.name)
+        schema = spec.schema(schema.name).schema
+    return isinstance(schema, UnionSchema) and any(_is_null(o) for o in schema.options)
+
+
+def _is_null(schema: Schema) -> bool:
+    return isinstance(schema, ScalarSchema) and schema.type == "null"
+
+
+def object_properties(schema: Schema, spec: ClientSpec) -> tuple[Property, ...] | None:
+    """Return the properties of an object schema, or None if the schema is not an object."""
+    found = resolved(schema, spec)
+    return found.properties if isinstance(found, ObjectSchema) else None
+
+
+def property_chain(schema: Schema, path: str, spec: ClientSpec) -> list[Property] | None:
+    """Return the property of each segment of a path (`address.city`), or None if one is missing."""
+    chain: list[Property] = []
+    current = schema
+    for part in path.split("."):
+        properties = object_properties(current, spec)
+        found = next((p for p in properties or () if p.name == part), None)
+        if found is None:
+            return None
+        chain.append(found)
+        current = found.schema
+    return chain
+
+
+def list_items(schema: Schema, spec: ClientSpec) -> Schema | None:
+    """Return the schema of the items of a list schema, or None if the schema is not a list."""
+    found = resolved(schema, spec)
+    return found.items if isinstance(found, ArraySchema) else None
+
+
 def walk(schema: Schema) -> Iterator[Schema]:
     """Yield a schema and each schema in it, without following a `Ref`."""
     yield schema

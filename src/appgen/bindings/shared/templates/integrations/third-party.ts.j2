@@ -103,6 +103,25 @@ export class HttpClient {
     return text ? (JSON.parse(text) as unknown) : null;
   }
 }
+{% if server and ui_views.api_views %}
+
+/** The answer of an operation for a view of API data: the data, or the message of the error. */
+export type ViewAnswer<T> = { status: "success"; data: T } | { status: "error"; error: string };
+
+/**
+ * Call an operation for a view of API data (ADR 0022). An error of the
+ * API gives the error state of the view, not an error page: the server
+ * logs the error, and the view gets its message.
+ */
+export async function viewAnswer<T>(call: () => Promise<T>): Promise<ViewAnswer<T>> {
+  try {
+    return { status: "success", data: await call() };
+  } catch (error) {
+    console.error(error);
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+{% endif %}
 {% if mock %}
 
 /** A route of the mock data of a third-party API. */

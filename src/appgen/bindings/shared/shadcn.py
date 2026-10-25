@@ -20,6 +20,8 @@ from appgen.dsl.ui.dashboards import ChartWidget, ListWidget, StatWidget
 from appgen.dsl.ui.fields import FieldPathError, FieldTarget, default_widget, resolve_path
 from appgen.dsl.ui.forms import Form
 from appgen.dsl.ui.views import (
+    ApiDetailView,
+    ApiViewBase,
     BoardView,
     CalendarView,
     CardsView,
@@ -191,6 +193,8 @@ def _action_components(actions: Iterable[Action]) -> set[str]:
 
 def _view_components(view: View) -> set[str]:
     """Return the components of a detail view. The list views come from `_list_components`."""
+    if isinstance(view, ApiViewBase):
+        return {"card"} if isinstance(view, ApiDetailView) else set()
     names = _action_components(view.actions.values())
     if isinstance(view, TableView | CardsView | BoardView | CalendarView):
         return names
