@@ -19,6 +19,7 @@ from appgen.dsl import load_definition
 from appgen.gen import find_binding, generate
 
 FILL_GAPS = SKILL / "references" / "fill-gaps.md"
+TRACKER = ROOT / "examples" / "project-tracker" / "app.yaml"
 SECTIONS = {"nextjs": "Next.js", "react": "React", "fastapi": "FastAPI"}
 DEFINITIONS = [
     *sorted((ROOT / "examples").glob("*/app.yaml")),
@@ -153,3 +154,38 @@ def test_the_front_ends_have_no_test_script(binding: str) -> None:
 
     assert "test" not in scripts
     assert "no `test` script" in section(binding)
+
+
+@cache
+def fastapi_files() -> dict[str, str]:
+    """Return the files of the FastAPI app of the project tracker, by path."""
+    result = generate(load_definition(TRACKER), find_binding("fastapi"))
+    return {file.path: file.content for file in result.files}
+
+
+def test_the_skill_tells_how_to_run_the_fastapi_tests_without_docker() -> None:
+    files = fastapi_files()
+    url = "sqlite+aiosqlite:///./test.db"
+    command = f"`TEST_DATABASE_URL={url} uv run pytest`"
+
+    assert "Testcontainers" in files["README.md"]
+    assert f"`{url}`" in files["README.md"]
+    assert 'os.environ.get("TEST_DATABASE_URL")' in files["tests/conftest.py"]
+    for reference in (FILL_GAPS, SKILL / "references" / "change-definition.md", SKILL / "SKILL.md"):
+        assert command in " ".join(reference.read_text(encoding="utf-8").split()), reference.name
+
+
+def test_the_factories_give_a_value_to_each_field_as_the_reference_tells() -> None:
+    files = fastapi_files()
+    payload = files["tests/payloads.py"].partition("def task_payload(")[2].partition("\ndef ")[0]
+    task = load_definition(TRACKER).entities["Task"]
+
+    assert (
+        "async def make_task(session: AsyncSession, **values: Any)" in files["tests/factories.py"]
+    )
+    assert not task.fields["completed_at"].required
+    for name in task.fields:
+        assert f'"{name}":' in payload
+    text = " ".join(section("fastapi").split())
+    assert "give a value to each field, also to the optional fields" in text
+    assert '`make_task(session, status="todo", completed_at=None)`' in text
