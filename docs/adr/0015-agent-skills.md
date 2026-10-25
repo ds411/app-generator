@@ -68,6 +68,13 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
   `SKILL.md` leaves out a command or an option of the CLI. Other tests
   check the front matter, the links, the DSL reference, the diagnostic
   codes, and the kinds of extension files.
+- Tests also check the statements of the skill against the CLI. They run
+  the command of each JSON example on a fixture, and compare the keys
+  and the types of the values. A comment before the block, for example
+  `<!-- appgen check -->`, names the command. They run each case of the
+  table of commands, and compare the exit codes. They compare each
+  default of an option (`Default: <value>.`) with the default of the
+  CLI. A wrong statement fails with the file and the line of the text.
 
 ## Consequences
 
@@ -77,7 +84,8 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
   definition of done and the pull request template say so, and the tests
   fail until the skill agrees.
 - The skill is text for agents, not a contract. The tests find a missing
-  or an unknown name, but not a wrong description. An evaluation with
-  agent tasks shows if the text is enough.
+  or an unknown name, a wrong JSON example, a wrong exit code, and a
+  wrong default, but not a wrong description in the prose. An evaluation
+  with agent tasks shows if the text is enough.
 - Agents without a shell cannot use the skill. An MCP server can cover
   them later, with the reference files as its resources.
