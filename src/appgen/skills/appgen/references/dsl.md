@@ -16,6 +16,7 @@ examples. [ADR 0002](https://github.com/ds411/app-generator/blob/main/docs/adr/0
 - [Names and IDs](#names-and-ids)
 - [app](#app)
 - [entities](#entities)
+- [seed](#seed)
 - [operations](#operations)
 - [pages](#pages)
 - [workflows](#workflows)
@@ -52,6 +53,7 @@ The file is YAML 1.1. The top level has these keys:
 | `pages`      | No       | A mapping from page name to page (the routes of a front end). |
 | `ui`         | No       | The design tokens, layouts, menus, views, forms, and dashboards. |
 | `apis`       | No       | The third-party APIs that the app calls (OpenAPI documents).  |
+| `seed`       | No       | The records that the apps start with, for each entity.        |
 
 A minimal definition:
 
@@ -98,6 +100,7 @@ element, never a list. The name rules:
 | Entity                                   | `^[A-Z][A-Za-z0-9]*$` | `Task`            |
 | Field, relation, param, operation, page, enum value, API, UI element | `^[a-z][a-z0-9_]*$` | `due_date` |
 | Operation of an API (its operation ID)   | `^[A-Za-z_][A-Za-z0-9_]*$` | `getPublicHolidays` |
+| Seed record key                          | `^[A-Za-z0-9_]+$`     | `a101`, `hq`      |
 | Token and token group                    | `^[a-z0-9][a-z0-9_]*$` | `600`, `primary` |
 | Icon (a [Lucide](https://lucide.dev) name) | `^[a-z][a-z0-9-]*$` | `folder-kanban`   |
 
@@ -121,6 +124,8 @@ ID ([traces.md](https://github.com/ds411/app-generator/blob/main/docs/traces.md)
 | Page action  | `pages.task_detail.actions.delete`         |
 | API          | `apis.holidays`                            |
 | API operation | `apis.holidays.operations.getPublicHolidays` |
+| Seed of an entity | `seed.Room`                            |
+| Seed record  | `seed.Room.records.a101`                   |
 | Token        | `ui.tokens.color.primary`                  |
 | View column  | `ui.views.task_table.columns.title`        |
 | Form field   | `ui.forms.new_task.fields.title`           |
@@ -342,6 +347,79 @@ Project:
     tasks: { kind: one_to_many, target: Task, inverse: project }
     members: { kind: many_to_many, target: Person }
 ```
+
+## seed
+
+The optional `seed` section gives the records that the apps start with,
+for example the rooms of an office or the categories of a shop. It maps
+an entity name to the seed of the entity
+([ADR 0021](https://github.com/ds411/app-generator/blob/main/docs/adr/0021-seed-data.md)):
+
+```yaml
+seed:
+  Office:
+    records:
+      hq: { name: Head office, opened_on: 2020-03-01 }
+      lisbon: { name: Lisbon office }
+  Room:
+    mock: 5
+    records:
+      a101: { code: A101, capacity: 8, office: hq, features: [screen, board] }
+      b201: { code: B201, office: lisbon }
+  Feature:
+    records:
+      screen: { label: Screen }
+      board: { label: Whiteboard }
+```
+
+| Key       | Content                                                                    |
+| --------- | -------------------------------------------------------------------------- |
+| `records` | A mapping from a record key to the values of the record.                   |
+| `mock`    | The number of generated records in addition to the seed records: an integer, 0 or more. The default is 0. |
+
+- Each record is an element, for example `seed.Room.records.a101`. A
+  record key has only letters, digits, and `_`.
+- The key gives the ID of the record: a UUID (version 5) from the app
+  name, the entity name, and the key. A change of another record, or a
+  new order of the records, does not change the ID. A rename of the key,
+  the entity, or the app changes it.
+- A record gives its values by field name and by relation name. A
+  `many_to_one` or `one_to_one` relation takes the key of a seed record
+  of the target entity, and a `many_to_many` relation takes a list of
+  keys. A `one_to_many` relation takes no value: give the key in the
+  `many_to_one` relation of the records on the other side.
+- A `one_to_one` relation and its inverse are one link. Give the key on
+  one side, or on both sides with the same partner.
+- A field that the record does not give gets its default, or no value.
+  A required field without a default, and a required relation, need a
+  value. A computed field takes no value.
+- Without a seed, an entity has generated mock records: 12, or the
+  number of the extension key `x-mock-count`. With a seed, the entity has
+  its seed records and `mock` generated records. A generated record can
+  refer to a seed record.
+- The bindings do not use the seed yet: they exclude the elements of
+  `seed`, so `appgen generate` makes no gap for them.
+
+The values:
+
+| Field type                                 | Value                                              |
+| ------------------------------------------ | -------------------------------------------------- |
+| `string`, `text`, `email`, `url`, `enum`, `uuid` | A text. An `email` has the form `name@domain`, a `url` starts with `http://` or `https://`. |
+| `integer`                                  | An integer.                                        |
+| `decimal`                                  | A number.                                          |
+| `boolean`                                  | `true` or `false`.                                 |
+| `date`                                     | An ISO 8601 date, for example `2026-01-05`.        |
+| `datetime`                                 | An ISO 8601 date-time, for example `2026-01-05T09:30:00Z`. A date-time without an offset is in UTC. |
+| `json`                                     | Any value.                                         |
+
+`appgen validate` checks each value against the type and the options of
+its field (`values`, `min`, `max`, `min_length`, `max_length`,
+`pattern`, and `precision`). It also checks that each key of a relation
+exists, that the records of an entity have different values in each
+`unique` field, and that they keep the `compare`, `unique`, and
+`no_overlap` rules of the entity. An error in a value gives the line of
+the value. Put quotes around a text that YAML reads as a number or a
+boolean, for example `code: "101"`.
 
 ## operations
 
@@ -1328,7 +1406,8 @@ stay valid.
 against the schema, the names, and the references between elements
 (for example a relation to an entity that does not exist, a token loop,
 or a view field of the wrong type). It also reads the OpenAPI document of
-each API, and checks its operations and its security scheme. Each diagnostic has a code, a
+each API, and checks its operations and its security scheme, and it checks
+the values of the seed records. Each diagnostic has a code, a
 message, and the line and the column. `--format json` writes the
 diagnostics as JSON. [`examples/invalid/`](https://github.com/ds411/app-generator/tree/main/examples/invalid/) has one broken definition for
 each diagnostic code. `appgen generate` validates the definition first,

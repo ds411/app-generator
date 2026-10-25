@@ -1,0 +1,12 @@
+# expect: duplicate-value
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Room:
+    fields:
+      code: { type: string, required: true, unique: true }
+seed:
+  Room:
+    records:
+      a101: { code: A101 }
+      a102: { code: A101 }

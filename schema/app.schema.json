@@ -2097,6 +2097,33 @@
         }
       ]
     },
+    "EntitySeed": {
+      "additionalProperties": false,
+      "description": "The seed of an entity: its records, and the number of generated records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "records": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SeedRecord"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/RecordKey"
+          },
+          "title": "Records",
+          "type": "object"
+        },
+        "mock": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Mock",
+          "type": "integer"
+        }
+      },
+      "title": "EntitySeed",
+      "type": "object"
+    },
     "EntityUniqueRule": {
       "additionalProperties": false,
       "description": "A rule that no two records have the same values in a set of fields and relations.",
@@ -4186,6 +4213,10 @@
       },
       "type": "object"
     },
+    "RecordKey": {
+      "pattern": "^[A-Za-z0-9_]+$",
+      "type": "string"
+    },
     "RecordRule": {
       "additionalProperties": false,
       "description": "An owner rule: the role uses only the records of an entity that its user owns (ADR 0018).\n\nThe owner of a record is the user of a many-to-one relation of the\nentity to the user entity.",
@@ -4420,6 +4451,16 @@
         "fields"
       ],
       "title": "SearchFilter",
+      "type": "object"
+    },
+    "SeedRecord": {
+      "additionalProperties": true,
+      "description": "A seed record: the values of its fields and relations, by name.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {},
+      "title": "SeedRecord",
       "type": "object"
     },
     "SelectFilter": {
@@ -5808,6 +5849,16 @@
         "$ref": "#/$defs/MemberName"
       },
       "title": "Apis",
+      "type": "object"
+    },
+    "seed": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EntitySeed"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/EntityName"
+      },
+      "title": "Seed",
       "type": "object"
     }
   },

@@ -50,6 +50,8 @@ DIAGNOSTIC_CODES = {
     "missing-widget",
     "invalid-document",
     "unsuitable-security",
+    "duplicate-value",
+    "invalid-record",
 }
 
 

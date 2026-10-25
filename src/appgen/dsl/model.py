@@ -14,6 +14,7 @@ from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.rules import EntityRule
+from appgen.dsl.seed import EntitySeed
 from appgen.dsl.translations import Translations
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
@@ -176,6 +177,8 @@ class AppDefinition(Element):
     """The state machines of the enum fields of the entities."""
     apis: dict[MemberName, Api] = pydantic.Field(default_factory=dict[str, Api])
     """The third-party APIs that OpenAPI documents describe (ADR 0019)."""
+    seed: dict[EntityName, EntitySeed] = pydantic.Field(default_factory=dict[str, EntitySeed])
+    """The seed records of the entities: the data that the apps start with (ADR 0021)."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

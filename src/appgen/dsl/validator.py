@@ -8,10 +8,13 @@ that later parts of the DSL can add their own checks.
 
 import datetime
 import difflib
+import json
+import operator
 import re
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from typing import Any, cast
 
 from appgen.dsl.access import ALL, RecordRule
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES
@@ -37,8 +40,9 @@ from appgen.dsl.expressions import (
     parse_expression,
 )
 from appgen.dsl.loader import load_definition
-from appgen.dsl.model import AppDefinition, Element, Entity, Field
+from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
+from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.translations import LOCALE, VALUE
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
@@ -931,6 +935,379 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                 yield _missing(operation, "apis", "API", name, definition.apis)
 
 
+def check_seed(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The seed records give valid values, refer to records that exist, and keep the rules."""
+    keys = {name: set(seed.records) for name, seed in definition.seed.items()}
+    for name, seed in definition.seed.items():
+        entity = definition.entities.get(name)
+        if entity is None:
+            yield _missing(seed, "", "entity", name, definition.entities)
+            continue
+        for record in seed.records.values():
+            yield from _check_record(name, entity, record, keys)
+        yield from _check_seed_rules(entity, seed)
+    yield from _check_seed_one_to_one(definition)
+    yield from _check_seed_targets(definition)
+
+
+def _check_record(
+    entity_name: str, entity: Entity, record: SeedRecord, keys: dict[str, set[str]]
+) -> Iterator[Diagnostic]:
+    values = record.values
+    for name, value in values.items():
+        field, relation = entity.fields.get(name), entity.relations.get(name)
+        if field is not None:
+            yield from _check_seed_value(record, name, field, value)
+        elif relation is not None:
+            yield from _check_seed_link(record, name, relation, value, keys)
+        else:
+            members = [*entity.stored_fields, *entity.relations]
+            yield _error(
+                "unknown-key",
+                f"The entity '{entity_name}' has no field or relation '{name}'.",
+                record,
+                at=name,
+                hint="The key of a seed record gives its ID."
+                if name == "id"
+                else _did_you_mean(name, members),
+            )
+    for name, field in entity.stored_fields.items():
+        if field.required and field.default is None and values.get(name) is None:
+            yield _error(
+                "missing-key",
+                f"The record has no value of the required field '{name}'.",
+                record,
+                at=name,
+                hint=f"Add '{name}' to the record.",
+            )
+    for name, relation in entity.relations.items():
+        if relation.kind == "many_to_one" and relation.required and values.get(name) is None:
+            yield _error(
+                "missing-key",
+                f"The record has no value of the required relation '{name}'.",
+                record,
+                at=name,
+                hint=f"Add '{name}' with the key of a seed record of '{relation.target}'.",
+            )
+
+
+def _check_seed_value(
+    record: SeedRecord, name: str, field: Field, value: object
+) -> Iterator[Diagnostic]:
+    if field.computed is not None:
+        yield _error(
+            "unsuitable-field",
+            f"The field '{name}' is computed: the apps compute its value.",
+            record,
+            at=name,
+            hint="Remove the value.",
+        )
+        return
+    try:
+        normal = normal_value(field, value)
+    except ValueError as error:
+        quote = field.type in (*STRING_TYPES, "enum", "uuid") and not isinstance(value, str)
+        yield _error(
+            "invalid-value",
+            f"The value {_show(value)} of '{name}' is not valid: {error}.",
+            record,
+            at=name,
+            hint=f'Put the value in quotes: "{_show(value, quotes=False)}".' if quote else None,
+        )
+        return
+    problem = _option_problem(field, normal)
+    if problem is not None:
+        yield _error(
+            "invalid-value",
+            f"The value {_show(normal)} of '{name}' is not valid: {problem}.",
+            record,
+            at=name,
+        )
+
+
+def _option_problem(field: Field, value: Any) -> str | None:
+    """Return why a value in its normal form breaks an option of its field, or None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and field.type in STRING_TYPES:
+        if field.min_length is not None and len(value) < field.min_length:
+            return f"the text must have {field.min_length} or more characters"
+        if field.max_length is not None and len(value) > field.max_length:
+            return f"the text must have {field.max_length} or fewer characters"
+        if field.pattern is not None and field.type == "string":
+            try:
+                if re.search(field.pattern, value) is None:
+                    return f"the text must match the pattern {field.pattern}"
+            except re.error:
+                return None  # check_fields reports the pattern.
+    if isinstance(value, int | float) and field.type in NUMBER_TYPES:
+        if field.min is not None and value < field.min:
+            return f"the value must be {_number(field.min)} or more"
+        if field.max is not None and value > field.max:
+            return f"the value must be {_number(field.max)} or less"
+        if field.precision is not None:
+            digits = field.precision - (field.scale or 0)
+            if abs(value) >= 10**digits:
+                return f"the value must have {digits} or fewer digits before the decimal point"
+    return None
+
+
+def _check_seed_link(
+    record: SeedRecord, name: str, relation: Relation, value: object, keys: dict[str, set[str]]
+) -> Iterator[Diagnostic]:
+    if relation.kind == "one_to_many":
+        yield _error(
+            "unsuitable-field",
+            f"The relation '{name}' is a 'one_to_many' relation, so the records of "
+            f"'{relation.target}' hold it.",
+            record,
+            at=name,
+            hint=f"Give the key of this record in '{relation.inverse}' of the records of "
+            f"'{relation.target}'."
+            if relation.inverse
+            else None,
+        )
+        return
+    if value is None:
+        return
+    many = relation.kind == "many_to_many"
+    if many and not isinstance(value, list):
+        yield _error(
+            "invalid-value",
+            f"The value of '{name}' must be a list of keys of seed records of '{relation.target}'.",
+            record,
+            at=name,
+        )
+        return
+    items: list[object] = cast(list[object], value) if many else [value]
+    if not all(is_record_key(item) for item in items):
+        what = "a list of keys" if many else "the key"
+        yield _error(
+            "invalid-value",
+            f"The value of '{name}' must be {what} of seed records of '{relation.target}'.",
+            record,
+            at=name,
+        )
+        return
+    targets = keys.get(relation.target, set())
+    seen: set[str] = set()
+    for key in [str(item) for item in items]:
+        if key in seen:
+            yield _error(
+                "duplicate-value",
+                f"The key '{key}' occurs more than one time in '{name}'.",
+                record,
+                at=name,
+            )
+        seen.add(key)
+        if key not in targets:
+            matches = difflib.get_close_matches(key, sorted(targets), n=1)
+            yield _error(
+                "unknown-reference",
+                f"The entity '{relation.target}' has no seed record '{key}'.",
+                record,
+                at=name,
+                hint=f"Did you mean '{matches[0]}'?"
+                if matches
+                else f"Add the record to 'seed.{relation.target}.records'.",
+            )
+
+
+def _seed_values(entity: Entity, record: SeedRecord) -> dict[str, Any]:
+    """Return the values of a record for the rules: valid values in their normal form, or None.
+
+    A field that the record does not give has its default. A single
+    relation has the key of its target.
+    """
+    values = record.values
+    result: dict[str, Any] = {}
+    for name, field in entity.stored_fields.items():
+        value = values.get(name, field.default)
+        try:
+            result[name] = normal_value(field, value)
+        except ValueError:
+            result[name] = None
+    for name, relation in entity.relations.items():
+        value = values.get(name)
+        if relation.kind in SINGLE_KINDS and is_record_key(value):
+            result[name] = str(value)
+    return result
+
+
+def _check_seed_rules(entity: Entity, seed: EntitySeed) -> Iterator[Diagnostic]:
+    """The records have unique values in the unique fields, and keep the rules of the entity."""
+    records = list(seed.records.values())
+    values = {record.key: _seed_values(entity, record) for record in records}
+    for name, field in entity.stored_fields.items():
+        if field.unique:
+            yield from _check_seed_unique(records, values, [name], f"the field '{name}'", name)
+    for rule_name, rule in entity.rules.items():
+        if isinstance(rule, EntityUniqueRule):
+            names = ", ".join(f"'{n}'" for n in rule.fields)
+            yield from _check_seed_unique(
+                records, values, rule.fields, f"{names} (rule '{rule_name}')", None
+            )
+        elif isinstance(rule, EntityCompareRule):
+            for record in records:
+                a = _comparable(entity, rule.field, values[record.key].get(rule.field))
+                b = _comparable(entity, rule.other, values[record.key].get(rule.other))
+                if a is not None and b is not None and not _SEED_OPS[rule.op](a, b):
+                    yield _error(
+                        "invalid-record",
+                        f"The record does not keep the rule '{rule_name}': {rule.message}",
+                        record,
+                        at=rule.field,
+                    )
+        else:
+            ranges: list[tuple[SeedRecord, Any, Any, list[Any]]] = []
+            for record in records:
+                record_values = values[record.key]
+                start = _comparable(entity, rule.start, record_values.get(rule.start))
+                end = _comparable(entity, rule.end, record_values.get(rule.end))
+                if start is None or end is None:
+                    continue
+                scope = [record_values.get(name) for name in rule.scope]
+                for other, other_start, other_end, other_scope in ranges:
+                    if scope == other_scope and start < other_end and other_start < end:
+                        yield _error(
+                            "invalid-record",
+                            f"The record does not keep the rule '{rule_name}': {rule.message}",
+                            record,
+                            at=rule.start,
+                            hint=f"The time range of the record '{other.key}' overlaps.",
+                        )
+                        break
+                ranges.append((record, start, end, scope))
+
+
+def _check_seed_unique(
+    records: list[SeedRecord],
+    values: dict[str, dict[str, Any]],
+    names: list[str],
+    what: str,
+    at: str | None,
+) -> Iterator[Diagnostic]:
+    seen: dict[str, SeedRecord] = {}
+    for record in records:
+        found = [values[record.key].get(name) for name in names]
+        if any(value is None for value in found):
+            continue
+        first = seen.setdefault(json.dumps(found, sort_keys=True), record)
+        if first is not record:
+            yield _error(
+                "duplicate-value",
+                f"The record has the same value of {what} as the record '{first.key}'.",
+                record,
+                at=at or names[0],
+                hint="Give each record its own value.",
+            )
+
+
+def _comparable(entity: Entity, name: str, value: Any) -> Any:
+    """Return a value in a form that the compare operators can compare."""
+    field = entity.fields.get(name)
+    if value is None or field is None:
+        return value
+    if field.type == "date":
+        return datetime.date.fromisoformat(value)
+    if field.type == "datetime":
+        return datetime.datetime.fromisoformat(value)
+    return value
+
+
+_SEED_OPS: dict[str, Callable[[Any, Any], bool]] = {
+    "eq": operator.eq,
+    "ne": operator.ne,
+    "lt": operator.lt,
+    "lte": operator.le,
+    "gt": operator.gt,
+    "gte": operator.ge,
+}
+
+
+def _check_seed_one_to_one(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Each record has one partner or none in a `one_to_one` relation, from both sides."""
+    for entity_name, seed in definition.seed.items():
+        entity = definition.entities.get(entity_name)
+        if entity is None:
+            continue
+        for name, relation in entity.relations.items():
+            if relation.kind != "one_to_one":
+                continue
+            target = definition.seed.get(relation.target)
+            inverse = definition.entities.get(relation.target)
+            inverse_relation = (
+                inverse.relations.get(relation.inverse)
+                if inverse is not None and relation.inverse is not None
+                else None
+            )
+            if inverse_relation is not None and inverse_relation.kind != "one_to_one":
+                inverse_relation = None
+            partners: dict[str, set[str]] = {key: set() for key in seed.records}
+            owners: dict[str, str] = {}
+            for record in seed.records.values():
+                value = record.values.get(name)
+                if not is_record_key(value):
+                    continue
+                partners[record.key].add(str(value))
+                first = owners.setdefault(str(value), record.key)
+                if first != record.key and inverse_relation is None:
+                    yield _error(
+                        "duplicate-value",
+                        f"The record '{first}' also refers to '{value}' in the one-to-one "
+                        f"relation '{name}'.",
+                        record,
+                        at=name,
+                        hint="Give each record its own partner.",
+                    )
+            if inverse_relation is not None and target is not None and relation.inverse:
+                for other in target.records.values():
+                    value = other.values.get(relation.inverse)
+                    if is_record_key(value) and str(value) in partners:
+                        partners[str(value)].add(other.key)
+            for record in seed.records.values():
+                found = sorted(partners[record.key])
+                if len(found) > 1:
+                    names = " and ".join(f"'{key}'" for key in found)
+                    yield _error(
+                        "duplicate-value",
+                        f"The record has two partners in the one-to-one relation '{name}': "
+                        f"{names}.",
+                        record,
+                        at=name,
+                        hint="Give the relation on one side only, or give each record one partner.",
+                    )
+                elif not found and relation.required:
+                    yield _error(
+                        "missing-key",
+                        f"The record has no value of the required relation '{name}'.",
+                        record,
+                        at=name,
+                        hint=f"Add '{name}' with the key of a seed record of '{relation.target}'.",
+                    )
+
+
+def _check_seed_targets(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """An entity whose seed has no records gives no target to a required relation."""
+    for target_name, target in definition.seed.items():
+        if target.records or target.mock:
+            continue
+        for entity_name, entity in definition.entities.items():
+            seed = definition.seed.get(entity_name)
+            if seed is not None and not seed.mock:
+                continue
+            for name, relation in entity.relations.items():
+                if relation.target == target_name and relation.required:
+                    yield _error(
+                        "missing-key",
+                        f"The generated records of '{entity_name}' need a record of "
+                        f"'{target_name}' for the required relation '{name}'.",
+                        target,
+                        hint=f"Add a record to 'seed.{target_name}.records', or set "
+                        f"'seed.{target_name}.mock'.",
+                    )
+
+
 CHECKS: list[Check] = [
     check_names,
     check_references,
@@ -944,6 +1321,7 @@ CHECKS: list[Check] = [
     check_auth,
     check_access,
     check_apis,
+    check_seed,
     check_ui_tokens,
     check_ui_views,
     check_ui_forms,
@@ -1101,3 +1479,21 @@ def _error(
         element_id=element.id or None,
         hint=hint,
     )
+
+
+def _did_you_mean(name: str, choices: Iterable[str]) -> str | None:
+    matches = difflib.get_close_matches(name, list(choices), n=1)
+    return f"Did you mean '{matches[0]}'?" if matches else None
+
+
+def _number(value: float) -> str:
+    return str(int(value)) if value == int(value) else str(value)
+
+
+def _show(value: object, *, quotes: bool = True) -> str:
+    """Return a value for a message. A date that YAML read without quotes is ISO 8601 text."""
+    if isinstance(value, datetime.date):
+        value = value.isoformat()
+    if not quotes:
+        return str(value).lower() if isinstance(value, bool) else str(value)
+    return repr(value)
