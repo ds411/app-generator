@@ -8,6 +8,15 @@ examples. [ADR 0002](adr/0002-app-definition-dsl-v0.md) and
 [ADR 0003](adr/0003-ui-dsl.md) give the reasons for the design.
 `examples/project-tracker/app.yaml` is a complete example.
 
+Most examples on this page are parts of a definition, and come from
+`examples/project-tracker/app.yaml`. A comment on the first lines of an
+example tells where it goes: `# in: entities.Task` is the place of the
+example in a definition (the default is the top level), and
+`# example: room-booking` names the example that it comes from
+(`examples/room-booking/app.yaml`). `tests/test_docs.py` puts each
+example into its example definition, and checks that the result is
+valid.
+
 ## Contents
 
 - [The file](#the-file)
@@ -223,6 +232,7 @@ dashboards use the currency of the field. `appgen validate` rejects a
 code that is not an ISO 4217 code.
 
 ```yaml
+# in: entities.Project
 fields:
   key:
     type: string
@@ -264,6 +274,8 @@ whole number. The FastAPI app returns the value in the read schema (a
 property of the model), and the front ends compute it in the views.
 
 ```yaml
+# example: room-booking
+# in: entities
 Booking:
   fields:
     starts_at: { type: datetime, required: true }
@@ -297,6 +309,8 @@ compare rule and a `no_overlap` rule: `required` checks it. The mock
 data keeps the compare and the unique rules.
 
 ```yaml
+# example: room-booking
+# in: entities
 Booking:
   rules:
     ends_after_start:
@@ -332,6 +346,7 @@ Booking:
 | `description`, `label` | Text.                                                          |
 
 ```yaml
+# in: entities
 Task:
   relations:
     project:
@@ -354,6 +369,7 @@ an entity name to the seed of the entity
 ([ADR 0021](adr/0021-seed-data.md)):
 
 ```yaml
+# not valid alone: the entities Office, Room, and Feature are not in an example.
 seed:
   Office:
     records:
@@ -521,6 +537,7 @@ of the field are the states. The apps reject a change of the field that
 no transition allows:
 
 ```yaml
+# example: room-booking
 workflows:
   booking_status:
     entity: Booking
@@ -869,6 +886,7 @@ previous, the next, or the current week or month. The weeks start on
 Monday.
 
 ```yaml
+# example: room-booking
 ui:
   views:
     booking_calendar:
@@ -960,6 +978,7 @@ A filter maps a field path to a value, or to operators (`eq`, `ne`,
 date values.
 
 ```yaml
+# in: ui.dashboards.overview
 widgets:
   overdue_tasks:
     kind: stat
@@ -1004,6 +1023,7 @@ user name and a password ([ADR 0011](adr/0011-auth.md)), or with an
 OpenID Connect provider ([ADR 0020](adr/0020-providers.md)).
 
 ```yaml
+# example: room-booking
 auth:
   user_entity: Member
   username_field: email
@@ -1136,6 +1156,7 @@ operations and pages that it may use ([ADR 0012](adr/0012-access.md)).
 It needs `auth`.
 
 ```yaml
+# example: room-booking
 access:
   role_field: role
   roles:
