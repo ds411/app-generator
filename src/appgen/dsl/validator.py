@@ -575,6 +575,15 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     for name in auth.public_operations:
         if name not in definition.operations:
             yield _missing(auth, "public_operations", "operation", name, definition.operations)
+    if auth.delivery == "smtp" and definition.address_field() is None:
+        yield _error(
+            "unsuitable-field",
+            "The delivery 'smtp' needs a field of the type 'email' in "
+            f"'{auth.user_entity}' for the address of the messages.",
+            auth,
+            at="delivery",
+            hint="Make the user name an 'email' field, or add a required 'email' field.",
+        )
     reserved = {SIGN_IN_PATH: "sign-in"}
     if auth.sign_up is not None:
         reserved[SIGN_UP_PATH] = "sign-up"

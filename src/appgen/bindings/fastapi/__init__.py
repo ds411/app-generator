@@ -117,8 +117,12 @@ BINDING = Binding(
         Output(
             template="app/core/messages_ext.py.j2",
             path="app/core/messages_ext.py",
-            when="py.message_elements",
+            when="py.message_elements and not py.smtp",
             extension=True,
+        ),
+        *(
+            Output(template=f"{path}.j2", path=path, when="py.smtp")
+            for path in ("app/core/mail.py", "tests/test_mail.py")
         ),
         Output(
             template="app/core/access.py.j2", path="app/core/access.py", when="definition.access"

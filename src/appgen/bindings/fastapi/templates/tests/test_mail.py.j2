@@ -1,0 +1,95 @@
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set reset = definition.auth.password_reset %}
+{% set address = u.fields | selectattr("name", "eq", definition.address_field()) | first %}
+{{ trace_header(*py.message_elements) }}
+"""The tests of the delivery of the messages of the sign-in by SMTP."""
+
+import logging
+from email.message import EmailMessage
+
+import pytest
+
+from app.core import mail
+from app.core.config import Settings
+from app.core.messages import Message, {{ "password_reset_message" if reset else "email_verification_message" }}
+{{ py.from_import("app.features." ~ u.slice ~ ".models", [u.name]) }}
+
+pytestmark = pytest.mark.anyio
+
+LINK = "https://app.example.com/page?token=abc"
+
+
+def _message() -> Message:
+    user = {{ u.name }}({{ address.attr }}="user@example.com")
+    return {{ "password_reset_message" if reset else "email_verification_message" }}(user, LINK)
+
+
+class FakeSmtp:
+    """An SMTP client that keeps its calls, without a connection."""
+
+    last: FakeSmtp | None = None
+    """The last client that the test made."""
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        self.calls: list[tuple[str, object]] = [("connect", (host, port, timeout))]
+        FakeSmtp.last = self
+
+    def __enter__(self) -> FakeSmtp:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.calls.append(("quit", None))
+
+    def starttls(self, context: object = None) -> None:
+        self.calls.append(("starttls", None))
+
+    def login(self, user: str, password: str) -> None:
+        self.calls.append(("login", (user, password)))
+
+    def send_message(self, email: EmailMessage) -> None:
+        self.calls.append(("send", email))
+
+
+async def test_a_message_goes_to_the_smtp_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mail.smtplib, "SMTP", FakeSmtp)
+    settings = Settings(
+        smtp_host="smtp.example.com",
+        smtp_port=2525,
+        smtp_username="app",
+        smtp_password="secret",
+        smtp_from="App <no-reply@example.com>",
+        smtp_tls="starttls",
+    )
+    message = _message()
+
+    await mail.deliver_message(settings, message)
+
+    assert FakeSmtp.last is not None
+    calls = FakeSmtp.last.calls
+    assert [name for name, _ in calls] == ["connect", "starttls", "login", "send", "quit"]
+    assert calls[0][1] == ("smtp.example.com", 2525, mail.TIMEOUT_SECONDS)
+    assert calls[2][1] == ("app", "secret")
+    email = calls[3][1]
+    assert isinstance(email, EmailMessage)
+    assert email["From"] == "App <no-reply@example.com>"
+    assert email["To"] == "user@example.com" == message.to
+    assert email["Subject"] == message.subject
+    assert LINK in email.get_content()
+
+
+async def test_without_a_host_the_development_app_writes_the_link_to_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = Settings(smtp_host="", environment="development")
+
+    with caplog.at_level(logging.WARNING, logger="app.auth"):
+        await mail.deliver_message(settings, _message())
+
+    assert LINK in caplog.text
+
+
+async def test_without_a_host_the_production_app_gives_an_error() -> None:
+    settings = Settings(smtp_host="", environment="production")
+
+    with pytest.raises(NotImplementedError):
+        await mail.deliver_message(settings, _message())

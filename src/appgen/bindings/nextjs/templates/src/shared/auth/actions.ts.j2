@@ -27,7 +27,7 @@ import { findCredential, makeChallenge, secondFactorStep } from "./second-factor
 {% endif %}
 {% if definition.auth.password_reset %}
 import { passwordResetMessage } from "./messages";
-import { deliverMessage } from "./messages.ext";
+import { deliverMessage } from "{{ "./mail" if nextjs.smtp else "./messages.ext" }}";
 import {
   MIN_PASSWORD_LENGTH,
   RESET_SECONDS,

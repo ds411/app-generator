@@ -6,8 +6,9 @@
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 """The messages of the sign-in to the users (ADR 0023): a subject, a text, and a link.
 
-The app makes each message in the language of the request. The delivery
-hook `app/core/messages_ext.py` sends it.
+The app makes each message in the language of the request. {% if py.smtp %}The module
+`app/core/mail.py` sends it by SMTP.{% else %}The delivery
+hook `app/core/messages_ext.py` sends it.{% endif %}
 """
 
 from dataclasses import dataclass

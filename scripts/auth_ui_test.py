@@ -16,12 +16,14 @@ test proves it for the room booking example (`examples/room-booking`):
    the menu of a public page shows only the public pages. Last, it
    compares the sign-up page with an approved screenshot, and signs up a
    new user (ADR 0016). In the Next.js app, the new user confirms the
-   email address with the link in the log of the app before the sign-in
-   (ADR 0023), and the test compares the page of the link with an
-   approved screenshot. In the Next.js app, it compares the password
-   reset pages with approved screenshots, resets the password of a user
-   with the link in the log of the app, and signs in with the new
-   password (ADR 0017). For each owner rule (ADR 0018), it signs in as a
+   email address with the link of an email before the sign-in (ADR
+   0023), and the test compares the page of the link with an approved
+   screenshot. In the Next.js app, it compares the password reset pages
+   with approved screenshots, resets the password of a user with the
+   link of an email, and signs in with the new password (ADR 0017). The
+   Next.js app sends the emails to the mock SMTP server of
+   scripts/mock_smtp.py (`auth.delivery: smtp`), and the test reads them
+   in its file. For each owner rule (ADR 0018), it signs in as a
    user of the role, and checks that the list and the detail page show
    only the records of the user, and that the form of a new record does
    not show the owner. For each provider that makes users (ADR 0020), it
@@ -44,7 +46,8 @@ Run it from the repository root:
 Without a binding, the script tests React, Next.js, and react-api. It
 needs uv, pnpm, and the Chromium of Playwright (see scripts/smoke_test.py).
 It uses the ports 5440 (React), 3440 (Next.js), 5441 and 8440 (react-api),
-and 9440 (the mock provider). It does not need Docker.
+9440 (the mock provider), and 2440 (the mock SMTP server). It does not need
+Docker.
 
 Environment variables:
     APPGEN_UPDATE_SCREENSHOTS     1: write the approved screenshots again
@@ -71,6 +74,7 @@ from pathlib import Path
 from typing import Any
 
 import mock_oidc
+import mock_smtp
 from smoke_test import expected_ui
 
 from appgen.bindings.react.api_client import DATA_KEY
@@ -92,6 +96,10 @@ API_PORT = 8440
 """The port of the FastAPI app of the binding `react-api`."""
 OIDC_PORT = 9440
 """The port of the mock OpenID Connect provider. scripts/check-fastapi.sh uses the default port."""
+SMTP_PORT = 2440
+"""The port of the mock SMTP server, for the emails of the Next.js app."""
+MAILBOX = "messages.jsonl"
+"""The file in the app folder that gets each email of the mock SMTP server as a JSON line."""
 PROVIDER_TEST = "signs in with the provider"
 """The part of the name of the UI test of the sign-in with a provider, for `react-api`."""
 
@@ -183,8 +191,8 @@ def expected_sign_up(binding: str, definition: AppDefinition, app: Path) -> dict
     """Return the values of the sign-up: the required fields, and the menu of a new user.
 
     Only the Next.js app has the page of the verification link: the React
-    app with mock data signs in a new user at once. With
-    `ENVIRONMENT=development`, the Next.js app writes each link to its log.
+    app with mock data signs in a new user at once. The Next.js app sends
+    each link in an email to the mock SMTP server.
     """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
@@ -204,7 +212,7 @@ def expected_sign_up(binding: str, definition: AppDefinition, app: Path) -> dict
     address = definition.address_field()
     verify: dict[str, str] | None = None
     if auth.sign_up.verify_email is not None and binding == "nextjs" and address is not None:
-        verify = {"addressId": f"sign-up-{kebab(address)}", "serverLog": str(app / "server.log")}
+        verify = {"addressId": f"sign-up-{kebab(address)}", "mailbox": str(app / MAILBOX)}
     return {
         "fields": fields,
         "usernameId": f"sign-up-{kebab(auth.username_field)}",
@@ -220,8 +228,8 @@ def expected_password_reset(
     """Return the values of the password reset: a user apart from the users of the other tests.
 
     Only the Next.js app has the reset pages: the React app with mock data
-    has no server that sends the links. With `ENVIRONMENT=development`, the
-    Next.js app writes each link to its log, and the test reads it there.
+    has no server that sends the links. The Next.js app sends each link in
+    an email to the mock SMTP server, and the test reads it in its file.
     """
     auth = definition.auth
     assert auth is not None
@@ -230,7 +238,7 @@ def expected_password_reset(
     users = [
         u for u in mock_data(definition)[auth.user_entity] if u[auth.username_field] not in used
     ]
-    return {"username": users[-1][auth.username_field], "serverLog": str(app / "server.log")}
+    return {"username": users[-1][auth.username_field], "mailbox": str(app / MAILBOX)}
 
 
 def expected_second_factor(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
@@ -465,9 +473,13 @@ def started(binding: str, app: Path) -> Generator[None]:
             "DATABASE_SEED": "true",
             "SEED_PASSWORD": PASSWORDS[binding],
             "AUTH_SECRET": "auth-ui-test-secret",
-            # The password reset and the sign-up write the links to the log (server.log).
             "ENVIRONMENT": "development",
             "PUBLIC_URL": f"http://localhost:{port}",
+            # The password reset and the sign-up send the links to the mock SMTP server.
+            "SMTP_HOST": "127.0.0.1",
+            "SMTP_PORT": str(SMTP_PORT),
+            "SMTP_TLS": "none",
+            "SMTP_FROM": "no-reply@example.com",
             **provider_env(load_definition(DEFINITION)),
         }
         command = ["pnpm", "--silent", "start"]
@@ -630,7 +642,12 @@ def auth_ui_test(binding: str, out: Path) -> None:
     log(binding, "pnpm install and pnpm build")
     run("pnpm", "install", "--silent", cwd=app)
     run("pnpm", "--silent", "build", cwd=app)
-    with mock_oidc.serving(port=OIDC_PORT), started(binding, app):
+    mailbox = app / MAILBOX
+    with (
+        mock_oidc.serving(port=OIDC_PORT),
+        mock_smtp.serving(port=SMTP_PORT, out=mailbox),
+        started(binding, app),
+    ):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
         check_ui(binding, definition, app)

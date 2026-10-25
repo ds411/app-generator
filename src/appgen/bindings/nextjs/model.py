@@ -110,8 +110,9 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     """Return the content of `package.json`, with the packages sorted by name.
 
     The app gets the npm packages of the shadcn/ui components that it uses,
-    with providers `jose` (ADR 0020), and with the rate limit in Redis
-    `@redis/client` (ADR 0013).
+    with providers `jose` (ADR 0020), with the delivery by SMTP
+    `nodemailer`, and with the rate limit in Redis `@redis/client`
+    (ADR 0013).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -125,6 +126,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.PROVIDER_PACKAGES
     if definition.auth is not None and definition.auth.second_factor is not None:
         dependencies |= versions.SECOND_FACTOR_PACKAGES
+    if uses_smtp(definition):
+        dependencies |= versions.SMTP_PACKAGES
     if uses_redis(definition):
         dependencies |= versions.REDIS_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
@@ -154,6 +157,19 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         "dependencies": dict(sorted(dependencies.items())),
         "devDependencies": dict(sorted(dev_dependencies.items())),
     }
+
+
+def uses_smtp(definition: AppDefinition) -> bool:
+    """Return True if the app sends the messages of the sign-in by SMTP (`auth.delivery: smtp`).
+
+    The app has these messages with a password reset or a verification of the email address.
+    """
+    auth = definition.auth
+    if auth is None or auth.delivery != "smtp":
+        return False
+    return auth.password_reset is not None or (
+        auth.sign_up is not None and auth.sign_up.verify_email is not None
+    )
 
 
 def uses_redis(definition: AppDefinition) -> bool:
@@ -208,6 +224,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
             "redis": uses_redis(definition),
+            "smtp": uses_smtp(definition),
             "deploy": deploy_targets(definition),
         },
     }

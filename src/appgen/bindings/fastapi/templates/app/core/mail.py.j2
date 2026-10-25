@@ -1,0 +1,64 @@
+{{ trace_header(*py.message_elements) }}
+"""The delivery of the messages of the sign-in by SMTP (`auth.delivery: smtp`).
+
+The app sends each message as an email with the SMTP server of the
+settings `SMTP_*`, to the address of the user. `smtplib` blocks, so the
+delivery runs in a thread. Without `SMTP_HOST`, the development app writes
+the link to the log, and the production app gives an error (501).
+"""
+
+import asyncio
+import logging
+import smtplib
+import ssl
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+
+from app.core.config import Settings
+from app.core.messages import Message
+
+logger = logging.getLogger("app.auth")
+
+TIMEOUT_SECONDS = 10
+"""The time that the app waits for each answer of the SMTP server."""
+
+
+def email_message(settings: Settings, message: Message) -> EmailMessage:
+    """Return the email of a message: from `SMTP_FROM` to the address of the user."""
+    email = EmailMessage()
+    email["From"] = settings.smtp_from
+    email["To"] = message.to
+    email["Subject"] = message.subject
+    email["Date"] = formatdate(localtime=False)
+    email["Message-ID"] = make_msgid()
+    email.set_content(message.text)
+    return email
+
+
+def send_email(settings: Settings, email: EmailMessage) -> None:
+    """Send an email with the SMTP server of the settings. The call blocks."""
+    context = ssl.create_default_context()
+    if settings.smtp_tls == "tls":
+        client = smtplib.SMTP_SSL(
+            settings.smtp_host, settings.smtp_port, timeout=TIMEOUT_SECONDS, context=context
+        )
+    else:
+        client = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=TIMEOUT_SECONDS)
+    with client:
+        if settings.smtp_tls == "starttls":
+            client.starttls(context=context)
+        if settings.smtp_username:
+            client.login(settings.smtp_username, settings.smtp_password)
+        client.send_message(email)
+
+
+async def deliver_message(settings: Settings, message: Message) -> None:
+    """Send a message of the sign-in to a user by SMTP."""
+    if not settings.smtp_host:
+        if settings.environment == "development":
+            logger.warning("The %s link of %s: %s", message.kind, message.to, message.link)
+            return
+        raise NotImplementedError("Set SMTP_HOST to send the messages of the sign-in.")
+    if not settings.smtp_from:
+        raise NotImplementedError("Set SMTP_FROM: the sender of the messages of the sign-in.")
+    await asyncio.to_thread(send_email, settings, email_message(settings, message))

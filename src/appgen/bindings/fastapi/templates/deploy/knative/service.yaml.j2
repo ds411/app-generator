@@ -60,6 +60,19 @@ spec:
             - name: EMAIL_VERIFY_URL
               value: https://app.example.com/verify-email
 {% endif %}
+{% if py.smtp %}
+            # The SMTP server of the messages of the sign-in.
+            - name: SMTP_HOST
+              value: smtp.example.com
+            - name: SMTP_PORT
+              value: "587"
+            - name: SMTP_USERNAME
+              value: no-reply@example.com
+            - name: SMTP_FROM
+              value: no-reply@example.com
+            - name: SMTP_TLS
+              value: starttls
+{% endif %}
 {% for api in py_apis.values() %}
             {{ trace(api.id) }}
             - name: {{ api.url_env }}
@@ -101,6 +114,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ app.name }}-auth-secret
+                  key: latest
+{% endif %}
+{% if py.smtp %}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ app.name }}-smtp-password
                   key: latest
 {% endif %}
 {% for api in py_apis.values() if api.secret_env %}

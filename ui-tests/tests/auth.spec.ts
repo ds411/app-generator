@@ -8,7 +8,7 @@
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { expect, type Page, test } from "@playwright/test";
 
@@ -98,20 +98,35 @@ test("the sign-up page shows the fields of a new user", async ({ page }, testInf
   await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", modeOf(testInfo.project.name), "sign-up.png"]);
 });
 
-/** Return the links of a kind that the app sent to an address, from the log of the app. */
-function messageLinks(serverLog: string, kind: string, to: string): string[] {
-  const prefix = `The ${kind} link of ${to}: `;
-  const lines = readFileSync(serverLog, "utf8").split("\n").filter((line) => line.includes(prefix));
-  return lines.map((line) => line.split(prefix)[1]?.trim() ?? "");
+/** The pages of the links of the messages, by the kind of the message. */
+const LINK_PAGES: Record<string, string> = {
+  "password-reset": "/reset-password?",
+  "email-verification": "/verify-email?",
+};
+
+/**
+ * Return the links of a kind that the app sent to an address, from the
+ * emails that the mock SMTP server wrote to its file (one JSON line each).
+ */
+function messageLinks(mailbox: string, kind: string, to: string): string[] {
+  if (!existsSync(mailbox)) return [];
+  const messages = readFileSync(mailbox, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as { to: string[]; text: string });
+  return messages
+    .filter((message) => message.to.includes(to))
+    .flatMap((message) => message.text.match(/https?:\/\/\S+/g) ?? [])
+    .filter((link) => link.includes(LINK_PAGES[kind] ?? "?"));
 }
 
 /**
- * Wait for a new link of a kind in the log of the app, and return it. Two
- * links of the same second can be equal, so the test counts the links.
+ * Wait for a new link of a kind in the emails of the app, and return it.
+ * Two links of the same second can be equal, so the test counts the links.
  */
-async function newMessageLink(serverLog: string, kind: string, to: string, before: number): Promise<string> {
-  await expect.poll(() => messageLinks(serverLog, kind, to).length).toBeGreaterThan(before);
-  return messageLinks(serverLog, kind, to).at(-1) ?? "";
+async function newMessageLink(mailbox: string, kind: string, to: string, before: number): Promise<string> {
+  await expect.poll(() => messageLinks(mailbox, kind, to).length).toBeGreaterThan(before);
+  return messageLinks(mailbox, kind, to).at(-1) ?? "";
 }
 
 test("the page of the verification link asks for a confirmation", async ({ page }, testInfo) => {
@@ -153,7 +168,7 @@ test("a new user signs up, and sees the menu of the default role", async ({ page
     const username = valueOf(signUp.usernameId, n);
     const address = valueOf(verify.addressId, n);
     await expect(page.getByRole("main").getByRole("status")).toBeVisible();
-    await newMessageLink(verify.serverLog, "email-verification", address, 0);
+    await newMessageLink(verify.mailbox, "email-verification", address, 0);
     await page.goto("/sign-in");
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(signUp.password);
@@ -162,7 +177,7 @@ test("a new user signs up, and sees the menu of the default role", async ({ page
     // A new link.
     await page.getByRole("button", { name: "Send the link again" }).click();
     await expect(page.getByRole("main").getByRole("status")).toBeVisible();
-    const link = await newMessageLink(verify.serverLog, "email-verification", address, 1);
+    const link = await newMessageLink(verify.mailbox, "email-verification", address, 1);
     await page.goto(link);
     await page.getByRole("button", { name: "Confirm the email address" }).click();
     await expect(page.getByRole("main").getByRole("status")).toBeVisible();
@@ -191,13 +206,13 @@ test("the password reset pages ask for a link, and set a new password", async ({
   await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "reset-password.png"]);
   if (testInfo.project.name !== "light") return;
 
-  // Ask for a link, and find it in the log of the app.
-  const before = messageLinks(reset.serverLog, "password-reset", reset.username).length;
+  // Ask for a link, and find it in the emails of the app.
+  const before = messageLinks(reset.mailbox, "password-reset", reset.username).length;
   await page.goto("/forgot-password");
   await page.locator('input[name="username"]').fill(reset.username);
   await page.getByRole("button", { name: "Send the link" }).click();
   await expect(page.getByRole("main").getByRole("status")).toBeVisible();
-  const link = await newMessageLink(reset.serverLog, "password-reset", reset.username, before);
+  const link = await newMessageLink(reset.mailbox, "password-reset", reset.username, before);
   // Set a new password with the link. The link is valid only one time.
   const password = `new-password-${Date.now()}`;
   for (const [value, result] of [

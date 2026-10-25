@@ -57,7 +57,26 @@ class Settings(BaseSettings):
 {% endif %}
 {% if py.message_elements %}
     environment: Literal["development", "production"] = "production"
+{% if py.smtp %}
+    """`development` for a local run: without `SMTP_HOST`, the app writes the links to the log."""
+{% else %}
     """`development` for a local run: the stub of the delivery writes the links to the log."""
+{% endif %}
+{% endif %}
+{% if py.smtp %}
+    smtp_host: str = ""
+    """The SMTP server that sends the messages of the sign-in. Empty: no delivery."""
+    smtp_port: int = 587
+    """The port of the SMTP server: usually 587 with `starttls`, and 465 with `tls`."""
+    smtp_username: str = ""
+    """The user name at the SMTP server. Empty: no sign-in at the server."""
+    smtp_password: str = ""
+    """The password at the SMTP server. Keep it out of the code."""
+    smtp_from: str = ""
+    """The sender of the messages, for example `Example <no-reply@example.com>`."""
+    smtp_tls: Literal["starttls", "tls", "none"] = "starttls"
+    """`starttls`: the connection changes to TLS. `tls`: TLS from the start. `none`: no
+    TLS, only for a local test server."""
 {% endif %}
 {% for api in py_apis.values() %}
     {{ trace(api.id) }}

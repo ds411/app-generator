@@ -300,7 +300,9 @@ git config core.hooksPath .githooks
   a new user, resets a password (Next.js), checks that a user of an
   owner rule sees only the records of the user, and signs in with a
   provider through the mock provider of `scripts/mock_oidc.py`
-  (`scripts/auth_ui_test.py`). The binding `react-api` is the React app
+  (`scripts/auth_ui_test.py`). The Next.js app sends the links of the
+  sign-up and of the reset as emails to the mock SMTP server
+  `scripts/mock_smtp.py`, and the test opens the links of the emails. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
   in through the flow of the FastAPI app. It needs uv and pnpm, but not
   Docker. Update its approved screenshots with

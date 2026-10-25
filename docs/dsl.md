@@ -1236,6 +1236,7 @@ auth:
     verify_email: true
   password_reset:
     token_minutes: 30
+  delivery: smtp
   second_factor:
     totp: true
     required_roles: [admin]
@@ -1277,8 +1278,19 @@ auth:
 - `password_reset` lets a user who forgot the password set a new one
   with a link in a message ([ADR 0017](adr/0017-password-reset.md)). It
   is off by default. `token_minutes` (5 to 1440, default 60) is the
-  time that a link stays valid. A link is valid only one time. The
-  delivery of the message (for example an email) is a generation gap.
+  time that a link stays valid. A link is valid only one time.
+- `delivery` selects how the apps send the messages of `verify_email`
+  and `password_reset`. With `extension` (the default), the delivery
+  (for example an email) is a generation gap: an extension file of the
+  app sends the messages. With `smtp`, the apps send them as emails
+  with an SMTP server, and the delivery is not a gap. The settings
+  `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USERNAME`,
+  `SMTP_PASSWORD`, `SMTP_FROM` (the sender), and `SMTP_TLS` (`starttls`
+  by default, `tls`, or `none`) select the server. Without `SMTP_HOST`,
+  the apps write the links to the log with `ENVIRONMENT=development`,
+  and give an error in production. `smtp` needs an address: the user
+  name field of the type `email`, or a required `email` field of the
+  user entity.
 - `second_factor` lets each user with a password turn on a second factor
   of the sign-in: the codes of an authenticator app
   ([ADR 0024](adr/0024-second-factor.md)). It is off by default.
@@ -1330,8 +1342,11 @@ password of a sign-up that is not verified. With `password_reset`, `POST
 sets the new password. A used or an ended token gives 400. The
 extension file `app/core/messages_ext.py` delivers the messages of both
 kinds: its stub writes the link to the log with
-`ENVIRONMENT=development`, and gives 501 in production. The subject and
-the text of a message are in the language of the request. With
+`ENVIRONMENT=development`, and gives 501 in production. With
+`delivery: smtp`, the app has no extension file: `app/core/mail.py`
+sends each message with `smtplib` in a thread, so that the request does
+not block the other requests. The subject and the text of a message are
+in the language of the request. With
 `second_factor`, `POST /auth/second-factor/setup` gives a new secret
 and its `otpauth://` URI, and `POST /auth/second-factor/confirm` with a
 valid code turns the factor on and gives 10 recovery codes one time.
@@ -1381,7 +1396,9 @@ sign-in page shows a button that sends a new link. The Next.js app uses
 the same token rules as the FastAPI app, and the link starts with
 `PUBLIC_URL`. Its extension file `src/shared/auth/messages.ext.ts`
 (`deliverMessage`) delivers the messages of the verification and of the
-password reset, with the stub of the FastAPI app. The React app calls
+password reset, with the stub of the FastAPI app. With `delivery:
+smtp`, `src/shared/auth/mail.ts` sends them with the package
+`nodemailer` instead. The React app calls
 the endpoints of the FastAPI app: set `EMAIL_VERIFY_URL` to its page
 `/verify-email`. The React app with mock data has no verification: the
 sign-up signs in at once.

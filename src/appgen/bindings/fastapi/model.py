@@ -1193,6 +1193,9 @@ class PyApp:
     """The generated tests of the record rules (ADR 0025)."""
     embed_tests: list[PyEmbedTest] = field(default_factory=list[PyEmbedTest])
     """The generated tests of the record rules on the embedded relations (ADR 0025)."""
+    smtp: bool = False
+    """True if the app sends these messages by SMTP (`auth.delivery: smtp`), not with the
+    extension file `app/core/messages_ext.py`."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1357,6 +1360,9 @@ def python_app(definition: AppDefinition) -> PyApp:
         message_elements=_message_elements(definition),
         rule_tests=_rule_tests(definition, entities),
         embed_tests=_embed_tests(definition, entities),
+        smtp=bool(_message_elements(definition))
+        and definition.auth is not None
+        and definition.auth.delivery == "smtp",
     )
 
 

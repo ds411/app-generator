@@ -64,8 +64,13 @@ def test_no_page_takes_a_path_of_the_reset_pages(path: str) -> None:
     )
 
 
+def hook_text() -> str:
+    """Return the room booking example with the delivery hook, not the delivery by SMTP."""
+    return EXAMPLE.read_text().replace("  delivery: smtp\n", "")
+
+
 def test_the_fastapi_app_has_the_reset_endpoints_and_a_delivery_hook() -> None:
-    definition = load_definition(EXAMPLE)
+    definition = load_definition_text(hook_text(), "app.yaml")
     result = generate(definition, fastapi.BINDING)
     files = {f.path: f for f in result.files}
     auth = files["app/core/auth.py"].content
@@ -91,10 +96,12 @@ def test_the_fastapi_app_has_the_reset_endpoints_and_a_delivery_hook() -> None:
 
 @pytest.mark.parametrize("binding", ["fastapi", "nextjs"])
 def test_the_check_reports_the_delivery_as_an_open_gap(tmp_path: Path, binding: str) -> None:
+    source, out = tmp_path / "app.yaml", tmp_path / "out"
+    source.write_text(hook_text())
     runner = CliRunner()
-    generated = runner.invoke(app, ["generate", str(EXAMPLE), "-b", binding, "-o", str(tmp_path)])
+    generated = runner.invoke(app, ["generate", str(source), "-b", binding, "-o", str(out)])
     assert generated.exit_code == 0, generated.output
-    result = runner.invoke(app, ["check", str(EXAMPLE), str(tmp_path), "-f", "json"])
+    result = runner.invoke(app, ["check", str(source), str(out), "-f", "json"])
     report = json.loads(result.output)
     gaps = [g["id"] for g in report["gaps"]]
     assert "auth.password_reset" in gaps
@@ -110,7 +117,7 @@ def api_text() -> str:
 
 
 def test_the_nextjs_app_has_the_reset_pages_with_the_token_rules_of_the_api() -> None:
-    app = files(nextjs.BINDING)
+    app = files(nextjs.BINDING, hook_text())
     assert "<ForgotPasswordForm />" in app["app/forgot-password/page.tsx"]
     assert "<ResetPasswordForm token=" in app["app/reset-password/page.tsx"]
     reset = app["src/shared/auth/password-reset.ts"]
