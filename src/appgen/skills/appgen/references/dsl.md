@@ -391,6 +391,7 @@ seed:
 | Key       | Content                                                                    |
 | --------- | -------------------------------------------------------------------------- |
 | `records` | A mapping from a record key to the values of the record.                   |
+| `file`    | A local data file with more records, from the folder of the definition: `.yaml`, `.yml`, `.json`, or `.csv` (see [Data files](#data-files)). |
 | `mock`    | The number of generated records in addition to the seed records: an integer, 0 or more. The default is 0. |
 
 - Each record is an element, for example `seed.Room.records.a101`. A
@@ -427,6 +428,65 @@ The values:
 | `date`                                     | An ISO 8601 date, for example `2026-01-05`.        |
 | `datetime`                                 | An ISO 8601 date-time, for example `2026-01-05T09:30:00Z`. A date-time without an offset is in UTC. |
 | `json`                                     | Any value.                                         |
+
+### Data files
+
+Many records, for example an export of another system, fit better into
+a data file next to the definition. `file` names the file, from the
+folder of the definition. An entity can have `records` and `file`, but a
+key cannot be in both.
+
+```yaml
+# not valid alone: the data files are not next to an example.
+seed:
+  Room:
+    file: data/rooms.csv
+  Feature:
+    file: data/features.yaml
+```
+
+A YAML or a JSON file is a mapping from a record key to a record, as
+`records`:
+
+```yaml
+# not valid alone: the text of a data file, not of a definition.
+screen: { label: Screen }
+board:
+  label: Whiteboard
+```
+
+```json
+{
+  "screen": { "label": "Screen" },
+  "board": { "label": "Whiteboard" }
+}
+```
+
+A CSV file has a header with the column `key`, and one column for each
+field and relation that it gives. Each row is a record:
+
+```text
+key,code,capacity,bookable,opened_on,office,features
+a101,A101,8,true,2020-03-01,hq,screen;board
+b201,B201,,false,,lisbon,
+```
+
+- An empty cell is no value.
+- The loader converts each cell to the type of its field: an `integer`,
+  a `decimal` (a number with a `.`), a `boolean` (`true` or `false`), a
+  `date` or a `datetime` (ISO 8601), and a `json` value (JSON text). A
+  cell that does not convert is an error.
+- A `many_to_one` or `one_to_one` cell has a record key. A
+  `many_to_many` cell has record keys with `;` between them.
+- A column that is not a field or a relation of the entity is an error
+  (`unknown-key`).
+
+The records of a file are elements with the same IDs as the records of
+`records`, for example `seed.Room.records.a101`. Each diagnostic of a
+record gives the path of the file and the line of the record (for a CSV
+file, the line of the row). The file must be a local file: appgen reads
+no URL. The output manifest records the hash of each data file, so the
+same files give the same app.
 
 `appgen validate` checks each value against the type and the options of
 its field (`values`, `min`, `max`, `min_length`, `max_length`,
@@ -1502,9 +1562,9 @@ stay valid.
 against the schema, the names, and the references between elements
 (for example a relation to an entity that does not exist, a token loop,
 or a view field of the wrong type). It also reads the OpenAPI document of
-each API, and checks its operations and its security scheme, and it checks
-the values of the seed records. Each diagnostic has a code, a
-message, and the line and the column. `--format json` writes the
+each API, and checks its operations and its security scheme. It reads the
+data files of the seed, and checks the values of the seed records. Each
+diagnostic has a code, a message, and the line and the column. `--format json` writes the
 diagnostics as JSON. [`examples/invalid/`](https://github.com/ds411/app-generator/tree/main/examples/invalid/) has one broken definition for
 each diagnostic code. `appgen generate` validates the definition first,
 and writes no file if it is not valid.

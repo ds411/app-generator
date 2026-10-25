@@ -1,0 +1,10 @@
+# expect: invalid-data-file
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Room:
+    fields:
+      code: { type: string, required: true }
+seed:
+  Room:
+    file: data/rooms-that-do-not-exist.csv

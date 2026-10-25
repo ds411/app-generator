@@ -16,15 +16,15 @@ same diagnostics if the definition is not valid.
 | ---------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `file-error`           | appgen cannot read the file, for example a wrong path.                | Give the path of a YAML file that exists.                           |
 | `yaml-syntax`          | The text is not valid YAML. In a flow mapping (`{ ... }`), a text with `: `, `?`, `#`, `{`, `[`, or `,` often causes it. | Fix the YAML at the line and column. Put quotes around the text, for example `title: "Cancel?"`. |
-| `duplicate-key`        | A mapping has the same key two times.                                 | Remove one key, or merge the two values. The hint gives the first one. |
+| `duplicate-key`        | A mapping has the same key two times, or a seed record is in `records` and in the data file, or two times in a data file. | Remove one key, or merge the two values. The hint gives the first one. |
 | `invalid-key`          | A mapping key is a list or a mapping.                                 | Use a plain name as the key.                                        |
 | `empty-definition`     | The file has no content.                                              | Write the definition. Start from the start definition of `new-definition.md`. |
 | `missing-version`      | The key `version` is missing.                                         | Add `version: 0` at the top of the file.                            |
 | `unsupported-version`  | `version` is not a version that this appgen reads.                    | Use `version: 0`.                                                   |
 | `not-supported`        | A section that this version of the DSL does not support.              | Remove the section, or keep its data in an extension key, for example `x-<section>`. |
 | `missing-key`          | A required key is missing, for example `title` of `app`, or `kind` of an operation. | Add the key. `dsl.md` gives the required keys of each element. |
-| `unknown-key`          | A key that the element does not have, often a typo, or an extension key that no binding in use declares. | Use the key of the hint, or remove the key. |
-| `invalid-value`        | A value of the wrong type or not in the allowed values, for example `type: strng`, or a boolean where a name must be. | Use a value from the message or the hint. Put quotes around `yes`, `no`, `on`, and `off`. |
+| `unknown-key`          | A key that the element does not have, often a typo, an extension key that no binding in use declares, or a field of a seed record (or a column of a CSV data file) that the entity does not have. | Use the key of the hint, or remove the key. |
+| `invalid-value`        | A value of the wrong type or not in the allowed values, for example `type: strng`, a boolean where a name must be, or a value of a seed record (or a cell of a CSV data file) that does not suit its field. | Use a value from the message or the hint. Put quotes around `yes`, `no`, `on`, and `off`. |
 | `invalid-name`         | A name does not match its pattern, for example an entity name in snake case. | Rename it: entities in PascalCase, other names in snake case. |
 | `duplicate-name`       | Two names differ only in case, or two elements of a kind have the same name. | Give each element its own name.                                |
 | `duplicate-id`         | Two elements have the same element ID.                                | Rename one element. The hint gives the other element.               |
@@ -51,6 +51,7 @@ same diagnostics if the definition is not valid.
 | `unsuitable-security`  | The security scheme of an API is not an API key in a header or a query parameter, or a bearer token. | Use a scheme that the clients support, or call the API from hand-written code. |
 | `duplicate-value`      | Two seed records of an entity have the same value of a `unique` field or of the fields of a `unique` rule, a record has two partners in a `one_to_one` relation, or a list of keys has a key two times. | Give each record its own value. The message names the other record. |
 | `invalid-record`       | A seed record does not keep a `compare` or a `no_overlap` rule of its entity. The message gives the message of the rule. | Change the values of the record, so that it keeps the rule. |
+| `invalid-data-file`    | The data file of a seed does not exist, is a URL, is not a `.yaml`, `.yml`, `.json`, or `.csv` file, or has no records: a YAML or JSON file that is not a mapping, or a CSV file without a header, without the column `key`, or with a row that has more cells than the header. | Give the local path of the file, from the folder of the definition. Fix the file at the line of the message. |
 
 ## Problems of a trace check
 

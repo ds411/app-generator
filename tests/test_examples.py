@@ -52,6 +52,7 @@ DIAGNOSTIC_CODES = {
     "unsuitable-security",
     "duplicate-value",
     "invalid-record",
+    "invalid-data-file",
 }
 
 
