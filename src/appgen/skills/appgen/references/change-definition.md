@@ -115,6 +115,26 @@ A rename of a field or a relation has no extension files of its own, so
 only step 5 applies. Do not rename an element if the task does not ask
 for it.
 
+### Seed records
+
+The seed records (`seed`) use the names of the entities, the fields,
+and the relations too:
+
+- After the rename of an entity, rename its key in `seed`. The ID of a
+  seed record comes from the app name, the entity name, and the record
+  key, so each seed record of the entity gets a new ID. The seed of the
+  Next.js app and of the FastAPI app then adds the records with the new
+  IDs, and a database that exists keeps the records with the old IDs.
+  Delete them, or start with an empty database.
+- After the rename of a field or a relation, rename the key in each
+  record of `records`, and the column of a CSV data file or the key in
+  a YAML or JSON data file of the entity. The IDs stay.
+- A rename of a record key or of the app changes the IDs too. Do not
+  rename them if the task does not ask for it.
+
+`appgen validate` reports each old name in a seed record as
+`unknown-key`, also in a data file, with the file and the line.
+
 ## Remove an element
 
 Remove the element and each reference to it from the definition, and
@@ -122,7 +142,9 @@ validate. After `appgen generate`, the generated files of the element
 are gone, and its extension files stay. `appgen orphans` lists them,
 often with `suggestion` `null`. Delete the hand-written code of the
 element, or move the parts that other elements still need. Remove the
-traces to the old ID, and check again.
+traces to the old ID, and check again. After the removal of a field or
+a relation, also remove its values from the seed records and from the
+data files (`unknown-key`).
 
 ## Generated files with manual edits
 

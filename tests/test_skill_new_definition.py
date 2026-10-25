@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from skill_support import ROOT, SKILL, fenced_blocks, skill_docs
+from skill_support import ROOT, SKILL, data_files, fenced_blocks, skill_docs
 from typer.testing import CliRunner
 
 from appgen.cli import app
@@ -129,6 +129,10 @@ def test_each_complete_definition_of_the_skill_is_valid(tmp_path: Path) -> None:
     runner = CliRunner()
     count = 0
     for name, text in skill_docs().items():
+        # The data files of the seed records, next to the definitions.
+        for file, content in data_files(text).items():
+            (tmp_path / file).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / file).write_text(content, encoding="utf-8")
         for number, block in enumerate(fenced_blocks(text, "yaml")):
             yaml.safe_load(block)
             if not re.search(r"^version: 0$", block, re.MULTILINE):

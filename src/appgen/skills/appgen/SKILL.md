@@ -1,6 +1,6 @@
 ---
 name: appgen
-description: "Use the appgen CLI to generate apps from a YAML app definition. Four tasks: (1) use the CLI loop: appgen validate, appgen generate with a binding (nextjs, react, or fastapi), and appgen check of the traces; (2) write a new app definition from a description of an app; (3) change the app definition of an app that exists, and keep its hand-written code and its traces valid; (4) fill the generation gaps of a generated app: the extension files with TODO(appgen) stubs and @trace:gap comments. Use this skill when a task names appgen, an app definition (a YAML file with version: 0, app, and entities), a folder with .appgen/manifest.json, @trace comments, or TODO(appgen) stubs."
+description: "Use the appgen CLI to generate apps from a YAML app definition. Five tasks: (1) use the CLI loop: appgen validate, appgen generate with a binding (nextjs, react, or fastapi), and appgen check of the traces; (2) write a new app definition from a description of an app; (3) change the app definition of an app that exists, and keep its hand-written code and its traces valid; (4) fill the generation gaps of a generated app: the extension files with TODO(appgen) stubs and @trace:gap comments; (5) add seed records to a definition: the data that the apps start with, from a table, a CSV file, or a JSON export. Use this skill when a task names appgen, an app definition (a YAML file with version: 0, app, and entities), a folder with .appgen/manifest.json, @trace comments, or TODO(appgen) stubs."
 ---
 
 # appgen
@@ -23,6 +23,7 @@ code by hand.
 | Write a new app definition.                  | [references/new-definition.md](references/new-definition.md)       |
 | Change the definition of an app that exists. | [references/change-definition.md](references/change-definition.md) |
 | Fill the generation gaps of an app.          | [references/fill-gaps.md](references/fill-gaps.md)                 |
+| Add seed records (data) to a definition.     | [references/seed-data.md](references/seed-data.md)                 |
 
 Each task uses the CLI loop of this file. Read the file of your task
 before you start it. Two more files help in all tasks:
