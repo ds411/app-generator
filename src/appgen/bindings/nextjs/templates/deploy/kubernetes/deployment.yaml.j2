@@ -1,0 +1,73 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ name }}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: web
+    spec:
+      # The user `node` of the image.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: {{ name }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # Kubernetes sets HOSTNAME to the name of the pod. The server
+            # listens on the address of HOSTNAME, so set all addresses.
+            - name: HOSTNAME
+              value: 0.0.0.0
+          envFrom:
+            - configMapRef:
+                name: {{ name }}-config
+            - secretRef:
+                name: {{ name }}-secret
+          # /health checks the database too, so a replica without the
+          # database gets no requests. The liveness probe checks only the port.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # The server writes its cache here. The rest of the file system is read-only.
+          volumeMounts:
+            - name: cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: cache
+          emptyDir:
+            sizeLimit: 256Mi

@@ -14,6 +14,11 @@ next-env.d.ts
 
 # The PGlite data of local runs
 /.pglite/
+{% if 'kubernetes' in nextjs.deploy %}
+
+# The secrets of the Kubernetes deployment
+/deploy/kubernetes/secret.env
+{% endif %}
 
 # Misc
 .DS_Store

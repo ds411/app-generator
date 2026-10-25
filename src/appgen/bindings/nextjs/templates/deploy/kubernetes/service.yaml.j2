@@ -1,0 +1,14 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ name }}
+spec:
+  # Only the pods of the app, not the pod of the migration Job.
+  selector:
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

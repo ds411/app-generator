@@ -28,12 +28,17 @@ DEV_DEPENDENCIES: dict[str, str] = {
     "@types/react-dom": "19.3.0",
     "drizzle-kit": "0.31.11",
     "eslint": "9.39.5",
+    "esbuild": "0.28.2",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
 }
-"""The development packages that each generated app needs. `tsx` runs `pnpm db:seed`."""
+"""The development packages that each generated app needs.
+
+`tsx` runs `pnpm db:seed`, and `esbuild` bundles the script of the
+migration Job (`pnpm build:migrate`). tsx uses the same esbuild.
+"""
 
 UI_DEPENDENCIES: dict[str, str] = {
     "class-variance-authority": "0.7.1",
@@ -65,6 +70,9 @@ A test checks that this mapping has a version for each of them.
 
 TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 """The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
+
+REDIS_PACKAGES: dict[str, str] = {"@redis/client": "6.3.0"}
+"""The packages of the rate limit in Redis (`x-nextjs-rate-limit-store: redis`, ADR 0013)."""
 
 PROVIDER_PACKAGES: dict[str, str] = {"jose": "6.2.12"}
 """The packages of the sign-in with providers (ADR 0020): `jose` checks the ID tokens."""

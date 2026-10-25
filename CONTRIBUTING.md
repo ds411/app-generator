@@ -262,8 +262,11 @@ git config core.hooksPath .githooks
   shared binding code, the hook also runs `scripts/check-nextjs.sh`.
   The script generates the project tracker with the Next.js binding,
   and runs `pnpm install`, lint, type check, build, `docker build`, and
-  `appgen check` on the output. It needs pnpm and Docker. Run it by
-  hand with `scripts/check-nextjs.sh [output folder]`.
+  `appgen check` on the output. Like the FastAPI check, it starts two
+  processes of the app with Redis, and checks that they share the rate
+  limit, and it validates the deployment files of each target against
+  their schemas. It needs pnpm and Docker. Run it by hand with
+  `scripts/check-nextjs.sh [output folder]`.
 - When a push changes the generator core, the React binding, or the
   shared binding code, the hook also runs `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs

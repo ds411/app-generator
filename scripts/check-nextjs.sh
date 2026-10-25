@@ -2,20 +2,27 @@
 # Generate the project tracker with the Next.js binding, and check the
 # output: install, lint, type check, build, Docker image, traces, and
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
-# app, request it, and run the Playwright tests in ui-tests/). Last, the
+# app, request it, and run the Playwright tests in ui-tests/). Then the
 # smoke test runs the built app with PGlite (--local), without Docker.
+# Last, check the rate limit that two processes share in Redis
+# (scripts/check_shared_rate_limit.py), and the deployment files of each
+# target against their schemas (scripts/check_deploy_files.py).
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
 #   scripts/check-nextjs.sh [output folder]
 #
 # Without an output folder, the script uses a temporary folder and
-# deletes it at the end. The script needs pnpm, Docker, and the Chromium
-# of Playwright (see scripts/smoke_test.py).
+# deletes it at the end. The app of the rate limit check goes to the
+# folder "<output folder>-rate-limit". The script needs pnpm, Docker, and
+# the Chromium of Playwright (see scripts/smoke_test.py).
 #
 # Environment variables:
 #   NODE_IMAGE                Build argument of the Docker image.
 #   POSTGRES_IMAGE            The Postgres image of the smoke test.
+#   REDIS_IMAGE               The Redis image of the shared rate limit check.
+#   KUBERNETES_VERSION        The version of the Kubernetes schemas of the deployment files.
+#   APPGEN_SCHEMA_CACHE       The folder of the downloaded schemas (default ~/.cache/appgen/schemas).
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
 #   PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the UI tests.
 
@@ -29,7 +36,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit"' EXIT
 fi
 
 step() {
@@ -76,5 +83,12 @@ uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-n
 
 step "smoke test with the local database"
 uv run --locked scripts/smoke_test.py nextjs --app "$out" --local
+
+step "shared rate limit"
+rm -rf "$out-rate-limit"
+uv run --locked scripts/check_shared_rate_limit.py nextjs "$out-rate-limit"
+
+step "deployment files"
+uv run --locked scripts/check_deploy_files.py nextjs
 
 step "passed"

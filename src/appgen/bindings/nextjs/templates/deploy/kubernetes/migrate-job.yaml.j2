@@ -1,0 +1,34 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+# Apply the migrations of the database (drizzle/) once: `node migrate.mjs`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ name }}-migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ name }}
+          command: ["node", "migrate.mjs"]
+          envFrom:
+            - secretRef:
+                name: {{ name }}-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

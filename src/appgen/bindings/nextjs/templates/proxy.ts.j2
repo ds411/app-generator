@@ -1,0 +1,18 @@
+{{ trace_header("app") }}
+import type { NextRequest } from "next/server";
+
+import { limitRate } from "@/shared/lib/rate-limit";
+
+/**
+ * Next.js calls the proxy before each page, server action, and route
+ * handler. It limits the requests of each client (RATE_LIMIT_PER_MINUTE,
+ * see `src/shared/lib/rate-limit.ts`).
+ */
+export function proxy(request: NextRequest) {
+  return limitRate(request);
+}
+
+export const config = {
+  // Not the static files of the build, the image optimizer, and the icon.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+};
