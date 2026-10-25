@@ -1717,7 +1717,9 @@ def view_rules() -> tuple[Output, ...]:
                     when=f"not ({_API_CLIENT})",
                     extension=True,
                 ),
-                Output(template="ui/views/api-index.ts.j2", path=_VIEW + "/index.ts", for_each=kind),
+                Output(
+                    template="ui/views/api-index.ts.j2", path=_VIEW + "/index.ts", for_each=kind
+                ),
             )
         ),
         *(
