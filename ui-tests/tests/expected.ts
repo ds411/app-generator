@@ -33,10 +33,14 @@ export type ExpectedTestLanguage = {
   code: string;
   /** The locale of the test language: the `lang` of the page. */
   locale: string;
+  /** The direction of the test language: the `dir` of the page. */
+  direction: "ltr" | "rtl";
   /** The key of the selected language in the browser storage, and the name of its cookie. */
   storageKey: string;
   /** The texts that are not UI text: the values of the records and the names of the languages. */
   ignore: string[];
+  /** The pages with an approved screenshot in the test language, in ui-tests/approved/<binding>/<direction>/. */
+  screenshots: string[];
 };
 
 /** An action of a page, and if the role sees it. */

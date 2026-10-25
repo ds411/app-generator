@@ -291,7 +291,12 @@ git config core.hooksPath .githooks
   (`scripts/translation_test.py`). It needs pnpm, but not Docker. A
   fixed text in a template must use a text helper of
   `src/appgen/bindings/shared/i18n.py`, for example `jsx_text("Close")`,
-  else the check fails.
+  else the check fails. The test language is from right to left: the
+  check fails when a page is wider than the window, and it compares one
+  page of each kind with its approved screenshot in
+  `ui-tests/approved/<binding>/rtl/<page>.png`, in the light mode. A
+  template that uses a class of a side (for example `ml-2` in place of
+  `ms-2`) fails a test of `tests/test_bindings_shared_sides.py`.
 - When a push changes the generator core, a front-end binding, the
   FastAPI binding, the shared binding code, or the room booking example,
   the hook also runs `scripts/check-auth-ui.sh`. The script builds the room booking example
@@ -334,6 +339,7 @@ git config core.hooksPath .githooks
   APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-nextjs.sh
   APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-react.sh
   APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-auth-ui.sh
+  APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-translations.sh
   git add ui-tests/approved
   ```
 

@@ -7,7 +7,9 @@ test proves it for the project tracker:
 1. Collect the texts that the app translates (`app_texts`), and write
    the project tracker with a test language instead of its languages.
    The test language changes each text to `⟦text⟧`, and has the
-   locale `ja`, so its dates and numbers have no Latin letters.
+   locale `ja`, so its dates and numbers have no Latin letters. Its
+   direction is `rtl`, so the pages show the layout from right to left
+   (ADR 0010).
 2. Generate the app, and find the UI text in the code that does not
    call `t` (`scripts/untranslated_text.mjs`).
 3. Build and start the app: React with `vite preview`, Next.js with
@@ -17,7 +19,9 @@ test proves it for the project tracker:
 4. Run the UI test `ui-tests/tests/test-language.spec.ts`: it opens each
    page in the test language, with its search, the menu of a record, and
    a form with its date picker. Each text with a Latin letter must have
-   ⟦, or be a value of the records.
+   ⟦, or be a value of the records. No page is wider than the window,
+   and one page of each kind (`SCREENSHOTS`) looks like its approved
+   screenshot in `ui-tests/approved/<binding>/rtl/`.
 5. Next.js: request the pages in the test language and in the default
    language at the same time. The server must render each page in the
    language of its request.
@@ -31,6 +35,7 @@ and the Chromium of Playwright (see scripts/smoke_test.py). It uses the
 ports 5430 (React) and 3430 (Next.js). It does not need Docker.
 
 Environment variables:
+    APPGEN_UPDATE_SCREENSHOTS     1: write the approved screenshots of the test language.
     PLAYWRIGHT_CHROMIUM_EXECUTABLE  A Chromium for the test, instead of the one
                                   that Playwright installs. Without both, the test
                                   uses /opt/pw-browsers/chromium if it exists.
@@ -73,6 +78,10 @@ CODE = "xx"
 LABEL = "Test"
 LOCALE = "ja"
 """The locale of the test language: its dates and numbers have no Latin letters."""
+DIRECTION = "rtl"
+"""The direction of the test language: the pages show the layout from right to left."""
+SCREENSHOTS = ["dashboard", "projects", "project_detail", "task_board", "people"]
+"""The pages with an approved screenshot in the test language: one page of each kind."""
 
 
 class TranslationTestError(Exception):
@@ -110,6 +119,7 @@ def test_definition(definition: AppDefinition, binding: str, folder: Path) -> Pa
                 CODE: {
                     "label": LABEL,
                     "locale": LOCALE,
+                    "direction": DIRECTION,
                     "text": {text: f"⟦{text}⟧" for text in texts},
                 },
             },
@@ -227,8 +237,10 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
         "testLanguage": {
             "code": CODE,
             "locale": LOCALE,
+            "direction": DIRECTION,
             "storageKey": f"{definition.app.name}-language",
             "ignore": ignored_texts(definition),
+            "screenshots": SCREENSHOTS,
         },
     }
     expected_file.write_text(json.dumps(expected, indent=2, ensure_ascii=False) + "\n")
@@ -242,6 +254,8 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
         run("pnpm", "install", "--silent", "--frozen-lockfile", cwd=UI_TESTS)
     command = ["pnpm", "exec", "playwright", "test", "tests/test-language.spec.ts"]
+    if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
+        command.append("--update-snapshots")
     run(*command, "--project", "light", cwd=UI_TESTS, env=env)
 
 
@@ -249,7 +263,8 @@ def check_parallel_requests(definition: AppDefinition) -> None:
     """Request the pages of Next.js in two languages at the same time: each page has one language.
 
     The server renders each request in the language of its cookie (ADR
-    0010). Half of the requests have the cookie of the test language.
+    0010), with its locale and its direction. Half of the requests have
+    the cookie of the test language.
     """
     pages: list[dict[str, Any]] = expected_ui("nextjs", definition)["pages"]
     paths = [page["path"] for page in pages if not page["params"]]
@@ -264,7 +279,8 @@ def check_parallel_requests(definition: AppDefinition) -> None:
         request = urllib.request.Request(url, headers={"Cookie": cookie} if test else {})
         with urllib.request.urlopen(request, timeout=120) as response:
             html = response.read().decode()
-        lang = f'<html lang="{LOCALE if test else default_locale}"'
+        direction = DIRECTION if test else "ltr"
+        lang = f'<html lang="{LOCALE if test else default_locale}" dir="{direction}"'
         if lang in html and ("⟦" in html) == test:
             return None
         return f"{path} ({CODE if test else default})"
