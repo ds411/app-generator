@@ -179,7 +179,7 @@ def test_react_makes_a_gap_for_a_view_of_an_api_with_a_secret(
         "// @trace:gap ui.views.shop_books file",
         "// @trace:gap ui.views.shop_books.card file",
     ]
-    assert "TODO(appgen): set `expose: true` on the API" in stub
+    assert "TODO(appgen): set `expose: true` on the API: then appgen generates the" in stub
     assert "export function ShopBooksView() {" in stub
     index = files["src/widgets/shop-books/index.ts"]
     assert 'export { ShopBooksView } from "./ui/shop-books-view.ext";' in index

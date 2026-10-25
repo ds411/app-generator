@@ -7,10 +7,10 @@
  * (`{{ plan.api.secret_env }}`), and a browser app cannot keep a secret, so
  * this app has no client for the API.
  *
- * TODO(appgen): set `expose: true` on the API, and `x-react-data: api` in
- * the section `app`: then the FastAPI app of the same definition calls
- * the API for this app, and appgen generates the view. Or write the view
- * here.
+ * TODO(appgen): set `expose: true` on the API: then appgen generates the
+ * view, and with `x-react-data: api` in the section `app`, the FastAPI
+ * app of the same definition calls the API for this app. Or write the
+ * view here.
  * When it is done, change the kind of the traces in the header from gap to manual.
  */
 {% if plan.props %}

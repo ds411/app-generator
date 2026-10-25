@@ -1038,8 +1038,8 @@ page, at each request, with the server client of the API. An error of
 the API shows the error state of the view. The React app calls the
 operation in the browser: with mock data, the view shows the example
 answer of the document. In the React app, the view of an API with a
-secret is a gap, unless the API has `expose: true` and the app has
-`x-react-data: api`.
+secret is a gap, unless the API has `expose: true`. With
+`x-react-data: api`, the view of an exposed API calls the FastAPI app.
 
 ```yaml
 pages:
