@@ -14,8 +14,8 @@
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
 # Last, generate tests/fixtures/account-security.yaml (the verification
-# of the email address, and the delivery hook of the messages), and
-# check its code and run its tests.
+# of the email address, the delivery hook of the messages, and the
+# second factor), and check its code and run its tests.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #

@@ -7,6 +7,7 @@
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
 {% set access = definition.access %}
+{% set sf_required = password and definition.auth.second_factor and definition.auth.second_factor.required_roles and access %}
 {% set default_role = none %}
 {% if sign_up and access %}
 {% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
@@ -25,17 +26,20 @@
 {% endfor %}
 """The tests of the sign-in: tokens, the auth endpoints, and the protected endpoints."""
 
+{% if sf_required %}
+import base64
+{% endif %}
 {% if reset or verify %}
 import time
 {% endif %}
 {% if sign_up %}
 from typing import Any
 {% endif %}
-{% if sign_up or reset %}
+{% if sign_up or reset or sf_required %}
 
 {% endif %}
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient{{ ", Response" if sf_required }}
 from sqlalchemy.ext.asyncio import AsyncSession
 
 {% if py.message_elements %}
@@ -47,6 +51,9 @@ from app.core.messages import Message
 from app.core.auth import set_password
 {% else %}
 from app.core.auth import make_token
+{% endif %}
+{% if sf_required %}
+from app.core.second_factor import current_step, totp_code
 {% endif %}
 {{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([u.snake ~ "_input"] if sign_up else [])) }}
 from tests.problems import assert_problem
@@ -65,7 +72,27 @@ async def _sign_in(client: AsyncClient, session: AsyncSession) -> tuple[str, str
         "/auth/sign-in", json={"username": user.{{ username.attr }}, "password": PASSWORD}
     )
     assert response.status_code == 200, response.text
+{% if sf_required %}
+    return str(user.id), await _token_of(client, response)
+
+
+async def _token_of(client: AsyncClient, response: Response) -> str:
+    """Return the token of a sign-in. A role that must use a second factor turns it on first."""
+    body = response.json()
+    if "access_token" in body:
+        return body["access_token"]
+    challenge = body["challenge"]
+    assert body["second_factor"] == "setup", body
+    setup = await client.post("/auth/second-factor/setup", json={"challenge": challenge})
+    assert setup.status_code == 200, setup.text
+    code = totp_code(base64.b32decode(setup.json()["secret"]), current_step())
+    data = {"challenge": challenge, "code": code}
+    confirm = await client.post("/auth/second-factor/confirm", json=data)
+    assert confirm.status_code == 200, confirm.text
+    return confirm.json()["token"]["access_token"]
+{% else %}
     return str(user.id), response.json()["access_token"]
+{% endif %}
 {% else %}
 
 async def _sign_in(client: AsyncClient, session: AsyncSession) -> tuple[str, str]:
@@ -189,7 +216,11 @@ async def test_a_new_user_signs_up_and_signs_in(
     credentials = {"username": body["{{ username.name }}"], "password": PASSWORD}
     sign_in = await anonymous_client.post("/auth/sign-in", json=credentials)
     assert sign_in.status_code == 200, sign_in.text
+{% if sf_required %}
+    headers = {"Authorization": f"Bearer {await _token_of(anonymous_client, sign_in)}"}
+{% else %}
     headers = {"Authorization": f"Bearer {sign_in.json()['access_token']}"}
+{% endif %}
 {% else %}
 {{ trace(sign_up.id) }}
 async def test_a_new_user_signs_up_and_signs_in(

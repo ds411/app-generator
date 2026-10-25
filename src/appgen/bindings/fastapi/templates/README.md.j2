@@ -234,6 +234,25 @@ a long random text in each environment.
   redirect URI of the app at the provider. Set the issuer, the client
   ID, and the client secret of each provider (see `.env.example`).
 {% endif %}
+{% set sf = definition.auth.second_factor if password else none %}
+{% if sf %}
+- The second factor (ADR 0024 of appgen): `POST /auth/second-factor/setup`
+  gives a new secret and its `otpauth://` URI for an authenticator app,
+  and `POST /auth/second-factor/confirm` with a code turns it on and
+  gives 10 recovery codes one time. Then `POST /auth/sign-in` gives a
+  challenge, not a token, and `POST /auth/sign-in/second-factor` with
+  the challenge and a code, or a recovery code, gives the token.{% if sf.required_roles and definition.access %} The
+  roles {% for name in sf.required_roles %}`{{ name }}`{{ ", " if not loop.last }}{% endfor %} must use it: their first sign-in turns it on
+  with the challenge.{% endif %} `GET /auth/second-factor` gives its state, and
+  `POST /auth/second-factor/disable` with a code turns it off. After 5
+  wrong codes in a row, the codes give 429 for 15 minutes. The app keeps
+  the secret encrypted with a key from `AUTH_SECRET`: after a change of
+  `AUTH_SECRET`, the codes of the authenticator apps are not valid. The
+  users sign in with a recovery code, and turn the factor off and on.
+- `uv run python -m app.cli disable-second-factor <user name>` turns off
+  the second factor of a user who lost the authenticator app and the
+  recovery codes.
+{% endif %}
 {% if password %}
 - `uv run python -m app.cli set-password <user name>` sets the password
   of a user.

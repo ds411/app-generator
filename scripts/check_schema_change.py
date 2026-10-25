@@ -13,9 +13,11 @@ temporary folder, and then:
    agree (`alembic check`), and that `appgen check` passes.
 
 Then it does the same steps for the verification of the email address
-(ADR 0023): it generates `tests/fixtures/account-security.yaml` without
-`verify_email`, adds a user with a password, turns on `verify_email`, and
-checks that the next migration keeps the user verified.
+(ADR 0023) and the second factor (ADR 0024): it generates
+`tests/fixtures/account-security.yaml` without `verify_email` and
+`second_factor`, adds a user with a password, turns both on, and checks
+that the next migration keeps the user verified, with the second factor
+off.
 
 `scripts/check-fastapi.sh` runs it after its other checks. Run it by hand
 from the repository root, with a generated app:
@@ -37,6 +39,7 @@ from pathlib import Path
 DEFINITION = Path("examples/project-tracker/app.yaml")
 SECURITY = Path("tests/fixtures/account-security.yaml")
 VERIFY_EMAIL = "    verify_email: { token_minutes: 120 }\n"
+SECOND_FACTOR = "  second_factor:\n    totp: true\n    required_roles: [admin]\n"
 FIRST = Path("migrations/versions/0001_schema.py")
 PERSON = "    fields:\n      name: { type: string, required: true, max_length: 120 }\n"
 NEW_FIELD = "      phone: { type: string, max_length: 40 }\n"
@@ -120,17 +123,21 @@ def check(app: Path) -> None:
     log("passed")
 
 
-def check_verification(root: Path) -> None:
-    """Turn on `verify_email` in an app with a user: the user stays verified (ADR 0023)."""
+def check_account_security(root: Path) -> None:
+    """Turn on `verify_email` and `second_factor` in an app with a user.
+
+    The user stays verified (ADR 0023), and its second factor is off (ADR 0024).
+    """
     with tempfile.TemporaryDirectory(prefix="appgen-schema-change.") as temp:
         text = SECURITY.read_text()
-        if VERIFY_EMAIL not in text:
-            raise SchemaChangeError(f"{SECURITY} has no 'verify_email' in the expected form.")
+        for part in (VERIFY_EMAIL, SECOND_FACTOR):
+            if part not in text:
+                raise SchemaChangeError(f"{SECURITY} has no {part.strip()!r}.")
         before = Path(temp) / "before.yaml"
-        before.write_text(text.replace(VERIFY_EMAIL, ""))
+        before.write_text(text.replace(VERIFY_EMAIL, "").replace(SECOND_FACTOR, ""))
         work = Path(temp) / "app"
         args = ["uv", "run", "--locked", "appgen", "generate"]
-        log(f"generate {SECURITY} without verify_email")
+        log(f"generate {SECURITY} without verify_email and second_factor")
         run([*args, str(before), "-b", "fastapi", "-o", str(work)], root)
         database = Path(temp) / "data.db"
         env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
@@ -140,30 +147,35 @@ def check_verification(root: Path) -> None:
         member = uuid.uuid4()
         with sqlite3.connect(database) as connection:
             connection.execute(
-                "INSERT INTO members (id, login, email, name) VALUES (?, ?, ?, ?)",
-                (member.hex, "ada", "ada@example.com", "Ada Lovelace"),
+                "INSERT INTO members (id, login, email, name, role) VALUES (?, ?, ?, ?, ?)",
+                (member.hex, "ada", "ada@example.com", "Ada Lovelace", "admin"),
             )
             connection.execute(
                 "INSERT INTO credentials (user_id, password_hash) VALUES (?, ?)",
                 (member.hex, "scrypt$00$00"),
             )
 
-        log("generate the app again with verify_email")
+        log("generate the app again with verify_email and second_factor")
         run([*args, str(SECURITY), "-b", "fastapi", "-o", str(work)], root)
-        message = "verify the email addresses"
+        message = "verify the email addresses, and add the second factor"
         run(["uv", "run", "alembic", "revision", "--autogenerate", "-m", message], work, env)
         new = [p for p in (work / FIRST.parent).glob("*.py") if p.name != FIRST.name]
-        if len(new) != 1 or "email_verified_at" not in new[0].read_text():
-            raise SchemaChangeError("The migration does not add the column email_verified_at.")
+        for column in ("email_verified_at", "totp_secret", "totp_failures", "recovery_codes"):
+            if len(new) != 1 or column not in new[0].read_text():
+                raise SchemaChangeError(f"The migration does not add the column {column}.")
         run(["uv", "run", "alembic", "upgrade", "head"], work, env)
         run(["uv", "run", "alembic", "check"], work, env)
         with sqlite3.connect(database) as connection:
             rows = connection.execute(
-                "SELECT email_verified_at FROM credentials WHERE user_id = ?", (member.hex,)
+                "SELECT email_verified_at, totp_enabled_at, totp_failures FROM credentials"
+                " WHERE user_id = ?",
+                (member.hex,),
             ).fetchall()
         if len(rows) != 1 or rows[0][0] is None:
             raise SchemaChangeError(f"The user that exists is not verified: {rows}.")
-    log("passed: the users that exist are verified")
+        if rows[0][1:] != (None, 0):
+            raise SchemaChangeError(f"The second factor of the user that exists is on: {rows}.")
+    log("passed: the users that exist are verified, with the second factor off")
 
 
 def main() -> int:
@@ -172,7 +184,7 @@ def main() -> int:
         return 2
     try:
         check(Path(sys.argv[1]).resolve())
-        check_verification(Path.cwd())
+        check_account_security(Path.cwd())
     except (SchemaChangeError, subprocess.CalledProcessError) as error:
         print(f"schema-change: failed: {error}", file=sys.stderr)
         return 1

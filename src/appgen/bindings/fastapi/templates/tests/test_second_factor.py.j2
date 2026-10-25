@@ -1,0 +1,241 @@
+{% set sf = definition.auth.second_factor %}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set username = u.fields | selectattr("name", "eq", definition.auth.username_field) | first %}
+{% set access = definition.access %}
+{% set required = sf.required_roles if access else [] %}
+{% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if required else none %}
+{% set free_roles = (access.roles.keys() | reject("in", required) | list) if required else [] %}
+{{ trace_header(sf.id) }}
+"""The tests of the second factor of the sign-in (ADR 0024)."""
+
+import base64
+from typing import Any
+
+import pytest
+from httpx import AsyncClient, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import set_password
+from app.core.second_factor import current_step, open_secret, seal_secret, totp_code
+{{ py.from_import("app.features." ~ u.slice ~ ".models", [u.name]) }}
+from tests.factories import make_{{ u.snake }}
+from tests.problems import assert_problem
+
+pytestmark = pytest.mark.anyio
+
+PASSWORD = "correct-horse-battery"
+
+
+def _code(secret: str, offset: int = 0) -> str:
+    """Return the code of a base32 secret in the current time step and an offset."""
+    return totp_code(base64.b32decode(secret), current_step() + offset)
+
+
+def _wrong_code(secret: str) -> str:
+    """Return a code that is not valid now."""
+    valid = {_code(secret, offset) for offset in (-1, 0, 1, 2)}
+    return next(code for code in ("000000", "111111", "222222", "333333") if code not in valid)
+
+
+async def _user(session: AsyncSession, **values: Any) -> {{ u.name }}:
+    """Store a user with a password."""
+    user = await make_{{ u.snake }}(session, **values)
+    await set_password(session, user, PASSWORD)
+    return user
+
+
+async def _password_step(client: AsyncClient, user: {{ u.name }}) -> dict[str, Any]:
+    """Sign in with the password, and return the answer."""
+    body = {"username": user.{{ username.attr }}, "password": PASSWORD}
+    response = await client.post("/auth/sign-in", json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _turn_on(client: AsyncClient, user: {{ u.name }}) -> tuple[str, list[str]]:
+    """Turn on the second factor of a user. Return the secret and the recovery codes."""
+    first = await _password_step(client, user)
+    challenge = first.get("challenge")
+    headers = {} if challenge else _bearer(first["access_token"])
+    setup = await client.post(
+        "/auth/second-factor/setup", json={"challenge": challenge}, headers=headers
+    )
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+    assert setup.json()["uri"].startswith("otpauth://totp/")
+    data = {"code": _code(secret), "challenge": challenge}
+    confirm = await client.post("/auth/second-factor/confirm", json=data, headers=headers)
+    assert confirm.status_code == 200, confirm.text
+    codes: list[str] = confirm.json()["recovery_codes"]
+    assert len(codes) == 10
+    return secret, codes
+
+
+async def _second_step(client: AsyncClient, user: {{ u.name }}, code: str) -> Response:
+    """Sign in with the password, and send a code with the challenge."""
+    first = await _password_step(client, user)
+    assert first["second_factor"] == "code", first
+    data = {"challenge": first["challenge"], "code": code}
+    return await client.post("/auth/sign-in/second-factor", json=data)
+
+
+def test_the_codes_follow_rfc_6238() -> None:
+    # The test values of RFC 6238 (SHA-1), with the last 6 digits.
+    secret = b"12345678901234567890"
+    assert totp_code(secret, 59 // 30) == "287082"
+    assert totp_code(secret, 1111111109 // 30) == "081804"
+    assert totp_code(secret, 2000000000 // 30) == "279037"
+
+
+def test_the_app_keeps_the_secret_encrypted() -> None:
+    sealed = seal_secret(b"test-secret", b"12345678901234567890")
+
+    assert "12345678901234567890" not in sealed
+    assert open_secret(b"test-secret", sealed) == b"12345678901234567890"
+    assert open_secret(b"another-secret", sealed) is None
+    assert seal_secret(b"test-secret", b"12345678901234567890") != sealed
+
+
+async def test_a_user_turns_on_the_factor_and_signs_in_with_a_code(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session)
+    secret, _ = await _turn_on(anonymous_client, user)
+
+    # The confirmation used the code of this time step: the next one signs in.
+    response = await _second_step(anonymous_client, user, _code(secret, 1))
+
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    status = await anonymous_client.get("/auth/second-factor", headers=_bearer(token))
+    assert status.json()["enabled"] is True
+    assert status.json()["recovery_codes_left"] == 10
+
+
+async def test_each_code_is_valid_one_time(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session)
+    secret, _ = await _turn_on(anonymous_client, user)
+    first = await _second_step(anonymous_client, user, _code(secret, 1))
+    assert first.status_code == 200, first.text
+
+    again = await _second_step(anonymous_client, user, _code(secret, 1))
+
+    assert_problem(again, 401)
+    # The code of the confirmation is used too.
+    assert_problem(await _second_step(anonymous_client, user, _code(secret)), 401)
+
+
+async def test_a_recovery_code_signs_in_one_time(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session)
+    _, codes = await _turn_on(anonymous_client, user)
+
+    response = await _second_step(anonymous_client, user, codes[0].upper())
+
+    assert response.status_code == 200, response.text
+    assert_problem(await _second_step(anonymous_client, user, codes[0]), 401)
+    status = await anonymous_client.get(
+        "/auth/second-factor", headers=_bearer(response.json()["access_token"])
+    )
+    assert status.json()["recovery_codes_left"] == 9
+
+
+async def test_too_many_wrong_codes_stop_the_codes_for_a_time(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session)
+    secret, _ = await _turn_on(anonymous_client, user)
+    for _ in range(5):
+        assert_problem(await _second_step(anonymous_client, user, _wrong_code(secret)), 401)
+
+    response = await _second_step(anonymous_client, user, _code(secret, 1))
+
+    assert_problem(response, 429)
+
+
+async def test_a_challenge_that_is_not_valid_gives_400(anonymous_client: AsyncClient) -> None:
+    data = {"challenge": "not-a-challenge", "code": "123456"}
+
+    response = await anonymous_client.post("/auth/sign-in/second-factor", json=data)
+
+    assert_problem(response, 400)
+
+
+async def test_a_wrong_code_does_not_turn_on_the_factor(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session)
+    first = await _password_step(anonymous_client, user)
+    challenge = first.get("challenge")
+    headers = {} if challenge else _bearer(first["access_token"])
+    setup = await anonymous_client.post(
+        "/auth/second-factor/setup", json={"challenge": challenge}, headers=headers
+    )
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+
+    data = {"code": _wrong_code(secret), "challenge": challenge}
+    response = await anonymous_client.post(
+        "/auth/second-factor/confirm", json=data, headers=headers
+    )
+
+    assert_problem(response, 400)
+    # The factor is still off: a valid code turns it on.
+    data = {"code": _code(secret), "challenge": challenge}
+    confirm = await anonymous_client.post("/auth/second-factor/confirm", json=data, headers=headers)
+    assert confirm.status_code == 200, confirm.text
+{% if not required or free_roles %}
+
+
+async def test_a_user_turns_off_the_factor_with_a_code(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session{{ (", " ~ role.attr ~ "=" ~ py.string(free_roles[0])) if role }})
+    secret, codes = await _turn_on(anonymous_client, user)
+    response = await _second_step(anonymous_client, user, _code(secret, 1))
+    headers = _bearer(response.json()["access_token"])
+    used = await anonymous_client.post(
+        "/auth/second-factor/disable", json={"code": _code(secret, 1)}, headers=headers
+    )
+    assert_problem(used, 401)
+
+    off = await anonymous_client.post(
+        "/auth/second-factor/disable", json={"code": codes[0]}, headers=headers
+    )
+
+    assert off.status_code == 204, off.text
+    assert "access_token" in await _password_step(anonymous_client, user)
+{% endif %}
+{% if required %}
+
+
+async def test_a_user_of_a_role_with_the_factor_turns_it_on_at_the_sign_in(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await _user(session, {{ role.attr }}={{ py.string(required[0]) }})
+    first = await _password_step(anonymous_client, user)
+    assert "access_token" not in first
+    assert first["second_factor"] == "setup"
+    challenge = first["challenge"]
+    setup = await anonymous_client.post("/auth/second-factor/setup", json={"challenge": challenge})
+    secret = setup.json()["secret"]
+
+    data = {"code": _code(secret), "challenge": challenge}
+    confirm = await anonymous_client.post("/auth/second-factor/confirm", json=data)
+
+    assert confirm.status_code == 200, confirm.text
+    headers = _bearer(confirm.json()["token"]["access_token"])
+    status = await anonymous_client.get("/auth/second-factor", headers=headers)
+    assert status.json() == {"enabled": True, "required": True, "recovery_codes_left": 10}
+    off = await anonymous_client.post(
+        "/auth/second-factor/disable", json={"code": _code(secret, 1)}, headers=headers
+    )
+    assert_problem(off, 403)
+{% endif %}

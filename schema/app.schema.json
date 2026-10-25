@@ -880,6 +880,17 @@
           "title": "Password",
           "type": "boolean"
         },
+        "second_factor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecondFactor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/Provider"
@@ -5089,6 +5100,29 @@
         "fields"
       ],
       "title": "SearchFilter",
+      "type": "object"
+    },
+    "SecondFactor": {
+      "additionalProperties": false,
+      "description": "A second factor of the sign-in (ADR 0024): the codes of an authenticator app.\n\nEach user with a password can turn it on. Then a sign-in needs the\npassword and a code, or a recovery code.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "totp": {
+          "default": false,
+          "title": "Totp",
+          "type": "boolean"
+        },
+        "required_roles": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Required Roles",
+          "type": "array"
+        }
+      },
+      "title": "SecondFactor",
       "type": "object"
     },
     "SeedRecord": {

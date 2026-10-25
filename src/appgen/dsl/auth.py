@@ -18,6 +18,8 @@ RESET_PASSWORD_PATH = "/reset-password"
 """The path of the page that sets a new password with a reset link, with `auth.password_reset`."""
 VERIFY_EMAIL_PATH = "/verify-email"
 """The path of the page of the link that confirms an email address, with `verify_email`."""
+SECOND_FACTOR_PATH = "/second-factor"
+"""The path of the page that turns the second factor on and off, with `auth.second_factor`."""
 PROVIDER_PATHS = "/auth/"
 """With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8
@@ -76,6 +78,19 @@ class PasswordReset(Element):
     """The time that a reset link stays valid."""
 
 
+class SecondFactor(Element):
+    """A second factor of the sign-in (ADR 0024): the codes of an authenticator app.
+
+    Each user with a password can turn it on. Then a sign-in needs the
+    password and a code, or a recovery code.
+    """
+
+    totp: bool = False
+    """`true`: time-based one-time passwords (RFC 6238). It is the only method now."""
+    required_roles: list[MemberName] = pydantic.Field(default_factory=list[str])
+    """With `access`: the roles that must use the second factor."""
+
+
 class Provider(Element):
     """An OpenID Connect provider for the sign-in (ADR 0020).
 
@@ -132,5 +147,7 @@ class Auth(Element):
     """The reset of a forgotten password with a link in a message. Off by default."""
     password: bool = True
     """The sign-in with a user name and a password. `false`: only the sign-in with `providers`."""
+    second_factor: SecondFactor | None = None
+    """A second factor of the sign-in with a password. Off by default."""
     providers: dict[MemberName, Provider] = pydantic.Field(default_factory=dict[str, Provider])
     """The OpenID Connect providers that the users can sign in with."""

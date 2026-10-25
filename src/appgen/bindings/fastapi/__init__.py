@@ -34,6 +34,7 @@ _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
 _OPERATION = "app/features/{{ py.operations[name].slice }}/{{ name }}"
 _INTEGRATION = "app/integrations/{{ py_apis[name].module }}"
+_SECOND_FACTOR = "definition.auth and definition.auth.password and definition.auth.second_factor"
 
 BINDING = Binding(
     name="fastapi",
@@ -105,6 +106,10 @@ BINDING = Binding(
             template="app/core/providers.py.j2",
             path="app/core/providers.py",
             when="py.providers",
+        ),
+        *(
+            Output(template=f"{path}.j2", path=path, when=_SECOND_FACTOR)
+            for path in ("app/core/second_factor.py", "tests/test_second_factor.py")
         ),
         Output(
             template="app/core/messages.py.j2",
@@ -294,7 +299,7 @@ BINDING = Binding(
         {"app", "entity", "field", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
-        | {"auth", "sign_up", "email_verification", "password_reset", "provider"}
+        | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
         | {"access", "role", "record_rule"}
         | {"api", "api_operation"}
         | {"translations", "language"}

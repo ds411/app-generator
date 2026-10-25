@@ -6,6 +6,8 @@
 {% set password = definition.auth.password %}
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
+{% set sf = definition.auth.second_factor if password else none %}
+{% set sf_role = (u.fields | selectattr("name", "eq", definition.access.role_field) | first) if sf and sf.required_roles else none %}
 {% set default_role = none %}
 {% if sign_up and definition.access %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
@@ -38,20 +40,17 @@ import json
 import secrets
 {% endif %}
 import time
-{% if verify %}
+{% if verify or sf %}
 from datetime import UTC, datetime
 {% endif %}
-from typing import Annotated, Any
+from typing import Annotated, Any{{ ", Literal" if sf }}
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-{% if verify %}
+{% if password %}
 from pydantic import BaseModel, Field
-from sqlalchemy import DateTime, ForeignKey, String, func, null, select
-{% elif password %}
-from pydantic import BaseModel, Field
-from sqlalchemy import ForeignKey, String, select
+{{ py.from_import("sqlalchemy", ["ForeignKey", "String", "select"] + (["DateTime", "func", "null"] if verify else []) + (["BigInteger", "DateTime", "Integer", "Text"] if sf else [])) }}
 {% else %}
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -96,12 +95,20 @@ RESET_SECONDS = {{ reset.token_minutes * 60 }}
 VERIFY_SECONDS = {{ verify.token_minutes * 60 }}
 """The time that a link that confirms an email address stays valid: {{ verify.token_minutes }} minutes."""
 {% endif %}
+{% if sf %}
+CHALLENGE_SECONDS = 300
+"""The time for the second step of a sign-in with a second factor: 5 minutes."""
+{% if sf_role %}
+REQUIRED_ROLES = frozenset({ {%- for name in sf.required_roles %}{{ py.string(name) }}{{ ", " if not loop.last }}{% endfor -%} })
+"""The roles that must use the second factor (ADR 0024)."""
+{% endif %}
+{% endif %}
 {% if password %}
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
 class Credential(Base):
-    """The password hash of a user{{ ", and the time of the verification of the email address" if verify }}."""
+    """The password hash of a user{{ ", the time of the verification of the email address" if verify }}{{ ", the second factor" if sf }}."""
 
     __tablename__ = "credentials"
 
@@ -117,6 +124,21 @@ class Credential(Base):
     """The time of the verification of the email address, or None before it. Without a value,
     the database sets the current time, so that the users of the administrator and the users
     that exist before the verification are verified (ADR 0023)."""
+{% endif %}
+{% if sf %}
+    {{ trace(sf.id) }}
+    totp_secret: Mapped[str | None] = mapped_column(String(200))
+    """The secret of the codes, encrypted with a key from `AUTH_SECRET` (ADR 0024), or None."""
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """The time that the user turned on the second factor, or None while it is off."""
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
+    """The time step of the last code of the user: each code is valid one time."""
+    totp_failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    """The number of wrong codes in a row."""
+    totp_locked_until: Mapped[int | None] = mapped_column(BigInteger)
+    """After too many wrong codes: the time (in seconds) until which the app refuses codes."""
+    recovery_codes: Mapped[str | None] = mapped_column(Text)
+    """The SHA-256 hashes of the recovery codes that the user did not use, with spaces between."""
 {% endif %}
 
 
@@ -188,6 +210,32 @@ def read_token(key: bytes, token: str) -> UUID | None:
         return UUID(str(payload["sub"])) if payload else None
     except ValueError, KeyError:
         return None
+{% if sf %}
+
+
+{{ trace(sf.id) }}
+def make_challenge(key: bytes, user_id: UUID) -> str:
+    """Return a signed challenge for the second step of a sign-in of a user (ADR 0024)."""
+    payload = {"sub": str(user_id), "exp": int(time.time()) + CHALLENGE_SECONDS}
+    return sign(key, "second-factor", payload)
+
+
+def read_challenge(key: bytes, challenge: str) -> UUID | None:
+    """Return the user ID of a valid challenge that has not ended, else None."""
+    payload = unsign(key, "second-factor", challenge)
+    try:
+        return UUID(str(payload["sub"])) if payload else None
+    except ValueError, KeyError:
+        return None
+{% if sf_role %}
+
+
+def second_factor_required(user: {{ u.name }}) -> bool:
+    """Return True if the role of a user must use the second factor."""
+    role = user.{{ sf_role.attr }}
+    return str(getattr(role, "value", role)) in REQUIRED_ROLES
+{% endif %}
+{% endif %}
 {% if reset %}
 
 
@@ -324,6 +372,19 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = SESSION_SECONDS
+{% if sf %}
+
+
+{{ trace(sf.id) }}
+class SecondFactorChallenge(BaseModel):
+    """The answer to a correct password of a user who needs a second factor (ADR 0024)."""
+
+    challenge: str
+    second_factor: Literal["code", "setup"]
+    """`code`: send a code with `POST /auth/sign-in/second-factor`. `setup`: the role of the
+    user must use a second factor: turn it on with the challenge first."""
+    expires_in: int = CHALLENGE_SECONDS
+{% endif %}
 {% if password %}
 
 
@@ -381,8 +442,15 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 @router.post("/sign-in", responses=problem_responses(401, 422), operation_id="sign_in")
+{% if sf %}
+async def sign_in(
+    data: SignIn, request: Request, session: SessionDep
+) -> Token | SecondFactorChallenge:
+    """Return a token for a user name and a password, or the challenge of a second factor."""
+{% else %}
 async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
     """Return a token for a user name and a password."""
+{% endif %}
     user = await find_user(session, data.username)
     credential = await session.get(Credential, user.id) if user else None
     if (
@@ -395,6 +463,18 @@ async def sign_in(data: SignIn, request: Request, session: SessionDep) -> Token:
     {{ trace(verify.id) }}
     if credential.email_verified_at is None:
         {{ py.problem(403, "Confirm the email address first: open the link in the message.", 8) }}
+{% endif %}
+{% if sf %}
+    {{ trace(sf.id) }}
+    if credential.totp_enabled_at is not None{{ " or second_factor_required(user)" if sf_role }}:
+        # The second step needs a code of the authenticator app{{ ", or the setup of the factor" if sf_role }}.
+        challenge = make_challenge(signing_key(request), user.id)
+{% if sf_role %}
+        step = "code" if credential.totp_enabled_at is not None else "setup"
+        return SecondFactorChallenge(challenge=challenge, second_factor=step)
+{% else %}
+        return SecondFactorChallenge(challenge=challenge, second_factor="code")
+{% endif %}
 {% endif %}
     return Token(access_token=make_token(signing_key(request), user.id))
 {% endif %}

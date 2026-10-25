@@ -22,11 +22,13 @@ from appgen.dsl.auth import (
     FORGOT_PASSWORD_PATH,
     PROVIDER_PATHS,
     RESET_PASSWORD_PATH,
+    SECOND_FACTOR_PATH,
     SIGN_IN_PATH,
     SIGN_UP_PATH,
     VERIFY_EMAIL_PATH,
     Auth,
     Provider,
+    SecondFactor,
     SignUp,
 )
 from appgen.dsl.currencies import CURRENCY_CODES
@@ -532,6 +534,8 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
     if entity is not None and auth.sign_up is not None:
         yield from _check_sign_up(definition, auth, auth.sign_up, entity)
+    if entity is not None and auth.second_factor is not None:
+        yield from _check_second_factor(definition, auth, auth.second_factor, entity)
     yield from _check_password_off(auth)
     # The settings of the issuers, and the variables of the API clients, also use names.
     variables = {f"{name.upper()}_ISSUER" for name in auth.providers}
@@ -575,6 +579,8 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
         reserved[RESET_PASSWORD_PATH] = "password reset"
     if auth.sign_up is not None and auth.sign_up.verify_email is not None:
         reserved[VERIFY_EMAIL_PATH] = "email verification"
+    if auth.second_factor is not None:
+        reserved[SECOND_FACTOR_PATH] = "second factor"
     for page in definition.pages.values():
         if page.path in reserved:
             yield _error(
@@ -657,6 +663,61 @@ def _check_sign_up(
         )
 
 
+def _check_second_factor(
+    definition: AppDefinition, auth: Auth, second_factor: SecondFactor, entity: Entity
+) -> Iterator[Diagnostic]:
+    """The second factor has a method, and its required roles exist (ADR 0024).
+
+    A new user of the sign-up starts a session at once, so the role of the
+    sign-up cannot need the second factor without `verify_email`: then the
+    user turns the factor on at the first sign-in.
+    """
+    if not second_factor.totp:
+        yield _error(
+            "missing-key",
+            "The second factor needs a method.",
+            second_factor,
+            at="totp",
+            hint="Set 'totp: true': the codes of an authenticator app.",
+        )
+    if not second_factor.required_roles:
+        return
+    access = definition.access
+    if access is None:
+        yield _error(
+            "invalid-option",
+            "'required_roles' needs the section 'access'.",
+            second_factor,
+            at="required_roles",
+        )
+        return
+    if len(set(second_factor.required_roles)) != len(second_factor.required_roles):
+        yield _error(
+            "duplicate-name",
+            "The names in 'required_roles' must be unique.",
+            second_factor,
+            at="required_roles",
+        )
+    for name in second_factor.required_roles:
+        if name not in access.roles:
+            yield _missing(second_factor, "required_roles", "role", name, access.roles)
+    sign_up = auth.sign_up
+    if sign_up is None or sign_up.verify_email is not None:
+        return
+    role = entity.fields.get(access.role_field)
+    default = sign_up.default_role or (str(role.default) if role and role.default else None)
+    if default in second_factor.required_roles:
+        yield _error(
+            "invalid-option",
+            f"A new user of the sign-up gets the role '{default}', which must use the "
+            "second factor, but the sign-up starts a session at once.",
+            second_factor,
+            at="required_roles",
+            hint="Turn on 'sign_up.verify_email': then a new user turns on the second "
+            "factor at the first sign-in.",
+        )
+
+
 def _check_default_role(
     definition: AppDefinition,
     element: Element,
@@ -700,7 +761,12 @@ def _check_password_off(auth: Auth) -> Iterator[Diagnostic]:
             at="password",
             hint="Add an OpenID Connect provider in 'providers'.",
         )
-    for key, part in (("sign_up", auth.sign_up), ("password_reset", auth.password_reset)):
+    parts = (
+        ("sign_up", auth.sign_up),
+        ("password_reset", auth.password_reset),
+        ("second_factor", auth.second_factor),
+    )
+    for key, part in parts:
         if part is not None:
             yield _error(
                 "invalid-option",
