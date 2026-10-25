@@ -75,6 +75,10 @@ We ship one skill, `appgen`, in the package: `src/appgen/skills/appgen/`.
   table of commands, and compare the exit codes. They compare each
   default of an option (`Default: <value>.`) with the default of the
   CLI. A wrong statement fails with the file and the line of the text.
+- Agents copy the YAML examples of the DSL reference. A test puts each
+  example into the example definition that its comments name, and
+  checks that `appgen validate` gives no diagnostic
+  (`tests/test_docs.py`).
 
 ## Consequences
 
