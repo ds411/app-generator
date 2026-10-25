@@ -3,6 +3,8 @@
 Each entity is a Postgres table with a UUID primary key `id`. Each field
 is a column, and each `many_to_one` or `one_to_one` relation is a foreign
 key column `<relation>_id`. A `many_to_many` relation gets a join table.
+A translatable field also has the `jsonb` column `<field>_translations`
+with its values in the other languages (ADR 0026), as in the FastAPI app.
 The templates of `src/shared/db/schema/` render these values. The seed
 of `src/shared/db/seed.ts` fills the tables with the shared mock records.
 """
@@ -14,6 +16,7 @@ from typing import Any
 
 from appgen.bindings.shared.auth import PathStep
 from appgen.bindings.shared.mock_data import mock_data, seed_records
+from appgen.bindings.shared.typescript import translations_key
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.dsl.rules import EntityUniqueRule
 from appgen.gen.naming import camel, snake
@@ -270,6 +273,11 @@ def build_tables(definition: AppDefinition) -> list[Table]:
                 )
                 code = code.replace("<enum>", const)
             table.columns.append(Column(camel(field_name), code, spec.id, imports))
+            if spec.translatable:
+                code = f'jsonb("{snake(field_name)}_translations").$type<Record<string, string>>()'
+                table.columns.append(
+                    Column(translations_key(field_name), code, spec.id, ("jsonb",))
+                )
         for relation_name, relation in entity.relations.items():
             _add_relation(definition, table, entity_name, relation_name, relation)
         for rule_name, rule in entity.rules.items():
@@ -584,6 +592,9 @@ class _SeedRows:
         link: list[tuple[str, str]] = []
         for field_name, spec in entity.stored_fields.items():
             row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
+            if spec.translatable:
+                values = record.get(f"{field_name}_translations")
+                row.append((translations_key(field_name), json.dumps(values, ensure_ascii=False)))
         for name, relation in entity.relations.items():
             if relation.kind not in ("many_to_one", "one_to_one"):
                 continue

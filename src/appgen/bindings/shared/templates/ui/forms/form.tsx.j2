@@ -56,7 +56,7 @@ import { Dialog, DialogContent, {% if form.description %}DialogDescription, {% e
 {% if plan.fields | selectattr("help") | list %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}
 {% if plan.sections %}{% set field_names = field_names + ["FieldLegend", "FieldSet"] %}{% if plan.sections | selectattr("description") | list and "FieldDescription" not in field_names %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}{% endif %}
 import { {{ field_names | sort | join(", ") }} } from "@/shared/ui/field";
-{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | rejectattr("format") | list %}
+{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | rejectattr("format") | list or plan.fields | selectattr("languages") | rejectattr("widget", "eq", "textarea") | list %}
 import { Input } from "@/shared/ui/input";
 {% endif %}
 {% if form.mode == "sheet" %}
@@ -92,6 +92,9 @@ import { {{ relation_names | join(", ") }} } from "@/shared/ui/form-widgets/rela
 type Values = {
 {% for f in plan.fields %}
   {{ f.key }}: {{ f.value_type }};
+{% if f.languages %}
+  {{ f.translations_key }}: Record<string, string>;
+{% endif %}
 {% endfor %}
 };
 
@@ -151,6 +154,9 @@ function initialValues({{ "record" if "record" in initial_code else "_record" }}
 {% else %}
     {{ f.key }}: {{ f.initial }},
 {% endif %}
+{% if f.languages %}
+    {{ f.translations_key }}: {{ f.translations_initial }},
+{% endif %}
 {% endfor %}
   };
 }
@@ -160,6 +166,9 @@ function toInput(values: Values) {
   return {
 {% for f in plan.fields %}
     {{ f.key }}: {{ f.to_input }},
+{% if f.languages %}
+    {{ f.translations_key }}: {{ f.translations_input }},
+{% endif %}
 {% endfor %}
   };
 }
@@ -315,6 +324,9 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% else %}
 {{ fm.field(f, 10, name) }}
 {% endif %}
+{% for language in f.languages %}
+{{ fm.translation(f, language, 10, name) }}
+{% endfor %}
 {% endfor %}
         </div>
       </FieldSet>
@@ -330,6 +342,9 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% else %}
 {{ fm.field(f, 8, name) }}
 {% endif %}
+{% for language in f.languages %}
+{{ fm.translation(f, language, 8, name) }}
+{% endfor %}
 {% endfor %}
       </div>
 {% endif %}

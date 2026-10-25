@@ -178,6 +178,78 @@ export function setLanguage(language: Language): void {
 }
 {% endif %}
 
+{% if i18n.translatable %}
+/** The values of a translatable field by language code (ADR 0026). */
+export type Translations = Partial<Record<string, string | null>>;
+
+function isLanguage(code: string): code is Language {
+  return languages.some((language) => language.code === code);
+}
+
+/**
+ * Return a stored record in the selected language (ADR 0026). The stored
+ * record keeps the value of the default language in each translatable
+ * field, and the values of the other languages in `<field>Translations`.
+ * The result has the value of the selected language in the field, else
+ * the value of the default language, and the values of all languages in
+ * `<field>Translations`, for the forms.
+ */
+export function translateRecord<T extends object>(record: T, keys: readonly string[]): T {
+  const selected = getLanguage();
+  const result = { ...record } as Record<string, unknown>;
+  for (const key of keys) {
+    const value = result[key];
+    const all: Translations = typeof value === "string" && value !== "" ? { [defaultLanguage]: value } : {};
+    for (const [code, text] of Object.entries((result[`${key}Translations`] ?? {}) as Translations)) {
+      if (code !== defaultLanguage && isLanguage(code) && text) all[code] = text;
+    }
+    if (selected !== defaultLanguage && all[selected]) result[key] = all[selected];
+    result[`${key}Translations`] = Object.keys(all).length > 0 ? all : null;
+  }
+  return result as T;
+}
+
+/**
+ * Return the stored values of the translatable fields after an input, as
+ * the FastAPI app stores them (ADR 0026). A field of the input has the
+ * value of the selected language. A new record without a value of the
+ * default language takes the value as its default value too.
+ * `<field>Translations` of the input sets the value of each language that
+ * it gives: null or an empty text removes the value of a language that is
+ * not the default language. `stored` is the stored record before the
+ * input: for a new record, the defaults of its fields.
+ */
+export function storeTranslations(
+  stored: object,
+  input: object,
+  keys: readonly string[],
+  created = false,
+): Record<string, unknown> {
+  const selected = getLanguage();
+  const before = stored as Record<string, unknown>;
+  const values = input as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const field = `${key}Translations`;
+    const given = (values[field] ?? {}) as Translations;
+    const others: Translations = { ...((before[field] ?? {}) as Translations) };
+    let value: unknown = before[key] ?? null;
+    if (values[key] !== undefined) {
+      if (selected === defaultLanguage || (created && !(defaultLanguage in given))) value = values[key];
+      if (selected !== defaultLanguage) others[selected] = values[key] as string | null;
+    }
+    for (const [code, text] of Object.entries(given)) {
+      if (code === defaultLanguage) value = text;
+      else if (isLanguage(code)) others[code] = text;
+    }
+    const kept = Object.entries(others).filter(([code, text]) => code !== defaultLanguage && text);
+    result[key] = value;
+    result[field] = kept.length > 0 ? Object.fromEntries(kept) : null;
+  }
+  return result;
+}
+
+{% endif %}
 /** Call a function when the language changes. Return a function that stops the calls. */
 export function subscribeLanguage(listener: () => void): () => void {
   listeners.add(listener);

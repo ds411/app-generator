@@ -53,6 +53,8 @@ class ApiEntity:
     endpoints: list[ApiEndpoint]
     list_endpoint: ListEndpoint
     """The query parameters and the sort keys of the list endpoint, for the views."""
+    translations: bool = False
+    """True if the entity has a translatable field: the client asks for all languages (ADR 0026)."""
 
 
 def data_source(definition: AppDefinition) -> DataSource:
@@ -69,10 +71,12 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
         json_names = {f.id: f.name for f in py.fields}
         json_names |= {r.id: r.fk_attr or "" for r in py.relations if r.side == "fk"}
         json_names |= {r.id: r.ids_field or "" for r in py.relations if r.side == "m2m"}
+        translations = {f.id: f.translations_name for f in py.translatable}
         keys: dict[str, str] = {}
         for member in members(name, entity):
-            if member.element_id in json_names:
-                keys[json_names[member.element_id]] = member.key
+            names = json_names if member.translations is None else translations
+            if member.element_id in names:
+                keys[names[member.element_id]] = member.key
         query = py.query
         params = {p.name: p for p in query.params if p.kind in ("eq", "in")}
         filters = {
@@ -101,6 +105,7 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
                 for op in py.operations
             ],
             list_endpoint=ListEndpoint(element_params, sort_keys),
+            translations=bool(translations),
         )
     return result
 

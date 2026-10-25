@@ -21,6 +21,10 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   entity: {{ ts_value(name) }},
   table: {{ table.const }},
   defaults: {{ var }}Defaults,
+{% set translatable = element.fields.items() | selectattr("1.translatable") | list %}
+{% if translatable %}
+  translatable: [{% for field_name, field in translatable %}{{ ts_value(field_name | camel) }}{{ ", " if not loop.last }}{% endfor %}],
+{% endif %}
 {% if rules and rules.direct %}
   owner: {{ ts_value(rules.path[0].key) }}, {{ trace(rules.path[0].element_id) }}
 {% elif condition %}

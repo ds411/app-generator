@@ -1672,6 +1672,18 @@ request:
   (`alembic revision --autogenerate`). The records keep their values as
   the values of the default language.
 
+The React and Next.js apps show the value of the selected language in
+the views, the detail views, and the relation fields, else the value of
+the default language. A form has an input for each language of a
+translatable field, for example `Title (English)` and `Title (Deutsch)`.
+The Next.js app stores the values as the FastAPI app does, and
+`pnpm db:generate` makes the migration of the new column. The mock data
+of the React app and the seed data of the Next.js app have a value in
+each language: the value of the default language with the label of the
+language, for example `Write the release notes (Deutsch)`. With
+`x-react-data: api`, the React app asks the API for the values of all
+languages.
+
 ### Fixed texts
 
 The components of the front ends show these texts in the default
@@ -1757,7 +1769,8 @@ use in the app does not show.
   `Select a value`, `Search`, `No results.`, `Loading…` (a search on
   the server), `Select a record`,
   `Select records`, `Clear`, `Remove {label}`, `Pick a date`, `Time`,
-  `Command Palette`, `Search for a command to run...`.
+  `Command Palette`, `Search for a command to run...`, and the label of
+  the input of a language of a translatable field, `{field} ({language})`.
 - The messages of the form fields: `Enter a value.`, `Select a value.`,
   `Enter a whole number.`, `Enter a valid email address.`,
   `Enter a valid URL.`, `Use the correct format.`,

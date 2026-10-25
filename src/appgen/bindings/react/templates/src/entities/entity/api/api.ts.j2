@@ -38,6 +38,9 @@ export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_val
   filters: {{ api.filters | tojson }},
   sorts: {{ api.sorts | tojson }},
   display: { key: {{ api.display | tojson }}, search: {{ api.search | tojson }} },
+{% if api.translations %}
+  translations: true,
+{% endif %}
 });
 
 /** The records of {{ type }} for a choice, with the text of the display field: the server searches them. */
@@ -52,6 +55,7 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
   {{ var }}MockData,
   {{ var }}Defaults,
 {% set workflows = definition.workflows.values() | selectattr("entity", "eq", name) | list %}
+{% set translatable = element.fields.items() | selectattr("1.translatable") | map(attribute="0") | map("camel") | list %}
 {% if workflows %}
   [
 {% for w in workflows %}
@@ -73,7 +77,12 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
     }, {{ trace(w.id, scope="end") }}
 {% endfor %}
   ],
-{% elif rule %}
+{% elif rule or translatable %}
+  [],
+{% endif %}
+{% if translatable %}
+  {{ ts_value(translatable) }},
+{% elif rule and i18n and i18n.translatable %}
   [],
 {% endif %}
 {% if rule %}

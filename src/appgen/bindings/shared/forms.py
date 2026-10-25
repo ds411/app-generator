@@ -15,8 +15,8 @@ from typing import Any, Literal
 
 from appgen.bindings.shared.auth import record_rules
 from appgen.bindings.shared.gaps import form_values, gap_spec
-from appgen.bindings.shared.i18n import text_js
-from appgen.bindings.shared.typescript import Member, members
+from appgen.bindings.shared.i18n import LanguagePlan, i18n_plan, text_js
+from appgen.bindings.shared.typescript import Member, members, translations_key
 from appgen.bindings.shared.ui import css_class_var, js
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl.model import AppDefinition, Field, Operation
@@ -116,6 +116,18 @@ class FieldPlan:
 
     A user of the rule does not see the field, and the form sets the value.
     """
+    languages: list[LanguagePlan] = field(default_factory=list[LanguagePlan])
+    """For a translatable field (ADR 0026): the other languages.
+
+    The widget of the field edits the value of the default language, and
+    one more widget edits the value of each other language.
+    """
+    translations_key: str = ""
+    """For a translatable field: the key of its values in each language, `titleTranslations`."""
+    translations_initial: str = ""
+    """For a translatable field: the TypeScript initial values of the other languages."""
+    translations_input: str = ""
+    """For a translatable field: the TypeScript input of the values of all languages."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +323,9 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
             plan.source = f"{camel(plan.target)}Options"
             plan.options = None
             plan.widget = "relation"
+        member = by_name.get(field_name)
+        if params is None and member is not None and member.field and member.field.translatable:
+            _translations(definition, plan, operation.kind == "update")
         fields.append(plan)
     by_field = {f.name: f for f in fields}
     sections = [
@@ -388,7 +403,7 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         loose=loose,
         rules=rules,
         grid=_grid(form.grid),
-        schema=f"{schema}.pick({{ {', '.join(f'{f.key}: true' for f in fields)} }})",
+        schema=f"{schema}.pick({{ {', '.join(f'{key}: true' for key in _input_keys(fields))} }})",
         input_type=input_type,
         call=call,
         imports=imports,
@@ -567,6 +582,46 @@ def _initial(plan: FieldPlan, default: Any, update: bool, member: Member | None)
             return f'record ? String(record.{plan.key} ?? "") : {fallback}'
         return f"record ? (record.{plan.key} ?? {plan.empty}) : {fallback}"
     return fallback
+
+
+def _translations(definition: AppDefinition, plan: FieldPlan, update: bool) -> None:
+    """Give a translatable field a widget for each other language (ADR 0026).
+
+    The record has the values of all languages in `<field>Translations`.
+    The input gives them all, so that the value of each language is the
+    value of its widget, in each selected language.
+    """
+    i18n = i18n_plan(definition)
+    if i18n is None:
+        return
+    key = translations_key(plan.name)
+    plan.languages = i18n.others
+    plan.translations_key = key
+    default = js(i18n.default)
+    if update:
+        # The field of the record has the value of the selected language.
+        plan.initial = plan.initial.replace(
+            f"record.{plan.key} ??", f"record.{key}?.[{default}] ?? record.{plan.key} ??", 1
+        )
+    codes = [js(language.code) for language in plan.languages]
+    initial = [
+        f'{code}: record ? String(record.{key}?.[{code}] ?? "") : ""' if update else f'{code}: ""'
+        for code in codes
+    ]
+    plan.translations_initial = "{ " + ", ".join(initial) + " }"
+    values = [f"{default}: values.{plan.key}.trim() || null"]
+    values += [f"{code}: values.{key}[{code}]?.trim() || null" for code in codes]
+    plan.translations_input = "{ " + ", ".join(values) + " }"
+
+
+def _input_keys(fields: list[FieldPlan]) -> list[str]:
+    """Return the keys of the input of the fields: a translatable field has two keys."""
+    keys: list[str] = []
+    for f in fields:
+        keys.append(f.key)
+        if f.translations_key:
+            keys.append(f.translations_key)
+    return keys
 
 
 def _literal(plan: FieldPlan, value: Any) -> str:

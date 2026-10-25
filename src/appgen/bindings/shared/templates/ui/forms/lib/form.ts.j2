@@ -58,6 +58,25 @@ export function issueMessage(issue: z.core.$ZodIssue): string {
   }
 }
 
+{% if i18n and i18n.translatable %}
+/**
+ * Return the key of the message of a zod issue: the field, or the field
+ * and the language of a value of a translatable field, for example
+ * `titleTranslations.de` (ADR 0026).
+ */
+function issueKey(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return "_form";
+  const key = String(path[0]);
+  return key.endsWith("Translations") && path.length > 1 ? `${key}.${String(path[1])}` : key;
+}
+
+/** Add the messages of a zod error to the form errors. A field keeps its first message. */
+export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
+  for (const issue of error.issues) {
+    errors[issueKey(issue.path)] ??= issueMessage(issue);
+  }
+}
+{% else %}
 /** Add the messages of a zod error to the form errors. A field keeps its first message. */
 export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
   for (const issue of error.issues) {
@@ -65,6 +84,7 @@ export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
     errors[key] ??= issueMessage(issue);
   }
 }
+{% endif %}
 
 /**
  * Return the form errors of an error of a submit. A server error with

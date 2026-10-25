@@ -48,7 +48,11 @@
   <FieldLabel htmlFor={{ js(id) }}>{{ jsx_text(f.label) }}</FieldLabel>
 {% else %}
   <FieldLabel htmlFor={{ js(id) }}>
+{% if f.languages %}
+    {{ jsx_format("{field} ({language})", field=tr(js(f.label)), language=js(i18n.languages[0].label)) }}
+{% else %}
     {{ jsx_text(f.label) }}
+{% endif %}
 {% if f.required and f.kind != "boolean" %}
     <span aria-hidden className="text-destructive">*</span>
 {% endif %}
@@ -59,6 +63,26 @@
   <FieldDescription>{{ jsx_text(f.help) }}</FieldDescription>
 {% endif %}
   <FieldError>{errors.{{ f.key }}}</FieldError>
+</Field>
+{% endfilter %}
+{%- endmacro %}
+
+{#- The widget of the value of a translatable field in another language (ADR 0026). #}
+{% macro translation(f, language, indent, prefix) -%}
+{% set code = language.code %}
+{% set id = (prefix | kebab) ~ "-" ~ (f.name | kebab) ~ "-" ~ (code | kebab) %}
+{% set error = "errors[" ~ js(f.translations_key ~ "." ~ code) ~ "]" %}
+{% set value = "values." ~ f.translations_key ~ "[" ~ js(code) ~ "] ?? \"\"" %}
+{% set on_change = "(event) => change(" ~ js(f.translations_key) ~ ", { ...values." ~ f.translations_key ~ ", " ~ js(code) ~ ": event.target.value })" %}
+{% filter indent(indent, true) %}
+<Field data-invalid={Boolean({{ error }})}{% if f.classes %} className={{ js(f.classes) }}{% endif %}> {{ trace(f.element_id, jsx=True) }}
+  <FieldLabel htmlFor={{ js(id) }}>{{ jsx_format("{field} ({language})", field=tr(js(f.label)), language=js(language.label)) }}</FieldLabel>
+{% if f.widget == "textarea" %}
+  <Textarea id={{ js(id) }} lang={{ js(language.locale) }} dir={{ js(language.direction) }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={ {{- value }}} onChange={ {{- on_change }}} disabled={busy} aria-invalid={Boolean({{ error }})} />
+{% else %}
+  <Input id={{ js(id) }} lang={{ js(language.locale) }} dir={{ js(language.direction) }} type="text" value={ {{- value }}} onChange={ {{- on_change }}} disabled={busy} aria-invalid={Boolean({{ error }})} />
+{% endif %}
+  <FieldError>{ {{- error }}}</FieldError>
 </Field>
 {% endfilter %}
 {%- endmacro %}
