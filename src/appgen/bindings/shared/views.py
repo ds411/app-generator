@@ -54,6 +54,7 @@ from appgen.dsl.ui.views import (
     CardsView,
     DateRangeFilter,
     DetailView,
+    EntityView,
     Filter,
     SearchFilter,
     SelectFilter,
@@ -1525,7 +1526,7 @@ def _badge_name(camel_name: str | None, sets: dict[str, BadgeSet]) -> str | None
     return next((name for name in sets if camel(name) == camel_name), None)
 
 
-def action_paths(view: View) -> list[str]:
+def action_paths(view: EntityView) -> list[str]:
     """Return the field paths that the page parameters of the actions of a view read."""
     actions = [*view.actions.values(), *getattr(view, "row_actions", {}).values()]
     return [p for a in actions if isinstance(a, NavigateAction) for p in a.params.values()]
