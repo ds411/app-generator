@@ -2,6 +2,8 @@
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
 {% set sign_up = definition.auth.sign_up %}
 {% set verify = sign_up.verify_email if sign_up else none %}
+{% set sf = definition.auth.second_factor %}
+{% set required = sf.required_roles if sf and definition.access else [] %}
 {% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
 {{ trace_header(definition.auth.id) }}
 {% if react.api %}
@@ -179,6 +181,17 @@ export function currentUserId(): string | null {
   }
 }
 
+{% if sf %}
+/** The state of the second factor of the signed-in user (ADR 0024). */
+export type SecondFactorStatus = { enabled: boolean; required: boolean; recoveryCodesLeft: number };
+
+/** A new secret of the second factor: as text, and as an `otpauth://` URI for a QR code. */
+export type SecondFactorSecret = { secret: string; uri: string };
+
+/** A value, or the message of the error. */
+export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: string };
+
+{% endif %}
 {% if react.api %}
 /** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
 export async function startSession(token: string): Promise<void> {
@@ -199,16 +212,31 @@ export async function startSession(token: string): Promise<void> {
 /**
  * The result of a sign-in: the user is signed in, or an error with its
  * message.{% if verify %} `unverified`: the password is correct, but the user must
- * confirm the email address first (ADR 0023).{% endif %}
+ * confirm the email address first (ADR 0023).{% endif %}{% if sf %} `second-factor`: the password is
+ * correct, and the user signs in with a code and the challenge (ADR 0024).
+ * With `setup`, the user must turn on the second factor first.{% endif %}
 
  */
-export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+export type SignInResult =
+  | { status: "signed-in" }
+  | { status: "error" | "unverified"; message: string }{{ "\n  | { status: \"second-factor\"; challenge: string; setup: boolean }" if sf }};
 
 /** Sign in with the API. */
 export async function signIn(username: string, password: string): Promise<SignInResult> {
   try {
+{% if sf %}
+    const answer = (await apiRequest("POST", "/auth/sign-in", { username, password })) as
+      | { access_token: string }
+      | { challenge: string; second_factor: "code" | "setup" };
+    if ("challenge" in answer) {
+      {{ trace(sf.id) }}
+      return { status: "second-factor", challenge: answer.challenge, setup: answer.second_factor === "setup" };
+    }
+    await startSession(answer.access_token);
+{% else %}
     const token = (await apiRequest("POST", "/auth/sign-in", { username, password })) as { access_token: string };
     await startSession(token.access_token);
+{% endif %}
   } catch (error) {
     setAccessToken(null);
 {% if verify %}
@@ -300,6 +328,75 @@ export async function confirmEmailVerification(token: string): Promise<string | 
   return null;
 }
 {% endif %}
+{% if sf %}
+
+/** Return the message of an error of the API. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+}
+
+/**
+ * Sign in with the challenge of a sign-in and a code, or a recovery code
+ * (`POST /auth/sign-in/second-factor`). Return null, or the message of the error.
+ */
+export async function signInWithCode(challenge: string, code: string): Promise<string | null> { {{ trace(sf.id) }}
+  try {
+    const token = (await apiRequest("POST", "/auth/sign-in/second-factor", { challenge, code })) as { access_token: string };
+    await startSession(token.access_token);
+  } catch (error) {
+    setAccessToken(null);
+    return errorMessage(error);
+  }
+  return null;
+}
+
+/** Return the state of the second factor of the signed-in user (`GET /auth/second-factor`). */
+export async function readSecondFactor(): Promise<SecondFactorStatus> { {{ trace(sf.id) }}
+  const status = (await apiRequest("GET", "/auth/second-factor")) as { enabled: boolean; required: boolean; recovery_codes_left: number };
+  return { enabled: status.enabled, required: status.required, recoveryCodesLeft: status.recovery_codes_left };
+}
+
+/**
+ * Give a new secret for the authenticator app (`POST /auth/second-factor/setup`):
+ * for the signed-in user, or for the challenge of a sign-in.
+ */
+export async function setUpSecondFactor(challenge: string | null): Promise<AuthResult<SecondFactorSecret>> { {{ trace(sf.id) }}
+  try {
+    return { ok: true, value: (await apiRequest("POST", "/auth/second-factor/setup", { challenge })) as SecondFactorSecret };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+/**
+ * Turn on the second factor with a code (`POST /auth/second-factor/confirm`),
+ * and return the recovery codes. With a challenge, the API gives a token: the user is signed in.
+ */
+export async function confirmSecondFactor(code: string, challenge: string | null): Promise<AuthResult<string[]>> { {{ trace(sf.id) }}
+  try {
+    const answer = (await apiRequest("POST", "/auth/second-factor/confirm", { code, challenge })) as {
+      recovery_codes: string[];
+      token: { access_token: string } | null;
+    };
+    if (answer.token) {
+      await startSession(answer.token.access_token);
+    }
+    return { ok: true, value: answer.recovery_codes };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+/** Turn off the second factor with a code, or a recovery code (`POST /auth/second-factor/disable`). Return null, or the message of the error. */
+export async function disableSecondFactor(code: string): Promise<string | null> { {{ trace(sf.id) }}
+  try {
+    await apiRequest("POST", "/auth/second-factor/disable", { code });
+  } catch (error) {
+    return errorMessage(error);
+  }
+  return null;
+}
+{% endif %}
 
 /** Sign out. */
 export async function signOut(): Promise<void> {
@@ -315,8 +412,10 @@ export async function signOut(): Promise<void> {
 }
 {% else %}
 {% if definition.auth.password %}
-/** The result of a sign-in: the user is signed in, or an error with its message. */
-export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+/** The result of a sign-in: the user is signed in, or an error with its message.{% if sf %} `second-factor`: the user signs in with a code (ADR 0024).{% endif %} */
+export type SignInResult =
+  | { status: "signed-in" }
+  | { status: "error" | "unverified"; message: string }{{ "\n  | { status: \"second-factor\"; challenge: string; setup: boolean }" if sf }};
 
 /** Sign in with the password of a mock user. */
 export async function signIn(username: string, password: string): Promise<SignInResult> {
@@ -329,6 +428,17 @@ export async function signIn(username: string, password: string): Promise<SignIn
 {% endif %}
     return { status: "error", message: {{ tr(js("The user name or the password is not correct.")) }} };
   }
+{% if sf %}
+  const step = secondFactorStep(user);
+  if (step !== null) {
+    {{ trace(sf.id) }}
+    // A demonstration: the challenge is the ID of the user.
+    return { status: "second-factor", challenge: user.id, setup: step === "setup" };
+  }
+  const message = startMockSession(user.id);
+  return message === null ? { status: "signed-in" } : { status: "error", message };
+}
+{% else %}
   try {
     window.sessionStorage.setItem(STORAGE_KEY, user.id);
   } catch {
@@ -336,6 +446,7 @@ export async function signIn(username: string, password: string): Promise<SignIn
   }
   return { status: "signed-in" };
 }
+{% endif %}
 {% endif %}
 {% if definition.auth.providers %}
 {% set mock_users = mock[definition.auth.user_entity] %}
@@ -367,6 +478,181 @@ export async function signInWithProvider(name: string, next: string): Promise<st
     return {{ tr(js("The browser does not keep the session.")) }};
   }
   window.location.assign(next);
+  return null;
+}
+{% endif %}
+{% if sf %}
+
+// The second factor of the mock users (ADR 0024) is a demonstration: the
+// secrets and the recovery codes stay in the browser tab, and the browser
+// makes the codes. An app with a back end keeps them on the server.
+const SECOND_FACTORS_KEY = {{ (app.name ~ "-second-factors") | tojson }};
+/** The name of the app in the authenticator app. */
+const ISSUER = {{ definition.app.title | tojson }};
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+{% if required %}
+/** The roles that must use the second factor. */
+const REQUIRED_ROLES: ReadonlySet<string> = new Set({{ required | tojson }});
+{% endif %}
+
+/** The second factor of a mock user: the secret in base32, the last time step of a code, and the recovery codes. */
+type MockSecondFactor = { secret: string; enabled: boolean; lastStep: number | null; recoveryCodes: string[] };
+
+function secondFactors(): Record<string, MockSecondFactor | undefined> {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(SECOND_FACTORS_KEY) ?? "{}") as Record<string, MockSecondFactor | undefined>;
+  } catch {
+    return {};
+  }
+}
+
+function saveSecondFactor(userId: string, factor: MockSecondFactor | undefined): void {
+  window.sessionStorage.setItem(SECOND_FACTORS_KEY, JSON.stringify({ ...secondFactors(), [userId]: factor }));
+}
+
+/** Sign in as a mock user. Return null, or the message of the error. */
+function startMockSession(userId: string): string | null {
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, userId);
+  } catch {
+    return {{ tr(js("The browser does not keep the session.")) }};
+  }
+  return null;
+}
+
+/** Return the second step of the sign-in of a mock user: `code`, `setup`, or null. */
+function secondFactorStep(user: { id: string{{ "; role: string | null" if required }} }): "code" | "setup" | null {
+  if (secondFactors()[user.id]?.enabled) return "code";
+{% if required %}
+  return REQUIRED_ROLES.has(user.role ?? "") ? "setup" : null;
+{% else %}
+  return null;
+{% endif %}
+}
+
+/** Return bytes in base32 without padding (RFC 4648). */
+function toBase32(bytes: Uint8Array): string {
+  let text = "";
+  let value = 0;
+  let bits = 0;
+  for (const byte of bytes) {
+    value = ((value << 8) | byte) & 0xffff;
+    bits += 8;
+    while (bits >= 5) {
+      text += BASE32.charAt((value >>> (bits - 5)) & 31);
+      bits -= 5;
+    }
+  }
+  return bits > 0 ? text + BASE32.charAt((value << (5 - bits)) & 31) : text;
+}
+
+function fromBase32(text: string): Uint8Array<ArrayBuffer> {
+  const bytes: number[] = [];
+  let value = 0;
+  let bits = 0;
+  for (const char of text) {
+    value = ((value << 5) | BASE32.indexOf(char)) & 0xffff;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+/** Return the code of a time step (RFC 6238: HMAC-SHA-1, 6 digits, steps of 30 seconds). */
+async function totpCode(secret: string, step: number): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", fromBase32(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const counter = new DataView(new ArrayBuffer(8));
+  counter.setUint32(0, Math.floor(step / 2 ** 32));
+  counter.setUint32(4, step >>> 0);
+  const digest = new DataView(await crypto.subtle.sign("HMAC", key, counter.buffer));
+  const offset = digest.getUint8(19) & 0x0f;
+  return String((digest.getUint32(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+/** Accept a code of the authenticator app, or a recovery code, one time. */
+async function acceptCode(userId: string, factor: MockSecondFactor, code: string): Promise<boolean> {
+  const value = code.trim();
+  const now = Math.floor(Date.now() / 30_000);
+  for (let step = now - 1; step <= now + 1 && /^[0-9]{6}$/.test(value); step++) {
+    if ((factor.lastStep === null || step > factor.lastStep) && (await totpCode(factor.secret, step)) === value) {
+      saveSecondFactor(userId, { ...factor, lastStep: step });
+      return true;
+    }
+  }
+  const normal = (text: string) => text.replace(/[-\s]/g, "").toLowerCase();
+  const left = factor.recoveryCodes.filter((item) => normal(item) !== normal(value));
+  if (left.length === factor.recoveryCodes.length) return false;
+  saveSecondFactor(userId, { ...factor, recoveryCodes: left });
+  return true;
+}
+
+/** Sign in with the challenge of a sign-in and a code, or a recovery code. Return null, or the message of the error. */
+export async function signInWithCode(challenge: string, code: string): Promise<string | null> { {{ trace(sf.id) }}
+  const factor = secondFactors()[challenge];
+  if (!factor?.enabled) return {{ tr(js("The sign-in has ended. Sign in again.")) }};
+  if (!(await acceptCode(challenge, factor, code))) return {{ tr(js("The code is not correct.")) }};
+  return startMockSession(challenge);
+}
+
+/** Return the state of the second factor of the signed-in user. */
+export async function readSecondFactor(): Promise<SecondFactorStatus> { {{ trace(sf.id) }}
+  const userId = currentUserId();
+  if (userId === null) throw new Error({{ tr(js("Sign in to do this.")) }});
+  const factor = secondFactors()[userId];
+  const enabled = factor?.enabled ?? false;
+  return { enabled, required: {{ 'REQUIRED_ROLES.has(currentRole() ?? "")' if required else "false" }}, recoveryCodesLeft: enabled ? (factor?.recoveryCodes.length ?? 0) : 0 };
+}
+
+/** Give a new secret for the authenticator app: for the signed-in user, or for the challenge of a sign-in. */
+export async function setUpSecondFactor(challenge: string | null): Promise<AuthResult<SecondFactorSecret>> { {{ trace(sf.id) }}
+  const userId = challenge ?? currentUserId();
+  if (userId === null) return { ok: false, message: {{ tr(js("Sign in to do this.")) }} };
+  const user = {{ "allUsers()" if sign_up else "users" }}.find((item) => item.id === userId);
+  if (user === undefined) return { ok: false, message: {{ tr(js("Sign in to do this.")) }} };
+  if (secondFactors()[userId]?.enabled) return { ok: false, message: {{ tr(js("The second factor is on.")) }} };
+  const secret = toBase32(crypto.getRandomValues(new Uint8Array(20)));
+  try {
+    saveSecondFactor(userId, { secret, enabled: false, lastStep: null, recoveryCodes: [] });
+  } catch {
+    return { ok: false, message: {{ tr(js("The browser does not keep the session.")) }} };
+  }
+  const label = encodeURIComponent(`${ISSUER}:${user.username}`);
+  const uri = `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(ISSUER)}&algorithm=SHA1&digits=6&period=30`;
+  return { ok: true, value: { secret, uri } };
+}
+
+/** Turn on the second factor with a code, and return the recovery codes. With a challenge, the user is signed in. */
+export async function confirmSecondFactor(code: string, challenge: string | null): Promise<AuthResult<string[]>> { {{ trace(sf.id) }}
+  const userId = challenge ?? currentUserId();
+  const factor = userId === null ? undefined : secondFactors()[userId];
+  if (userId === null || factor === undefined || factor.enabled) return { ok: false, message: {{ tr(js("The sign-in has ended. Sign in again.")) }} };
+  const now = Math.floor(Date.now() / 30_000);
+  let step: number | null = null;
+  for (let candidate = now - 1; candidate <= now + 1 && step === null; candidate++) {
+    if ((await totpCode(factor.secret, candidate)) === code.trim()) step = candidate;
+  }
+  if (step === null) return { ok: false, message: {{ tr(js("The code is not correct.")) }} };
+  const recoveryCodes = Array.from({ length: 10 }, () =>
+    toBase32(crypto.getRandomValues(new Uint8Array(10))).toLowerCase().replace(/(.{4})(?=.)/g, "$1-"),
+  );
+  saveSecondFactor(userId, { ...factor, enabled: true, lastStep: step, recoveryCodes });
+  const message = challenge === null ? null : startMockSession(userId);
+  return message === null ? { ok: true, value: recoveryCodes } : { ok: false, message };
+}
+
+/** Turn off the second factor with a code, or a recovery code. Return null, or the message of the error. */
+export async function disableSecondFactor(code: string): Promise<string | null> { {{ trace(sf.id) }}
+  const userId = currentUserId();
+  const factor = userId === null ? undefined : secondFactors()[userId];
+  if (userId === null || !factor?.enabled) return {{ tr(js("The second factor is off.")) }};
+{% if required %}
+  if (REQUIRED_ROLES.has(currentRole() ?? "")) return {{ tr(js("Your role must use a second factor.")) }};
+{% endif %}
+  if (!(await acceptCode(userId, factor, code))) return {{ tr(js("The code is not correct.")) }};
+  saveSecondFactor(userId, undefined);
   return null;
 }
 {% endif %}

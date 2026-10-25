@@ -1,10 +1,11 @@
 """The sign-in of the front ends (React and Next.js): the shared parts (ADR 0011).
 
 Each binding has its own `src/shared/auth/` with `signIn`, `signOut`,
-and the calls of the password reset (ADR 0017) and of the verification
-of the email address (ADR 0023). The sign-in form, the sign-up form
-(ADR 0016), the forms of the password reset, the page of the
-verification link, and the sign-out button are shared templates. Each binding has its own
+and the calls of the password reset (ADR 0017), of the verification of
+the email address (ADR 0023), and of the second factor (ADR 0024). The
+sign-in form, the sign-up form (ADR 0016), the forms of the password
+reset, the page of the verification link, the page of the second
+factor, and the sign-out button are shared templates. Each binding has its own
 `src/features/sign-up/api/` with `signUp`. The table of the permissions
 of the roles (ADR 0012) is a shared template too. The checks of the app
 and the menus, the links, and the actions of the UI read it. Each
@@ -31,6 +32,8 @@ class AuthPages:
     """The pages `/forgot-password` and `/reset-password` (ADR 0017)."""
     verify_email: bool = False
     """The page `/verify-email` of the link that confirms the email address (ADR 0023)."""
+    second_factor: bool = False
+    """The page `/second-factor` of the account, and the code step of the sign-in (ADR 0024)."""
 
 
 def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
@@ -39,7 +42,8 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
     `server` is True if the app has a server that sends the reset links:
     the Next.js app, or the React app with the FastAPI app. An app with
     mock data has no password reset pages, and no verification of the
-    email address: its sign-up signs in at once.
+    email address: its sign-up signs in at once. The second factor needs
+    no server: the React app with mock data has it as a demonstration.
     """
     auth = definition.auth
     if auth is None:
@@ -48,6 +52,7 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
         sign_up=auth.sign_up is not None,
         password_reset=auth.password_reset is not None and server,
         verify_email=auth.sign_up is not None and auth.sign_up.verify_email is not None and server,
+        second_factor=auth.second_factor is not None and auth.password,
     )
 
 
@@ -132,6 +137,20 @@ def auth_rules() -> tuple[Output, ...]:
                     "ui/features/email-verification/verify-email-form.tsx.j2",
                     "src/features/email-verification/ui/verify-email-form.tsx",
                 ),
+            )
+        ),
+        *(
+            Output(
+                template=f"ui/features/second-factor/{name}.j2",
+                path=f"src/features/second-factor/{'' if name == 'index.ts' else 'ui/'}{name}",
+                when="auth_pages.second_factor",
+            )
+            for name in (
+                "index.ts",
+                "qr-code.tsx",
+                "second-factor-link.tsx",
+                "second-factor-page.tsx",
+                "second-factor-setup.tsx",
             )
         ),
         Output(

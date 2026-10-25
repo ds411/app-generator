@@ -1,0 +1,133 @@
+{% set sf = definition.auth.second_factor %}
+{% set required = sf.required_roles and definition.access %}
+{{ trace_header(sf.id) }}
+"use server";
+
+import { z } from "zod";
+
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+{% endif %}
+import {
+  checkCode,
+  findCredential,
+  newSecret,
+  readChallenge,
+  recoveryCodesLeft,
+  removeSecondFactor,
+{% if required %}
+  secondFactorRequired,
+{% endif %}
+  turnOn,
+} from "./second-factor";
+import { sessionUserId, startSession } from "./session";
+
+// The server actions of the second factor (ADR 0024), with the rules of
+// the FastAPI app: a sign-in with the factor gives a challenge, and a code
+// of the authenticator app, or a recovery code, signs in.
+
+/** A value, or the message of the error. */
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+const codeSchema = z.string().trim().min(6).max(40);
+const challengeSchema = z.string().min(1).max(1000);
+
+{% if i18n %}
+/** Return a failed result with a message in the language of the request. */
+async function failed<T>(message: () => string): Promise<Result<T>> {
+  return { ok: false, message: await inRequestLanguage(message) };
+}
+{% else %}
+/** Return a failed result with a message. */
+function failed<T>(message: () => string): Result<T> {
+  return { ok: false, message: message() };
+}
+{% endif %}
+
+/** Return the user of a challenge of the sign-in, or the signed-in user without a challenge. */
+async function setupUser(challenge: string | null): Promise<string | null> {
+  if (challenge === null) return sessionUserId();
+  return challengeSchema.safeParse(challenge).success ? readChallenge(challenge) : null;
+}
+
+/** Sign in with the challenge of the password step and a code of the authenticator app, or a recovery code. */
+export async function signInWithCodeAction(challenge: string, code: string): Promise<Result<null>> {
+  const userId = challengeSchema.safeParse(challenge).success ? readChallenge(challenge) : null;
+  const credential = userId === null ? null : await findCredential(userId);
+  if (credential === null || credential.totpEnabledAt === null) {
+    return failed(() => {{ tr(js("The sign-in has ended. Sign in again.")) }});
+  }
+  const input = codeSchema.safeParse(code);
+  const check = input.success ? await checkCode(credential, input.data) : "wrong";
+  if (check === "locked") return failed(() => {{ tr(js("Too many wrong codes. Try again later.")) }});
+  if (check === "wrong") return failed(() => {{ tr(js("The code is not correct.")) }});
+  await startSession(credential.userId);
+  return { ok: true, value: null };
+}
+
+/** Return the state of the second factor of the signed-in user. */
+export async function readSecondFactorAction(): Promise<Result<{ enabled: boolean; required: boolean; recoveryCodesLeft: number }>> {
+  const userId = await sessionUserId();
+  if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
+  const credential = await findCredential(userId);
+  const enabled = credential !== null && credential.totpEnabledAt !== null;
+  return {
+    ok: true,
+    value: {
+      enabled,
+      required: {{ "await secondFactorRequired(userId)" if required else "false" }},
+      recoveryCodesLeft: credential !== null && enabled ? recoveryCodesLeft(credential) : 0,
+    },
+  };
+}
+
+/**
+ * Give a new secret for the authenticator app. A valid code of it turns the
+ * factor on. A sign-in that must turn on the factor sends its challenge.
+ */
+export async function setUpSecondFactorAction(challenge: string | null): Promise<Result<{ secret: string; uri: string }>> {
+  const userId = await setupUser(challenge);
+  if (userId === null) {
+    return challenge === null ? failed(() => {{ tr(js("Sign in to do this.")) }}) : failed(() => {{ tr(js("The sign-in has ended. Sign in again.")) }});
+  }
+  const credential = await findCredential(userId);
+  if (credential === null) return failed(() => {{ tr(js("The second factor needs a password. Set a password first.")) }});
+  if (credential.totpEnabledAt !== null) return failed(() => {{ tr(js("The second factor is on.")) }});
+  return { ok: true, value: await newSecret(userId) };
+}
+
+/**
+ * Turn on the second factor with a code of the new secret, and return the
+ * recovery codes. With the challenge of a sign-in, the user is signed in.
+ */
+export async function confirmSecondFactorAction(code: string, challenge: string | null): Promise<Result<string[]>> {
+  const userId = await setupUser(challenge);
+  if (userId === null) {
+    return challenge === null ? failed(() => {{ tr(js("Sign in to do this.")) }}) : failed(() => {{ tr(js("The sign-in has ended. Sign in again.")) }});
+  }
+  const credential = await findCredential(userId);
+  if (credential === null) return failed(() => {{ tr(js("The second factor needs a password. Set a password first.")) }});
+  if (credential.totpEnabledAt !== null) return failed(() => {{ tr(js("The second factor is on.")) }});
+  const codes = await turnOn(credential, code.trim());
+  if (codes === null) return failed(() => {{ tr(js("The code is not correct.")) }});
+  if (challenge !== null) await startSession(userId);
+  return { ok: true, value: codes };
+}
+
+/** Turn off the second factor of the signed-in user with a code, or a recovery code. */
+export async function disableSecondFactorAction(code: string): Promise<Result<null>> {
+  const userId = await sessionUserId();
+  if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
+{% if required %}
+  if (await secondFactorRequired(userId)) return failed(() => {{ tr(js("Your role must use a second factor.")) }});
+{% endif %}
+  const credential = await findCredential(userId);
+  if (credential === null || credential.totpEnabledAt === null) return failed(() => {{ tr(js("The second factor is off.")) }});
+  const input = codeSchema.safeParse(code);
+  const check = input.success ? await checkCode(credential, input.data) : "wrong";
+  if (check === "locked") return failed(() => {{ tr(js("Too many wrong codes. Try again later.")) }});
+  if (check === "wrong") return failed(() => {{ tr(js("The code is not correct.")) }});
+  await removeSecondFactor(userId);
+  return { ok: true, value: null };
+}

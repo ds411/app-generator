@@ -1396,6 +1396,25 @@ as the FastAPI app, and the link starts with `PUBLIC_URL`. Its
 extension file `src/shared/auth/messages.ext.ts` delivers the link,
 with the same stub. The React app with mock data has no reset pages.
 
+With `second_factor`, each front end has the page `/second-factor` for
+the signed-in user, and a link to it in the top bar. The page turns the
+factor on: it shows the new secret as a QR code and as text (the key),
+asks for a code of the authenticator app, and then shows the recovery
+codes one time. The browser makes the QR code with the package `uqr`,
+so the secret goes to no service on the network. The page also shows
+the number of the recovery codes that are left, and turns the factor
+off with a code or a recovery code, but not for a required role. After
+the password of a user with the factor, the sign-in page asks for a code
+of the authenticator app or a recovery code. A user of a required role
+without the factor turns it on before the sign-in. The Next.js app uses
+server actions with the rules of the FastAPI app, and keeps the factor
+in the table `credentials`. An administrator turns off the factor of a
+user who lost the codes in the database: set the column
+`totp_enabled_at` of the user to null. The React app with
+`x-react-data: api` calls the endpoints of the FastAPI app. The React
+app with mock data has the factor as a demonstration: the secrets and
+the recovery codes stay in the browser tab.
+
 With `providers`, the sign-in page of each front end has a button for
 each provider, with its `title`. With `password: false`, the page has
 no password form. The Next.js app does the flow itself: the routes
@@ -1589,6 +1608,22 @@ use in the app does not show.
   `Confirm that the email address of the new account is yours.`,
   `The email address is confirmed. Sign in with your password.`,
   `The link is not valid, or has ended.`.
+- The second factor: `Second factor`,
+  `Sign in with your password and a code of an authenticator app on your phone.`,
+  `Turn on`,
+  `Scan the QR code with an authenticator app, or enter the key. Then enter the code that the app shows.`,
+  `QR code of the key`, `Key`, `Code`, `The second factor is on.`,
+  `Keep these recovery codes in a safe place. Each code signs you in one time if you lose the authenticator app.`,
+  `Recovery codes`, `Continue`, `Recovery codes left: {count}`,
+  `Code or recovery code`, `Turn off`,
+  `Your role must use a second factor.`,
+  `Your role must use a second factor. Turn it on to sign in.`,
+  `Code of the authenticator app`,
+  `Without the app, enter a recovery code.`,
+  `The sign-in has ended. Sign in again.`, `The code is not correct.`,
+  `Too many wrong codes. Try again later.`,
+  `The second factor needs a password. Set a password first.`,
+  `The second factor is off.`.
 - The messages to the users of the Next.js app (the subject is the
   title of the app and a text): `Reset the password`,
   `Open the link to set a new password. The link is valid one time.`,

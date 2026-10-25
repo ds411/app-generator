@@ -1,16 +1,30 @@
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {% set actions = (["confirmEmailVerificationAction"] if verify else []) + (["confirmPasswordResetAction"] if definition.auth.password_reset else []) + (["requestEmailVerificationAction"] if verify else []) + (["requestPasswordResetAction"] if definition.auth.password_reset else []) + (["signInAction"] if definition.auth.password else []) + ["signOutAction"] %}
+{% set sf = definition.auth.second_factor %}
 {{ trace_header(definition.auth.id) }}
 import { {{ actions | join(", ") }} } from "./actions";
+{% if sf %}
+import {
+  confirmSecondFactorAction,
+  disableSecondFactorAction,
+  readSecondFactorAction,
+  setUpSecondFactorAction,
+  signInWithCodeAction,
+} from "./second-factor-actions";
+{% endif %}
 {% if definition.auth.password %}
 
 /**
  * The result of a sign-in: the user is signed in, or an error with its
  * message.{% if verify %} `unverified`: the password is correct, but the user must
- * confirm the email address first (ADR 0023).{% endif %}
+ * confirm the email address first (ADR 0023).{% endif %}{% if sf %} `second-factor`: the password is
+ * correct, and the user signs in with a code and the challenge (ADR 0024).
+ * With `setup`, the user must turn on the second factor first.{% endif %}
 
  */
-export type SignInResult = { status: "signed-in" } | { status: "error" | "unverified"; message: string };
+export type SignInResult =
+  | { status: "signed-in" }
+  | { status: "error" | "unverified"; message: string }{{ "\n  | { status: \"second-factor\"; challenge: string; setup: boolean }" if sf }};
 
 /** Sign in with a user name and a password. */
 export async function signIn(username: string, password: string): Promise<SignInResult> {
@@ -62,5 +76,45 @@ export async function requestEmailVerification(username: string): Promise<string
 export async function confirmEmailVerification(token: string): Promise<string | null> {
   const result = await confirmEmailVerificationAction(token);
   return result.ok ? null : result.error.message;
+}
+{% endif %}
+{% if sf %}
+
+/** The state of the second factor of the signed-in user (ADR 0024). */
+export type SecondFactorStatus = { enabled: boolean; required: boolean; recoveryCodesLeft: number };
+
+/** A new secret of the second factor: as text, and as an `otpauth://` URI for a QR code. */
+export type SecondFactorSecret = { secret: string; uri: string };
+
+/** A value, or the message of the error. */
+export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: string };
+
+/** Sign in with the challenge of a sign-in and a code, or a recovery code. Return null, or the message of the error. */
+export async function signInWithCode(challenge: string, code: string): Promise<string | null> { {{ trace(sf.id) }}
+  const result = await signInWithCodeAction(challenge, code);
+  return result.ok ? null : result.message;
+}
+
+/** Return the state of the second factor of the signed-in user. */
+export async function readSecondFactor(): Promise<SecondFactorStatus> { {{ trace(sf.id) }}
+  const result = await readSecondFactorAction();
+  if (!result.ok) throw new Error(result.message);
+  return result.value;
+}
+
+/** Give a new secret for the authenticator app: for the signed-in user, or for the challenge of a sign-in. */
+export async function setUpSecondFactor(challenge: string | null): Promise<AuthResult<SecondFactorSecret>> { {{ trace(sf.id) }}
+  return setUpSecondFactorAction(challenge);
+}
+
+/** Turn on the second factor with a code, and return the recovery codes. With a challenge, the user is signed in. */
+export async function confirmSecondFactor(code: string, challenge: string | null): Promise<AuthResult<string[]>> { {{ trace(sf.id) }}
+  return confirmSecondFactorAction(code, challenge);
+}
+
+/** Turn off the second factor with a code, or a recovery code. Return null, or the message of the error. */
+export async function disableSecondFactor(code: string): Promise<string | null> { {{ trace(sf.id) }}
+  const result = await disableSecondFactorAction(code);
+  return result.ok ? null : result.message;
 }
 {% endif %}

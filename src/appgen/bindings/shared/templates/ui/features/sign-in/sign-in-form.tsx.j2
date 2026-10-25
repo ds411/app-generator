@@ -4,12 +4,16 @@
 {% set providers = definition.auth.providers %}
 {% set card = "form onSubmit={submit}" if password else "div" %}
 {% set verify = auth_pages.verify_email %}
+{% set sf = auth_pages.second_factor %}
 {{ trace_header(definition.auth.id) }}
 "use client";
 
 import { {{ "type FormEvent, " if password }}useState } from "react";
 
-import { {{ ((["requestEmailVerification"] if verify else []) + (["signIn"] if password else []) + (["signInWithProvider"] if providers else [])) | join(", ") }} } from "@/shared/auth";
+{% if sf %}
+import { SecondFactorSetup } from "@/features/second-factor";
+{% endif %}
+import { {{ ((["requestEmailVerification"] if verify else []) + (["type SecondFactorSecret", "setUpSecondFactor"] if sf else []) + (["signIn"] if password else []) + (["signInWithCode"] if sf else []) + (["signInWithProvider"] if providers else [])) | join(", ") }} } from "@/shared/auth";
 {% if auth_pages.sign_up or auth_pages.password_reset %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
@@ -44,6 +48,12 @@ export function SignInForm({ next }: { next: string }) {
   const [unverified, setUnverified] = useState<string | null>(null);
   const [linkSent, setLinkSent] = useState(false);
 {% endif %}
+{% if sf %}
+  // The challenge of the password step of a user with a second factor (ADR 0024).
+  const [challenge, setChallenge] = useState<string | null>(null);
+  // The new secret of a user who must turn on the second factor before the sign-in.
+  const [secret, setSecret] = useState<SecondFactorSecret | null>(null);
+{% endif %}
 {% if password %}
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -52,6 +62,21 @@ export function SignInForm({ next }: { next: string }) {
     const username = String(data.get("username") ?? "");
     setPending(true);
     const result = await signIn(username, String(data.get("password") ?? ""));
+{% if sf %}
+    if (result.status === "second-factor") {
+      {{ trace(definition.auth.second_factor.id) }}
+      const setup = result.setup ? await setUpSecondFactor(result.challenge) : null;
+      setPending(false);
+      if (setup !== null && !setup.ok) {
+        setError(setup.message);
+        return;
+      }
+      setError(null);
+      setSecret(setup === null ? null : setup.value);
+      setChallenge(result.challenge);
+      return;
+    }
+{% endif %}
     setPending(false);
     if (result.status === "signed-in") {
       window.location.assign(next);
@@ -62,6 +87,27 @@ export function SignInForm({ next }: { next: string }) {
       setLinkSent(false);
 {% endif %}
     }
+  }
+{% endif %}
+{% if sf %}
+
+  async function submitCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (challenge === null) return;
+    setPending(true);
+    const message = await signInWithCode(challenge, String(new FormData(event.currentTarget).get("code") ?? "").trim());
+    setPending(false);
+    if (message === null) {
+      window.location.assign(next);
+    } else {
+      setError(message);
+    }
+  }
+
+  function cancelCode() {
+    setChallenge(null);
+    setSecret(null);
+    setError(null);
   }
 {% endif %}
 {% if verify %}
@@ -84,6 +130,61 @@ export function SignInForm({ next }: { next: string }) {
       setPending(false);
       setError(message);
     }
+  }
+{% endif %}
+{% if sf %}
+
+  if (challenge !== null && secret !== null) {
+    // A user of a role that must use the second factor turns it on before the first sign-in.
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+        <div className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+          <h1 className="text-xl font-semibold">{{ jsx_text("Second factor") }}</h1>
+          <p className="text-sm">{{ jsx_text("Your role must use a second factor. Turn it on to sign in.") }}</p>
+          <SecondFactorSetup secret={secret} challenge={challenge} onDone={() => window.location.assign(next)} />
+          <button type="button" onClick={cancelCode} className="text-sm font-medium underline underline-offset-4">
+            {{ jsx_text("Cancel") }}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (challenge !== null) {
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+        <form onSubmit={submitCode} className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+          <h1 className="text-xl font-semibold">{{ jsx_text(definition.app.title) }}</h1>
+          <label className="flex flex-col gap-1.5 text-sm font-medium">
+            {{ jsx_text("Code of the authenticator app") }}
+            <input
+              name="code"
+              autoComplete="one-time-code"
+              minLength={6}
+              maxLength={40}
+              required
+              className="h-9 rounded-md border bg-background px-3 text-sm font-normal"
+            />
+          </label>
+          <p className="text-sm text-muted-foreground">{{ jsx_text("Without the app, enter a recovery code.") }}</p>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={pending}
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {{ jsx_text("Sign in") }}
+          </button>
+          <button type="button" onClick={cancelCode} className="text-sm font-medium underline underline-offset-4">
+            {{ jsx_text("Cancel") }}
+          </button>
+        </form>
+      </main>
+    );
   }
 {% endif %}
 

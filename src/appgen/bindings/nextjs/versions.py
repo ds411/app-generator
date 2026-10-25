@@ -76,3 +76,9 @@ REDIS_PACKAGES: dict[str, str] = {"@redis/client": "6.3.0"}
 
 PROVIDER_PACKAGES: dict[str, str] = {"jose": "6.2.12"}
 """The packages of the sign-in with providers (ADR 0020): `jose` checks the ID tokens."""
+
+SECOND_FACTOR_PACKAGES: dict[str, str] = {"uqr": "0.1.3"}
+"""The packages of the second factor (ADR 0024).
+
+`uqr` makes the QR code of the secret in the browser, without a service on the network.
+"""

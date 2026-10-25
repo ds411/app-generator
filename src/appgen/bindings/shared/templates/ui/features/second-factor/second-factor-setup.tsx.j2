@@ -1,0 +1,107 @@
+{{ trace_header(definition.auth.second_factor.id) }}
+"use client";
+
+import { type FormEvent, useState } from "react";
+
+import { confirmSecondFactor, type SecondFactorSecret } from "@/shared/auth";
+
+import { QrCode } from "./qr-code";
+
+/**
+ * The setup of the second factor (ADR 0024): the new secret as a QR code
+ * and as text, and a code of the authenticator app that turns the factor
+ * on. Then the recovery codes, which the app shows only one time. A
+ * sign-in that must turn on the factor sends its `challenge`: the
+ * confirmation then signs the user in.
+ */
+export function SecondFactorSetup({
+  secret,
+  challenge,
+  onDone,
+}: {
+  secret: SecondFactorSecret;
+  challenge: string | null;
+  onDone: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = String(new FormData(event.currentTarget).get("code") ?? "").trim();
+    setPending(true);
+    const result = await confirmSecondFactor(code, challenge);
+    setPending(false);
+    if (result.ok) {
+      setError(null);
+      setRecoveryCodes(result.value);
+    } else {
+      setError(result.message);
+    }
+  }
+
+  if (recoveryCodes !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p role="status" className="text-sm">
+          {{ jsx_text("The second factor is on.") }}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {{ jsx_text("Keep these recovery codes in a safe place. Each code signs you in one time if you lose the authenticator app.") }}
+        </p>
+        <ul aria-label={{ jsx_attr("Recovery codes") }} className="grid grid-cols-2 gap-2 rounded-md border bg-muted p-3 font-mono text-sm">
+          {recoveryCodes.map((code) => (
+            <li key={code}>{code}</li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={onDone}
+          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+        >
+          {{ jsx_text("Continue") }}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
+        {{ jsx_text("Scan the QR code with an authenticator app, or enter the key. Then enter the code that the app shows.") }}
+      </p>
+      <QrCode value={secret.uri} label={{ jsx_attr("QR code of the key") }} />
+      <div className="flex flex-col gap-1.5 text-sm font-medium">
+        {{ jsx_text("Key") }}
+        <code id="second-factor-key" className="break-all rounded-md border bg-muted px-3 py-2 font-mono text-sm font-normal">
+          {secret.secret}
+        </code>
+      </div>
+      <label className="flex flex-col gap-1.5 text-sm font-medium">
+        {{ jsx_text("Code") }}
+        <input
+          name="code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]{6}"
+          maxLength={6}
+          required
+          className="h-9 rounded-md border bg-background px-3 text-sm font-normal"
+        />
+      </label>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={pending}
+        className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {{ jsx_text("Turn on") }}
+      </button>
+    </form>
+  );
+}

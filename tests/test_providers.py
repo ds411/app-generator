@@ -166,9 +166,11 @@ def front_end(text: str, binding: Binding) -> dict[str, str]:
 
 
 def without_password(text: str) -> str:
-    """Return the room booking example without the sign-in with a password."""
+    """Return the room booking example without the sign-in with a password and the second factor."""
     start, end = text.index("  sign_up:\n"), text.index("  providers:\n")
-    return text[:start] + "  password: false\n" + text[end:]
+    text = text[:start] + "  password: false\n" + text[end:]
+    start = text.index("  # Each member can turn on a second factor")
+    return text[:start] + text[text.index("    totp: true\n", start) + len("    totp: true\n") :]
 
 
 def with_api(text: str) -> str:
@@ -206,8 +208,9 @@ def test_the_nextjs_app_has_the_flow_of_each_provider() -> None:
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
 def test_the_sign_in_page_has_a_button_for_each_provider(binding: Binding) -> None:
     form = front_end(EXAMPLE.read_text(), binding)["src/features/sign-in/ui/sign-in-form.tsx"]
-    # The Next.js app also sends a new link that confirms the email address.
-    assert 'signIn, signInWithProvider } from "@/shared/auth";' in form
+    # The Next.js app also sends a new link that confirms the email address, and both
+    # apps ask for a code of the second factor.
+    assert 'signIn, signInWithCode, signInWithProvider } from "@/shared/auth";' in form
     assert 'onClick={() => signInWith("company")}' in form
     assert "{/* @trace auth.providers.company */}\n          Company account\n" in form
     assert 'name="password"' in form

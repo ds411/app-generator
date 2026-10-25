@@ -1,4 +1,5 @@
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set sf = definition.auth.second_factor %}
 {# The sign-in returns a status: only the password reset and the verification return an ActionResult. #}
 {% set results = definition.auth.password_reset or verify %}
 {{ trace_header(definition.auth.id) }}
@@ -20,6 +21,9 @@ import { inRequestLanguage } from "@/shared/lib/i18n-server";
 
 {% if verify %}
 import { confirmVerification, findUnverifiedUser, readVerificationToken, sendVerification } from "./email-verification";
+{% endif %}
+{% if sf %}
+import { findCredential, makeChallenge, secondFactorStep } from "./second-factor";
 {% endif %}
 {% if definition.auth.password_reset %}
 import { passwordResetMessage } from "./messages";
@@ -47,13 +51,18 @@ const signInSchema = z.object({ username: z.string().min(1).max(320), password: 
  * A wrong password gives the status `error`.{% if verify %} The correct password of a
  * user who did not confirm the email address gives the status `unverified`
  * (ADR 0023), so the answer tells the state of the account only to a caller
- * who knows the password.{% endif %}
+ * who knows the password.{% endif %}{% if sf %} The correct password of a user with
+ * a second factor gives the status `second-factor` with a challenge
+ * (ADR 0024): `signInWithCodeAction` then signs in.{% endif %}
 
  */
 export async function signInAction(
   username: string,
   password: string,
-): Promise<{ status: "signed-in" } | { status: "error" | "unverified"; message: string }> {
+): Promise<
+  | { status: "signed-in" }
+  | { status: "error" | "unverified"; message: string }{{ "\n  | { status: \"second-factor\"; challenge: string; setup: boolean }" if sf }}
+> {
   const input = signInSchema.safeParse({ username, password });
 {% if verify %}
   const user = input.success ? await checkPassword(input.data.username, input.data.password) : null;
@@ -75,6 +84,16 @@ export async function signInAction(
     const message = {{ "await inRequestLanguage(() => " if i18n }}{{ tr(js("Confirm the email address first: open the link in the message.")) }}{{ ")" if i18n }};
     return { status: "unverified", message };
   }
+{% endif %}
+{% if sf %}
+  {{ trace(sf.id) }}
+  const credential = await findCredential({{ "user.id" if verify else "userId" }});
+  const step = credential === null ? null : await secondFactorStep(credential);
+  if (step !== null) {
+    return { status: "second-factor", challenge: makeChallenge({{ "user.id" if verify else "userId" }}), setup: step === "setup" };
+  }
+{% endif %}
+{% if verify %}
   await startSession(user.id);
 {% else %}
   await startSession(userId);

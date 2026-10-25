@@ -89,6 +89,12 @@ export type ExpectedAuth = {
     /** The log of the app, with the reset links. */
     serverLog: string;
   };
+  /**
+   * The second factor (ADR 0024): a user who turns it on, signs out, and
+   * signs in with a code that the test computes. The menu is the menu of
+   * the role of the user.
+   */
+  secondFactor?: { username: string; menu: string[] } | null;
   /** The owner rules of `read` (ADR 0018): a user of the role sees only the records of the user. */
   ownerRules?: {
     role: string;

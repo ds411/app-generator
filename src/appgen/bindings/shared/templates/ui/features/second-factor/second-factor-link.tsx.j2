@@ -1,0 +1,20 @@
+{{ trace_header(definition.auth.second_factor.id) }}
+"use client";
+
+import { ShieldCheckIcon } from "lucide-react";
+
+import { Link } from "@/shared/lib/router";
+
+/** A link to the page of the second factor of the signed-in user (ADR 0024). */
+export function SecondFactorLink() {
+  return (
+    <Link
+      href="/second-factor"
+      aria-label={{ jsx_attr("Second factor") }}
+      title={{ jsx_attr("Second factor") }}
+      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      <ShieldCheckIcon className="size-4" />
+    </Link>
+  );
+}

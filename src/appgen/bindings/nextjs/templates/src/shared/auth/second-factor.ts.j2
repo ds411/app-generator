@@ -1,0 +1,285 @@
+{% set auth = definition.auth %}
+{% set sf = auth.second_factor %}
+{% set table = nextjs.tables_by_entity[auth.user_entity] %}
+{% set fields = definition.entities[auth.user_entity].fields %}
+{% set username = table.columns | selectattr("element_id", "eq", fields[auth.username_field].id) | first %}
+{% set required = sf.required_roles if definition.access else [] %}
+{% set role = (table.columns | selectattr("element_id", "eq", fields[definition.access.role_field].id) | first) if required else none %}
+{{ trace_header(sf.id) }}
+import "server-only";
+
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+
+import { eq } from "drizzle-orm";
+
+import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
+
+import { authSecret, sign } from "./session";
+
+// The second factor of the sign-in (ADR 0024): the codes of an
+// authenticator app. The codes follow RFC 6238 (TOTP): HMAC-SHA-1, 6
+// digits, and a new code each 30 seconds. The table `credentials` keeps the
+// secret encrypted with a key from AUTH_SECRET, and only the SHA-256 hashes
+// of the recovery codes. Each code is valid one time. After 5 wrong codes
+// in a row, the app refuses the codes of the user for 15 minutes.
+
+/** The name of the app in the authenticator app. */
+const ISSUER = {{ definition.app.title | tojson }};
+const DIGITS = 6;
+/** The seconds of a time step: each step has a new code. */
+const PERIOD = 30;
+/** The time steps before and after the current one that the app accepts: the clock difference. */
+const DRIFT_STEPS = 1;
+const SECRET_BYTES = 20;
+const RECOVERY_CODES = 10;
+/** The wrong codes in a row after which the app refuses the codes of the user for a time. */
+const MAX_FAILURES = 5;
+const LOCK_SECONDS = 900;
+/** The time of the second step of a sign-in: 5 minutes. */
+const CHALLENGE_SECONDS = 300;
+{% if required %}
+/** The roles that must use the second factor. */
+const REQUIRED_ROLES: ReadonlySet<string> = new Set({{ required | tojson }});
+{% endif %}
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/** The credential of a user, with the columns of the second factor. */
+export type Credential = typeof credentialsTable.$inferSelect;
+
+function sameText(a: string, b: string): boolean {
+  return a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/** Return the code of a time step (RFC 4226 and RFC 6238). */
+export function totpCode(secret: Buffer, step: number): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const digest = createHmac("sha1", secret).update(counter).digest();
+  const offset = (digest.at(-1) ?? 0) & 0x0f;
+  const value = digest.readUInt32BE(offset) & 0x7fffffff;
+  return String(value % 10 ** DIGITS).padStart(DIGITS, "0");
+}
+
+/** Return the current time step. */
+export function currentStep(): number {
+  return Math.floor(Date.now() / 1000 / PERIOD);
+}
+
+/** Return the time step of a valid code that the user did not use yet, else null. */
+export function matchingStep(secret: Buffer, code: string, lastStep: number | null): number | null {
+  const now = currentStep();
+  for (let step = now - DRIFT_STEPS; step <= now + DRIFT_STEPS; step++) {
+    if (lastStep !== null && step <= lastStep) continue;
+    if (sameText(totpCode(secret, step), code)) return step;
+  }
+  return null;
+}
+
+function keys(): { encrypt: Buffer; check: Buffer } {
+  // Two keys from AUTH_SECRET: one encrypts the secrets, and one checks them.
+  const key = authSecret();
+  return {
+    encrypt: createHmac("sha256", key).update("totp-secret.encrypt").digest(),
+    check: createHmac("sha256", key).update("totp-secret.check").digest(),
+  };
+}
+
+function xor(data: Buffer, stream: Buffer): Buffer {
+  return Buffer.from(data.map((byte, index) => byte ^ (stream[index] ?? 0)));
+}
+
+/**
+ * Return a secret encrypted with a key from AUTH_SECRET, and with a check
+ * tag. The key stream is HMAC-SHA-256 of a random nonce, so each value is
+ * different. The tag is HMAC-SHA-256 of the nonce and the encrypted secret:
+ * a changed value, or another AUTH_SECRET, gives no secret.
+ */
+export function sealSecret(secret: Buffer): string {
+  const { encrypt, check } = keys();
+  const nonce = randomBytes(16);
+  const box = xor(secret, createHmac("sha256", encrypt).update(nonce).digest());
+  const tag = createHmac("sha256", check).update(Buffer.concat([nonce, box])).digest().subarray(0, 16);
+  return Buffer.concat([nonce, box, tag]).toString("base64url");
+}
+
+/** Return the secret of a sealed value, or null if the value or the key is not correct. */
+export function openSecret(sealed: string): Buffer | null {
+  const { encrypt, check } = keys();
+  const data = Buffer.from(sealed, "base64url");
+  if (data.length <= 32) return null;
+  const nonce = data.subarray(0, 16);
+  const box = data.subarray(16, -16);
+  const tag = data.subarray(-16);
+  const expected = createHmac("sha256", check).update(Buffer.concat([nonce, box])).digest().subarray(0, 16);
+  if (!timingSafeEqual(tag, expected)) return null;
+  return xor(box, createHmac("sha256", encrypt).update(nonce).digest());
+}
+
+/** Return bytes in base32 without padding (RFC 4648), as an authenticator app reads a secret. */
+export function base32(bytes: Buffer): string {
+  let text = "";
+  let value = 0;
+  let bits = 0;
+  for (const byte of bytes) {
+    value = ((value << 8) | byte) & 0xffff;
+    bits += 8;
+    while (bits >= 5) {
+      text += BASE32.charAt((value >>> (bits - 5)) & 31);
+      bits -= 5;
+    }
+  }
+  return bits > 0 ? text + BASE32.charAt((value << (5 - bits)) & 31) : text;
+}
+
+/** Return the `otpauth://` URI of a secret, for the QR code. */
+export function otpauthUri(secret: Buffer, account: string): string {
+  const label = encodeURIComponent(`${ISSUER}:${account}`);
+  const query = `secret=${base32(secret)}&issuer=${encodeURIComponent(ISSUER)}&algorithm=SHA1&digits=${DIGITS}`;
+  return `otpauth://totp/${label}?${query}&period=${PERIOD}`;
+}
+
+/** Return the SHA-256 hash of a recovery code, without its dashes and spaces. */
+export function recoveryHash(code: string): string {
+  return createHash("sha256").update(code.replace(/[-\s]/g, "").toLowerCase()).digest("hex");
+}
+
+/** Return new recovery codes: 16 random base32 characters (80 bits) each, in groups of 4. */
+export function newRecoveryCodes(): string[] {
+  return Array.from({ length: RECOVERY_CODES }, () => base32(randomBytes(10)).toLowerCase().replace(/(.{4})(?=.)/g, "$1-"));
+}
+
+/** Return the hashes of the recovery codes without a code, or null if the user has no such code. */
+function withoutRecoveryCode(stored: string | null, code: string): string | null {
+  const hashes = (stored ?? "").split(" ").filter(Boolean);
+  const found = recoveryHash(code);
+  const index = hashes.findIndex((hash) => sameText(hash, found));
+  if (index < 0) return null;
+  hashes.splice(index, 1);
+  return hashes.join(" ");
+}
+
+/** Return the number of the recovery codes of a credential. */
+export function recoveryCodesLeft(credential: Credential): number {
+  return (credential.recoveryCodes ?? "").split(" ").filter(Boolean).length;
+}
+
+function challengeSignature(body: string): string {
+  return sign(`second-factor.${body}`);
+}
+
+/**
+ * Return a challenge for the second step of the sign-in of a user: a
+ * signed text with the user ID and an end time. The signed message has its
+ * own prefix, so that a session token is never valid as a challenge, and
+ * the reverse.
+ */
+export function makeChallenge(userId: string): string {
+  const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + CHALLENGE_SECONDS };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${body}.${challengeSignature(body)}`;
+}
+
+/** Return the user ID of a valid challenge that has not ended, or null. */
+export function readChallenge(challenge: string): string | null {
+  const [body = "", signature = ""] = challenge.split(".");
+  if (!sameText(signature, challengeSignature(body))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as { sub?: unknown; exp?: unknown };
+    if (typeof payload.sub !== "string" || typeof payload.exp !== "number") return null;
+    return payload.exp * 1000 > Date.now() ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Return the credential of a user, or null for a user without a password. */
+export async function findCredential(userId: string): Promise<Credential | null> {
+  const [row] = await getDb().select().from(credentialsTable).where(eq(credentialsTable.userId, userId)).limit(1);
+  return row ?? null;
+}
+{% if required %}
+
+/** Return true if the role of a user must use the second factor. */
+export async function secondFactorRequired(userId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ role: {{ table.const }}.{{ role.key }} })
+    .from({{ table.const }})
+    .where(eq({{ table.const }}.id, userId))
+    .limit(1);
+  return row !== undefined && REQUIRED_ROLES.has(String(row.role));
+}
+{% endif %}
+
+/**
+ * Return the second step of the sign-in of a user: `code` for a user with
+ * the factor{% if required %}, `setup` for a user of a role that must turn it on first{% endif %}, or null.
+ */
+export async function secondFactorStep(credential: Credential): Promise<"code" | "setup" | null> {
+  if (credential.totpEnabledAt !== null) return "code";
+{% if required %}
+  return (await secondFactorRequired(credential.userId)) ? "setup" : null;
+{% else %}
+  return null;
+{% endif %}
+}
+
+/**
+ * Accept a code of the authenticator app or a recovery code one time.
+ * Return `wrong` for a wrong code, and `locked` after too many wrong codes
+ * in a row: then the app refuses the codes of the user for a time.
+ */
+export async function checkCode(credential: Credential, code: string): Promise<"accepted" | "wrong" | "locked"> {
+  const now = Math.floor(Date.now() / 1000);
+  if (credential.totpLockedUntil !== null && credential.totpLockedUntil > now) return "locked";
+  const secret = credential.totpSecret ? openSecret(credential.totpSecret) : null;
+  const step = secret !== null && /^[0-9]{6}$/.test(code) ? matchingStep(secret, code, credential.totpLastStep) : null;
+  const recoveryCodes = step === null ? withoutRecoveryCode(credential.recoveryCodes, code) : credential.recoveryCodes;
+  const where = eq(credentialsTable.userId, credential.userId);
+  if (step === null && recoveryCodes === null) {
+    const failures = credential.totpFailures + 1;
+    const locked = failures >= MAX_FAILURES;
+    await getDb()
+      .update(credentialsTable)
+      .set(locked ? { totpFailures: 0, totpLockedUntil: now + LOCK_SECONDS } : { totpFailures: failures })
+      .where(where);
+    return "wrong";
+  }
+  await getDb()
+    .update(credentialsTable)
+    .set({ totpLastStep: step ?? credential.totpLastStep, recoveryCodes, totpFailures: 0, totpLockedUntil: null })
+    .where(where);
+  return "accepted";
+}
+
+/** Store a new secret of a user, and return it as text and as an `otpauth://` URI. The factor stays off until a code confirms it. */
+export async function newSecret(userId: string): Promise<{ secret: string; uri: string }> {
+  const [user] = await getDb()
+    .select({ username: {{ table.const }}.{{ username.key }} })
+    .from({{ table.const }})
+    .where(eq({{ table.const }}.id, userId))
+    .limit(1);
+  const secret = randomBytes(SECRET_BYTES);
+  await getDb().update(credentialsTable).set({ totpSecret: sealSecret(secret) }).where(eq(credentialsTable.userId, userId));
+  return { secret: base32(secret), uri: otpauthUri(secret, String(user?.username ?? "")) };
+}
+
+/** Turn on the second factor with a code of the new secret. Return the recovery codes, or null for a wrong code. */
+export async function turnOn(credential: Credential, code: string): Promise<string[] | null> {
+  const secret = credential.totpSecret ? openSecret(credential.totpSecret) : null;
+  const step = secret !== null && /^[0-9]{6}$/.test(code) ? matchingStep(secret, code, null) : null;
+  if (step === null) return null;
+  const codes = newRecoveryCodes();
+  await getDb()
+    .update(credentialsTable)
+    .set({ totpEnabledAt: new Date(), totpLastStep: step, totpFailures: 0, totpLockedUntil: null, recoveryCodes: codes.map(recoveryHash).join(" ") })
+    .where(eq(credentialsTable.userId, credential.userId));
+  return codes;
+}
+
+/** Turn off the second factor of a user, and delete its secret and recovery codes. */
+export async function removeSecondFactor(userId: string): Promise<void> {
+  await getDb()
+    .update(credentialsTable)
+    .set({ totpSecret: null, totpEnabledAt: null, totpLastStep: null, totpFailures: 0, totpLockedUntil: null, recoveryCodes: null })
+    .where(eq(credentialsTable.userId, userId));
+}

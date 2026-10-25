@@ -1,0 +1,22 @@
+{{ trace_header(definition.auth.second_factor.id) }}
+import type { Metadata } from "next";
+
+import { SecondFactorPage } from "@/features/second-factor";
+import { requirePageUser } from "@/shared/auth/session";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+/** The title of the page, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js("Second factor")) }} }));
+}
+{% else %}
+
+export const metadata: Metadata = { title: "Second factor" };
+{% endif %}
+
+/** The page of the second factor of the signed-in user (ADR 0024). */
+export default async function Route() {
+  await requirePageUser("/second-factor");
+  return <SecondFactorPage />;
+}

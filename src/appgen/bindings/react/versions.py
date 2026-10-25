@@ -63,3 +63,9 @@ TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 
 FORM_PACKAGES: dict[str, str] = {"zod": "4.6.7"}
 """The packages of the forms: the forms check their input with the zod schemas of the entities."""
+
+SECOND_FACTOR_PACKAGES: dict[str, str] = {"uqr": "0.1.3"}
+"""The packages of the second factor (ADR 0024).
+
+`uqr` makes the QR code of the secret in the browser, without a service on the network.
+"""

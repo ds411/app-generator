@@ -1,0 +1,125 @@
+{{ trace_header(definition.auth.second_factor.id) }}
+"use client";
+
+import { type FormEvent, useState } from "react";
+
+import { disableSecondFactor, readSecondFactor, type SecondFactorSecret, setUpSecondFactor } from "@/shared/auth";
+import { Link } from "@/shared/lib/router";
+import { useResource } from "@/shared/lib/use-resource";
+
+import { SecondFactorSetup } from "./second-factor-setup";
+
+/**
+ * The page of the second factor of the signed-in user (ADR 0024): it
+ * turns the factor on with an authenticator app, and off with a code or a
+ * recovery code. A user of a role that must use the factor cannot turn it
+ * off.
+ */
+export function SecondFactorPage() {
+  const status = useResource("second-factor", readSecondFactor);
+  const [secret, setSecret] = useState<SecondFactorSecret | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function turnOn() {
+    setPending(true);
+    const result = await setUpSecondFactor(null);
+    setPending(false);
+    if (result.ok) {
+      setError(null);
+      setSecret(result.value);
+    } else {
+      setError(result.message);
+    }
+  }
+
+  async function turnOff(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const code = String(new FormData(event.currentTarget).get("code") ?? "").trim();
+    setPending(true);
+    const message = await disableSecondFactor(code);
+    setPending(false);
+    setError(message);
+    if (message === null) status.reload();
+  }
+
+  function done() {
+    setSecret(null);
+    status.reload();
+  }
+
+  const alert = error && (
+    <p role="alert" className="text-sm text-destructive">
+      {error}
+    </p>
+  );
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+      <div className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+        <h1 className="text-xl font-semibold">{{ jsx_text("Second factor") }}</h1>
+        {status.status === "loading" && <p className="text-sm text-muted-foreground">{{ jsx_text("Loading") }}</p>}
+        {status.status === "error" && (
+          <p role="alert" className="text-sm text-destructive">
+            {status.error instanceof Error ? status.error.message : {{ tr(js("The request failed.")) }}}
+          </p>
+        )}
+        {status.status === "success" && secret !== null && <SecondFactorSetup secret={secret} challenge={null} onDone={done} />}
+        {status.status === "success" && secret === null && !status.data.enabled && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {{ jsx_text("Sign in with your password and a code of an authenticator app on your phone.") }}
+            </p>
+            {alert}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={turnOn}
+              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {{ jsx_text("Turn on") }}
+            </button>
+          </>
+        )}
+        {status.status === "success" && secret === null && status.data.enabled && (
+          <form onSubmit={turnOff} className="flex flex-col gap-4">
+            <p role="status" className="text-sm">
+              {{ jsx_text("The second factor is on.") }}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {{ jsx_format("Recovery codes left: {count}", count="status.data.recoveryCodesLeft") }}
+            </p>
+            {status.data.required ? (
+              <p className="text-sm text-muted-foreground">{{ jsx_text("Your role must use a second factor.") }}</p>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  {{ jsx_text("Code or recovery code") }}
+                  <input
+                    name="code"
+                    autoComplete="one-time-code"
+                    minLength={6}
+                    maxLength={40}
+                    required
+                    className="h-9 rounded-md border bg-background px-3 text-sm font-normal"
+                  />
+                </label>
+                {alert}
+                <button
+                  type="submit"
+                  disabled={pending}
+                  className="h-9 rounded-md border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
+                >
+                  {{ jsx_text("Turn off") }}
+                </button>
+              </>
+            )}
+          </form>
+        )}
+        <Link href="/" className="text-sm font-medium underline underline-offset-4">
+          {{ jsx_text("Go to the start page") }}
+        </Link>
+      </div>
+    </main>
+  );
+}
