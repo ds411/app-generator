@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from appgen.bindings.react import versions
-from appgen.bindings.react.api_client import api_entities, data_source
+from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
 from appgen.bindings.shared.forms import FormContext
@@ -104,6 +104,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}
     endpoints = {name: entity.list_endpoint for name, entity in apis.items()}
+    widgets = widget_endpoints(definition) if api else {}
     components = shadcn.used_components(definition, endpoints)
     third_party = ts_apis(definition)
     return {
@@ -119,7 +120,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": ui_plan(definition),
-        "ui_views": ViewContext(definition, forms=True, endpoints=endpoints),
+        "ui_views": ViewContext(definition, forms=True, endpoints=endpoints, widgets=widgets),
         "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "record_rules": record_rules(definition),

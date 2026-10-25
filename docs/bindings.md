@@ -194,7 +194,9 @@ binding:
 - **Excluded** (`excludes`): out of the scope of the binding by design.
   The generator makes no gap for these elements, or for the elements
   under them, and `appgen check` does not count them. The FastAPI
-  binding excludes `page` and `ui`. The React binding excludes the
+  binding excludes `page` and `ui`, but it reads the stat, chart, and
+  list widgets of the dashboards for their endpoints: their traces do
+  not count in its coverage. The React binding excludes the
   rules of the entities (`entity_compare_rule`, `entity_unique_rule`,
   and `entity_overlap_rule`), because it has no back end.
 - **Gaps**: all other kinds. The generator renders the `gap_rule` for
@@ -344,8 +346,13 @@ app:
 - A board loads one page for each column (the query parameter of its
   group field), shows the counts of the server, and has "Show more" for
   each column. A calendar loads only the records of the shown days (the
-  date ranges of its start field, and of a required end field). The
-  dashboards still load all pages.
+  date ranges of its start field, and of a required end field).
+- A dashboard calls one endpoint for each stat and chart widget, and
+  for each list widget: `GET /dashboards/<dashboard>/<widget>`, from the
+  FastAPI app. The database computes the values, so the browser gets no
+  records for a stat or a chart. A list widget gets only its first
+  records, in the order of its sort. A chart of a relation shows the
+  groups that have records, with the labels of their records.
 - A custom operation calls its endpoint: the FastAPI app runs the
   logic, so the React app has no extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request

@@ -1,10 +1,14 @@
 """The dashboards of the front-end apps: stat tiles, charts, and record lists (ADR 0003).
 
 The shared UI templates in `templates/ui/dashboards/` render the values of
-this module. A dashboard reads all records of the entities that its
-widgets show, and filters, groups, and aggregates them in the browser.
-Each widget has a function of the dashboard data (`data`), with the same
-TypeScript values as the list views (`appgen.bindings.shared.views`).
+this module. With mock data, a dashboard reads all records of the
+entities that its widgets show, and filters, groups, and aggregates them
+in the browser. With the API client (`ViewContext.widgets`), a dashboard
+calls the endpoint of each widget: the API gives the value of a stat, the
+groups of a chart, and the records of a list, and the dashboard loads the
+related records of these by ID. Each widget has a function of the
+dashboard data (`data`), with the same TypeScript values as the list
+views (`appgen.bindings.shared.views`).
 """
 
 from dataclasses import dataclass, field
@@ -17,13 +21,15 @@ from appgen.bindings.shared.ui import css_var, js
 from appgen.bindings.shared.views import (
     CardPlan,
     ColumnPlan,
+    RelatedStep,
     Value,
     ViewContext,
+    WidgetEndpoint,
     grid_classes,
     label,
     state_ids,
 )
-from appgen.dsl.model import Field
+from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.ui.common import Grid, States
 from appgen.dsl.ui.dashboards import (
     ChartWidget,
@@ -36,7 +42,7 @@ from appgen.dsl.ui.dashboards import (
 from appgen.dsl.ui.fields import resolve_path
 from appgen.dsl.ui.states import BUILT_IN_STATES
 from appgen.dsl.ui.views import CardsView, Sort, TableView
-from appgen.gen.naming import camel, pascal
+from appgen.gen.naming import camel, constant, pascal
 
 DEFAULT_COLUMNS = 4
 """The grid columns of a dashboard without a grid."""
@@ -74,6 +80,23 @@ class WidgetPlan:
     card: CardPlan | None = None
     sort_id: str | None = None
     gap: GapSpec | None = None
+    endpoint: WidgetEndpoint | None = None
+    """With the API client: the endpoint that gives the value of the widget."""
+    data: str | None = None
+    """With the API client: the TypeScript type of the response in the dashboard data."""
+    related: list[list[RelatedStep]] = field(default_factory=list[list[RelatedStep]])
+    """With the API client: the related records of the records of a list, in stages."""
+    target: str | None = None
+    """With the API client: the entity of the groups of a chart of a relation."""
+    groups: str | None = None
+    """The TypeScript of the known groups of a chart, in their order, or None."""
+    store: str | None = None
+    """With the API client: the store of the records of a list widget, for example `taskApi`."""
+
+    @property
+    def related_name(self) -> str:
+        """The name of the constant with the related records of a list widget."""
+        return f"{constant(self.name)}_RELATED"
 
 
 @dataclass(slots=True)
@@ -94,6 +117,12 @@ class DashboardPlan:
     uses: set[str] = field(default_factory=set[str])
     icons: set[str] = field(default_factory=set[str])
     imports: list[str] = field(default_factory=list[str])
+    server: bool = False
+    """True if the widgets call the endpoints of the API client."""
+    lookups: list[str] = field(default_factory=list[str])
+    """With the API client: the related entities that the widgets show, sorted by name."""
+    types: list[str] = field(default_factory=list[str])
+    """With the API client: the entities whose types the code names, sorted by name."""
 
     def code(self) -> str:
         """Return the TypeScript of the widgets, to find the helpers that they call."""
@@ -156,6 +185,8 @@ def build_dashboard(ctx: ViewContext, name: str) -> DashboardPlan:
     else:
         plan.grid = grid_classes(grid)
     entities: set[str] = set()
+    # With the API client: the entities whose stores the dashboard uses.
+    served: set[str] = set()
     for widget_name, widget in dashboard.widgets.items():
         classes = span_classes(grid, widget.span)
         widget_label = widget.label or label(widget_name)
@@ -177,8 +208,17 @@ def build_dashboard(ctx: ViewContext, name: str) -> DashboardPlan:
             assert isinstance(widget, CustomWidget)
             result.function = None
             result.gap = component_gap(definition, widget.id)
+        if widget.id in ctx.widgets and not isinstance(widget, CustomWidget):
+            plan.server = True
+            _server(ctx, result, widget, served)
         plan.widgets.append(result)
-    plan.entities = sorted(entities)
+    plan.entities = sorted(served if plan.server else entities)
+    if plan.server:
+        found = {s.entity for w in plan.widgets for stage in w.related for s in stage}
+        found |= {w.target for w in plan.widgets if w.target}
+        plan.lookups = sorted(found)
+        lists = {_list_view(definition, w.view).entity for w in plan.widgets if w.view}
+        plan.types = sorted(found | lists)
     defaults = definition.ui.defaults
     found = [s for s in (defaults.states if defaults else None, BUILT_IN_STATES) if s is not None]
     plan.states = States(
@@ -328,6 +368,7 @@ def _chart(
             items.append(item + " }")
         groups = "[" + ", ".join(items) + "]"
     args = f"rows, {key}, (group) => {total}"
+    result.groups = groups
     if groups:
         args += f", {groups}"
     result.body.append(f"return groupRows({args});")
@@ -349,10 +390,7 @@ def _list(
     widget: ListWidget,
     entities: set[str],
 ) -> None:
-    definition = ctx.definition
-    assert definition.ui is not None
-    view = definition.ui.views[widget.view]
-    assert isinstance(view, TableView | CardsView)
+    view = _list_view(ctx.definition, widget.view)
     entity = view.entity
     view_plan = ctx.view_plan(widget.view)
     entities.add(entity)
@@ -378,3 +416,54 @@ def _list(
     if widget.link:
         result.href = ctx.href(entity, widget.link, {}, "row")
     plan.uses.add("list")
+
+
+def _server(
+    ctx: ViewContext,
+    result: WidgetPlan,
+    widget: StatWidget | ChartWidget | ListWidget,
+    entities: set[str],
+) -> None:
+    """Make a widget read its value from its endpoint: the dashboard data has the response.
+
+    A chart keeps its known groups: a chart of a relation shows the related
+    records of the groups of the API, which the dashboard loads by ID. A
+    list loads the related records of its records by ID.
+    """
+    result.endpoint = ctx.widgets[widget.id]
+    data = f"data.{result.function}"
+    if isinstance(widget, StatWidget | ChartWidget):
+        # The dashboard loads again after a change of the records.
+        entities.add(widget.entity)
+    if isinstance(widget, StatWidget):
+        result.data = "number | null"
+        result.body = [f"return {data};"]
+        return
+    if isinstance(widget, ListWidget):
+        view = _list_view(ctx.definition, widget.view)
+        result.data = result.returns
+        result.store = f"{camel(view.entity)}Api"
+        result.related = ctx.view_plan(widget.view).related
+        entities.add(view.entity)
+        entities.update(s.entity for stage in result.related for s in stage)
+        result.body = [f"return {data};"]
+        return
+    result.data = "ChartValue[]"
+    group = ctx.value(widget.entity, widget.group_by)
+    groups = f", {result.groups}" if result.groups else ""
+    if group.kind == "one":
+        # The known groups are the related records of the groups of the API.
+        target = group.target or ""
+        result.target = target
+        entities.add(target)
+        label = f'(item) => String(item.{ctx.display_field(target)} ?? "")'
+        groups = f", recordGroups({data}, lookups.{camel(target)}, {label})"
+    result.body = [f"return chartGroups({data}{groups});"]
+
+
+def _list_view(definition: AppDefinition, name: str) -> TableView | CardsView:
+    """Return the view of a list widget: the validator allows only a table or a card list."""
+    assert definition.ui is not None
+    view = definition.ui.views[name]
+    assert isinstance(view, TableView | CardsView)
+    return view

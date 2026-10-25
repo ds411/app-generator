@@ -1,0 +1,34 @@
+{{ trace_header(element_id) }}
+{% set d = py.dashboards[name] %}
+{% set guard = py.dashboard_guard %}
+"""The dashboard `{{ d.name }}`: GET {{ d.path }}/<widget> gives the value of a widget.
+
+The database filters, groups, and aggregates the records, so that a
+client gets the values without the records.
+"""
+
+{{ d.imports(guard, py.dashboard_guard_module) }}
+
+router = APIRouter(prefix="{{ d.path }}")
+{% for alias, cls in d.aliases() %}
+{% if loop.first %}
+
+{% endif %}
+{{ alias }} = aliased({{ cls }})
+{% endfor %}
+{% if d.scoped %}
+
+Scope = Annotated[RecordScope | None, Depends(scope_of("read"))]
+"""The records that the request may read (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% for w in d.widgets %}
+
+
+{{ trace(w.id) }}
+{{ w.decorator(guard if w.protected else none) }}
+{{ w.signature() }}
+    """The value of the widget `{{ w.name }}`."""
+{% for line in w.body() %}
+    {{ line }}
+{% endfor %}
+{% endfor %}

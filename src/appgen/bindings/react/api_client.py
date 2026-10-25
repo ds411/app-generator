@@ -12,7 +12,7 @@ from typing import Literal
 
 from appgen.bindings.fastapi.model import python_app
 from appgen.bindings.shared.typescript import members
-from appgen.bindings.shared.views import ListEndpoint, definition_display
+from appgen.bindings.shared.views import ListEndpoint, WidgetEndpoint, definition_display
 from appgen.dsl.model import AppDefinition
 from appgen.gen.naming import camel
 
@@ -103,3 +103,12 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             list_endpoint=ListEndpoint(element_params, sort_keys),
         )
     return result
+
+
+def widget_endpoints(definition: AppDefinition) -> dict[str, WidgetEndpoint]:
+    """Return the endpoint of each dashboard widget of the FastAPI app, by element ID."""
+    return {
+        widget.id: WidgetEndpoint(dashboard.path + widget.path, widget.today)
+        for dashboard in python_app(definition).dashboards.values()
+        for widget in dashboard.widgets
+    }

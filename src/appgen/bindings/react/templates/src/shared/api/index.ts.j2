@@ -11,6 +11,17 @@ export {
   type RecordOption,
 } from "./http-store";
 export { loadRelated, type RelatedKey, type RelatedStep, type RelatedStore } from "./related";
+{% if ui_views.widgets %}
+export {
+  type ChartValue,
+  chartValues,
+  groupRecords,
+  mergeLookups,
+  type RecordReader,
+  statValue,
+  widgetRecords,
+} from "./dashboards";
+{% endif %}
 {% else %}
 export { MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
 {% endif %}

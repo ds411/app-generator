@@ -1182,6 +1182,11 @@ A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are
 date values.
 
+The FastAPI binding computes each stat, chart, and list widget in the
+database, with one endpoint for each widget. A widget for that binding
+cannot read a computed field, because the database has no column for
+it.
+
 ```yaml
 # in: ui.dashboards.overview
 widgets:

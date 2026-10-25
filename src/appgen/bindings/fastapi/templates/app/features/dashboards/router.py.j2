@@ -1,0 +1,13 @@
+{{ trace_header("app") }}
+"""The router of the dashboards: the endpoints of the values of their widgets."""
+
+from fastapi import APIRouter
+
+{{ py.from_import("app.features.dashboards", py.dashboards.values() | map(attribute="module") | list) }}
+
+router = APIRouter(tags=["Dashboards"])
+{% for d in py.dashboards.values() %}
+
+{{ trace(d.id) }}
+router.include_router({{ d.module }}.router)
+{% endfor %}

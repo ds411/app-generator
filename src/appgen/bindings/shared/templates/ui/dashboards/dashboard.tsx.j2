@@ -15,9 +15,26 @@
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
 
+{% set served = plan.widgets | selectattr("endpoint") | list %}
+{% set related = served | selectattr("related") | list %}
 {% for entity in plan.entities %}
+{% if plan.server and entity not in plan.types %}
+import { {{ entity | camel }}Api } from "@/entities/{{ entity | kebab }}";
+{% else %}
 import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endif %}
 {% endfor %}
+{% if plan.server %}
+{% set api = [] %}
+{% if served | selectattr("kind", "eq", "chart") | list %}{% set api = api + ["type ChartValue", "chartValues"] %}{% endif %}
+{% if served | selectattr("target") | list %}{% set api = api + ["groupRecords"] %}{% endif %}
+{% if related %}{% set api = api + ["loadRelated"] %}{% endif %}
+{% if plan.lookups %}{% set api = api + ["mergeLookups"] %}{% endif %}
+{% if related %}{% set api = api + ["type RelatedStep"] %}{% endif %}
+{% if served | selectattr("kind", "eq", "stat") | list %}{% set api = api + ["statValue"] %}{% endif %}
+{% if served | selectattr("kind", "eq", "list") | list %}{% set api = api + ["widgetRecords"] %}{% endif %}
+import { {{ api | join(", ") }} } from "@/shared/api";
+{% endif %}
 {% for line in plan.imports %}
 {{ line }}
 {% endfor %}
@@ -25,6 +42,8 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 import { badges } from "@/shared/config/badges";
 {% endif %}
 {% set agg = [] %}
+{% if "chartGroups(" in code %}{% set agg = agg + ["chartGroups"] %}{% endif %}
+{% if "recordGroups(" in code %}{% set agg = agg + ["recordGroups"] %}{% endif %}
 {% if "aggregate(" in code %}{% set agg = agg + ["aggregate"] %}{% endif %}
 {% if "groupRows(" in code %}{% set agg = agg + ["groupRows"] %}{% endif %}
 {% if "matchesOp(" in code %}{% set agg = agg + ["matchesOp"] %}{% endif %}
@@ -42,9 +61,9 @@ import { formatValue } from "@/shared/lib/format";
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
 {% set query = [] %}
-{% if plan.entities %}{% set query = query + ["byId"] %}{% endif %}
+{% if plan.entities and not plan.server %}{% set query = query + ["byId"] %}{% endif %}
 {% if "sortBy(" in code %}{% set query = query + ["sortBy"] %}{% endif %}
-{% if "today()" in code %}{% set query = query + ["today"] %}{% endif %}
+{% if "today()" in code or served | selectattr("endpoint.today") | list %}{% set query = query + ["today"] %}{% endif %}
 {% if query %}
 import { {{ query | join(", ") }} } from "@/shared/lib/query";
 {% endif %}
@@ -72,7 +91,66 @@ import { FormattedValue } from "@/shared/ui/values/formatted-value";
 import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
 {% set cards = (["StatTile"] if "stat" in plan.uses else []) + (["WidgetCard"] if plan.widgets | rejectattr("kind", "eq", "stat") | list else []) %}
 import { {{ cards | join(", ") }} } from "@/shared/ui/widget-card";
-{% if plan.entities %}
+{% if plan.server %}
+
+{% if plan.lookups %}
+type Lookups = {
+{% for entity in plan.lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+{% else %}
+type Lookups = Record<string, never>;
+{% endif %}
+
+/** The responses of the endpoints of the widgets, and the related records that the widgets show. */
+type DashboardData = {
+{% for w in served %}
+  {{ w.function }}: {{ w.data }};
+{% endfor %}
+  lookups: Lookups;
+};
+{% for w in related %}
+
+{{ m.related_steps(w.related, w.related_name) }}
+{% endfor %}
+
+/** Read the value of each widget from its endpoint, and the related records of the values. */
+async function load(): Promise<DashboardData> {
+  const [{% for w in served %}{{ w.function }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for w in served %}
+{% set params = ", { today: today() }" if w.endpoint.today else "" %}
+{% if w.kind == "stat" %}
+    statValue({{ js(w.endpoint.path) }}{{ params }}),
+{% elif w.kind == "chart" %}
+    chartValues({{ js(w.endpoint.path) }}{{ params }}),
+{% else %}
+    widgetRecords({{ w.store }}, {{ js(w.endpoint.path) }}{{ params }}),
+{% endif %}
+{% endfor %}
+  ]);
+{% if plan.lookups %}
+  const parts = await Promise.all([
+{% for w in related %}
+    loadRelated({{ w.function }}, {{ w.related_name }}),
+{% endfor %}
+{% for w in served if w.target %}
+    groupRecords({{ js(w.target | camel) }}, {{ w.target | camel }}Api, {{ w.function }}),
+{% endfor %}
+  ]);
+  const lookups = mergeLookups({{ js(plan.lookups | map("camel") | list) }}, parts) as Lookups;
+{% else %}
+  const lookups: Lookups = {};
+{% endif %}
+  return { {% for w in served %}{{ w.function }}, {% endfor %}lookups };
+}
+
+/** Load the data again after a change of the records. */
+function subscribe(listener: () => void): () => void {
+  const stops = [{% for entity in plan.entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+  return () => stops.forEach((stop) => stop());
+}
+{% elif plan.entities %}
 
 type Lookups = {
 {% for entity in plan.entities %}

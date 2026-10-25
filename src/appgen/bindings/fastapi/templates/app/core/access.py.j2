@@ -6,7 +6,8 @@
 
 The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
 is not public checks the role of the signed-in user, by the operation ID
-of its route.{% if rules %} The record rules (ADR 0018, ADR 0025) limit a role to some
+of its route.{% if py.dashboards %} A dashboard widget needs the list operation of its
+entity.{% endif %}{% if rules %} The record rules (ADR 0018, ADR 0025) limit a role to some
 records: the records of its user, and the records with the values of the
 conditions.{% endif %}
 """
@@ -46,6 +47,20 @@ PERMISSIONS: dict[str, frozenset[str]] = {
 {% endfor %}
 }
 """The operations of each role. `*` stands for all operations."""
+{% set widgets = py.dashboards.values() | map(attribute="widgets") | sum(start=[]) | selectattr("protected") | list %}
+{% if widgets %}
+NEEDS: dict[str, str] = {
+{% for w in widgets %}
+    {{ trace(w.id) }}
+    "{{ w.operation_id }}": "{{ w.permission }}",
+{% endfor %}
+}
+"""The endpoints of the dashboard widgets, and the operation that each needs.
+
+A widget needs the list operation of its entity. A widget of an entity
+without a list operation needs its own operation ID, which only `*` gives.
+"""
+{% endif %}
 
 
 def allows(role: object, operation: str) -> bool:
@@ -57,6 +72,10 @@ def allows(role: object, operation: str) -> bool:
 async def check_access(request: Request, user: CurrentUser) -> None:
     """Give a 403 error if the role of the signed-in user may not call the operation."""
     operation = getattr(request.scope.get("route"), "operation_id", None)
+{% if widgets %}
+    if operation is not None:
+        operation = NEEDS.get(str(operation), str(operation))
+{% endif %}
     if operation is None or not allows(user.{{ role.attr }}, str(operation)):
         raise ProblemError(403, {{ py.message("Your role may not do this operation.") }})
 {% if rules %}

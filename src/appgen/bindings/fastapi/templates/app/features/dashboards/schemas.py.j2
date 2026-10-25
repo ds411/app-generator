@@ -1,0 +1,24 @@
+{{ trace_header("app") }}
+"""The schemas of the dashboard endpoints: the value of a stat, and the groups of a chart."""
+
+from pydantic import BaseModel
+
+
+class StatValue(BaseModel):
+    """The value of a stat widget: an aggregate of records, or null without numbers."""
+
+    value: float | None
+
+
+class ChartGroup(BaseModel):
+    """One group of a chart: the value of the group field, and the aggregate of its records."""
+
+    key: str | None
+    """The enum value, the ID of the related record, or the month (`YYYY-MM`). Null: no value."""
+    value: float | None
+
+
+class ChartValues(BaseModel):
+    """The groups of a chart widget that have records, sorted by key. The null key comes last."""
+
+    groups: list[ChartGroup]

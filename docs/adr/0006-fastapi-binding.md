@@ -41,6 +41,11 @@ for an element of an excluded kind, or for the elements under it. The
 manifest records the excluded kinds, and `appgen check` does not count
 these elements in the coverage.
 
+The binding reads the stat, chart, and list widgets of the dashboards
+for their endpoints (M26, see [Dashboards](#dashboards)). The `ui`
+kinds stay excluded: the traces of these endpoints do not count in the
+coverage.
+
 ### Layout
 
 Each entity is a vertical slice in `app/features/<slice>/`. The slice
@@ -62,6 +67,7 @@ The slice name is also the table name and the URL prefix
 | `app/features/<slice>/<operation>.py` | One module for each CRUD or list operation: its endpoint and its handler. |
 | `app/features/<slice>/<operation>_gen.py` | The endpoint of a custom operation.      |
 | `app/features/<slice>/<operation>_ext.py` | The logic of a custom operation (extension file). |
+| `app/features/dashboards/<dashboard>.py` | The endpoints of the widgets of a dashboard. |
 | `migrations/`                      | The Alembic migrations.                         |
 | `Dockerfile`, `compose.yaml`       | The image of the API, and a stack with Postgres and the migrations. |
 | `tests/`                           | The tests, with one module for each operation.  |
@@ -140,6 +146,44 @@ generator stops with an error.
   or a list of IDs for `many_to_many` (`member_ids`). Read schemas give
   the same IDs. A relation with the extension key `x-fastapi-embed: true`
   is also in the read schema as the object of the target.
+
+### Dashboards
+
+The slice `app/features/dashboards/` has one module for each dashboard,
+and one endpoint for each stat, chart, and list widget:
+`GET /dashboards/<dashboard>/<widget>` (#339). The operation ID is
+`<dashboard>_<widget>`. A custom widget has no endpoint.
+
+| Widget  | Response                                 | Query                                   |
+| ------- | ---------------------------------------- | --------------------------------------- |
+| `stat`  | `StatValue`: `{"value": 3.0}`            | The aggregate of the records of the filter. |
+| `chart` | `ChartValues`: `{"groups": [{"key": "done", "value": 2.0}]}` | `GROUP BY` the group field, or the month of a date field, or the foreign key of a relation. |
+| `list`  | A list of the read schema of the entity of the view | The filter, the sort, and the limit of the widget. |
+
+- The filter has the semantics of the browser: `ne` and `not_in` keep
+  the records without a value, and a comparison with an empty value is
+  false. A date-time field compares by the day in UTC with a date or
+  `$today`. A field path joins the related records, and a relation to
+  many records uses `any()`.
+- A widget with `$today` in its filter, or `$now` for a date field,
+  takes the query parameter `today` (a date). Without it, the server
+  uses the date in UTC. `$now` for a date-time field is the time of the
+  server.
+- `count` gives the number of records. `sum` gives 0 without records,
+  and `avg`, `min`, and `max` give `null`.
+- A widget needs the permission of the first list operation of its
+  entity, and reads only the records of the record rule of the role
+  ([ADR 0025](0025-record-rules.md)), with the filter of the list
+  endpoints (`repository.owned`). A list widget hides the embedded
+  records that the rules hide. A widget of an entity with a public list
+  operation is public.
+- A widget that reads a computed field (in its field, its filter, its
+  group, or its sort) stops the generator with an error, because the
+  database has no column for it.
+- The generated tests check each widget without records, and with known
+  records: three records pass the filter, and each next record fails
+  one part of it. They run on Postgres and on SQLite. A filter with an
+  empty value or a field path through relations has no value test.
 
 ### Generation gaps
 

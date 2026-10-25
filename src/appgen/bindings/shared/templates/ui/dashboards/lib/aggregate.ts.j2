@@ -1,8 +1,13 @@
 {{ trace_header("app") }}
+{% if ui_views.widgets %}
+// The groups of the charts of the dashboards. The API gives the value of
+// each widget: `chartGroups` gives the groups of a chart in their order.
+{% else %}
 {% raw %}
 // The filters, the groups, and the aggregates of the dashboards. The
 // dashboards read all records and apply these functions in the browser.
 {% endraw %}
+{% endif %}
 {% if i18n %}
 
 import { dateTimeFormat } from "@/shared/lib/format";
@@ -127,3 +132,42 @@ export function groupRows<T>(
     .map(([key, items]) => ({ key: key || "none", label: key ? groupLabel(key) : {% endraw %}{{ text("None") }}{% raw %}, value: valueOf(items) }));
 }
 {% endraw %}
+{% if ui_views.widgets %}
+
+/**
+ * Return the chart data of the groups of the API: the same groups as
+ * `groupRows`. With known groups, the chart shows them in their order, also
+ * without records, and the other groups count as "Other". Without known
+ * groups, the chart shows the groups of the API, sorted by key.
+ */
+export function chartGroups(
+  values: readonly { key: string | null; value: number | null }[],
+  groups?: Group[],
+): ChartDatum[] {
+  const byKey = new Map(values.map((item) => [item.key ?? "", item.value ?? 0]));
+  if (groups) {
+    const known = new Set(groups.map((group) => group.key));
+    const result: ChartDatum[] = groups.map((group) => ({ ...group, value: byKey.get(group.key) ?? 0 }));
+    const other = [...byKey.entries()].filter(([key]) => !known.has(key));
+    if (other.length > 0) {
+      result.push({ key: "other", label: {{ text("Other") }}, value: other.reduce((total, [, value]) => total + value, 0) });
+    }
+    return result;
+  }
+  return [...byKey.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({ key: key || "none", label: key ? groupLabel(key) : {{ text("None") }}, value }));
+}
+
+/** Return the known groups of a chart of a relation: the related records of the groups of the API. */
+export function recordGroups<T extends { id: string }>(
+  values: readonly { key: string | null }[],
+  records: ReadonlyMap<string, T>,
+  label: (record: T) => string,
+): Group[] {
+  return values.flatMap((value) => {
+    const record = value.key === null ? undefined : records.get(value.key);
+    return record ? [{ key: record.id, label: label(record) }] : [];
+  });
+}
+{% endif %}

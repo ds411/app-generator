@@ -22,6 +22,9 @@ that the two generated apps work together:
    one page for each column, shows the counts of the server, loads more
    cards of a column, and moves a card. The calendar (a view that the
    test adds to the definition) loads only the records of the shown days.
+   The dashboard calls the endpoint of each widget once, and loads no
+   list of all records. Each checked stat tile shows the value of its
+   endpoint, which is the total of the list endpoint with the same filter.
 6. With translations: the API gives an error in the second language of
    `Accept-Language`, and the page in the second language asks the API
    for it (ADR 0010).
@@ -69,7 +72,7 @@ from typing import Any, cast
 
 from mock_api import SECRET, MockApi
 
-from appgen.bindings.react.api_client import DATA_KEY, api_entities
+from appgen.bindings.react.api_client import DATA_KEY, api_entities, widget_endpoints
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl import load_definition
 
@@ -338,6 +341,65 @@ function check(ok, message) {
     check(next > from, `The next month asked for the days from ${next}, not after ${from}.`);
     await settle();
     noLoadAll("The calendar");
+  } finally {
+    await browser.close();
+  }
+})().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+"""
+
+# Open the dashboard, and check its requests to the API: one request for
+# each widget endpoint, and no request that loads all records of an
+# entity. Each stat tile must show the value of its endpoint, and the
+# value that the list endpoint gives. The argument is a JSON object with
+# the URLs, the stat tiles, and the endpoints of the widgets.
+DASHBOARD_CHECK = """
+const { existsSync } = require("node:fs");
+const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+const timeout = 30000;
+const PAGE_KEYS = ["limit", "offset", "sort"];
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+(async () => {
+  const test = JSON.parse(process.argv[1]);
+  const system = "/opt/pw-browsers/chromium";
+  let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    executablePath = existsSync(system) ? system : undefined;
+  }
+  const browser = await chromium.launch({ executablePath });
+  try {
+    const page = await browser.newPage();
+    const gets = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.origin === test.api) gets.push(url);
+    });
+    await page.goto(`${test.web}/`);
+    for (const stat of test.stats) {
+      const tile = page.locator("[data-slot=card]", {
+        has: page.getByText(stat.label, { exact: true }),
+      });
+      const api = await (await fetch(`${test.api}${stat.path}`)).json();
+      check(api.value === stat.expected, `${stat.path} gives ${api.value}, not ${stat.expected}.`);
+      const value = tile.locator("p.tabular-nums");
+      await value.getByText(String(stat.expected), { exact: true }).waitFor({ timeout });
+    }
+    await page.waitForLoadState("networkidle");
+    for (const path of test.widgets) {
+      const calls = gets.filter((url) => url.pathname === path);
+      check(calls.length === 1, `The dashboard called ${path} ${calls.length} times, not once.`);
+    }
+    const dated = gets.filter((url) => test.today.includes(url.pathname));
+    check(dated.every((url) => url.searchParams.has("today")), `No date of today: ${dated}`);
+    const all = gets.filter((url) => {
+      const keys = [...url.searchParams.keys()];
+      return url.searchParams.get("limit") === "200" && keys.every((k) => PAGE_KEYS.includes(k));
+    });
+    check(all.length === 0, `The dashboard loaded all records: ${all.join(", ")}`);
   } finally {
     await browser.close();
   }
@@ -641,6 +703,28 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     }
     log(f"open the large lists: no page loads all records ({len(people)} people)")
     run("node", "-e", LIST_CHECK, json.dumps(lists))
+    widgets = widget_endpoints(loaded)
+    open_tasks = "&".join(f"status={s}" for s in ("todo", "in_progress", "in_review"))
+    stats = [
+        ("active_projects", "Active projects", "/projects?status=active&limit=1"),
+        ("open_tasks", "Open tasks", f"/tasks?{open_tasks}&limit=1"),
+    ]
+    dashboard: dict[str, object] = {
+        "api": API_URL,
+        "web": WEB_URL,
+        "stats": [
+            {
+                "label": label,
+                "path": widgets[f"ui.dashboards.overview.widgets.{name}"].path,
+                "expected": request("GET", f"{API_URL}{query}")["total"],
+            }
+            for name, label, query in stats
+        ],
+        "widgets": [w.path for w in widgets.values()],
+        "today": [w.path for w in widgets.values() if w.today],
+    }
+    log(f"open {WEB_URL}/: the dashboard calls each widget endpoint once ({len(widgets)})")
+    run("node", "-e", DASHBOARD_CHECK, json.dumps(dashboard))
     log(f"open {WEB_URL}/, and wait for the holiday '{HOLIDAY_NAME}' of the mock server")
     run("node", "-e", TEXT_CHECK, f"{WEB_URL}/", HOLIDAY_NAME)
     calls = mock.calls("holidays", "getNextPublicHolidays")

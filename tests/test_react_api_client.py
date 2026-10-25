@@ -224,8 +224,35 @@ def test_no_view_or_form_of_the_api_loads_all_records() -> None:
         path
         for path, content in output.items()
         if path.startswith(("src/widgets/", "src/features/"))
-        # The dashboards compute their widgets in the browser until #340.
-        and not path.endswith("-dashboard.tsx")
         and re.search(r"Api\.list\(\)", content)
     ]
     assert loads == []
+
+
+def test_a_dashboard_calls_the_endpoint_of_each_widget() -> None:
+    output = files("project-tracker", "api")
+    dashboard = output["src/widgets/overview/ui/overview-dashboard.tsx"]
+    assert '    statValue("/dashboards/overview/open-tasks"),\n' in dashboard
+    assert '    statValue("/dashboards/overview/overdue-tasks", { today: today() }),\n' in dashboard
+    assert '    chartValues("/dashboards/overview/tasks-by-status"),\n' in dashboard
+    assert (
+        '    widgetRecords(taskApi, "/dashboards/overview/due-soon", { today: today() }),\n'
+        in dashboard
+    )
+    # The list loads the related records of its rows, and the chart the records of its groups.
+    assert "    loadRelated(dueSoon, DUE_SOON_RELATED),\n" in dashboard
+    assert '    groupRecords("person", personApi, hoursByPerson),\n' in dashboard
+    assert 'return chartGroups(data.tasksByStatus, [{ key: "todo"' in dashboard
+    assert "recordGroups(data.hoursByPerson, lookups.person, (item) =>" in dashboard
+    assert "groupRows(" not in dashboard
+    assert "src/shared/api/dashboards.ts" in output
+    assert "export function chartGroups(" in output["src/shared/lib/aggregate.ts"]
+
+
+def test_with_mock_data_a_dashboard_computes_its_widgets_in_the_browser() -> None:
+    output = files("project-tracker", None)
+    dashboard = output["src/widgets/overview/ui/overview-dashboard.tsx"]
+    assert "    taskApi.list(),\n" in dashboard
+    assert "return groupRows(rows, (row) => row.status ?? null" in dashboard
+    assert "src/shared/api/dashboards.ts" not in output
+    assert "chartGroups" not in output["src/shared/lib/aggregate.ts"]

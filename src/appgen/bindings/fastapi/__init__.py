@@ -206,6 +206,25 @@ BINDING = Binding(
             path=_SLICE + "/schemas.py",
             for_each="entity",
         ),
+        Output(
+            template="package.py.j2",
+            path="app/features/dashboards/__init__.py",
+            when="py.dashboards",
+        ),
+        *(
+            Output(
+                template=f"app/features/dashboards/{module}.py.j2",
+                path=f"app/features/dashboards/{module}.py",
+                when="py.dashboards",
+            )
+            for module in ("router", "schemas", "aggregates")
+        ),
+        Output(
+            template="app/features/dashboards/dashboard.py.j2",
+            path="app/features/dashboards/{{ py.dashboards[name].module }}.py",
+            for_each="dashboard",
+            when="name in py.dashboards",
+        ),
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
         Output(template="tests/test_migrations.py.j2", path="tests/test_migrations.py"),
@@ -238,6 +257,17 @@ BINDING = Binding(
             path="tests/features/{{ py.operations[name].slice }}/test_{{ name }}_query.py",
             for_each="operation",
             when="element.kind == 'list'",
+        ),
+        Output(
+            template="package.py.j2",
+            path="tests/features/dashboards/__init__.py",
+            when="py.dashboards",
+        ),
+        Output(
+            template="tests/features/dashboards/test_dashboard.py.j2",
+            path="tests/features/dashboards/test_{{ py.dashboards[name].module }}.py",
+            for_each="dashboard",
+            when="name in py.dashboards",
         ),
         Output(template="package.py.j2", path="app/integrations/__init__.py", when="py_apis"),
         Output(
