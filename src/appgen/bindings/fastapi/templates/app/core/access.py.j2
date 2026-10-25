@@ -6,12 +6,14 @@
 
 The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
 is not public checks the role of the signed-in user, by the operation ID
-of its route.{% if rules %} The owner rules (ADR 0018) limit a role to the records of
-its user.{% endif %}
+of its route.{% if rules %} The record rules (ADR 0018, ADR 0025) limit a role to some
+records: the records of its user, and the records with the values of the
+conditions.{% endif %}
 """
 
 {% if rules %}
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 {% endif %}
@@ -60,38 +62,74 @@ async def check_access(request: Request, user: CurrentUser) -> None:
 {% if rules %}
 
 
-OWNER_RULES: dict[str, dict[str, frozenset[str]]] = {
+@dataclass(frozen=True, slots=True)
+class RecordRule:
+    """A record rule of a role (ADR 0025): the records of an entity that the role may use."""
+
+    actions: frozenset[str]
+    """`read` (the lists and the reads), `change` (the other operations), or both."""
+    owner: bool = False
+    """True if the records belong to the user, through the owner path of the entity."""
+    where: Mapping[str, tuple[object, ...]] = field(default_factory=dict[str, tuple[object, ...]])
+    """The conditions, by attribute: the records have one of the values of each attribute."""
+
+    def applies(self, action: str) -> bool:
+        """Return True if the rule applies to an action.
+
+        A rule for `read` also applies to `change`: a user cannot change a
+        record that it cannot see.
+        """
+        return action == "change" or action in self.actions
+
+
+RECORD_RULES: dict[str, dict[str, RecordRule]] = {
 {% for name, r in definition.access.roles.items() if r.records %}
     "{{ name }}": {
 {% for entity, rule in r.records.items() %}
-        "{{ entity }}": frozenset({ {%- for action in rule.operations | sort %}"{{ action }}"{{ ", " if not loop.last }}{% endfor -%} }),  {{ trace(rule.id) }}
+        {{ trace(rule.id) }}
+        {{ py.record_rule(entity, rule) }}
 {% endfor %}
     },
 {% endfor %}
 }
-"""The owner rules of each role: the entities, and the operations that each rule applies to."""
+"""The record rules of each role, by entity."""
 
 
-def record_owner(user: {{ u.name }} | None, entity: str, action: str) -> UUID | None:
-    """Return the ID of the user if an owner rule of its role applies, else None.
+@dataclass(frozen=True, slots=True)
+class RecordScope:
+    """The records that a request may use: the signed-in user, its role, and the action."""
 
-    The action is `read` (a list or a read) or `change` (a create, a change,
-    a delete, or a custom operation). A rule for `read` also applies to
-    `change`: a user cannot change a record that it cannot see.
-    """
+    user: UUID
+    role: str
+    action: str
+    """`read` (a list or a read), or `change` (a create, a change, a delete, or a custom one)."""
+
+    def rule(self, entity: str, action: str | None = None) -> RecordRule | None:
+        """Return the rule of the role for the records of an entity, or None for all records.
+
+        Without an action, the rule is for the action of the request.
+        """
+        rule = RECORD_RULES.get(self.role, {}).get(entity)
+        return rule if rule is not None and rule.applies(action or self.action) else None
+
+    def reading(self) -> RecordScope:
+        """Return the scope of the reads of the same user, for example for the embedded records."""
+        return replace(self, action="read")
+
+
+def record_scope(user: {{ u.name }} | None, action: str) -> RecordScope | None:
+    """Return the scope of a request of a user (`read` or `change`), or None without a user."""
     if user is None:
         return None
     role = getattr(user.{{ role.attr }}, "value", user.{{ role.attr }})
-    actions = OWNER_RULES.get(str(role), {}).get(entity, frozenset[str]())
-    applies = bool(actions) if action == "change" else action in actions
-    return user.id if applies else None
+    return RecordScope(user.id, str(role), action)
 
 
-def owner_of(entity: str, action: str) -> Callable[[{{ u.name }}], Awaitable[UUID | None]]:
-    """Return a dependency: the user whose records a request may use, or None for all records."""
+def scope_of(action: str) -> Callable[[{{ u.name }}], Awaitable[RecordScope | None]]:
+    """Return a dependency: the scope of the records that a request may use (ADR 0025)."""
 
-    async def owner(user: CurrentUser) -> UUID | None:
-        return record_owner(user, entity, action)
+    async def scope(user: CurrentUser) -> RecordScope | None:
+        return record_scope(user, action)
 
-    return owner
+    return scope
 {% endif %}

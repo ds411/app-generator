@@ -61,7 +61,7 @@ def test_an_owner_rule_is_valid_and_applies_to_reads_and_changes() -> None:
     assert definition.find("access.roles.member.records.Task") is rule
 
 
-def test_the_owner_is_a_many_to_one_relation_to_the_user_entity() -> None:
+def test_the_owner_is_a_relation_to_the_user_entity() -> None:
     assert codes(BASE.replace("owner: assignee", "owner: project")) == [
         ("unsuitable-field", "access.roles.member.records.Task")
     ]
@@ -95,23 +95,23 @@ def test_the_fastapi_app_filters_the_records_of_the_owner() -> None:
     definition = load_definition(EXAMPLE)
     files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
     access = files["app/core/access.py"]
-    assert '        "Booking": frozenset({"change", "read"}),' in access
-    assert "def owner_of(entity: str, action: str)" in access
-    repository = files["app/features/bookings/repository.py"]
-    assert "    return statement.where(Booking.organizer_id == owner)\n" in repository
-    assert "    if record is None or (owner is not None and record.organizer_id != owner):\n" in (
-        repository
+    assert '        "Booking": RecordRule(actions=frozenset({"change", "read"}), owner=True),' in (
+        access
     )
+    assert "def scope_of(action: str)" in access
+    repository = files["app/features/bookings/repository.py"]
+    assert "    return Booking.organizer_id == user\n" in repository
+    assert "        statement = statement.where(belongs_to(scope.user))\n" in repository
     assert '        values["organizer_id"] = owner\n' in repository
     listing = files["app/features/bookings/list_bookings.py"]
-    assert 'Owner = Annotated[UUID | None, Depends(owner_of("Booking", "read"))]' in listing
-    assert "    statement = repository.owned(select(Booking), owner)\n" in listing
+    assert 'Scope = Annotated[RecordScope | None, Depends(scope_of("read"))]' in listing
+    assert "    statement = repository.owned(select(Booking), scope)\n" in listing
     update = files["app/features/bookings/update_booking.py"]
-    assert 'Depends(owner_of("Booking", "change"))' in update
+    assert 'Depends(scope_of("change"))' in update
     custom = files["app/features/bookings/cancel_booking_gen.py"]
-    assert "    record = await repository.get(session, id, owner)\n" in custom
-    # The rooms have no owner rule: their code does not change.
-    assert "owner" not in files["app/features/rooms/repository.py"]
+    assert "    record = await repository.get(session, id, scope)\n" in custom
+    # The rooms have no record rule: their code does not change.
+    assert "scope" not in files["app/features/rooms/repository.py"]
     tests = files["tests/test_access.py"]
-    assert "async def test_an_owner_rule_limits_the_role_member_to_its_bookings(" in tests
-    assert "async def test_the_role_admin_without_an_owner_rule_sees_all_bookings(" in tests
+    assert "async def test_the_record_rule_limits_the_role_member_to_its_bookings(" in tests
+    assert "async def test_the_role_admin_without_a_record_rule_sees_all_bookings(" in tests

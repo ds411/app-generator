@@ -18,6 +18,7 @@ from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import mocks_imports, py_features, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import (
+    LINE_LENGTH,
     call,
     from_import,
     import_block,
@@ -28,6 +29,7 @@ from appgen.bindings.fastapi.queries import PyListQuery, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
 from appgen.bindings.shared.i18n import i18n_plan
+from appgen.dsl.access import RecordRule
 from appgen.dsl.expressions import (
     Binary,
     Call,
@@ -243,6 +245,8 @@ class PyRelation:
     ids_field: str | None = None
     """For the `m2m` side: the field of the input schemas with the IDs of the targets."""
     embed: bool = False
+    hidden: bool = False
+    """True if a record rule can hide the embedded target (ADR 0025): the read allows None."""
     computed: bool = False
     """True if a computed field reads the target: the model loads it with the record."""
 
@@ -336,7 +340,8 @@ class PyRelation:
             if self.many:
                 lines.append(f"{self.attr}: list[{target}]")
             else:
-                lines.append(f"{self.attr}: {target}" + (" | None" if self.nullable else ""))
+                optional = self.nullable or self.hidden
+                lines.append(f"{self.attr}: {target}" + (" | None" if optional else ""))
         return lines
 
 
@@ -542,6 +547,169 @@ class PyJoinTable:
 
 
 @dataclass(slots=True)
+class PyOwnerPath:
+    """The owner of the records of an entity with record rules (ADR 0025): a path of relations.
+
+    Each step is a many-to-one or a many-to-many relation. The last step
+    goes to the user entity. A record belongs to each user at the end of
+    the path.
+    """
+
+    path: str
+    """The path in the definition, for example `project.team.members`."""
+    steps: list[tuple[PyEntity, PyRelation]]
+    """The entity and the relation of each step, from the entity of the rules to the users."""
+
+    @property
+    def ids(self) -> list[str]:
+        """The element IDs of the relations of the path."""
+        return [rel.id for _, rel in self.steps]
+
+    @property
+    def direct(self) -> PyRelation | None:
+        """The relation of a path with one many-to-one step, else None."""
+        if len(self.steps) == 1 and self.steps[0][1].side == "fk":
+            return self.steps[0][1]
+        return None
+
+    def models(self, entity: PyEntity) -> list[PyEntity]:
+        """Return the other models that the condition of the path uses, in path order."""
+        found = [e for e, _ in self.steps[1:]]
+        last_entity, last = self.steps[-1]
+        if last.side == "m2m":
+            found.append(last_entity.target(last))
+        unique = {e.name: e for e in found if e.name != entity.name}
+        return list(unique.values())
+
+    def condition(self, prefix: str, user: str, indent: int = 4) -> str:
+        """Return `<prefix><condition>`: the records of a user, as SQLAlchemy `EXISTS` subqueries.
+
+        A many-to-one step is `has()`, and a many-to-many step is `any()`.
+        The last many-to-one step compares its foreign key with the user.
+        """
+        return self._condition(0, prefix, user, indent)
+
+    def _condition(self, index: int, prefix: str, user: str, indent: int) -> str:
+        entity, rel = self.steps[index]
+        if index == len(self.steps) - 1:
+            if rel.side == "fk":
+                return f"{prefix}{entity.name}.{rel.fk_attr} == {user}"
+            inner = f"{entity.target(rel).name}.id == {user}"
+        else:
+            inner = self._condition(index + 1, "", user, indent + 4)
+        method = "has" if rel.side == "fk" else "any"
+        return _nested_call(prefix, f"{entity.name}.{rel.attr}.{method}", inner, indent)
+
+    def owner_lines(self, user: str) -> list[str]:
+        """Return the statements of a test that store the records of the path for a user.
+
+        The last statement returns the values of a new record that make it
+        belong to the user, for example `{"project_id": str(project.id)}`.
+        """
+        lines: list[str] = []
+        current = user
+        names: set[str] = set()
+        for index in range(len(self.steps) - 1, 0, -1):
+            entity, rel = self.steps[index]
+            var = entity.snake if entity.snake not in names else f"{entity.snake}_{index}"
+            names.add(var)
+            lines.append(f"{var} = await make_{entity.snake}(session, {_link(rel, current)})")
+            current = f"str({var}.id)"
+        rel = self.steps[0][1]
+        key = rel.fk_attr if rel.side == "fk" else rel.ids_field
+        value = current if rel.side == "fk" else f"[{current}]"
+        lines.append(f'return {{"{key}": {value}}}')
+        return lines
+
+
+def _python_tuple(values: list[str | int | bool]) -> str:
+    """Return a tuple of literal values as Python source, for example `("open",)`."""
+    items = [string(v) if isinstance(v, str) else repr(v) for v in values]
+    return f"({items[0]},)" if len(items) == 1 else f"({', '.join(items)})"
+
+
+def _braces(prefix: str, items: list[str], indent: int) -> str:
+    """Return `<prefix>{<items>}` on one line if it fits, else with one item on each line."""
+    one_line = f"{prefix}{{{', '.join(items)}}}"
+    if indent + len(one_line) + 1 <= LINE_LENGTH:
+        return one_line
+    pad = " " * indent
+    inner = "".join(f"{pad}    {item},\n" for item in items)
+    return f"{prefix}{{\n{inner}{pad}}}"
+
+
+def _link(rel: PyRelation, value: str) -> str:
+    """Return the keyword argument of a factory that links a record to the record of an ID."""
+    if rel.side == "fk":
+        return f"{rel.fk_attr}={value}"
+    return f"{rel.ids_field}=[{value}]"
+
+
+def _nested_call(prefix: str, func: str, arg: str, indent: int) -> str:
+    """Return `<prefix><func>(<arg>)` on one line if it fits, else with the argument below."""
+    one_line = f"{prefix}{func}({arg})"
+    if "\n" not in arg and indent + len(one_line) <= LINE_LENGTH:
+        return one_line
+    pad = " " * indent
+    return f"{prefix}{func}(\n{pad}    {arg},\n{pad})"
+
+
+@dataclass(slots=True)
+class PyRuleTest:
+    """The generated test of a record rule of a role (ADR 0025)."""
+
+    role: str
+    id: str
+    """The element ID of the rule."""
+    entity: PyEntity
+    reads: bool
+    """True if the rule applies to the lists and the reads."""
+    owner: bool
+    """True if the rule has an owner: the records of another user are out of the scope."""
+    inside: str
+    """The values of the conditions in the scope, as a Python dict of JSON values."""
+    outside: list[str]
+    """For each condition with a value out of the scope: the values, as a Python dict."""
+    patch: str | None
+    """A change of a record in the scope that moves it out of the scope, as a Python dict."""
+    ops: dict[str, PyOperation]
+    """The operations of the entity that the role may call, by kind."""
+
+    @property
+    def name(self) -> str:
+        return f"{self.role}_to_its_{self.entity.slice}"
+
+
+@dataclass(slots=True)
+class PyEmbedTest:
+    """The generated test of a record rule on an embedded relation (ADR 0025)."""
+
+    role: str
+    entity: PyEntity
+    """The entity that embeds the records."""
+    relation: PyRelation
+    """The embedded relation."""
+    read: PyOperation
+    """The read operation of the entity."""
+    values: str
+    """The values of a record of the entity in the scope of the role, as a Python dict."""
+    inside: str
+    """The values of an embedded record in the scope, as a Python dict."""
+    outside: str
+    """The values of an embedded record out of the scope, as a Python dict."""
+
+    @property
+    def target(self) -> PyEntity:
+        return self.entity.target(self.relation)
+
+    @property
+    def link(self) -> str:
+        """The key of the input of the target that refers to the record, for a `back` relation."""
+        inverse = next(r for r in self.target.relations if r.name == self.relation.back_populates)
+        return str(inverse.fk_attr)
+
+
+@dataclass(slots=True)
 class PyOperation:
     """An operation, as an endpoint of the REST API."""
 
@@ -567,8 +735,8 @@ class PyOperation:
     """True if the operation needs a signed-in user (the `auth` section)."""
     apis: list[str] = dataclass_field(default_factory=list[str])
     """The names of the third-party APIs that a custom operation calls."""
-    owner_action: str | None = None
-    """`read` or `change`, if an owner rule of a role can apply to the operation (ADR 0018)."""
+    scope_action: str | None = None
+    """`read` or `change`, if a record rule of a role can apply to the operation (ADR 0025)."""
 
     @property
     def custom(self) -> bool:
@@ -628,14 +796,23 @@ class PyEntity:
     """The filters and the sort keys of the list endpoints, from the fields and the views."""
     sign_up_fields: list[PyField] | None = None
     """The fields of the sign-up form, if the entity holds the users and `auth.sign_up` is set."""
-    owner: PyRelation | None = None
-    """The relation to the user entity of the owner rules of the entity, if a role has one."""
+    scoped: bool = False
+    """True if a record rule of a role names the entity (ADR 0018, ADR 0025)."""
+    owner_path: PyOwnerPath | None = None
+    """The owner path of the record rules of the entity, if a rule has `owner`."""
+    hides: list[PyRelation] = field(default_factory=list[PyRelation])
+    """The embedded relations whose records a record rule can hide, also in a nested embed."""
     translated: bool = False
     """True if the app has translations: the messages go through `t` (ADR 0010)."""
 
     @property
     def guard_module(self) -> str:
         return "access" if self.guard == "check_access" else "auth"
+
+    @property
+    def owner(self) -> PyRelation | None:
+        """The direct owner: a create sets it to the user, and a change keeps it (ADR 0018)."""
+        return self.owner_path.direct if self.owner_path is not None else None
 
     app_entities: dict[str, PyEntity] = field(default_factory=dict[str, "PyEntity"], repr=False)
     """All entities of the app, to find the targets of the relations."""
@@ -734,11 +911,13 @@ class PyEntity:
             "from app.core.errors import ProblemError",
             f"from app.features.{self.slice}.models import {self.name}",
             from_import(
-                f"app.features.{self.slice}.schemas", {f"{self.name}Create", f"{self.name}Update"}
+                f"app.features.{self.slice}.schemas",
+                {f"{self.name}Create", f"{self.name}Update"}
+                | ({f"{self.name}Read"} if self.hides else set[str]()),
             ),
             f"from app.features.{self.slice}.validation_ext import validate",
         }
-        core = {"commit"}
+        core = {"commit"} | ({"flush"} if self.scoped else set[str]())
         if self.fk_relations:
             core.add("ensure_exists")
         if self.m2m_relations:
@@ -746,8 +925,26 @@ class PyEntity:
         lines.add(from_import("app.core.db", core))
         if self.workflows:
             lines.add("from app.core.workflows import check_transition")
-        if self.owner is not None:
-            lines.add("from sqlalchemy import Select")
+        if self.scoped:
+            sqlalchemy = {"Select", "select"}
+            if self.owner_path:
+                sqlalchemy.add("ColumnElement")
+            lines |= {
+                from_import("sqlalchemy", sqlalchemy),
+                "from app.core.access import RecordScope",
+            }
+        if self.scoped:
+            lines.add("from collections.abc import Sequence")
+        if self.hides:
+            lines.add("from collections.abc import Sequence")
+            lines.add("from app.core.access import RecordScope")
+            for rel in self.hides:
+                target = self.target(rel)
+                module = f"app.features.{target.slice}"
+                lines.add(f"from {module} import repository as {target.snake}_repository")
+        if self.owner_path is not None:
+            for model in self.owner_path.models(self):
+                lines.add(f"from app.features.{model.slice}.models import {model.name}")
         if self.translated:
             lines.add("from app.core.i18n import t")
         checks = {r.kind for r in self.check_rules}
@@ -773,7 +970,7 @@ class PyEntity:
         pagination |= {
             n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
         }
-        owner = op is not None and op.owner_action is not None
+        owner = op is not None and op.scope_action is not None
         lines = {
             # Without sort keys, `SORTABLE` is an empty dict with a type.
             "from typing import Annotated" + ("" if query.sort_keys else ", Any"),
@@ -800,7 +997,7 @@ class PyEntity:
             lines.add("import datetime as dt")
         if "Decimal" in types:
             lines.add("from decimal import Decimal")
-        if "UUID" in types or owner:
+        if "UUID" in types:
             lines.add("from uuid import UUID")
         enums: dict[str, set[str]] = {}
         for p in params:
@@ -811,7 +1008,7 @@ class PyEntity:
             lines.add(from_import(f"app.features.{slice_name}.enums", names))
         if owner:
             lines |= {
-                "from app.core.access import owner_of",
+                "from app.core.access import RecordScope, scope_of",
                 f"from app.features.{self.slice} import repository",
             }
         return import_block(lines)
@@ -992,6 +1189,10 @@ class PyApp:
     message_elements: list[str] = field(default_factory=list[str])
     """The IDs of the elements whose messages the sign-in sends to the users (ADR 0023):
     `auth.password_reset` and `auth.sign_up.verify_email`."""
+    rule_tests: list[PyRuleTest] = field(default_factory=list[PyRuleTest])
+    """The generated tests of the record rules (ADR 0025)."""
+    embed_tests: list[PyEmbedTest] = field(default_factory=list[PyEmbedTest])
+    """The generated tests of the record rules on the embedded relations (ADR 0025)."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1053,6 +1254,25 @@ class PyApp:
             status, text, values, indent=indent, translated=self.translated, suffix=suffix
         )
 
+    def record_rule(self, entity: str, rule: RecordRule) -> str:
+        """Return the entry of a record rule in the table of `app/core/access.py` (ADR 0025).
+
+        For example `"Task": RecordRule(actions=frozenset({"read"}), where={"status": ("done",)}),`.
+        The keys of `where` are the attributes of the fields.
+        """
+        actions = ", ".join(string(a) for a in sorted(rule.operations))
+        args = [f"actions=frozenset({{{actions}}})"]
+        if rule.owner is not None:
+            args.append("owner=True")
+        if rule.where:
+            attrs = {f.name: f.attr for f in self.entities[entity].fields}
+            items = [
+                f"{string(attrs[name])}: {_python_tuple(values)}"
+                for name, values in rule.conditions().items()
+            ]
+            args.append(_braces("where=", items, 12))
+        return call(f"{string(entity)}: ", "RecordRule", args, 8, ",")
+
     def foreign_key_name(self, entity: PyEntity, rel: PyRelation) -> str:
         return f"fk_{entity.table}_{rel.fk}_{self.entities[rel.target].table}"
 
@@ -1112,7 +1332,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         users = entities[auth.user_entity]
         by_name = {f.name: f for f in users.fields}
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
-    _owner_rules(definition, entities)
+    _record_rules(definition, entities)
     for entity in entities.values():
         if definition.access is not None:
             entity.guard = "check_access"
@@ -1135,6 +1355,8 @@ def python_app(definition: AppDefinition) -> PyApp:
         providers=_providers(definition, entities),
         translated=definition.translations is not None,
         message_elements=_message_elements(definition),
+        rule_tests=_rule_tests(definition, entities),
+        embed_tests=_embed_tests(definition, entities),
     )
 
 
@@ -1181,20 +1403,190 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
     return found
 
 
-def _owner_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
-    """Give each entity with an owner rule its owner relation, and its operations their action."""
+def _record_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Give each entity with a record rule its owner path, and its operations their action."""
     if definition.access is None:
         return
+    users = entities[definition.auth.user_entity] if definition.auth else None
     for role in definition.access.roles.values():
         for name, rule in role.records.items():
             entity = entities[name]
-            entity.owner = next(r for r in entity.relations if r.name == rule.owner)
+            entity.scoped = True
+            if rule.owner is not None and users is not None:
+                entity.owner_path = _owner_path(entities, entity, rule.owner)
     for entity in entities.values():
-        if entity.owner is None:
-            continue
+        entity.hides = [r for r in entity.embedded if _can_hide(entities, r)]
+        for rel in entity.hides:
+            rel.hidden = entities[rel.target].scoped and not rel.many
+    for entity in entities.values():
         for op in entity.operations:
-            if op.protected:
-                op.owner_action = "read" if op.kind in ("list", "read") else "change"
+            returns = entities[op.returns] if op.returns else None
+            shows = op.kind in ("list", "read", "create", "update") and bool(entity.hides)
+            if op.protected and (entity.scoped or shows or (returns and returns.hides)):
+                op.scope_action = "read" if op.kind in ("list", "read") else "change"
+
+
+def _can_hide(entities: dict[str, PyEntity], rel: PyRelation) -> bool:
+    """Return True if a record rule can hide the target of an embedded relation, or a nested one."""
+    target = entities[rel.target]
+    return target.scoped or any(_can_hide(entities, r) for r in target.embedded)
+
+
+def _rule_tests(definition: AppDefinition, entities: dict[str, PyEntity]) -> list[PyRuleTest]:
+    """Return the tests of the record rules, for the rules that the tests can check.
+
+    The records of a test have the values of the conditions in the scope,
+    and one record for each condition has a value out of the scope. A
+    workflow with an initial state sets the state of each new record, so
+    a condition on its field needs the initial state in the scope.
+    """
+    if definition.access is None:
+        return []
+    found: list[PyRuleTest] = []
+    for role_name, role in definition.access.roles.items():
+        for name, rule in role.records.items():
+            entity = entities[name]
+            ops: dict[str, PyOperation] = {}
+            for op in entity.operations:
+                if not op.protected or not role.allows_operation(op.name) or op.kind in ops:
+                    continue
+                if op.custom and any(p.required for p in op.params):
+                    continue
+                ops[op.kind] = op
+            if not ops:
+                continue
+            values = _rule_values(entity, rule.conditions())
+            if values is None:
+                continue
+            inside, outside, patch = values
+            found.append(
+                PyRuleTest(
+                    role=role_name,
+                    id=rule.id,
+                    entity=entity,
+                    reads="read" in rule.operations,
+                    owner=rule.owner is not None,
+                    inside=inside,
+                    outside=outside,
+                    patch=patch,
+                    ops=ops,
+                )
+            )
+    return found
+
+
+def _embed_tests(definition: AppDefinition, entities: dict[str, PyEntity]) -> list[PyEmbedTest]:
+    """Return the tests of the rules on the embedded relations that the tests can check.
+
+    A test needs a role that reads the entity, a rule of the role on the
+    target with conditions only and a value out of the scope, and no
+    owner in the rule of the role on the entity.
+    """
+    if definition.access is None:
+        return []
+    found: list[PyEmbedTest] = []
+    for role_name, role in definition.access.roles.items():
+        for entity in entities.values():
+            read = next(
+                (
+                    op
+                    for op in entity.operations
+                    if op.kind == "read" and op.protected and role.allows_operation(op.name)
+                ),
+                None,
+            )
+            own = role.records.get(entity.name)
+            if read is None or (own is not None and own.owner is not None):
+                continue
+            values: tuple[str, list[str], str | None] | None = ("{}", [], None)
+            if own is not None:
+                values = _rule_values(entity, own.conditions())
+            for rel in entity.hides:
+                rule = role.records.get(rel.target)
+                if values is None or rule is None or rule.owner is not None:
+                    continue
+                target = _rule_values(entities[rel.target], rule.conditions())
+                if target is None or not target[1]:
+                    continue
+                found.append(
+                    PyEmbedTest(
+                        role=role_name,
+                        entity=entity,
+                        relation=rel,
+                        read=read,
+                        values=values[0],
+                        inside=target[0],
+                        outside=target[1][0],
+                    )
+                )
+    return found
+
+
+def _rule_values(
+    entity: PyEntity, conditions: dict[str, list[str | int | bool]]
+) -> tuple[str, list[str], str | None] | None:
+    """Return the values of a test of a rule: in the scope, out of it, and a change out of it.
+
+    Return None if no record of the tests can be in the scope.
+    """
+    fields = {f.name: f for f in entity.fields}
+    initials = {w.field: w.initial for w in entity.workflows if w.initial is not None}
+    moves = {w.field for w in entity.workflows}
+    inside: dict[str, str] = {}
+    others: dict[str, str] = {}
+    for name, values in conditions.items():
+        f = fields[name]
+        initial = initials.get(name)
+        if initial is not None:
+            if initial not in values:
+                return None
+            inside[name] = string(initial)
+            continue
+        inside[name] = _python_value(values[0])
+        other = _other_value(f, values)
+        if other is not None:
+            others[name] = other
+
+    def merged(name: str, value: str) -> str:
+        items = [f"{string(k)}: {value if k == name else v}" for k, v in inside.items()]
+        return "{" + ", ".join(items) + "}"
+
+    outside = [merged(name, value) for name, value in others.items()]
+    patch = next(
+        (f"{{{string(name)}: {value}}}" for name, value in others.items() if name not in moves),
+        None,
+    )
+    as_dict = "{" + ", ".join(f"{string(k)}: {v}" for k, v in inside.items()) + "}"
+    return as_dict, outside, patch
+
+
+def _python_value(value: str | int | bool) -> str:
+    return string(value) if isinstance(value, str) else repr(value)
+
+
+def _other_value(f: PyField, values: list[str | int | bool]) -> str | None:
+    """Return a valid value of a field that is not in a list, as Python source, or None."""
+    if f.enum is not None:
+        return next((string(v) for _, v in f.enum.members if v not in values), None)
+    if f.type == "boolean":
+        return next((repr(v) for v in (True, False) if v not in values), None)
+    if f.type == "integer":
+        bounds = dict(f.constraints)
+        low = int(bounds.get("ge", "0"))
+        high = int(bounds.get("le", str(low + len(values))))
+        return next((str(n) for n in range(low, high + 1) if n not in values), None)
+    return None
+
+
+def _owner_path(entities: dict[str, PyEntity], entity: PyEntity, path: str) -> PyOwnerPath:
+    """Return the steps of an owner path (the validator checks that each step exists)."""
+    steps: list[tuple[PyEntity, PyRelation]] = []
+    current = entity
+    for step in path.split("."):
+        relation = next(r for r in current.relations if r.name == step)
+        steps.append((current, relation))
+        current = entities[relation.target]
+    return PyOwnerPath(path=path, steps=steps)
 
 
 def _deploy_targets(value: object) -> tuple[str, ...]:

@@ -3,7 +3,7 @@
 {% set e = py.entity(op.entity) %}
 """The operation `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}."""
 
-{% set owner = op.owner_action %}
+{% set owner = op.scope_action %}
 {% if op.kind == "list" %}
 {{ e.list_imports(op) }}
 {% else %}
@@ -13,11 +13,11 @@
     "from app.core.errors import problem_responses",
     "from app.features." ~ e.slice ~ " import repository",
 ] %}
-{% if op.kind != "create" or owner %}
+{% if op.kind != "create" %}
 {% set lines = lines + ["from uuid import UUID"] %}
 {% endif %}
 {% if owner %}
-{% set lines = lines + ["from typing import Annotated", "from app.core.access import owner_of"] %}
+{% set lines = lines + ["from typing import Annotated", "from app.core.access import RecordScope, scope_of"] %}
 {% endif %}
 {% set schemas = {"create": [e.name ~ "Create", e.name ~ "Read"], "update": [e.name ~ "Read", e.name ~ "Update"], "read": [e.name ~ "Read"]}.get(op.kind) %}
 {% if schemas %}
@@ -29,9 +29,8 @@
 router = APIRouter(prefix="{{ e.path }}")
 {% if owner %}
 
-{{ trace(e.owner.id) }}
-Owner = Annotated[UUID | None, Depends(owner_of("{{ e.name }}", "{{ owner }}"))]
-"""The user whose records the request may use (ADR 0018), or None for all records."""
+Scope = Annotated[RecordScope | None, Depends(scope_of("{{ owner }}"))]
+"""The records that the request may use (the record rules of the role, ADR 0025), or all."""
 {% endif %}
 {% if op.kind == "list" %}
 
@@ -74,15 +73,23 @@ SORTABLE: dict[str, Any] = {}
 
 
 {{ op.decorator() }}
+{% set sarg = ", scope" if e.scoped else "" %}
+{% set hides = e.hides and owner %}
 {% if op.kind == "create" and owner %}
 async def {{ op.name }}(
     data: {{ e.name }}Create,
     session: SessionDep,
-    owner: Owner,
+    scope: Scope,
 ) -> {{ e.name }}Read:
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.create(session, data, owner)
+    record = await repository.create(session, data{{ sarg }})
+{% if hides %}
+    result = {{ e.name }}Read.model_validate(record)
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
     return {{ e.name }}Read.model_validate(record)
+{% endif %}
 {% elif op.kind == "create" %}
 async def {{ op.name }}(data: {{ e.name }}Create, session: SessionDep) -> {{ e.name }}Read:
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
@@ -92,11 +99,17 @@ async def {{ op.name }}(data: {{ e.name }}Create, session: SessionDep) -> {{ e.n
 async def {{ op.name }}(
     id: UUID,
     session: SessionDep,
-    owner: Owner,
+    scope: Scope,
 ) -> {{ e.name }}Read:
     """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.get(session, id, owner)
+    record = await repository.get(session, id{{ sarg }})
+{% if hides %}
+    result = {{ e.name }}Read.model_validate(record)
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
     return {{ e.name }}Read.model_validate(record)
+{% endif %}
 {% elif op.kind == "read" %}
 async def {{ op.name }}(id: UUID, session: SessionDep) -> {{ e.name }}Read:
     """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
@@ -107,12 +120,18 @@ async def {{ op.name }}(
     id: UUID,
     data: {{ e.name }}Update,
     session: SessionDep,
-    owner: Owner,
+    scope: Scope,
 ) -> {{ e.name }}Read:
     """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.get(session, id, owner)
-    record = await repository.update(session, record, data, owner)
+    record = await repository.get(session, id{{ sarg }})
+    record = await repository.update(session, record, data{{ sarg }})
+{% if hides %}
+    result = {{ e.name }}Read.model_validate(record)
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
     return {{ e.name }}Read.model_validate(record)
+{% endif %}
 {% elif op.kind == "update" %}
 async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep) -> {{ e.name }}Read:
     """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
@@ -123,10 +142,10 @@ async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep)
 async def {{ op.name }}(
     id: UUID,
     session: SessionDep,
-    owner: Owner,
+    scope: Scope,
 ) -> None:
     """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
-    record = await repository.get(session, id, owner)
+    record = await repository.get(session, id{{ sarg }})
     await repository.delete(session, record)
 {% elif op.kind == "delete" %}
 async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
@@ -138,10 +157,14 @@ async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
 async def {{ op.name }}(
     query: Annotated[{{ op.name | pascal }}Query, Query()],
     session: SessionDep,
-    owner: Owner,
+    scope: Scope,
 ) -> Page[{{ e.name }}Read]:
     """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
-    statement = repository.owned(select({{ e.name }}), owner)
+{% if e.scoped %}
+    statement = repository.owned(select({{ e.name }}), scope)
+{% else %}
+    statement = select({{ e.name }})
+{% endif %}
 {% else %}
 async def {{ op.name }}(
     query: Annotated[{{ op.name | pascal }}Query, Query()], session: SessionDep
@@ -159,10 +182,21 @@ async def {{ op.name }}(
     records = await session.scalars(
         statement.order_by(*order).limit(query.limit).offset(query.offset)
     )
+{% if hides %}
+    items = [{{ e.name }}Read.model_validate(record) for record in records]
+    await repository.hide(session, items, scope)
+    return Page[{{ e.name }}Read](
+        items=items,
+        total=total or 0,
+        limit=query.limit,
+        offset=query.offset,
+    )
+{% else %}
     return Page[{{ e.name }}Read](
         items=[{{ e.name }}Read.model_validate(record) for record in records],
         total=total or 0,
         limit=query.limit,
         offset=query.offset,
     )
+{% endif %}
 {% endif %}

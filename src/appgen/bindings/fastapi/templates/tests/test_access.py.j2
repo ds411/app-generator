@@ -15,26 +15,28 @@
 {% endif %}
 {% endfor %}
 {% endfor %}
-{% set oc = namespace(role=none, rule=none, entity=none, other=none) %}
-{% for role_name, r in roles.items() %}
-{% for entity_name, rule in r.records.items() if oc.rule is none %}
-{% set oc.role, oc.rule, oc.entity = role_name, rule, py.entity(entity_name) %}
+{% set tests = py.rule_tests %}
+{% set embeds = py.embed_tests %}
+{% set owners = {} %}
+{% for t in tests if t.entity.owner_path and not t.entity.owner %}
+{% set _ = owners.update({t.entity.name: t.entity}) %}
 {% endfor %}
+{# The role without a rule on the entity of the first rule sees all records. #}
+{% set oc = namespace(test=none, other=none) %}
+{% for t in tests if oc.test is none %}
+{% set oc.test = t %}
 {% endfor %}
-{% if oc.rule %}
-{% for role_name, r in roles.items() if oc.other is none and oc.entity.name not in r.records %}
+{% if oc.test %}
+{% for role_name, r in roles.items() if oc.other is none and oc.test.entity.name not in r.records and "list" in oc.test.ops and r.allows_operation(oc.test.ops["list"].name) %}
 {% set oc.other = role_name %}
 {% endfor %}
-{% set ops = {} %}
-{% for op in oc.entity.operations if op.protected and roles[oc.role].allows_operation(op.name) %}
-{% if op.kind not in ops and (op.kind != "custom" or not (op.params | selectattr("required") | list)) %}
-{% set _ = ops.update({op.kind: op}) %}
-{% endif %}
-{% endfor %}
-{% set reads = "read" in oc.rule.operations %}
 {% endif %}
 """The tests of the roles: an operation that the role of the user may not call gives 403."""
 
+{% if owners or tests | rejectattr("inside", "eq", "{}") | list or embeds %}
+from typing import Any
+
+{% endif %}
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,13 +48,29 @@ from app.core.auth import make_token
 {% set e, op, deny, allow = ns.case %}
 {% set _ = factories.extend(["make_" ~ u.snake] + ([e.snake ~ "_input"] if op.kind == "create" else [])) %}
 {% endif %}
-{% if oc.rule %}
-{% set _ = factories.extend(["make_" ~ u.snake, "make_" ~ oc.entity.snake] + ([oc.entity.snake ~ "_input"] if "create" in ops else [])) %}
-{% endif %}
+{% for t in tests %}
+{% set _ = factories.extend(["make_" ~ u.snake, "make_" ~ t.entity.snake] + ([t.entity.snake ~ "_input"] if "create" in t.ops else [])) %}
+{% endfor %}
+{% for e in owners.values() %}
+{% for step_entity, _ in e.owner_path.steps[1:] %}
+{% set _ = factories.append("make_" ~ step_entity.snake) %}
+{% endfor %}
+{% endfor %}
+{% for t in embeds %}
+{% set _ = factories.extend(["make_" ~ u.snake, "make_" ~ t.entity.snake, "make_" ~ t.target.snake]) %}
+{% endfor %}
 {% if factories %}
 {{ py.from_import("tests.factories", factories | unique | list) }}
 {% endif %}
-{% if oc.rule and ((reads and "read" in ops) or "update" in ops or "custom" in ops or "delete" in ops) %}
+{# A test checks a problem for a record of another user or out of the conditions, or for a change out of the rule. #}
+{% set ps = namespace(problem=false) %}
+{% for t in tests %}
+{% set others = t.owner or t.outside %}
+{% if (others and "read" in t.ops and t.reads) or (others and ("update" in t.ops or "custom" in t.ops or "delete" in t.ops)) or ("update" in t.ops and t.patch) or ("create" in t.ops and ((t.owner and not t.entity.owner) or t.outside)) %}
+{% set ps.problem = true %}
+{% endif %}
+{% endfor %}
+{% if ps.problem %}
 from tests.problems import assert_problem
 {% endif %}
 
@@ -90,30 +108,68 @@ async def test_a_role_calls_only_its_operations(
 
         assert response.status_code == status, response.text
 {% endif %}
-{% if oc.rule %}
-{% set e = oc.entity %}
-{% set fk = e.owner.fk_attr %}
+{% if tests or embeds %}
 
 
 async def _headers_of(session: AsyncSession, role: str) -> tuple[str, dict[str, str]]:
     """Store a user with a role, and return the user ID and the headers with a token."""
     user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
     return str(user.id), {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+{% for e in owners.values() %}
 
 
-{{ trace(oc.rule.id) }}
-async def test_an_owner_rule_limits_the_role_{{ oc.role }}_to_its_{{ e.slice }}(
+{% for id in e.owner_path.ids %}
+{{ trace(id) }}
+{% endfor %}
+async def _{{ e.snake }}_owner(session: AsyncSession, user_id: str) -> dict[str, Any]:
+    """Store the records of the path `{{ e.owner_path.path }}` to a user, and return the values of a {{ e.name }}."""
+{% for line in e.owner_path.owner_lines("user_id") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% for t in tests %}
+{% set e = t.entity %}
+{% set ops = t.ops %}
+{% set direct = e.owner and t.owner %}
+{% set path_owner = t.owner and not e.owner %}
+{% set mine_owner = ((e.owner.fk_attr ~ "=user_id") if direct else ("**owner" if path_owner else "")) %}
+{% set their_owner = ((e.owner.fk_attr ~ "=other_id") if direct else ("**other_owner" if path_owner else "")) %}
+{% set conditions = t.inside != "{}" %}
+{% macro args(owner, values="inside") -%}
+{{ (([owner] if owner else []) + (["**" ~ values] if conditions else [])) | join(", ") }}
+{%- endmacro %}
+
+
+{{ trace(t.id) }}
+async def test_the_record_rule_limits_the_role_{{ t.name }}(
     anonymous_client: AsyncClient, session: AsyncSession
 ) -> None:
-    user_id, headers = await _headers_of(session, "{{ oc.role }}")
-    other_id, _ = await _headers_of(session, "{{ oc.role }}")
-{% if reads and ("list" in ops or "read" in ops) %}
-    mine = await make_{{ e.snake }}(session, {{ fk }}=user_id)
+    {{ "user_id" if t.owner else "_" }}, headers = await _headers_of(session, "{{ t.role }}")
+{% if t.owner %}
+    other_id, _ = await _headers_of(session, "{{ t.role }}")
 {% endif %}
-{% if "read" in ops or "update" in ops or "custom" in ops or "delete" in ops %}
-    theirs = await make_{{ e.snake }}(session, {{ fk }}=other_id)
+{% if path_owner %}
+    owner = await _{{ e.snake }}_owner(session, user_id)
+    other_owner = await _{{ e.snake }}_owner(session, other_id)
 {% endif %}
-{% if reads and "list" in ops %}
+{% if conditions %}
+    inside: dict[str, Any] = {{ t.inside }}
+{% endif %}
+    mine = await make_{{ e.snake }}(session, {{ args(mine_owner) }})
+{% if t.owner %}
+    theirs = await make_{{ e.snake }}(session, {{ args(their_owner) }})
+{% endif %}
+{% for values in t.outside %}
+    out_{{ loop.index }}: dict[str, Any] = {{ values }}
+    outside_{{ loop.index }} = await make_{{ e.snake }}(session, {{ args(mine_owner, "out_" ~ loop.index) }})
+{% endfor %}
+{% set ns_others = namespace(names=(["theirs"] if t.owner else [])) %}
+{% for values in t.outside %}
+{% set ns_others.names = ns_others.names + ["outside_" ~ loop.index] %}
+{% endfor %}
+{% set others = ns_others.names %}
+{% if t.reads and "list" in ops %}
 
     response = await anonymous_client.get("{{ e.path }}{{ ops["list"].path }}", headers=headers)
     assert response.status_code == 200, response.text
@@ -121,48 +177,135 @@ async def test_an_owner_rule_limits_the_role_{{ oc.role }}_to_its_{{ e.slice }}(
 {% endif %}
 {% if "read" in ops %}
     path = "{{ e.path }}{{ ops["read"].path | replace('{id}', '') }}"
-{% if reads %}
     assert (await anonymous_client.get(f"{path}{mine.id}", headers=headers)).status_code == 200
-    assert_problem(await anonymous_client.get(f"{path}{theirs.id}", headers=headers), 404)
+{% for other in others %}
+{% if t.reads %}
+    assert_problem(await anonymous_client.get(f"{path}{ {{- other }}.id}", headers=headers), 404)
 {% else %}
     # The rule limits only the changes: the role reads all records.
-    assert (await anonymous_client.get(f"{path}{theirs.id}", headers=headers)).status_code == 200
+    response = await anonymous_client.get(f"{path}{ {{- other }}.id}", headers=headers)
+    assert response.status_code == 200, response.text
 {% endif %}
+{% endfor %}
 {% endif %}
+{% if others %}
 {% if "update" in ops %}
     path = "{{ e.path }}{{ ops["update"].path | replace('{id}', '') }}"
-    response = await anonymous_client.patch(f"{path}{theirs.id}", json={}, headers=headers)
+    response = await anonymous_client.patch(f"{path}{ {{- others[0] }}.id}", json={}, headers=headers)
     assert_problem(response, 404)
 {% endif %}
 {% if "custom" in ops %}
-    path = f"{{ e.path }}{{ ops["custom"].path | replace('{id}', '{theirs.id}') }}"
+    path = f"{{ e.path }}{{ ops["custom"].path | replace('{id}', '{' ~ others[0] ~ '.id}') }}"
     assert_problem(await anonymous_client.post(path, json={}, headers=headers), 404)
 {% endif %}
 {% if "delete" in ops %}
     path = "{{ e.path }}{{ ops["delete"].path | replace('{id}', '') }}"
-    assert_problem(await anonymous_client.delete(f"{path}{theirs.id}", headers=headers), 404)
+    assert_problem(await anonymous_client.delete(f"{path}{ {{- others[0] }}.id}", headers=headers), 404)
+{% endif %}
+{% endif %}
+{% if "update" in ops and t.patch %}
+    path = "{{ e.path }}{{ ops["update"].path | replace('{id}', '') }}"
+    outside = {{ t.patch }}
+    response = await anonymous_client.patch(f"{path}{mine.id}", json=outside, headers=headers)
+    assert_problem(response, 403)
 {% endif %}
 {% if "create" in ops %}
-    payload = await {{ e.snake }}_input(session, {{ fk }}=other_id)
     path = "{{ e.path }}{{ ops["create"].path }}"
+{% if direct %}
+    # A create gives the record to the user, whatever the request gives.
+    payload = await {{ e.snake }}_input(session, {{ args(their_owner) }})
     response = await anonymous_client.post(path, json=payload, headers=headers)
     assert response.status_code == 201, response.text
-    assert response.json()["{{ fk }}"] == user_id
+    assert response.json()["{{ e.owner.fk_attr }}"] == user_id
+{% else %}
+    payload = await {{ e.snake }}_input(session, {{ args(mine_owner) }})
+    response = await anonymous_client.post(path, json=payload, headers=headers)
+    assert response.status_code == 201, response.text
 {% endif %}
-{% if oc.other and "list" in ops and roles[oc.other].allows_operation(ops["list"].name) %}
+{% if path_owner %}
+    payload = await {{ e.snake }}_input(session, {{ args(their_owner) }})
+    assert_problem(await anonymous_client.post(path, json=payload, headers=headers), 403)
+{% endif %}
+{% for values in t.outside %}
+    payload = await {{ e.snake }}_input(session, {{ args(mine_owner, "out_" ~ loop.index) }})
+    assert_problem(await anonymous_client.post(path, json=payload, headers=headers), 403)
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% for t in embeds %}
+{% set e = t.entity %}
+{% set r = t.relation %}
+{% set target = t.target %}
 
 
-{{ trace(oc.rule.id) }}
-async def test_the_role_{{ oc.other }}_without_an_owner_rule_sees_all_{{ e.slice }}(
+{{ trace(r.id) }}
+async def test_the_role_{{ t.role }}_sees_no_hidden_{{ r.attr }}_in_the_{{ e.slice }}(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await _headers_of(session, "{{ t.role }}")
+    values: dict[str, Any] = {{ t.values }}
+    inside: dict[str, Any] = {{ t.inside }}
+    outside: dict[str, Any] = {{ t.outside }}
+{% if r.side == "fk" %}
+    shown = await make_{{ target.snake }}(session, **inside)
+    hidden = await make_{{ target.snake }}(session, **outside)
+    first = await make_{{ e.snake }}(session, {{ r.fk_attr }}=str(shown.id), **values)
+    second = await make_{{ e.snake }}(session, {{ r.fk_attr }}=str(hidden.id), **values)
+    path = "{{ e.path }}{{ t.read.path | replace('{id}', '') }}"
+
+    response = await anonymous_client.get(f"{path}{first.id}", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["{{ r.attr }}"]["id"] == str(shown.id)
+    # A hidden record of one gives null, and its ID stays.
+    response = await anonymous_client.get(f"{path}{second.id}", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["{{ r.attr }}"] is None
+    assert response.json()["{{ r.fk_attr }}"] == str(hidden.id)
+{% elif r.side == "m2m" %}
+    shown = await make_{{ target.snake }}(session, **inside)
+    hidden = await make_{{ target.snake }}(session, **outside)
+    ids = [str(shown.id), str(hidden.id)]
+    record = await make_{{ e.snake }}(session, {{ r.ids_field }}=ids, **values)
+    path = "{{ e.path }}{{ t.read.path | replace('{id}', '') }}"
+
+    response = await anonymous_client.get(f"{path}{record.id}", headers=headers)
+    assert response.status_code == 200, response.text
+    # A hidden record is not in the embedded list.
+    assert [item["id"] for item in response.json()["{{ r.attr }}"]] == [str(shown.id)]
+{% elif r.many %}
+    record = await make_{{ e.snake }}(session, **values)
+    shown = await make_{{ target.snake }}(session, {{ t.link }}=str(record.id), **inside)
+    await make_{{ target.snake }}(session, {{ t.link }}=str(record.id), **outside)
+    path = "{{ e.path }}{{ t.read.path | replace('{id}', '') }}"
+
+    response = await anonymous_client.get(f"{path}{record.id}", headers=headers)
+    assert response.status_code == 200, response.text
+    # A hidden record is not in the embedded list.
+    assert [item["id"] for item in response.json()["{{ r.attr }}"]] == [str(shown.id)]
+{% else %}
+    record = await make_{{ e.snake }}(session, **values)
+    await make_{{ target.snake }}(session, {{ t.link }}=str(record.id), **outside)
+    path = "{{ e.path }}{{ t.read.path | replace('{id}', '') }}"
+
+    response = await anonymous_client.get(f"{path}{record.id}", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["{{ r.attr }}"] is None
+{% endif %}
+{% endfor %}
+{% if oc.other %}
+{% set e = oc.test.entity %}
+
+
+{{ trace(oc.test.id) }}
+async def test_the_role_{{ oc.other }}_without_a_record_rule_sees_all_{{ e.slice }}(
     anonymous_client: AsyncClient, session: AsyncSession
 ) -> None:
     _, headers = await _headers_of(session, "{{ oc.other }}")
     first = await make_{{ e.snake }}(session)
     second = await make_{{ e.snake }}(session)
 
-    response = await anonymous_client.get("{{ e.path }}{{ ops["list"].path }}", headers=headers)
+    response = await anonymous_client.get("{{ e.path }}{{ oc.test.ops["list"].path }}", headers=headers)
 
     assert response.status_code == 200, response.text
     assert {item["id"] for item in response.json()["items"]} == {str(first.id), str(second.id)}
-{% endif %}
 {% endif %}
