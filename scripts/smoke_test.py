@@ -3,16 +3,17 @@
 The smoke test proves that the apps start, not only that they build. For
 each binding, it generates the project tracker, builds the Docker image,
 and starts the app: the Next.js app and the FastAPI app with Postgres
-(Docker Compose), and the React app with nginx. The Next.js app adds its
-seed records when it starts (`DATABASE_SEED=true`), so its pages show
-data, as the pages of the React app with its mock data do. Then it
-checks the app:
+(Docker Compose), and the React app with nginx. The Next.js app and the
+FastAPI app add their seed records when they start (`DATABASE_SEED=true`),
+so the pages show data, as the pages of the React app with its mock data
+do. Then it checks the app:
 
 - Next.js and React: open one page for each entity that has a page.
   Next.js: a detail page with an unknown ID gives the status 404, and
   the server renders each page of API data with the answer of the mock
   server.
 - FastAPI: call the health check, and the list endpoint of each entity.
+  Each list has the records of the seed.
 
 With `--local`, the script runs the Next.js app or the FastAPI app on the
 machine, without Docker and without a Postgres server: the Next.js app
@@ -84,6 +85,7 @@ from typing import cast
 
 from mock_api import MockApi
 
+from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import css_value, css_var
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.ui.api_data import api_data
@@ -257,6 +259,7 @@ def started_local(binding: str, app: Path, temp: Path, apis: dict[str, str]) -> 
         # The generated app has its own virtual environment.
         env.pop("VIRTUAL_ENV", None)
         env["DATABASE_URL"] = f"sqlite+aiosqlite:///{temp / 'local.db'}"
+        env["DATABASE_SEED"] = "true"
         log(binding, "alembic upgrade head")
         subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
         command = ["uv", "run", "fastapi", "run", "app/main.py", "--port", env["PORT"]]
@@ -395,6 +398,7 @@ def check_front_end(binding: str, definition: AppDefinition) -> None:
 
 def check_api(binding: str, definition: AppDefinition) -> None:
     base = f"http://localhost:{PORTS[binding]}"
+    records = mock_data(definition)
     wait_for(binding, base + "/health")
     log(binding, "GET /health is OK")
     openapi = json.loads(get(base + "/openapi.json").body)
@@ -418,13 +422,16 @@ def check_api(binding: str, definition: AppDefinition) -> None:
         response = get(base + paths[name])
         if response.status != 200:
             raise SmokeError(f"{binding}: GET {paths[name]} gave the status {response.status}.")
-        items: object = json.loads(response.body).get("items")
-        if not isinstance(items, list):
+        page = json.loads(response.body)
+        if not isinstance(page.get("items"), list):
             raise SmokeError(f"{binding}: GET {paths[name]} gave no list of items.")
-        log(
-            binding,
-            f"entity {entity}: GET {paths[name]} is OK ({len(cast(list[object], items))} records)",
-        )
+        # The app adds the seed records when it starts (DATABASE_SEED=true).
+        if page.get("total") != len(records[entity]):
+            raise SmokeError(
+                f"{binding}: GET {paths[name]} gave {page.get('total')} records, "
+                f"not the {len(records[entity])} records of the seed."
+            )
+        log(binding, f"entity {entity}: GET {paths[name]} is OK ({page['total']} records)")
 
 
 def check_api_operation(binding: str, mock: MockApi) -> None:

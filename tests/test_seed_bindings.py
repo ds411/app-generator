@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from appgen.bindings.fastapi.pysource import literal
 from appgen.bindings.nextjs.db import build_tables, seed_tables
 from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.dsl import AppDefinition, load_definition, load_definition_text
@@ -165,7 +166,7 @@ def test_the_nextjs_seed_splits_the_seed_records_from_the_generated_records(
     assert seeds["Room"].seed_id is None
 
 
-@pytest.mark.parametrize("binding_name", ["react", "nextjs"])
+@pytest.mark.parametrize("binding_name", ["react", "nextjs", "fastapi"])
 def test_the_apps_cover_each_seed_record(binding_name: str, tmp_path: Path) -> None:
     definition = load_definition(FIXTURE)
     binding = find_binding(binding_name)
@@ -204,3 +205,56 @@ def test_the_nextjs_seed_inserts_the_seed_records_by_id(tmp_path: Path) -> None:
     assert "  // @trace seed.Room.records.l201\n" in data
     assert "export const roomRecords:" in data
     assert "personAdded.has(String(row.id))" in seed
+
+
+def test_the_fastapi_seed_has_typed_rows_in_the_order_of_the_required_keys(
+    tmp_path: Path,
+) -> None:
+    binding = find_binding("fastapi")
+    write_result(generate(load_definition(FIXTURE), binding), tmp_path, binding.name)
+
+    data = (tmp_path / "app/core/seed_data.py").read_text()
+    a101 = record_id("seed-data", "Room", "a101")
+
+    assert "    # @trace seed.Room.records.a101\n" in data
+    assert f'        "id": UUID("{a101}"),\n' in data
+    assert '        "price": Decimal("120.5"),\n' in data
+    assert '        "checked_at": dt.datetime.fromisoformat("2026-01-05T09:00:00Z"),\n' in data
+    assert '        "settings": {"floor": 1},\n' in data
+    # The optional key of the one_to_one relation is a link: the seed sets it after the inserts.
+    assert "OFFICES_RECORD_LINKS: list[Row] = [" in data
+    tables = data[data.index("TABLES: list[SeedTable]") :]
+    assert tables.index('"offices"') < tables.index('"rooms"') < tables.index('"bookings"')
+    assert '        "rooms_features",\n        "rooms",\n        "room_id",\n' in data
+    assert "        records=ROOMS_FEATURES_RECORDS,\n" in data
+
+
+def test_the_fastapi_seed_test_changes_and_deletes_seed_records(tmp_path: Path) -> None:
+    binding = find_binding("fastapi")
+    write_result(generate(load_definition(FIXTURE), binding), tmp_path, binding.name)
+
+    test = (tmp_path / "tests/test_seed.py").read_text()
+
+    assert '    "credentials": 2,\n' in test
+    assert "async def test_a_second_seed_adds_a_deleted_seed_record_and_keeps_a_change(" in test
+    assert "    assert added == 1\n" in test
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"floor": 1, "tags": [True, None]}, '"settings": {"floor": 1, "tags": [True, None]},'),
+        ("It's", '"settings": "It\'s",'),
+        (
+            {"text": "x" * 50, "list": ["y" * 30, 2.5]},
+            '"settings": {\n'
+            + f'            "text": "{"x" * 50}",\n'
+            + f'            "list": ["{"y" * 30}", 2.5],\n'
+            + "        },",
+        ),
+    ],
+)
+def test_a_json_value_is_a_python_literal_in_the_format_of_ruff(
+    value: object, expected: str
+) -> None:
+    assert literal(value, '"settings": ', 8, ",") == expected

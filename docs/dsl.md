@@ -413,10 +413,9 @@ seed:
   its seed records and `mock` generated records. A generated record can
   refer to a seed record.
 - The React app has the seed records first in its mock data. The
-  Next.js seed (`pnpm db:seed`) adds each seed record that the database
-  does not have, by ID, and adds generated records only if all tables
-  are empty. The FastAPI binding excludes the elements of `seed` for now,
-  so `appgen generate` makes no gap for them.
+  Next.js seed (`pnpm db:seed`) and the FastAPI seed (`uv run python -m
+  app.cli seed`) add each seed record that the database does not have,
+  by ID, and add generated records only if all tables are empty.
 
 The values:
 
@@ -1356,8 +1355,10 @@ with the token in the fragment of the URL. The setting
 `<NAME>_ISSUER` changes the issuer of a provider, for example for a
 test provider. With `password: false`, the app has no
 `POST /auth/sign-in`, no `PUT /auth/password`, no table of the password
-hashes, and no `app.cli`. The Next.js app has the page `/sign-in` and a
-session cookie, and its seed gives each user the password in
+hashes, and no command `set-password`. With a password, the seed of
+the FastAPI app gives each new seed user the password in
+`SEED_PASSWORD`. The Next.js app has the page `/sign-in` and a session
+cookie, and its seed also gives each user the password in
 `SEED_PASSWORD`. Both need `AUTH_SECRET`. The React app (mock data)
 accepts each mock user with the password `password`. Each front end has
 a sign-out button in the top bar.

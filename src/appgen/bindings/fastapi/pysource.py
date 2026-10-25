@@ -7,6 +7,7 @@ each line and a trailing comma, which the formatter keeps as it is.
 
 import ast
 import json
+from typing import cast
 
 from appgen.dsl.translations import VALUE
 
@@ -38,6 +39,49 @@ def call(prefix: str, func: str, args: list[str], indent: int = 4, suffix: str =
         return one_line
     inner = "".join(f"{pad}    {arg},\n" for arg in args)
     return f"{prefix}{func}(\n{inner}{pad}){suffix}"
+
+
+def literal(value: object, prefix: str = "", indent: int = 0, suffix: str = "") -> str:
+    """Return a JSON value as a Python literal, in the format of the Ruff formatter.
+
+    `prefix` and `suffix` are the text before and after the value on its
+    line, for example `"key": ` and `,`, and `indent` is the indent of the
+    line. A list or a dict that does not fit in the line length has one
+    item on each line and a trailing comma. The result has no indent on
+    its first line.
+    """
+    one_line = f"{prefix}{_flat(value)}{suffix}"
+    if indent + len(one_line) <= LINE_LENGTH or not isinstance(value, list | dict) or not value:
+        return one_line
+    pad = " " * indent
+    if isinstance(value, dict):
+        entries = cast(dict[str, object], value)
+        items = [literal(v, f"{string(k)}: ", indent + 4, ",") for k, v in entries.items()]
+        brackets = "{}"
+    else:
+        items = [literal(v, "", indent + 4, ",") for v in cast(list[object], value)]
+        brackets = "[]"
+    inner = "".join(f"{pad}    {item}\n" for item in items)
+    return f"{prefix}{brackets[0]}\n{inner}{pad}{brackets[1]}{suffix}"
+
+
+def _flat(value: object) -> str:
+    match value:
+        case None:
+            return "None"
+        case bool():
+            return str(value)
+        case int() | float():
+            return json.dumps(value)
+        case str():
+            return string(value)
+        case list():
+            return "[" + ", ".join(_flat(v) for v in cast(list[object], value)) + "]"
+        case dict():
+            entries = cast(dict[str, object], value)
+            return "{" + ", ".join(f"{string(k)}: {_flat(v)}" for k, v in entries.items()) + "}"
+        case _:
+            raise TypeError(f"not a JSON value: {value!r}")
 
 
 def raise_problem(
@@ -128,7 +172,8 @@ def import_block(lines: set[str]) -> str:
     app (`app.` and `tests.`). Straight imports (`import x`) come before `from` imports
     in each group.
     """
-    stdlib = {"collections", "datetime", "decimal", "enum", "itertools", "os", "typing", "uuid"}
+    stdlib = {"collections", "dataclasses", "datetime", "decimal", "enum", "itertools", "os"}
+    stdlib |= {"typing", "uuid"}
     stdlib |= {"asyncio", "json", "pathlib", "re", "types", "urllib"}
     groups: list[list[str]] = [[], [], []]
     for line in lines:

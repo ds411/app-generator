@@ -29,6 +29,7 @@ When you write the code of an extension file, change `@trace:gap` to
 | ------------------ | ----------------------------------------- |
 | Install            | `uv sync`                                 |
 | Migrate the database | `uv run alembic upgrade head`           |
+| Add the seed records | `uv run python -m app.cli seed`         |
 | Start the API      | `uv run fastapi dev app/main.py`          |
 | Lint               | `uv run ruff check`                       |
 | Check the format   | `uv run ruff format --check`              |
@@ -48,12 +49,24 @@ into `.env`, then migrate the database and start the API:
 ```sh
 printf 'DATABASE_URL=sqlite+aiosqlite:///./local.db\n' > .env
 uv run alembic upgrade head
+uv run python -m app.cli seed
 uv run fastapi dev app/main.py
 ```
 
 The API and Alembic read `DATABASE_URL` from `.env` or from an
 exported environment variable. A shell variable that you do not export
 has no effect.
+
+## Seed data
+
+`uv run python -m app.cli seed` adds the seed records to the database
+of `DATABASE_URL`. Apply the migrations first. The records come from
+the app definition, and are the same on each run. The seed adds each
+record of the `seed` section of the definition that the database does
+not have (by ID), and does not change a record that it has. It adds the
+generated mock records only if all tables are empty. With
+`DATABASE_SEED=true`, the API runs the seed when it starts, as
+`docker compose up` does. `app/core/seed_data.py` holds the records.
 
 The database is the file `local.db`. The models and the migrations work
 on both databases. Use Postgres in production: SQLite has one writer at
@@ -96,7 +109,8 @@ test modules, which appgen does not change.
 ## Docker
 
 `docker compose up --build` builds the image, starts Postgres, runs the
-migrations, and starts the API on port 8000. The Dockerfile installs
+migrations, and starts the API on port 8000 with the seed records
+(`DATABASE_SEED=true`). The Dockerfile installs
 the dependencies with uv in a build stage, and runs the API as a
 non-root user. To use other images, for example from a mirror, set the
 build arguments `UV_IMAGE` and `PYTHON_IMAGE`, and the environment

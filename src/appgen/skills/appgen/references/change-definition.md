@@ -165,6 +165,10 @@ the app folder:
 4. `uv run alembic upgrade head` applies it. `uv run pytest` runs
    `tests/test_migrations.py`, which compares the migrations with the
    models.
+5. `uv run python -m app.cli seed` adds the seed records that the
+   database does not have, for example new records of `seed`. It
+   changes no record that exists.
 
 The Next.js app writes its SQL migrations with `pnpm db:generate`
-(Drizzle). Review them in `drizzle/` in the same way.
+(Drizzle). Review them in `drizzle/` in the same way. `pnpm db:seed`
+adds the new seed records.

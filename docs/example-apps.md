@@ -241,13 +241,22 @@ applies the migrations when it starts.
    The output shows `Context impl SQLiteImpl.` for SQLite and
    with `Context impl PostgresqlImpl.` for Postgres.
 
-4. Start the API:
+4. Add the seed records, the same records as in the other apps:
+
+   ```sh
+   uv run python -m app.cli seed
+   ```
+
+   The output shows the number of records that the seed adds. A second
+   run adds no records.
+
+5. Start the API:
 
    ```sh
    uv run fastapi dev app/main.py
    ```
 
-5. Open <http://localhost:8000/docs> for the API documentation.
+6. Open <http://localhost:8000/docs> for the API documentation.
    `GET /health` gives `{"status":"ok"}`.
 
 To run the tests of the app, run `uv run pytest`. The tests start their

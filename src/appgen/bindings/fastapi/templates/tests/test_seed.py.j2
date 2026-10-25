@@ -1,0 +1,96 @@
+{{ trace_header("app") }}
+{% set password = definition.auth and definition.auth.password %}
+{% set change = py_seed.change %}
+{% set remove = py_seed.remove %}
+"""The seed (ADR 0021): the first run adds all records, and a second run adds no record."""
+
+{% if change %}
+from uuid import UUID
+
+{% endif %}
+import pytest
+{% if change %}
+from sqlalchemy import delete, func, select, update
+{% else %}
+from sqlalchemy import func, select
+{% endif %}
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import Base, make_engine, make_sessions
+from app.core.seed import seed_database
+
+pytestmark = pytest.mark.anyio
+
+COUNTS = {
+{% for name, count in py_seed.counts().items() %}
+    {{ name | tojson }}: {{ count }},
+{% endfor %}
+}
+"""The rows of each table after the seed."""
+{% if password %}
+
+PASSWORD = "seed-test-password"
+{% endif %}
+
+
+async def _counts(session: AsyncSession) -> dict[str, int]:
+    tables = Base.metadata.tables
+    return {
+        name: await session.scalar(select(func.count()).select_from(tables[name])) or 0
+        for name in COUNTS
+    }
+
+
+async def test_a_second_seed_adds_no_record(migrated_url: str, session: AsyncSession) -> None:
+    engine = make_engine(migrated_url)
+    try:
+        async with make_sessions(engine)() as seed_session:
+            first = await seed_database(seed_session{{ ", PASSWORD" if password }})
+            after_first = await _counts(seed_session)
+            second = await seed_database(seed_session{{ ", PASSWORD" if password }})
+            after_second = await _counts(seed_session)
+    finally:
+        await engine.dispose()
+
+    assert first == {{ py_seed.added }}
+    assert after_first == COUNTS
+    assert second == 0
+    assert after_second == COUNTS
+{% if change %}
+
+
+async def test_a_second_seed_adds_a_deleted_seed_record_and_keeps_a_change(
+    migrated_url: str, session: AsyncSession
+) -> None:
+    tables = Base.metadata.tables
+    changed = tables[{{ change.table | tojson }}]
+    changed_id = UUID({{ change.id | tojson }})
+{% if remove %}
+    deleted = tables[{{ remove.table | tojson }}]
+    deleted_id = UUID({{ remove.id | tojson }})
+{% endif %}
+    engine = make_engine(migrated_url)
+    try:
+        async with make_sessions(engine)() as seed_session:
+            await seed_database(seed_session{{ ", PASSWORD" if password }})
+            await seed_session.execute(
+                update(changed)
+                .where(changed.c.id == changed_id)
+                .values({ {{- change.column | tojson }}: {{ change.value | tojson -}} })
+            )
+{% if remove %}
+            await seed_session.execute(delete(deleted).where(deleted.c.id == deleted_id))
+{% endif %}
+            await seed_session.commit()
+            added = await seed_database(seed_session{{ ", PASSWORD" if password }})
+            value = await seed_session.scalar(
+                select(changed.c[{{ change.column | tojson }}]).where(changed.c.id == changed_id)
+            )
+            counts = await _counts(seed_session)
+    finally:
+        await engine.dispose()
+
+    assert added == {{ 1 if remove else 0 }}
+    assert value == {{ change.value | tojson }}
+    assert counts == COUNTS
+{% endif %}

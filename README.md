@@ -212,7 +212,7 @@ steps with the CLI.
 Next.js app and the FastAPI app with Postgres (Docker Compose), and the
 React app with nginx. It opens one page for each entity in the
 Next.js and React apps, and calls the health check and the list endpoint
-of each entity in the FastAPI app. The check scripts of the bindings
+of each entity in the FastAPI app, which must give the seed records. The check scripts of the bindings
 (`scripts/check-<binding>.sh`) run it on the image that they build, so
 the pre-push hook runs it. The script header lists the environment
 variables, for example `POSTGRES_IMAGE` for a mirror of the Postgres
@@ -632,8 +632,12 @@ custom operation has a generated endpoint and an extension file for its
 logic, and each entity has an extension file for its custom validation.
 Each operation has generated API tests that run against Postgres in a
 container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
-migration creates the schema in Postgres. A Dockerfile and a Compose
-file run the API with Postgres. For a local run without a Postgres
+migration creates the schema in Postgres. `uv run python -m app.cli
+seed` (or `DATABASE_SEED=true` at start) adds the seed records by ID,
+and fills an empty database with the mock records of the shared
+generator, the same records as in the Next.js and React apps. A
+Dockerfile and a Compose file run the API with Postgres and the seed
+records. For a local run without a Postgres
 server, set `DATABASE_URL=sqlite+aiosqlite:///./local.db` ([ADR
 0007](docs/adr/0007-local-database.md)). Pages and the UI are out of the scope of
 the binding. The binding is in `src/appgen/bindings/fastapi/`, and [ADR

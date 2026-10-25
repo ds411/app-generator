@@ -151,7 +151,7 @@ def test_the_fastapi_app_without_a_password_has_no_password_parts() -> None:
     assert "/sign-in" not in auth
     assert "class Credential" not in auth
     assert "hash_password" not in auth
-    assert "app/cli.py" not in files
+    assert "set-password" not in files["app/cli.py"]
     assert "credentials" not in files["migrations/versions/0001_schema.py"]
     assert "Credential" not in files["app/models.py"]
     assert 'ProviderName = Literal["company", "partner"]\n' in files["app/core/providers.py"]

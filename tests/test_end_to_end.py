@@ -21,12 +21,10 @@ runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI.
-# FastAPI excludes the seed until it uses it (ADR 0021).
-SEED = ["entity_seed", "seed_record"]
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": [],
     "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule"],
-    "fastapi": sorted(["page", "ui", *SEED]),
+    "fastapi": ["page", "ui"],
 }
 
 # The stubs that each app has after a first run: the custom operations,

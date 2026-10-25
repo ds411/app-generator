@@ -1,0 +1,103 @@
+{{ trace_header("app") }}
+{% set password = definition.auth and definition.auth.password %}
+"""The seed of the database (ADR 0021): the records that the app starts with.
+
+`uv run python -m app.cli seed` runs the seed, and the app runs it when
+it starts with `DATABASE_SEED=true`. The seed records of the definition
+go in by ID: the seed adds each one that the database does not have, and
+changes no record that exists. The generated records go in only if all
+tables are empty. The seed inserts the tables in the order of their
+required foreign keys, and sets the optional foreign keys after all
+inserts. An insert skips a row whose ID exists, so two processes that
+start at the same time do not fail. `app/core/seed_data.py` holds the
+rows.
+"""
+
+from uuid import UUID
+
+from sqlalchemy import Insert, Table, func, select, update
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.ext.asyncio import AsyncSession
+
+{% if password %}
+from app.core.auth import Credential, hash_password
+{% endif %}
+from app.core.db import Base
+from app.core.seed_data import JOINS, TABLES, Row
+
+
+{% if password %}
+async def seed_database(session: AsyncSession, password: str = "") -> int:
+    """Add the seed records, and return the number of records that the seed adds.
+
+    With a password, each new seed user can sign in with this password.
+    """
+{% else %}
+async def seed_database(session: AsyncSession) -> int:
+    """Add the seed records, and return the number of records that the seed adds."""
+{% endif %}
+    tables = Base.metadata.tables
+    names = [seed.name for seed in TABLES] + [join.name for join in JOINS]
+    empty = all([await _count(session, tables[name]) == 0 for name in names])
+    added: dict[str, set[UUID]] = {}
+    count = 0
+    for seed in TABLES:
+        table = tables[seed.name]
+        added[seed.name] = await _insert_new(session, table, seed.records)
+        count += len(added[seed.name])
+        if empty:
+            count += len(await _insert_new(session, table, seed.rows))
+    for seed in TABLES:
+        for link in seed.record_links:
+            if link["id"] in added[seed.name]:
+                await _link(session, tables[seed.name], link)
+    for join in JOINS:
+        rows = [row for row in join.records if row[join.column] in added[join.owner]]
+        if rows:
+            await session.execute(_insert_or_skip(session, tables[join.name]), rows)
+    if empty:
+        for seed in TABLES:
+            for link in seed.links:
+                await _link(session, tables[seed.name], link)
+        for join in JOINS:
+            if join.rows:
+                await session.execute(_insert_or_skip(session, tables[join.name]), join.rows)
+{% if password %}
+    users = next(seed for seed in TABLES if seed.name == {{ py_seed.user_table | tojson }})
+    new_users = [*added[users.name], *(row["id"] for row in users.rows if empty)]
+    if password and new_users:
+        {{ trace(definition.auth.id) }}
+        credentials = [
+            {"user_id": user_id, "password_hash": hash_password(password)} for user_id in new_users
+        ]
+        table = tables[Credential.__tablename__]
+        await session.execute(_insert_or_skip(session, table), credentials)
+{% endif %}
+    await session.commit()
+    return count
+
+
+async def _count(session: AsyncSession, table: Table) -> int:
+    return await session.scalar(select(func.count()).select_from(table)) or 0
+
+
+def _insert_or_skip(session: AsyncSession, table: Table) -> Insert:
+    """Return an insert that skips each row whose primary key exists."""
+    keys = [column.name for column in table.primary_key.columns]
+    if session.get_bind().dialect.name == "postgresql":
+        return postgresql.insert(table).on_conflict_do_nothing(index_elements=keys)
+    return sqlite.insert(table).on_conflict_do_nothing(index_elements=keys)
+
+
+async def _insert_new(session: AsyncSession, table: Table, rows: list[Row]) -> set[UUID]:
+    """Insert the rows with a new ID, and return their IDs."""
+    if not rows:
+        return set()
+    result = await session.execute(_insert_or_skip(session, table).returning(table.c.id), rows)
+    return set(result.scalars())
+
+
+async def _link(session: AsyncSession, table: Table, link: Row) -> None:
+    """Set the optional foreign keys of a row."""
+    values = {key: value for key, value in link.items() if key != "id"}
+    await session.execute(update(table).where(table.c.id == link["id"]).values(values))
