@@ -234,7 +234,14 @@ a long random text in each environment.
   {{ definition.auth.password_reset.token_minutes }} minutes and one time. `PASSWORD_RESET_URL` is the page of
   the front end in the link.
 {% endif %}
-{% if py.message_elements %}
+{% if py.smtp %}
+- The app sends the messages with the links as emails with the SMTP
+  server of `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_FROM` (the sender), and `SMTP_TLS` (`starttls`, `tls`, or
+  `none`). Without `SMTP_HOST`, the links go to the log with
+  `ENVIRONMENT=development`, and the endpoints that send a message give
+  501 in production.
+{% elif py.message_elements %}
 - Write the delivery of the messages with the links (for example an
   email) in `app/core/messages_ext.py`. Until then, the links go to the
   log with `ENVIRONMENT=development`, and the endpoints that send a

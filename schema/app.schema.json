@@ -911,6 +911,15 @@
           ],
           "default": null
         },
+        "delivery": {
+          "default": "extension",
+          "enum": [
+            "extension",
+            "smtp"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
         "password": {
           "default": true,
           "title": "Password",

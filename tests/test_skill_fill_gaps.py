@@ -22,6 +22,7 @@ FILL_GAPS = SKILL / "references" / "fill-gaps.md"
 SECTIONS = {"nextjs": "Next.js", "react": "React", "fastapi": "FastAPI"}
 DEFINITIONS = [
     *sorted((ROOT / "examples").glob("*/app.yaml")),
+    ROOT / "tests" / "fixtures" / "account-security.yaml",
     ROOT / "tests" / "fixtures" / "react-gaps.yaml",
     ROOT / "tests" / "fixtures" / "secret-api.yaml",
     ROOT / "tests" / "fixtures" / "api-views.yaml",

@@ -288,17 +288,22 @@ BINDING = Binding(
         ),
         # One delivery hook for the messages of the password reset and of the verification of
         # the email address (ADR 0023).
-        *(
-            Output(
-                template=template,
-                path=path,
-                when=_MESSAGES,
-                extension=template.endswith(".ext.ts.j2"),
-            )
-            for template, path in (
-                ("src/shared/auth/messages.ts.j2", "src/shared/auth/messages.ts"),
-                ("src/shared/auth/messages.ext.ts.j2", "src/shared/auth/messages.ext.ts"),
-            )
+        # With `auth.delivery: smtp`, `mail.ts` sends them, and the hook is not there.
+        Output(
+            template="src/shared/auth/messages.ts.j2",
+            path="src/shared/auth/messages.ts",
+            when=_MESSAGES,
+        ),
+        Output(
+            template="src/shared/auth/messages.ext.ts.j2",
+            path="src/shared/auth/messages.ext.ts",
+            when=f"not nextjs.smtp and {_MESSAGES}",
+            extension=True,
+        ),
+        Output(
+            template="src/shared/auth/mail.ts.j2",
+            path="src/shared/auth/mail.ts",
+            when="nextjs.smtp",
         ),
         *(
             Output(template=template, path=path, when=_VERIFY_EMAIL)

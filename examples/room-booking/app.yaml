@@ -377,6 +377,9 @@ auth:
     verify_email: true
   password_reset:
     token_minutes: 30
+  # The app sends the reset links and the verification links as emails
+  # with an SMTP server (SMTP_HOST).
+  delivery: smtp
   # The members can also sign in with the account of the company. A first
   # sign-in makes a new member.
   providers:

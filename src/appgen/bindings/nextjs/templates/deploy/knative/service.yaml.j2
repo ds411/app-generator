@@ -53,10 +53,23 @@ spec:
             # Cloud Run adds the address of the client to the end of X-Forwarded-For.
             - name: RATE_LIMIT_TRUSTED_HOPS
               value: "1"
-{% if definition.auth and (definition.auth.password_reset or definition.auth.providers) %}
+{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email)) %}
             # The URL of the app for the browsers.
             - name: PUBLIC_URL
               value: https://app.example.com
+{% endif %}
+{% if nextjs.smtp %}
+            # The SMTP server of the messages of the sign-in.
+            - name: SMTP_HOST
+              value: smtp.example.com
+            - name: SMTP_PORT
+              value: "587"
+            - name: SMTP_USERNAME
+              value: no-reply@example.com
+            - name: SMTP_FROM
+              value: no-reply@example.com
+            - name: SMTP_TLS
+              value: starttls
 {% endif %}
 {% if definition.auth %}
 {% for provider, p in definition.auth.providers.items() %}
@@ -97,6 +110,13 @@ spec:
                 secretKeyRef:
                   name: {{ name }}-auth-secret
                   key: latest
+{% if nextjs.smtp %}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-smtp-password
+                  key: latest
+{% endif %}
 {% for p in definition.auth.providers.values() %}
             {{ trace(p.id) }}
             - name: {{ p.client_secret_env }}

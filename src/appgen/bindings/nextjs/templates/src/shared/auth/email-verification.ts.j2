@@ -14,7 +14,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
 
 import { emailVerificationMessage } from "./messages";
-import { deliverMessage } from "./messages.ext";
+import { deliverMessage } from "{{ "./mail" if nextjs.smtp else "./messages.ext" }}";
 import { publicUrl, sign } from "./session";
 
 // The verification of the email address of a new user (ADR 0023). A

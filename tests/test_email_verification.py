@@ -180,8 +180,13 @@ def api_text() -> str:
     return EXAMPLE.read_text().replace("app:\n", "app:\n  x-react-data: api\n", 1)
 
 
+def hook_text() -> str:
+    """Return the room booking example with the delivery hook, not the delivery by SMTP."""
+    return EXAMPLE.read_text().replace("  delivery: smtp\n", "")
+
+
 def test_the_nextjs_app_has_the_verification_page_with_the_token_rules_of_the_api() -> None:
-    files = front_end_files(nextjs.BINDING)
+    files = front_end_files(nextjs.BINDING, hook_text())
     assert "<VerifyEmailForm token=" in files["app/verify-email/page.tsx"]
     verification = files["src/shared/auth/email-verification.ts"]
     # The same rules as the FastAPI app: its own prefix, an end time, and the tag of the address.
@@ -238,7 +243,7 @@ def test_the_react_app_has_the_verification_page_only_with_the_api() -> None:
 
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
 def test_without_the_verification_the_sign_up_signs_in_at_once(binding: Binding) -> None:
-    text = EXAMPLE.read_text().replace("    verify_email: true\n", "")
+    text = hook_text().replace("    verify_email: true\n", "")
     files = front_end_files(binding, text.replace("app:\n", "app:\n  x-react-data: api\n", 1))
     assert not [path for path in files if "email-verification" in path or "verify-email" in path]
     assert "setSent" not in files["src/features/sign-up/ui/sign-up-form.tsx"]
@@ -251,11 +256,13 @@ def test_without_the_verification_the_sign_up_signs_in_at_once(binding: Binding)
 
 
 def test_the_check_of_the_nextjs_app_reports_the_delivery_as_a_gap(tmp_path: Path) -> None:
+    source, out = tmp_path / "app.yaml", tmp_path / "out"
+    source.write_text(hook_text())
     runner = CliRunner()
-    args = ["generate", str(EXAMPLE), "-b", "nextjs", "-o", str(tmp_path)]
+    args = ["generate", str(source), "-b", "nextjs", "-o", str(out)]
     generated = runner.invoke(app, args)
     assert generated.exit_code == 0, generated.output
-    result = runner.invoke(app, ["check", str(EXAMPLE), str(tmp_path), "-f", "json"])
+    result = runner.invoke(app, ["check", str(source), str(out), "-f", "json"])
     report = json.loads(result.output)
     gaps = {g["id"] for g in report["gaps"]}
     assert {"auth.password_reset", "auth.sign_up.verify_email"} <= gaps

@@ -82,3 +82,9 @@ SECOND_FACTOR_PACKAGES: dict[str, str] = {"uqr": "0.1.3"}
 
 `uqr` makes the QR code of the secret in the browser, without a service on the network.
 """
+
+SMTP_PACKAGES: dict[str, str] = {"nodemailer": "10.1.0"}
+"""The packages of the delivery of the messages by SMTP (`auth.delivery: smtp`, ADR 0017).
+
+`nodemailer` has its own TypeScript types.
+"""

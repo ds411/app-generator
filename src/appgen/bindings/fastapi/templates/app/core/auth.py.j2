@@ -71,8 +71,13 @@ from app.core.errors import ProblemError, problem_responses
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
+{% if py.smtp %}
+from app.core.mail import deliver_message
+{% endif %}
 {% if py.message_elements %}
 {{ py.from_import("app.core.messages", (["password_reset_message"] if reset else []) + (["email_verification_message"] if verify else [])) }}
+{% endif %}
+{% if py.message_elements and not py.smtp %}
 from app.core.messages_ext import deliver_message
 {% endif %}
 {% if sign_up %}

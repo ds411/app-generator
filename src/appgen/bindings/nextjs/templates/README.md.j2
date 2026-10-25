@@ -201,7 +201,14 @@ secrets unreadable, and the users sign in with a recovery code. To turn
 off the factor of a user who lost the codes, set `totp_enabled_at` of
 the user in the table `credentials` to null.
 {% endif %}
-{% if definition.auth.password_reset or (definition.auth.sign_up and definition.auth.sign_up.verify_email) %}
+{% if nextjs.smtp %}
+The app sends the messages with the links as emails with the SMTP
+server of `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+`SMTP_FROM` (the sender), and `SMTP_TLS` (`starttls`, `tls`, or `none`).
+Without `SMTP_HOST`, the app writes the links to the log with
+`ENVIRONMENT=development`. Set `PUBLIC_URL` to the URL of the app for
+the browsers: the links use it.
+{% elif definition.auth.password_reset or (definition.auth.sign_up and definition.auth.sign_up.verify_email) %}
 Write the delivery of the messages (for example an email) in
 `src/shared/auth/messages.ext.ts`. Until then, with
 `ENVIRONMENT=development`, the app writes the links to the log. Set

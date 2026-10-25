@@ -56,11 +56,29 @@ without new packages and with no table except `credentials`.
   delivery. (Update for ADR 0023: one hook delivers the messages of all
   kinds, `app/core/messages_ext.py` in the FastAPI app and
   `src/shared/auth/messages.ext.ts` in the Next.js app.)
+- Update: `auth.delivery: smtp` replaces the hook with a delivery by
+  SMTP, so that an app that sends plain emails needs no code of its own.
+  The default stays `extension`. With `smtp`, the FastAPI app has
+  `app/core/mail.py` (`smtplib` in a thread, because `smtplib` blocks),
+  and the Next.js app has `src/shared/auth/mail.ts` (the package
+  `nodemailer`). Both are generated files with `@trace` traces, so the
+  trace check reports no gap. The settings `SMTP_HOST`, `SMTP_PORT`,
+  `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, and `SMTP_TLS`
+  (`starttls`, `tls`, or `none`) select the server. Without
+  `SMTP_HOST`, the apps keep the behavior of the stub: the log in
+  development, and an error in production. The address of an email is
+  the email field of the user (`AppDefinition.address_field`), so the
+  validator gives an error for `smtp` without one. The room booking
+  example uses `smtp`, and `scripts/check-auth-ui.sh` reads the links in
+  the emails of the mock SMTP server `scripts/mock_smtp.py`.
 
 ## Consequences
 
 - The trace check reports the delivery as an open gap until a developer
-  writes it.
+  writes it, or until the definition selects `delivery: smtp`.
+- A delivery by SMTP needs a server and its settings in each
+  environment. A mail service with only an HTTP API still needs the
+  hook (`delivery: extension`).
 - A token stays valid until it ends or the password changes. A second
   request gives a second valid token: both are valid until the password
   changes.
