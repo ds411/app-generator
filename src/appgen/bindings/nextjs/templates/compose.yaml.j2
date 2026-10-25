@@ -2,6 +2,11 @@
 # Run the app with a Postgres database: docker compose up --build
 # The app applies the migrations in drizzle/ when it starts, and fills
 # the empty tables with the seed records.
+{% if nextjs.redis %}
+# With Redis for the rate limit of all replicas:
+#   RATE_LIMIT_PER_MINUTE=1200 RATE_LIMIT_STORE_URL=redis://redis:6379/0 \
+#     docker compose --profile redis up --build
+{% endif %}
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:18-alpine}
@@ -23,6 +28,12 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/{{ app.name | snake }}
       DATABASE_MIGRATE: "true"
       DATABASE_SEED: "true"
+      # The requests of each client in each minute. A page view makes 10 to
+      # 25 requests, so local runs have no limit (0) by default.
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
+{% if nextjs.redis %}
+      RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
+{% endif %}
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
@@ -51,6 +62,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+{% if nextjs.redis %}
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:8-alpine}
+    profiles: [redis]
+{% endif %}
 
 volumes:
   db-data:

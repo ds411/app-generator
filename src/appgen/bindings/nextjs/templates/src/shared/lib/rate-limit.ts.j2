@@ -1,0 +1,274 @@
+{{ trace_header("app") }}
+// A limit on the number of requests of each client in each minute (ADR
+// 0013). `proxy.ts` calls `limitRate` before each page, server action, and
+// route handler. RATE_LIMIT_PER_MINUTE sets the limit (0, the default,
+// sets no limit).
+{% if nextjs.redis %}
+//
+// The counts are in the memory of the process, or in Redis with
+// RATE_LIMIT_STORE_URL. In memory, each process or replica counts on its
+// own, so the limit of the app is the limit of one process times the
+// number of processes. In Redis, all processes that use the same Redis
+// share the counts, so the limit is the same for any number of replicas.
+{% else %}
+//
+// The counts are in the memory of the process. With more than one process
+// or replica, each one counts on its own, so the limit of the app is the
+// limit of one process times the number of processes.
+{% endif %}
+{% if i18n %}
+import { AsyncLocalStorage } from "node:async_hooks";
+
+{% endif %}
+{% if nextjs.redis %}
+import { createClient } from "@redis/client";
+{% endif %}
+import { type NextRequest, NextResponse } from "next/server";
+{% if i18n %}
+
+import { LANGUAGE_COOKIE, type Language, languages, matchLanguage } from "@/shared/lib/i18n";
+{% endif %}
+
+const WINDOW_SECONDS = 60;
+/** The paths without a limit, for the health checks of the platform. */
+const EXEMPT_PATHS = new Set(["/health"]);
+{% if nextjs.redis %}
+/** Redis must answer in this time, so that a slow Redis does not stop the app. */
+const STORE_TIMEOUT_MS = 1000;
+{% endif %}
+
+/** If a request is allowed, the remaining requests, and the seconds until the next window. */
+export type Hit = { allowed: boolean; remaining: number; wait: number };
+
+function hitOf(limit: number, count: number, window: number, now: number): Hit {
+  const wait = Math.ceil((window + 1) * WINDOW_SECONDS - now);
+  return { allowed: count <= limit, remaining: Math.max(limit - count, 0), wait };
+}
+
+/** Count the requests of each client in fixed windows of one minute{{ ", in memory" if nextjs.redis }}. */
+export class MemoryLimiter {
+  private window = -1;
+  private readonly counts = new Map<string, number>();
+
+  constructor(
+    readonly limit: number,
+    private readonly clock: () => number = Date.now,
+  ) {}
+
+  /** Count one request. */
+  hit(client: string): Hit {
+    const now = this.clock() / 1000;
+    const window = Math.floor(now / WINDOW_SECONDS);
+    if (window !== this.window) {
+      this.window = window;
+      this.counts.clear();
+    }
+    const count = (this.counts.get(client) ?? 0) + 1;
+    this.counts.set(client, count);
+    return hitOf(this.limit, count, window, now);
+  }
+}
+{% if nextjs.redis %}
+
+/** Make the client of Redis. It connects again by itself when the connection breaks. */
+function redisClient(url: string) {
+  const client = createClient({
+    url,
+    // A request does not wait while the client connects again.
+    disableOfflineQueue: true,
+    socket: {
+      connectTimeout: STORE_TIMEOUT_MS,
+      reconnectStrategy: (retries: number) => Math.min(100 * (retries + 1), 2000),
+    },
+  });
+  // `hit` logs the errors of the requests.
+  client.on("error", () => undefined);
+  return client;
+}
+
+type RedisClient = ReturnType<typeof redisClient>;
+
+/** Wait for a promise of Redis, at most STORE_TIMEOUT_MS. */
+async function withTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Redis did not answer in ${STORE_TIMEOUT_MS} ms.`)), STORE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Count the requests of each client in fixed windows of one minute, in Redis.
+ *
+ * The windows start at the full minutes of the clock, so that all
+ * processes use the same windows. One transaction counts a request and
+ * sets the end of its count. When Redis is not available, the limiter
+ * logs a warning, at most once in each window, and returns undefined. The
+ * client connects again by itself.
+ */
+export class RedisLimiter {
+  private client: Promise<RedisClient> | undefined;
+  private warned = -1;
+
+  constructor(
+    readonly limit: number,
+    private readonly url: string,
+    private readonly clock: () => number = Date.now,
+  ) {}
+
+  /** Connect on the first request, and wait at most STORE_TIMEOUT_MS for the first connection. */
+  private connect(): Promise<RedisClient> {
+    if (!this.client) {
+      const client = redisClient(this.url);
+      this.client = withTimeout(client.connect()).then(
+        () => client,
+        () => client,
+      );
+    }
+    return this.client;
+  }
+
+  /** Count one request. Return undefined if Redis is not available. */
+  async hit(client: string): Promise<Hit | undefined> {
+    const now = this.clock() / 1000;
+    const window = Math.floor(now / WINDOW_SECONDS);
+    const key = `rate-limit:${window}:${client}`;
+    try {
+      const redis = await this.connect();
+      const [count] = await withTimeout(redis.multi().incr(key).expire(key, WINDOW_SECONDS).exec());
+      return hitOf(this.limit, Number(count), window, now);
+    } catch (error) {
+      if (this.warned !== window) {
+        this.warned = window;
+        console.warn(`The rate limit store is not available: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return undefined;
+    }
+  }
+}
+{% endif %}
+
+/**
+ * The address of the client: the first of the addresses that the trusted
+ * proxies add to the end of X-Forwarded-For. Next.js sets the header to
+ * the address of the connection when the request has none. `hops` is
+ * RATE_LIMIT_TRUSTED_HOPS (default 1). The addresses before them come
+ * from the client, so the limit does not use them.
+ */
+export function clientAddress(forwardedFor: string | null, hops: number): string {
+  const addresses = (forwardedFor ?? "")
+    .split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
+  return addresses[Math.max(addresses.length - Math.max(hops, 1), 0)] ?? "unknown";
+}
+
+type Settings = {
+  limiter: {{ "MemoryLimiter | RedisLimiter" if nextjs.redis else "MemoryLimiter" }} | undefined;
+  hops: number;
+{% if nextjs.redis %}
+  failClosed: boolean;
+{% endif %}
+};
+
+let settings: Settings | undefined;
+
+/** Read the settings of the limit once, on the first request. */
+function rateLimitSettings(): Settings {
+  if (!settings) {
+    const limit = Number.parseInt(process.env.RATE_LIMIT_PER_MINUTE ?? "", 10) || 0;
+{% if nextjs.redis %}
+    const store = process.env.RATE_LIMIT_STORE_URL;
+    let limiter: Settings["limiter"];
+    if (limit > 0) {
+      limiter = store ? new RedisLimiter(limit, store) : new MemoryLimiter(limit);
+    }
+{% else %}
+    const limiter = limit > 0 ? new MemoryLimiter(limit) : undefined;
+{% endif %}
+    const hops = Number.parseInt(process.env.RATE_LIMIT_TRUSTED_HOPS ?? "", 10) || 1;
+{% if nextjs.redis %}
+    settings = { limiter, hops, failClosed: process.env.RATE_LIMIT_FAIL_CLOSED === "true" };
+{% else %}
+    settings = { limiter, hops };
+{% endif %}
+  }
+  return settings;
+}
+{% if i18n %}
+
+// The texts of the responses use the language of the request, as the pages
+// do (see `src/shared/lib/i18n-server.ts`).
+const languageStore: AsyncLocalStorage<Language> = ((
+  globalThis as { __appLanguage?: AsyncLocalStorage<Language> }
+).__appLanguage ??= new AsyncLocalStorage<Language>());
+
+function requestLanguage(request: NextRequest): Language {
+  const stored = request.cookies.get(LANGUAGE_COOKIE)?.value;
+  const found = languages.find((language) => language.code === stored);
+  return found ? found.code : matchLanguage(request.headers.get("accept-language"));
+}
+{% endif %}
+
+function textResponse(text: string, status: number, headers: Record<string, string>): NextResponse {
+  return new NextResponse(text, {
+    status,
+    headers: { "content-type": "text/plain; charset=utf-8", ...headers },
+  });
+}
+
+/**
+ * Count a request, and return the response of the proxy: the next step with
+ * the headers of the limit, or 429 Too Many Requests with Retry-After when
+ * the client sent more than the limit.
+ */
+{% if nextjs.redis %}
+export async function limitRate(request: NextRequest): Promise<NextResponse> {
+  const { limiter, hops, failClosed } = rateLimitSettings();
+{% else %}
+export function limitRate(request: NextRequest): NextResponse {
+  const { limiter, hops } = rateLimitSettings();
+{% endif %}
+  if (!limiter || EXEMPT_PATHS.has(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+  const hit = {{ "await " if nextjs.redis }}limiter.hit(clientAddress(request.headers.get("x-forwarded-for"), hops));
+{% if i18n %}
+  const language = requestLanguage(request);
+{% endif %}
+{% if nextjs.redis %}
+  if (!hit) {
+    if (!failClosed) {
+      return NextResponse.next();
+    }
+{% if i18n %}
+    const text = languageStore.run(language, () => {{ tr(js("The store of the rate limit is not available. Try again later.")) }});
+{% else %}
+    const text = {{ js("The store of the rate limit is not available. Try again later.") }};
+{% endif %}
+    return textResponse(text, 503, {});
+  }
+{% endif %}
+  const headers = {
+    "x-ratelimit-limit": String(limiter.limit),
+    "x-ratelimit-remaining": String(hit.remaining),
+  };
+  if (hit.allowed) {
+    const response = NextResponse.next();
+    for (const [name, value] of Object.entries(headers)) {
+      response.headers.set(name, value);
+    }
+    return response;
+  }
+  const limit = limiter.limit;
+{% if i18n %}
+  const text = languageStore.run(language, () => {{ js_format("Send not more than {limit} requests in each minute.", limit="limit") }});
+{% else %}
+  const text = {{ js_format("Send not more than {limit} requests in each minute.", limit="limit") }};
+{% endif %}
+  return textResponse(text, 429, { "retry-after": String(hit.wait), ...headers });
+}

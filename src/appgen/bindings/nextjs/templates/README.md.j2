@@ -67,7 +67,92 @@ in production.
 seed records when it starts.
 The `Dockerfile` builds a standalone Next.js server that runs as a
 non-root user. If `drizzle/` does not exist, the build writes the first
-migration from the schema.
+migration from the schema. `node migrate.mjs` in the image applies the
+migrations and stops.
+
+## Production
+
+{% set name = app.name ~ "-web" %}
+- Health: `/health` gives `{"status":"ok"}` while the database answers,
+  else 503. The probes of the deployment files use it.
+- Rate limits: `RATE_LIMIT_PER_MINUTE` sets the number of requests that
+  each client address can send in each minute (0, the default, sets no
+  limit). `proxy.ts` counts the pages, the server actions, and the route
+  handlers, but not the static files and `/health`. Over the limit, the
+  app gives 429 with `Retry-After`. A page view makes 10 to 25 requests
+  (the page, the prefetches of its links, and the data of its views), so
+  the deployment files set 1200, and Compose sets no limit.
+{% if nextjs.redis %}
+  The counts are in the memory of each process, or in Redis with
+  `RATE_LIMIT_STORE_URL` (for example `redis://localhost:6379/0`): then
+  all replicas share one limit. When Redis is not available, the app
+  logs a warning and lets the requests through, or gives 503 with
+  `RATE_LIMIT_FAIL_CLOSED=true`. Compose starts Redis with
+  `--profile redis`.
+{% else %}
+  The counts are in the memory of each process, so each replica has its
+  own limit.
+{% endif %}
+- The client address: the app counts by the address that the proxy in
+  front of the app (an ingress, a load balancer, or Cloud Run) adds to
+  the end of `X-Forwarded-For`. `RATE_LIMIT_TRUSTED_HOPS` (default 1)
+  is the number of addresses that your proxies add: set 2 behind a load
+  balancer of Google Cloud, which adds the address of the client and its
+  own address. Clients must reach the app only through the proxy, else
+  a client can send any `X-Forwarded-For`.
+{% if "kubernetes" in nextjs.deploy %}
+- Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
+  Deployment (2 replicas, a non-root user, a read-only file system), a
+  Service, and a Job that applies the migrations. The database is
+  outside the cluster. Push the image, set its name in
+  `kustomization.yaml`, copy `secret.example.env` to `secret.env`, and
+  set the values. Then run
+  `kubectl delete job {{ name }}-migrate --ignore-not-found` and
+  `kubectl apply -k deploy/kubernetes`.
+{% endif %}
+{% if "knative" in nextjs.deploy %}
+{% set image = "registry.example.com/" ~ name ~ ":0.1.0" %}
+{# The secrets of deploy/knative/service.yaml: each one is a secret of its own. #}
+{% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if nextjs.redis else [])
+    + (["AUTH_SECRET"] if definition.auth else [])
+    + ((definition.auth.providers.values() | map(attribute="client_secret_env") | list) if definition.auth else [])
+    + (ts_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
+- Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
+  Knative Service (0 to 10 instances, the probes, and the resource
+  limits), and Cloud Run accepts the same file. Push the image, and set
+  its name in `service.yaml` and `migrate-job.yaml`. Each secret is a
+  secret of its own, with the key (Knative) or the version (Cloud Run)
+  `latest`. Apply the migrations before each deployment of a new image.
+  On a cluster with Knative Serving:
+
+  ```sh
+{% for env in secrets %}
+  kubectl create secret generic {{ name }}-{{ env | lower | replace("_", "-") }} --from-literal=latest='<{{ env }}>'
+{% endfor %}
+  kubectl delete job {{ name }}-migrate --ignore-not-found
+  kubectl apply -f deploy/knative/migrate-job.yaml
+  kubectl wait --for=condition=complete job/{{ name }}-migrate --timeout=10m
+  kubectl apply -f deploy/knative/service.yaml
+  ```
+
+  On Cloud Run, a Cloud Run job applies the migrations. The database
+  must accept connections from Cloud Run, and the service account of the
+  service and of the job must have access to the secrets:
+
+  ```sh
+{% for env in secrets %}
+  printf %s '<{{ env }}>' | gcloud secrets create {{ name }}-{{ env | lower | replace("_", "-") }} --data-file=-
+{% endfor %}
+  gcloud run jobs deploy {{ name }}-migrate --image {{ image }} \
+    --command node --args migrate.mjs \
+    --set-secrets DATABASE_URL={{ name }}-database-url:latest --execute-now --wait
+  gcloud run services replace deploy/knative/service.yaml
+  ```
+
+  A new Cloud Run service accepts only requests with a Google sign-in.
+  For a public app, run `gcloud run services add-iam-policy-binding
+  {{ name }} --member=allUsers --role=roles/run.invoker`.
+{% endif %}
 {% if definition.auth %}
 
 ## Sign-in

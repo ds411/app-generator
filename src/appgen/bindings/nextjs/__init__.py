@@ -9,21 +9,26 @@ route renders the page of its slice in `src/pages`.
 """
 
 from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import Field
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs import db
-from appgen.bindings.nextjs.model import FSD_LAYERS, context
+from appgen.bindings.nextjs.model import DEPLOY_KEY, FSD_LAYERS, RATE_LIMIT_STORE_KEY, context
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kinds
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
-from appgen.gen.binding import Binding, Output
+from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
+_DEPLOY_TARGET = Literal["kubernetes", "knative"]
+"""A deployment target (`DEPLOY_TARGETS`)."""
 
 # The app shell: the layouts, the menus, the breadcrumbs, and the search
 # (shared templates, see `appgen.bindings.shared.ui`). Each layout with
@@ -141,6 +146,29 @@ BINDING = Binding(
         Output(template="Dockerfile.j2", path="Dockerfile"),
         Output(template="dockerignore.j2", path=".dockerignore"),
         Output(template="compose.yaml.j2", path="compose.yaml"),
+        *(
+            Output(
+                template=f"deploy/kubernetes/{name}.j2",
+                path=f"deploy/kubernetes/{name}",
+                when="'kubernetes' in nextjs.deploy",
+            )
+            for name in (
+                "kustomization.yaml",
+                "deployment.yaml",
+                "service.yaml",
+                "migrate-job.yaml",
+                "config.env",
+                "secret.example.env",
+            )
+        ),
+        *(
+            Output(
+                template=f"deploy/knative/{name}.j2",
+                path=f"deploy/knative/{name}",
+                when="'knative' in nextjs.deploy",
+            )
+            for name in ("service.yaml", "migrate-job.yaml")
+        ),
         Output(template="README.md.j2", path="README.md"),
         Output(template="root-pages-readme.md.j2", path="pages/README.md"),
         *(
@@ -188,6 +216,9 @@ BINDING = Binding(
         Output(template="src/shared/lib/theme.ts.j2", path="src/shared/lib/theme.ts"),
         Output(template="drizzle.config.ts.j2", path="drizzle.config.ts"),
         Output(template="instrumentation.ts.j2", path="instrumentation.ts"),
+        Output(template="proxy.ts.j2", path="proxy.ts"),
+        Output(template="src/shared/lib/rate-limit.ts.j2", path="src/shared/lib/rate-limit.ts"),
+        Output(template="app/health/route.ts.j2", path="app/health/route.ts"),
         Output(template="env.example.j2", path=".env.example"),
         Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
         Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
@@ -196,6 +227,7 @@ BINDING = Binding(
         Output(template="src/shared/db/seed.ts.j2", path="src/shared/db/seed.ts"),
         Output(template="src/shared/db/seed-data.ts.j2", path="src/shared/db/seed-data.ts"),
         Output(template="src/shared/db/run-seed.ts.j2", path="src/shared/db/run-seed.ts"),
+        Output(template="src/shared/db/run-migrate.ts.j2", path="src/shared/db/run-migrate.ts"),
         Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
         *(
             Output(
@@ -361,4 +393,25 @@ BINDING = Binding(
     | {"public_kinds": public_kinds, "kind_operations": kind_operations}
     | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys},
     stub_markers=("TODO(appgen)", "Not implemented yet"),
+    extension_keys=(
+        ExtensionKey(
+            name=RATE_LIMIT_STORE_KEY,
+            kinds=frozenset({"app"}),
+            type=Literal["memory", "redis"],
+            description=(
+                "The store of the rate limit: `memory` (default) or `redis`, which adds "
+                "the setting `RATE_LIMIT_STORE_URL`: all replicas share one limit."
+            ),
+        ),
+        ExtensionKey(
+            name=DEPLOY_KEY,
+            kinds=frozenset({"app"}),
+            type=_DEPLOY_TARGET | Annotated[list[_DEPLOY_TARGET], Field(min_length=1)],
+            description=(
+                "The deployment targets: `kubernetes` (default, Kustomize) or `knative` "
+                "(a Knative Service that Google Cloud Run accepts too), or a list of both."
+            ),
+        ),
+    ),
+    extension_prefix="x-nextjs-",
 )

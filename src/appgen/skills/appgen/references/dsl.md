@@ -1402,6 +1402,10 @@ use in the app does not show.
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.
+- The rate limit of the Next.js app:
+  `Send not more than {limit} requests in each minute.`, and with the
+  store in Redis
+  `The store of the rate limit is not available. Try again later.`.
 
 ### Messages of the FastAPI app
 

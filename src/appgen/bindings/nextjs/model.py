@@ -6,7 +6,7 @@ the templates do not compute them again in Jinja2.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import build_tables, seed_tables
@@ -20,6 +20,13 @@ from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
 from appgen.gen.naming import kebab, pascal
+
+RATE_LIMIT_STORE_KEY = "x-nextjs-rate-limit-store"
+"""The extension key of the app that selects the store of the rate limit: `memory` or `redis`."""
+DEPLOY_KEY = "x-nextjs-deploy"
+"""The extension key of the app that selects the deployment targets: one target or a list."""
+DEPLOY_TARGETS = ("kubernetes", "knative")
+"""The deployment targets, in the order of the README. `kubernetes` is the default."""
 
 FSD_LAYERS: tuple[tuple[str, str], ...] = (
     ("app", "The app layer: global styles, providers, and the app configuration."),
@@ -103,7 +110,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     """Return the content of `package.json`, with the packages sorted by name.
 
     The app gets the npm packages of the shadcn/ui components that it uses,
-    and with providers `jose` (ADR 0020).
+    with providers `jose` (ADR 0020), and with the rate limit in Redis
+    `@redis/client` (ADR 0013).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -115,6 +123,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.TABLE_PACKAGES
     if definition.auth is not None and definition.auth.providers:
         dependencies |= versions.PROVIDER_PACKAGES
+    if uses_redis(definition):
+        dependencies |= versions.REDIS_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,
@@ -126,6 +136,10 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         "scripts": {
             "dev": "next dev",
             "build": "next build",
+            "build:migrate": (
+                "esbuild src/shared/db/run-migrate.ts --bundle --platform=node --format=esm"
+                " --outfile=.next/migrate.mjs"
+            ),
             "start": "next start",
             "lint": "eslint --max-warnings 0",
             "typecheck": "next typegen && tsc --noEmit",
@@ -138,6 +152,20 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         "dependencies": dict(sorted(dependencies.items())),
         "devDependencies": dict(sorted(dev_dependencies.items())),
     }
+
+
+def uses_redis(definition: AppDefinition) -> bool:
+    """Return True if the rate limit can count in Redis (`RATE_LIMIT_STORE_URL`)."""
+    return definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis"
+
+
+def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
+    """Return the deployment targets in a fixed order (the key schema checks the names)."""
+    value = definition.app.extensions.get(DEPLOY_KEY)
+    if value is None:
+        return ("kubernetes",)
+    names = {value} if isinstance(value, str) else set(cast(list[str], value))
+    return tuple(target for target in DEPLOY_TARGETS if target in names)
 
 
 def context(definition: AppDefinition) -> dict[str, Any]:
@@ -177,5 +205,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
+            "redis": uses_redis(definition),
+            "deploy": deploy_targets(definition),
         },
     }

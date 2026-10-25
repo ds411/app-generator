@@ -2,9 +2,10 @@
 {{ trace_header("app") }}
 # Build the app with pnpm as a standalone Next.js server, and run it as a
 # non-root user on port 3000. Set DATABASE_URL, and DATABASE_MIGRATE=true
-# to apply the migrations in drizzle/ when the server starts. The build
-# argument NODE_IMAGE selects another image, for example a mirror of the
-# registry.
+# to apply the migrations in drizzle/ when the server starts. The command
+# `node migrate.mjs` applies the migrations and stops (the migration Job
+# of deploy/). The build argument NODE_IMAGE selects another image, for
+# example a mirror of the registry.
 
 ARG NODE_IMAGE=node:{{ nextjs.node_version }}-alpine
 
@@ -26,7 +27,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
 # The migrations belong to the app (pnpm db:generate). Without them, the
 # build writes the first migration from the schema.
 RUN if [ ! -d drizzle ]; then pnpm db:generate; fi
-RUN pnpm build
+RUN pnpm build && pnpm build:migrate
 
 FROM ${NODE_IMAGE} AS run
 WORKDIR /app
@@ -34,6 +35,7 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/drizzle ./drizzle
+COPY --from=build --chown=node:node /app/.next/migrate.mjs ./migrate.mjs
 USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

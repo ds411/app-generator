@@ -1,10 +1,11 @@
-"""Validate the deployment files of the FastAPI app against their schemas, without a cluster.
+"""Validate the deployment files of an app against their schemas, without a cluster.
 
-The FastAPI binding writes the files of each deployment target of the
-key `x-fastapi-deploy` (ADR 0013): `deploy/kubernetes/` (Kustomize) and
-`deploy/knative/` (a Knative Service that Google Cloud Run accepts). The
-script generates the two examples with both targets, one with the Redis
-store of the rate limit, and checks each file of `deploy/`:
+The FastAPI and the Next.js bindings write the files of each deployment
+target of the key `x-fastapi-deploy` or `x-nextjs-deploy` (ADR 0013):
+`deploy/kubernetes/` (Kustomize) and `deploy/knative/` (a Knative Service
+that Google Cloud Run accepts). The script generates the two examples
+with both targets, one with the Redis store of the rate limit, and
+checks each file of `deploy/`:
 
 - A Kubernetes object: the JSON schema of the Kubernetes API, strict, so
   that an unknown field is an error (yannh/kubernetes-json-schema).
@@ -12,9 +13,11 @@ store of the rate limit, and checks each file of `deploy/`:
   (datreeio/CRDs-catalog).
 - The Kustomization: the schema of SchemaStore. Its resources and env
   files must exist (`secret.env` as `secret.example.env`).
-- Each environment variable is a field of `Settings` in
-  `app/core/config.py`, and the Knative Service sets the same variables
-  as `config.env` and `secret.example.env` of Kubernetes.
+- Each environment variable is a setting of the app: a field of
+  `Settings` in `app/core/config.py` (FastAPI), or a `process.env` value
+  that the code reads, or `HOSTNAME` and `PORT` of the server (Next.js).
+  The files of the Knative target set the same variables as the files of
+  the Kubernetes target.
 - With gcloud installed: the Knative Service converts to the messages of
   the Cloud Run API without an unknown field, as in `gcloud run services
   replace`. Without gcloud, the script skips this step.
@@ -22,13 +25,14 @@ store of the rate limit, and checks each file of `deploy/`:
 The script downloads the schemas once, into a cache folder. Run it from
 the repository root:
 
-    uv run scripts/check_deploy_files.py
+    uv run scripts/check_deploy_files.py {fastapi,nextjs}
 
 Environment variables:
     KUBERNETES_VERSION    The version of the Kubernetes schemas (default v1.34.0).
     APPGEN_SCHEMA_CACHE   The folder of the schemas (default ~/.cache/appgen/schemas).
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -45,15 +49,24 @@ import yaml
 from jsonschema import Draft7Validator
 from jsonschema.validators import validator_for
 
-from appgen.bindings.fastapi.model import DEPLOY_KEY, RATE_LIMIT_STORE_KEY
+from appgen.bindings.fastapi import model as fastapi
+from appgen.bindings.nextjs import model as nextjs
 from appgen.dsl import load_definition_text
 from appgen.gen import find_binding, generate
 
-EXAMPLES = (
-    ("project-tracker", {DEPLOY_KEY: "[kubernetes, knative]"}),
-    ("room-booking", {DEPLOY_KEY: "[kubernetes, knative]", RATE_LIMIT_STORE_KEY: "redis"}),
-)
-"""The examples and the keys that the script adds to their `app` section."""
+EXAMPLES = {
+    binding: (
+        ("project-tracker", {model.DEPLOY_KEY: "[kubernetes, knative]"}),
+        (
+            "room-booking",
+            {model.DEPLOY_KEY: "[kubernetes, knative]", model.RATE_LIMIT_STORE_KEY: "redis"},
+        ),
+    )
+    for binding, model in (("fastapi", fastapi), ("nextjs", nextjs))
+}
+"""The examples of each binding, and the keys that the script adds to their `app` section."""
+NEXTJS_SERVER_SETTINGS = {"HOSTNAME", "PORT"}
+"""The settings that the standalone server of Next.js reads, not the code of the app."""
 KUBERNETES_SCHEMAS = "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master"
 CRDS_CATALOG = "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main"
 KNATIVE_SERVICE_SCHEMA = f"{CRDS_CATALOG}/serving.knative.dev/service_v1.json"
@@ -130,8 +143,11 @@ def validate(document: dict[str, Any], where: str) -> None:
         raise CheckError(f"{where} does not match {url}:\n  " + "\n  ".join(lines))
 
 
-def settings(files: dict[str, str]) -> set[str]:
+def settings(binding: str, files: dict[str, str]) -> set[str]:
     """Return the environment variables of the settings of the app."""
+    if binding == "nextjs":
+        code = "".join(c for path, c in files.items() if path.endswith((".ts", ".tsx")))
+        return set(re.findall(r"process\.env\.([A-Z_][A-Z0-9_]*)", code)) | NEXTJS_SERVER_SETTINGS
     config = files["app/core/config.py"].split("class Settings", 1)[1]
     return {name.upper() for name in re.findall(r"(?m)^    (\w+): ", config)}
 
@@ -185,7 +201,7 @@ def check_cloud_run(path: str, content: str) -> None:
         raise CheckError(f"Cloud Run does not accept {path}:\n  " + "\n  ".join(problem))
 
 
-def check(example: str, keys: dict[str, str]) -> None:
+def check(binding: str, example: str, keys: dict[str, str]) -> None:
     source = Path("examples") / example / "app.yaml"
     text = source.read_text()
     lines = "".join(f"  {key}: {value}\n" for key, value in keys.items())
@@ -193,11 +209,11 @@ def check(example: str, keys: dict[str, str]) -> None:
     if count != 1:
         raise CheckError(f"{source} has no 'app:' line.")
     # The path of the example, so that the loader finds the OpenAPI documents of `apis`.
-    result = generate(load_definition_text(text, str(source)), find_binding("fastapi"))
+    result = generate(load_definition_text(text, str(source)), find_binding(binding))
     files = {f.path: f.content for f in result.files}
     deploy = sorted(path for path in files if path.startswith("deploy/"))
     log(f"{example} with {', '.join(f'{k}: {v}' for k, v in keys.items())}: {len(deploy)} files")
-    known = settings(files)
+    known = settings(binding, files)
     targets: dict[str, set[str]] = {}
     for path in deploy:
         content = files[path]
@@ -215,8 +231,7 @@ def check(example: str, keys: dict[str, str]) -> None:
             unknown = sorted(names - known)
             if unknown:
                 raise CheckError(f"{path} sets variables that are not settings: {unknown}")
-            if path.endswith(".env") or path.endswith("knative/service.yaml"):
-                targets.setdefault(path.split("/")[1], set()).update(names)
+            targets.setdefault(path.split("/")[1], set()).update(names)
     if len(targets) > 1 and len(set(map(frozenset, targets.values()))) > 1:
         kubernetes, knative = targets["kubernetes"], targets["knative"]
         raise CheckError(
@@ -226,9 +241,12 @@ def check(example: str, keys: dict[str, str]) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("binding", choices=sorted(EXAMPLES))
+    binding = parser.parse_args().binding
     try:
-        for example, keys in EXAMPLES:
-            check(example, keys)
+        for example, keys in EXAMPLES[binding]:
+            check(binding, example, keys)
     except (CheckError, OSError, subprocess.CalledProcessError) as error:
         print(f"deploy-files: failed: {error}", file=sys.stderr)
         return 1

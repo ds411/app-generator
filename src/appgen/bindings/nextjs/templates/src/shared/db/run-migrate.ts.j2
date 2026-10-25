@@ -1,0 +1,23 @@
+{{ trace_header("app") }}
+// The migration Job of the deployment (deploy/): apply the migrations in
+// drizzle/ to the Postgres database of DATABASE_URL, and stop. The Docker
+// image has this script as `migrate.mjs` (`pnpm build:migrate` bundles
+// it), because the standalone server has no node_modules for it. For a
+// local database, use `pnpm db:migrate`.
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
+
+const url = process.env.DATABASE_URL;
+if (!url) {
+  console.error("Set DATABASE_URL to the connection URL of the Postgres database.");
+  process.exit(1);
+}
+// Without the notices of Postgres, for example that the table of the migrations exists.
+const client = postgres(url, { max: 1, onnotice: () => undefined });
+try {
+  await migrate(drizzle(client), { migrationsFolder: "drizzle" });
+  console.log("The migrations are applied.");
+} finally {
+  await client.end();
+}

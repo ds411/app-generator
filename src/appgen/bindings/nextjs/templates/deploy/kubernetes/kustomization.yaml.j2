@@ -1,0 +1,37 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+# Deploy the app to Kubernetes with Kustomize:
+#   cp secret.example.env secret.env    (and set the values)
+#   kubectl delete job {{ name }}-migrate --ignore-not-found
+#   kubectl apply -k deploy/kubernetes
+# The Job applies the migrations of Drizzle. A Job cannot change, so delete
+# the last Job before each deployment of a new image.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: {{ name }}
+    includeSelectors: true
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - migrate-job.yaml
+
+# Set the registry and the tag of the image that you push.
+images:
+  - name: {{ name }}
+    newName: registry.example.com/{{ name }}
+    newTag: "0.1.0"
+
+configMapGenerator:
+  - name: {{ name }}-config
+    envs:
+      - config.env
+
+secretGenerator:
+  - name: {{ name }}-secret
+    envs:
+      - secret.env

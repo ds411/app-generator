@@ -1,0 +1,18 @@
+{{ trace_header("app") }}
+import { sql } from "drizzle-orm";
+
+import { getDb } from "@/shared/db";
+
+// Each request checks the database, so the build does not render the route.
+export const dynamic = "force-dynamic";
+
+/** The health check of the app, for Docker and the probes of the platform: `ok` while the database answers. */
+export async function GET() {
+  try {
+    await getDb().execute(sql`select 1`);
+  } catch (error) {
+    console.error("The health check cannot reach the database:", error);
+    return Response.json({ status: "error" }, { status: 503 });
+  }
+  return Response.json({ status: "ok" });
+}

@@ -114,10 +114,10 @@ uv run --locked scripts/check_schema_change.py "$out"
 
 step "shared rate limit"
 rm -rf "$out-rate-limit"
-uv run --locked scripts/check_shared_rate_limit.py "$out-rate-limit"
+uv run --locked scripts/check_shared_rate_limit.py fastapi "$out-rate-limit"
 
 step "deployment files"
-uv run --locked scripts/check_deploy_files.py
+uv run --locked scripts/check_deploy_files.py fastapi
 
 step "generate $auth_definition in $auth_out"
 rm -rf "$auth_out"

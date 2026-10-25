@@ -254,8 +254,52 @@ The keys of the bindings of this repository:
 | `fastapi` | `x-fastapi-column` | `relation`      | The foreign key column of a `many_to_one` or owning `one_to_one` relation. |
 | `fastapi` | `x-fastapi-rate-limit-store` | `app` | `memory` (default) or `redis`: where the rate limit counts the requests. |
 | `fastapi` | `x-fastapi-deploy` | `app` | `kubernetes` (default), `knative`, or a list of both: the folders in `deploy/`. |
+| `nextjs`  | `x-nextjs-rate-limit-store` | `app` | `memory` (default) or `redis`: where the rate limit counts the requests. |
+| `nextjs`  | `x-nextjs-deploy` | `app`            | `kubernetes` (default), `knative`, or a list of both: the folders in `deploy/`. |
 | `react`   | `x-mock-count`    | `entity`         | An integer, 1 or more.        |
 | `react`   | `x-react-data`    | `app`            | `mock` (default) or `api`.    |
+
+### The rate limit and the deployment files
+
+The FastAPI app and the Next.js app have the same production settings
+([ADR 0013](adr/0013-fastapi-production.md)):
+
+```yaml
+app:
+  name: project-tracker
+  title: Project Tracker
+  x-nextjs-rate-limit-store: redis
+  x-nextjs-deploy: [kubernetes, knative]
+```
+
+- `RATE_LIMIT_PER_MINUTE` sets the requests that each client address
+  can send in each minute (0, the default, sets no limit). Over the
+  limit, the app gives 429 with `Retry-After` and a message in the
+  language of the request. `/health` has no limit. The FastAPI app counts
+  in a middleware. The Next.js app counts in `proxy.ts`, so the limit
+  applies to the pages, the server actions, and the route handlers, but
+  not to the static files.
+- With the store `redis`, `RATE_LIMIT_STORE_URL` selects Redis, and all
+  replicas share one limit. When Redis is not available, a request
+  passes and the app logs a warning, or gets 503 with
+  `RATE_LIMIT_FAIL_CLOSED=true`.
+- The client address of the Next.js app comes from `X-Forwarded-For`,
+  because the proxy of Next.js does not get the address of the
+  connection. `RATE_LIMIT_TRUSTED_HOPS` (default 1) is the number of
+  addresses that the proxies in front of the app add to the end of the
+  header. The app does not use the addresses that the client sends.
+- Each deployment target is a folder in `deploy/`: `kubernetes` (a
+  Deployment, a Service, a ConfigMap, an example Secret, and a Job for
+  the migrations, with Kustomize) and `knative` (a Knative Service that
+  Google Cloud Run accepts too, and a Job for the migrations). The probes
+  use `/health`, which checks the database. The Job of the Next.js app
+  runs `node migrate.mjs`: the migrations of Drizzle, in a script that
+  the image bundles with esbuild.
+- `scripts/check-fastapi.sh` and `scripts/check-nextjs.sh` start two
+  processes of the app with Redis, and check that they share the limit
+  (`scripts/check_shared_rate_limit.py`). They also validate the files of
+  each target against their JSON schemas, without a cluster
+  (`scripts/check_deploy_files.py`).
 
 ### The React app with the FastAPI app
 

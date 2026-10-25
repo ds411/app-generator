@@ -1,0 +1,48 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+# Apply the migrations of the database (drizzle/) once, on a cluster with
+# Knative, before each deployment of a new image:
+#   kubectl delete job {{ name }}-migrate --ignore-not-found
+#   kubectl apply -f deploy/knative/migrate-job.yaml
+#   kubectl wait --for=condition=complete job/{{ name }}-migrate --timeout=10m
+# Cloud Run applies the migrations with a Cloud Run job (README.md).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ name }}-migrate
+  labels:
+    app.kubernetes.io/name: {{ name }}
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ name }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      # The user `node` of the image.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # The image of service.yaml.
+          image: registry.example.com/{{ name }}:0.1.0
+          command: ["node", "migrate.mjs"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-database-url
+                  key: latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
