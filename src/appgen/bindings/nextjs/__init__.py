@@ -349,6 +349,8 @@ BINDING = Binding(
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
     ),
+    # The seed records (ADR 0021) are out of the scope until the seed holds them.
+    excludes=frozenset({"entity_seed", "seed_record"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

@@ -44,6 +44,7 @@ next step. One error can cause more errors later in the file.
 | `auth`         | No       | The sign-in: the user entity and the public parts.         | The users must sign in.                        |
 | `access`       | No       | Roles, and the operations and pages of each role. Needs `auth`. | The users have roles with different rights. |
 | `translations` | No       | The UI text in more than one language.                     | The app has more than one language.            |
+| `seed`         | No       | The records that the apps start with, by entity and record key. | The task gives data, for example a list of rooms. |
 
 A key that starts with `x-` is an extension key of a binding, for
 example `x-mock-count` (the number of mock records of the React app).

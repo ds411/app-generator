@@ -49,6 +49,8 @@ same diagnostics if the definition is not valid.
 | `missing-widget`       | A form field has no default widget, for example a `json` field.       | Set a `widget`, or `widget: custom` and write the widget by hand.   |
 | `invalid-document`     | The OpenAPI document of an API does not exist, is a URL, or is not valid OpenAPI 3.0 or 3.1. The message gives the line in the document. | Give the local path of the document, from the folder of the definition. Fix the document at the line, or copy a remote `$ref` into it. |
 | `unsuitable-security`  | The security scheme of an API is not an API key in a header or a query parameter, or a bearer token. | Use a scheme that the clients support, or call the API from hand-written code. |
+| `duplicate-value`      | Two seed records of an entity have the same value of a `unique` field or of the fields of a `unique` rule, a record has two partners in a `one_to_one` relation, or a list of keys has a key two times. | Give each record its own value. The message names the other record. |
+| `invalid-record`       | A seed record does not keep a `compare` or a `no_overlap` rule of its entity. The message gives the message of the rule. | Change the values of the record, so that it keeps the rule. |
 
 ## Problems of a trace check
 

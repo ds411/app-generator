@@ -345,7 +345,11 @@ BINDING = Binding(
         | {"api", "api_operation"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
-    excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
+    # The seed records (ADR 0021) are out of the scope until the mock data holds them.
+    excludes=frozenset(
+        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
+        | {"entity_seed", "seed_record"}
+    ),
     context=context,
     warnings=warnings,
     finish=finish,

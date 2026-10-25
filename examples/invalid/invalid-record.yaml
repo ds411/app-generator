@@ -1,0 +1,19 @@
+# expect: invalid-record
+version: 0
+app: { name: broken, title: Broken }
+entities:
+  Booking:
+    fields:
+      starts_on: { type: date, required: true }
+      ends_on: { type: date, required: true }
+    rules:
+      ends_after_start:
+        kind: compare
+        field: ends_on
+        op: gte
+        other: starts_on
+        message: The end must not be before the start.
+seed:
+  Booking:
+    records:
+      first: { starts_on: 2026-01-05, ends_on: 2026-01-04 }

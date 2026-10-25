@@ -276,7 +276,8 @@ BINDING = Binding(
         | {"api", "api_operation"}
         | {"translations", "language"}
     ),
-    excludes=frozenset({"page", "ui"}),
+    # The seed records (ADR 0021) are out of the scope until the app has a seed.
+    excludes=frozenset({"page", "ui", "entity_seed", "seed_record"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),
