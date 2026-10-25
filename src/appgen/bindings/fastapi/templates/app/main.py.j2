@@ -1,6 +1,7 @@
 {{ trace_header("app") }}
 """The entry point of the API: `create_app` makes the FastAPI app."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -38,6 +39,7 @@ from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 {% if sf %}
 from app.core.second_factor import router as second_factor_router
 {% endif %}
+from app.core.seed import seed_database
 {% for e in py.entity_order() | sort(attribute="slice") %}
 
 {{ trace(e.id) }}
@@ -50,10 +52,22 @@ from app.integrations.{{ api.module }}.router import router as {{ api.module }}_
 {% endfor %}
 from app.models import configure_models
 
+logger = logging.getLogger("app.seed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Close the connections of the database{{ " and of Redis" if py.redis }} when the app stops."""
+    """Add the seed records with DATABASE_SEED=true when the app starts. Close the
+    connections of the database{{ " and of Redis" if py.redis }} when the app stops."""
+    settings: Settings = app.state.settings
+    if settings.database_seed:
+        async with app.state.sessions() as session:
+{% if definition.auth and definition.auth.password %}
+            added = await seed_database(session, settings.seed_password)
+{% else %}
+            added = await seed_database(session)
+{% endif %}
+        logger.info("The seed added %d records.", added)
     yield
     await app.state.engine.dispose()
 {% if py.redis %}

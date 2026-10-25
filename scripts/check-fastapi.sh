@@ -14,9 +14,13 @@
 # tests/fixtures/provider-sign-in.yaml (only the sign-in with
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
-# Last, generate tests/fixtures/account-security.yaml (the verification
+# Then generate tests/fixtures/account-security.yaml (the verification
 # of the email address, the delivery hook of the messages, and the
-# second factor), and check its code and run its tests.
+# second factor), and check its code and run its tests. Last, generate
+# tests/fixtures/seed-data.yaml (seed records with a CSV data file),
+# check its code, and run its tests on SQLite and the test of its seed
+# on Postgres. The smoke test also runs the seed on Postgres: the app
+# starts with DATABASE_SEED=true.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -25,8 +29,8 @@
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The other apps go to the folders
 # "<output folder>-room-booking", "<output folder>-provider-sign-in",
-# "<output folder>-account-security", and "<output folder>-rate-limit"
-# (the app of the rate limit check). The
+# "<output folder>-account-security", "<output folder>-seed-data", and
+# "<output folder>-rate-limit" (the app of the rate limit check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
@@ -44,6 +48,7 @@ definition=examples/project-tracker/app.yaml
 auth_definition=examples/room-booking/app.yaml
 provider_definition=tests/fixtures/provider-sign-in.yaml
 security_definition=tests/fixtures/account-security.yaml
+seed_definition=tests/fixtures/seed-data.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -51,11 +56,12 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
 security_out="$out-account-security"
+seed_out="$out-seed-data"
 
 step() {
     echo "check-fastapi: $*"
@@ -169,6 +175,21 @@ uv run ruff format --check
 uv run pyright
 TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
 rm -f test.db
+cd "$root"
+
+step "generate $seed_definition in $seed_out"
+rm -rf "$seed_out"
+uv run --locked appgen generate "$seed_definition" -b fastapi -o "$seed_out" >/dev/null
+uv run --locked appgen check "$seed_definition" "$seed_out"
+cd "$seed_out"
+step "seed data: uv sync, ruff, pyright, pytest on SQLite, the seed test on Postgres"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+uv run pytest -q tests/test_seed.py
 cd "$root"
 
 step "passed"

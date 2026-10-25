@@ -1,5 +1,6 @@
 {{ trace_header("app") }}
-# Start Postgres, run the migrations, and start the API on port 8000:
+# Start Postgres, run the migrations, and start the API on port 8000 with
+# the seed records:
 #   docker compose up --build
 {% if py.redis %}
 # With Redis for the rate limit of all replicas:
@@ -37,6 +38,7 @@ services:
     image: {{ app.name }}-api
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+      DATABASE_SEED: "true"
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
 {% if py.redis %}
       RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
@@ -44,6 +46,9 @@ services:
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+{% if definition.auth.password %}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+{% endif %}
 {% endif %}
 {% for api in py_apis.values() %}
       {{ trace(api.id) }}

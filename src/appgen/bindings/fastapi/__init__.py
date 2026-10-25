@@ -97,11 +97,9 @@ BINDING = Binding(
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
         Output(template="app/core/i18n.py.j2", path="app/core/i18n.py", when="i18n"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
-        Output(
-            template="app/cli.py.j2",
-            path="app/cli.py",
-            when="definition.auth and definition.auth.password",
-        ),
+        Output(template="app/cli.py.j2", path="app/cli.py"),
+        Output(template="app/core/seed.py.j2", path="app/core/seed.py"),
+        Output(template="app/core/seed_data.py.j2", path="app/core/seed_data.py"),
         Output(
             template="app/core/providers.py.j2",
             path="app/core/providers.py",
@@ -291,6 +289,7 @@ BINDING = Binding(
         Output(template="tests/problems.py.j2", path="tests/problems.py"),
         Output(template="tests/conftest.py.j2", path="tests/conftest.py"),
         Output(template="tests/test_health.py.j2", path="tests/test_health.py"),
+        Output(template="tests/test_seed.py.j2", path="tests/test_seed.py"),
         Output(template="tests/test_logging.py.j2", path="tests/test_logging.py"),
         Output(template="tests/test_rate_limit.py.j2", path="tests/test_rate_limit.py"),
         Output(template="tests/test_i18n.py.j2", path="tests/test_i18n.py", when="i18n"),
@@ -303,9 +302,9 @@ BINDING = Binding(
         | {"access", "role", "record_rule"}
         | {"api", "api_operation"}
         | {"translations", "language"}
+        | {"entity_seed", "seed_record"}
     ),
-    # The seed records (ADR 0021) are out of the scope until the app has a seed.
-    excludes=frozenset({"page", "ui", "entity_seed", "seed_record"}),
+    excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
     context=binding_context,
     stub_markers=("TODO(appgen)", "NotImplementedError"),

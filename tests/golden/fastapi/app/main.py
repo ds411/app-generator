@@ -2,6 +2,7 @@
 # @trace app file
 """The entry point of the API: `create_app` makes the FastAPI app."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
 from app.core.logging import RequestLogMiddleware, configure_logging
 from app.core.rate_limit import RateLimiter, RateLimitMiddleware
+from app.core.seed import seed_database
 
 # @trace entities.Project
 from app.features.projects.router import router as projects_router
@@ -22,10 +24,18 @@ from app.features.projects.router import router as projects_router
 from app.features.tasks.router import router as tasks_router
 from app.models import configure_models
 
+logger = logging.getLogger("app.seed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Close the connections of the database when the app stops."""
+    """Add the seed records with DATABASE_SEED=true when the app starts. Close the
+    connections of the database when the app stops."""
+    settings: Settings = app.state.settings
+    if settings.database_seed:
+        async with app.state.sessions() as session:
+            added = await seed_database(session)
+        logger.info("The seed added %d records.", added)
     yield
     await app.state.engine.dispose()
 

@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://app:app@localhost:5432/{{ py.package }}"
     """The URL of the database: Postgres with the asyncpg driver, or SQLite with the
     aiosqlite driver for local runs, for example `sqlite+aiosqlite:///./local.db`."""
+    database_seed: bool = False
+    """True: add the seed records when the app starts (`app/core/seed.py`)."""
+{% if definition.auth and definition.auth.password %}
+    seed_password: str = ""
+    """With a value, the seed gives each new seed user this password. Use it only for
+    local runs and tests."""
+{% endif %}
     cors_origins: list[str] = []
     """The origins of the browser apps that can call the API."""
     log_level: str = "INFO"

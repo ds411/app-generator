@@ -1,0 +1,118 @@
+{{ trace_header("app") }}
+"""The rows of the seed (ADR 0021). `app/core/seed.py` inserts them.
+
+The rows are the same records, with the same IDs, as the seed of the
+Next.js app and the mock data of the React app. The `*_RECORDS` rows are
+the seed records of the definition (`seed`). The `*_ROWS` rows are the
+generated records.
+"""
+
+{{ py_seed.imports }}
+
+type Row = dict[str, Any]
+"""A row of a table: the value of each column."""
+
+
+@dataclass(frozen=True, slots=True)
+class SeedTable:
+    """The seed rows of a table.
+
+    `records` and `record_links` are the seed records of the definition.
+    `rows` and `links` are the generated records. A row has None in each
+    optional foreign key: a link sets these keys after all inserts.
+    """
+
+    name: str
+    records: list[Row] = field(default_factory=list[Row])
+    record_links: list[Row] = field(default_factory=list[Row])
+    rows: list[Row] = field(default_factory=list[Row])
+    links: list[Row] = field(default_factory=list[Row])
+
+
+@dataclass(frozen=True, slots=True)
+class SeedJoin:
+    """The rows of a join table of a many-to-many relation.
+
+    `owner` is the table of the records in the column `column`.
+    """
+
+    name: str
+    owner: str
+    column: str
+    records: list[Row] = field(default_factory=list[Row])
+    rows: list[Row] = field(default_factory=list[Row])
+
+{% for seed in py_seed.tables %}
+{% if seed.records %}
+
+{{ trace(seed.seed_id) }}
+{{ seed.const }}_RECORDS: list[Row] = [
+{% for record in seed.records %}
+    {{ trace(record.element_id) }}
+    {{ record.row }},
+{% endfor %}
+]
+{% endif %}
+{% if seed.record_links %}
+
+{{ trace(seed.seed_id) }}
+{{ seed.const }}_RECORD_LINKS: list[Row] = [
+{% for row in seed.record_links %}
+    {{ row }},
+{% endfor %}
+]
+{% endif %}
+{% for seed_join in seed.joins if seed_join.records %}
+
+{{ trace(seed.seed_id) }}
+{{ seed_join.const }}_RECORDS: list[Row] = [
+{% for row in seed_join.records %}
+    {{ row }},
+{% endfor %}
+]
+{% endfor %}
+{% if seed.rows %}
+
+{{ trace(seed.entity.id) }}
+{{ seed.const }}_ROWS: list[Row] = [
+{% for row in seed.rows %}
+    {{ row }},
+{% endfor %}
+]
+{% endif %}
+{% if seed.links %}
+
+{{ trace(seed.entity.id) }}
+{{ seed.const }}_LINKS: list[Row] = [
+{% for row in seed.links %}
+    {{ row }},
+{% endfor %}
+]
+{% endif %}
+{% for seed_join in seed.joins if seed_join.rows %}
+
+{{ trace(seed_join.join.relation_id) }}
+{{ seed_join.const }}_ROWS: list[Row] = [
+{% for row in seed_join.rows %}
+    {{ row }},
+{% endfor %}
+]
+{% endfor %}
+{% endfor %}
+
+TABLES: list[SeedTable] = [
+{% for seed in py_seed.tables %}
+    {{ seed.table_call() }}
+{% endfor %}
+]
+"""The tables in the order of the inserts: each comes after the targets of its required keys."""
+
+{% if py_seed.joins %}
+JOINS: list[SeedJoin] = [
+{% for seed_join in py_seed.joins %}
+    {{ seed_join.join_call() }}
+{% endfor %}
+]
+{% else %}
+JOINS: list[SeedJoin] = []
+{% endif %}

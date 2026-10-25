@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://app:app@localhost:5432/project_tracker"
     """The URL of the database: Postgres with the asyncpg driver, or SQLite with the
     aiosqlite driver for local runs, for example `sqlite+aiosqlite:///./local.db`."""
+    database_seed: bool = False
+    """True: add the seed records when the app starts (`app/core/seed.py`)."""
     cors_origins: list[str] = []
     """The origins of the browser apps that can call the API."""
     log_level: str = "INFO"

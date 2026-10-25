@@ -1,31 +1,31 @@
-{% set sf = definition.auth.second_factor %}
-{{ trace_header(definition.auth.id) }}
-{% if sf %}
-"""Commands of the app for an administrator.
+{{ trace_header("app") }}
+{% set password = definition.auth and definition.auth.password %}
+{% set sf = definition.auth and definition.auth.second_factor %}
+"""Commands of the app: `uv run python -m app.cli <command>`.
 
-- `uv run python -m app.cli set-password <user name>` reads the new
-  password from the terminal, or from the environment variable
-  `APP_PASSWORD`, and stores its hash.
-- `uv run python -m app.cli disable-second-factor <user name>` turns off
-  the second factor of a user who lost the authenticator app and the
-  recovery codes (ADR 0024). The user can turn it on again.
-"""
-{% else %}
-"""Commands of the app: `uv run python -m app.cli set-password <user name>`.
-
-The command reads the new password from the terminal, or from the
-environment variable `APP_PASSWORD`, and stores its hash.
-"""
+- `seed` adds the seed records to the database (`app/core/seed.py`).
+{% if password %}
+- `set-password <user name>` sets the password of a user. The command
+  reads the new password from the terminal, or from the environment
+  variable `APP_PASSWORD`, and stores its hash.
 {% endif %}
+{% if sf %}
+- `disable-second-factor <user name>` turns off the second factor of a
+  user who lost the authenticator app and the recovery codes (ADR 0024).
+  The user can turn it on again.
+{% endif %}
+"""
 
 import asyncio
+{% if password %}
 import getpass
 import os
+{% endif %}
 import sys
 
 {% if sf %}
 from app.core.auth import MIN_PASSWORD_LENGTH, Credential, find_user, set_password
-{% else %}
+{% elif password %}
 from app.core.auth import MIN_PASSWORD_LENGTH, find_user, set_password
 {% endif %}
 from app.core.config import Settings
@@ -33,15 +33,42 @@ from app.core.db import {{ "commit, " if sf }}make_engine, make_sessions
 {% if sf %}
 from app.core.second_factor import remove_second_factor
 {% endif %}
+from app.core.seed import seed_database
 from app.models import configure_models
-{% if sf %}
 
-USAGE = """Usage:
-  python -m app.cli set-password <user name>
-  python -m app.cli disable-second-factor <user name>"""
+{% if sf %}
+USAGE = """\
+Usage: python -m app.cli seed
+       python -m app.cli set-password <user name>
+       python -m app.cli disable-second-factor <user name>"""
+{% elif password %}
+USAGE = """\
+Usage: python -m app.cli seed
+       python -m app.cli set-password <user name>"""
+{% else %}
+USAGE = "Usage: python -m app.cli seed"
 {% endif %}
 
 
+async def _seed() -> int:
+    configure_models()
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    try:
+        async with make_sessions(engine)() as session:
+{% if password %}
+            added = await seed_database(session, settings.seed_password)
+{% else %}
+            added = await seed_database(session)
+{% endif %}
+    finally:
+        await engine.dispose()
+    print(f"The seed added {added} records.")
+    return 0
+{% if password %}
+
+
+{{ trace(definition.auth.id) }}
 async def _set_password(username: str, password: str) -> int:
     configure_models()
     engine = make_engine(Settings().database_url)
@@ -56,6 +83,14 @@ async def _set_password(username: str, password: str) -> int:
         await engine.dispose()
     print(f"The password of {username} is set.")
     return 0
+
+
+def _set_password_command(username: str, password: str) -> int:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        print(f"The password needs {MIN_PASSWORD_LENGTH} or more characters.", file=sys.stderr)
+        return 1
+    return asyncio.run(_set_password(username, password))
+{% endif %}
 {% if sf %}
 
 
@@ -81,22 +116,21 @@ async def _disable_second_factor(username: str) -> int:
 
 def main(args: list[str]) -> int:
     """Run a command. Return the exit code."""
-{% if sf %}
-    if len(args) == 2 and args[0] == "disable-second-factor":
-        return asyncio.run(_disable_second_factor(args[1]))
-    if len(args) != 2 or args[0] != "set-password":
-        print(USAGE, file=sys.stderr)
-        return 2
-{% else %}
-    if len(args) != 2 or args[0] != "set-password":
-        print("Usage: python -m app.cli set-password <user name>", file=sys.stderr)
-        return 2
+    match args:
+        case ["seed"]:
+            return asyncio.run(_seed())
+{% if password %}
+        case ["set-password", username]:
+            password = os.environ.get("APP_PASSWORD") or getpass.getpass("New password: ")
+            return _set_password_command(username, password)
 {% endif %}
-    password = os.environ.get("APP_PASSWORD") or getpass.getpass("New password: ")
-    if len(password) < MIN_PASSWORD_LENGTH:
-        print(f"The password needs {MIN_PASSWORD_LENGTH} or more characters.", file=sys.stderr)
-        return 1
-    return asyncio.run(_set_password(args[1], password))
+{% if sf %}
+        case ["disable-second-factor", username]:
+            return asyncio.run(_disable_second_factor(username))
+{% endif %}
+        case _:
+            print(USAGE, file=sys.stderr)
+            return 2
 
 
 if __name__ == "__main__":

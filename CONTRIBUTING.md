@@ -240,8 +240,8 @@ git config core.hooksPath .githooks
   starts with the name of the app, for example `[nextjs]`. At the end,
   the hook tells which app checks passed and which failed. To run them
   one after the other, push with `APPGEN_CHECK_SERIAL=1 git push`.
-- When a push changes the generator core or the FastAPI binding, the
-  hook also runs `scripts/check-fastapi.sh`. The script generates the
+- When a push changes the generator core, the FastAPI binding, or the
+  shared binding code, the hook also runs `scripts/check-fastapi.sh`. The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
   the output. It also starts two processes of the app with Redis, and
@@ -255,7 +255,9 @@ git config core.hooksPath .githooks
   `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). Last, it
   generates `tests/fixtures/account-security.yaml` (the verification of
   the email address, and the second factor), and runs Ruff, pyright, the generated tests, and
-  `appgen check` on it. It needs Docker. Run it by hand with
+  `appgen check` on it. Then it generates `tests/fixtures/seed-data.yaml`
+  (seed records, ADR 0021), checks it in the same way, and runs its seed
+  test on Postgres. It needs Docker. Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
 - When a push changes the generator core, the Next.js binding, or the
