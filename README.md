@@ -409,7 +409,8 @@ migrations in `drizzle/`) and a `compose.yaml` with Postgres:
 `docker compose up --build` starts both, and the app migrates the
 database when it starts. A detail page for an ID that no record has
 gives the status 404 and the not-found page. The app has seed records: `pnpm db:seed` (or
-`DATABASE_SEED=true` at start) fills the empty tables with the mock
+`DATABASE_SEED=true` at start) adds the records of the `seed` section
+of the definition by ID, and fills an empty database with the mock
 records of the shared generator, the same records as in the React app. For a local run without a Postgres server, set
 `DATABASE_URL=pglite:./.pglite` to use PGlite, an embedded Postgres
 ([ADR 0007](docs/adr/0007-local-database.md)).
@@ -601,7 +602,9 @@ definition call it. The mock records come from a fixed seed, so the
 output stays the same, and each relation refers to a record that
 exists. A key or a code field comes from the name of the record (for
 example the key `MP` for "Meridian Portal"). An entity sets the number of records with the extension key
-`x-mock-count` (default: 12).
+`x-mock-count` (default: 12). The records of the `seed` section of the
+definition come first, with their fixed IDs, and `mock` generated
+records follow them ([ADR 0021](docs/adr/0021-seed-data.md)).
 
 Each custom element of the definition is a generation gap (ADR 0005):
 custom operations, custom page contents, detail tabs and sections,

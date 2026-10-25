@@ -426,4 +426,3 @@ def test_the_bindings_make_no_gaps_for_the_seed(binding_name: str) -> None:
     result = generate(load(), find_binding(binding_name))
 
     assert [gap.element_id for gap in result.gaps if gap.element_id.startswith("seed")] == []
-    assert {"entity_seed", "seed_record"} <= set(result.excluded_kinds)

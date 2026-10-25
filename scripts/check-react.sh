@@ -2,7 +2,9 @@
 # Generate the project tracker with the React binding, and check the
 # output: install, lint, type check, build, Docker image, traces, and
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
-# app, request it, and run the Playwright tests in ui-tests/).
+# app, request it, and run the Playwright tests in ui-tests/). Then it
+# generates tests/fixtures/seed-data.yaml, and runs lint, type check, and
+# appgen check on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the React binding. Run it by hand from the repository root:
 #
@@ -22,12 +24,17 @@ set -eu
 definition=examples/project-tracker/app.yaml
 root=$(pwd)
 
+# The app of the seed data fixture (ADR 0021), in a temporary folder.
+seed_definition=tests/fixtures/seed-data.yaml
+seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-seed.XXXXXX")
+
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
+    trap 'rm -rf "$seed_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react.XXXXXX")
-    trap 'rm -rf "$out"' EXIT
+    trap 'rm -rf "$out" "$seed_out"' EXIT
 fi
 
 step() {
@@ -72,5 +79,19 @@ uv run --locked appgen check "$definition" "$out"
 
 step "smoke test"
 uv run --locked scripts/smoke_test.py react --app "$out" --image appgen-check-react --ui
+
+step "generate $seed_definition in $seed_out"
+uv run --locked appgen generate "$seed_definition" -b react -o "$seed_out" >/dev/null
+(
+    cd "$seed_out"
+    step "pnpm install (seed data)"
+    pnpm install --silent
+    step "pnpm lint (seed data)"
+    pnpm --silent lint
+    step "pnpm typecheck (seed data)"
+    pnpm --silent typecheck
+)
+step "appgen check (seed data)"
+uv run --locked appgen check "$seed_definition" "$seed_out"
 
 step "passed"

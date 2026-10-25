@@ -1,6 +1,7 @@
 {{ trace_header("app") }}
-// The seed records of each table. They are the mock records of the
-// React binding (the same generator), so they are the same on each run.
+// The seed records of each table: the seed records of the definition,
+// and the generated records. They are the mock records of the React
+// binding (the same generator), so they are the same on each run.
 import type {
 {% for seed in nextjs.seed %}
   {{ seed.table.const }},
@@ -10,6 +11,34 @@ import type {
 {% endfor %}
 } from "./schema";
 {% for seed in nextjs.seed %}
+{% if seed.seed_id %}
+
+{{ trace(seed.seed_id) }}
+export const {{ seed.records_const }}: (typeof {{ seed.table.const }}.$inferInsert)[] = [
+{% for record in seed.records %}
+  {{ trace(record.element_id) }}
+  {{ record.row }},
+{% endfor %}
+];
+{% if seed.record_links %}
+
+{{ trace(seed.seed_id) }}
+export const {{ seed.record_links_const }}: ({ id: string } & Partial<typeof {{ seed.table.const }}.$inferInsert>)[] = [
+{% for link in seed.record_links %}
+  {{ link }},
+{% endfor %}
+];
+{% endif %}
+{% for seed_join in seed.record_joins %}
+
+{{ trace(seed.seed_id) }}
+export const {{ seed_join.join.const | replace("Table", "Records") }}: (typeof {{ seed_join.join.const }}.$inferInsert)[] = [
+{% for row in seed_join.rows %}
+  {{ row }},
+{% endfor %}
+];
+{% endfor %}
+{% endif %}
 
 {{ trace(seed.table.element_id) }}
 export const {{ seed.const }}: (typeof {{ seed.table.const }}.$inferInsert)[] = [

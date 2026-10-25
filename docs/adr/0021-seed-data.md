@@ -117,7 +117,8 @@ We looked at three forms of the records:
   the Next.js seed, and the FastAPI seed have the same records.
 - The Next.js seed and the FastAPI seed insert the seed records by ID: a
   second run adds the seed records that do not exist, and changes no
-  record that exists. The generated records go only into empty tables.
+  record that exists. The generated records go in only if all tables
+  are empty.
 - With `auth`, each seed record of the user entity is a user. With
   `SEED_PASSWORD`, it can sign in with this password, as a mock user
   can.

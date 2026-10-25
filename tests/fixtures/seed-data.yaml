@@ -1,0 +1,92 @@
+# An app with seed records (ADR 0021): inline records, a CSV data file,
+# generated records that refer to the seed records, and seed users.
+# scripts/check-nextjs.sh and scripts/check-react.sh build the apps of
+# this definition, and scripts/seed_test.py runs the Next.js seed two
+# times.
+version: 0
+app:
+  name: seed-data
+  title: Seed data
+entities:
+  Office:
+    display_field: name
+    fields:
+      name: { type: string, required: true, unique: true, max_length: 60 }
+      opened_on: { type: date }
+    relations:
+      rooms: { kind: one_to_many, target: Room, inverse: office }
+      manager: { kind: one_to_one, target: Person, inverse: office }
+    crud: { views: [table], forms: [create] }
+  Room:
+    display_field: code
+    fields:
+      code: { type: string, required: true, unique: true, max_length: 10 }
+      capacity: { type: integer, min: 1, max: 50 }
+      price: { type: decimal, precision: 8, scale: 2 }
+      bookable: { type: boolean, default: true }
+      checked_at: { type: datetime }
+      settings: { type: json }
+    relations:
+      office: { kind: many_to_one, target: Office, required: true, inverse: rooms }
+      features: { kind: many_to_many, target: Feature }
+    crud: { views: [table] }
+  Feature:
+    display_field: label
+    fields:
+      label: { type: string, required: true, max_length: 40 }
+    crud: { views: [table] }
+  Person:
+    display_field: name
+    fields:
+      email: { type: email, required: true, unique: true }
+      name: { type: string, required: true, max_length: 120 }
+      role: { type: enum, values: [admin, staff], default: staff }
+    relations:
+      office: { kind: one_to_one, target: Office, inverse: manager }
+    crud: { views: [table] }
+  Booking:
+    x-mock-count: 6
+    fields:
+      starts_at: { type: datetime, required: true }
+      ends_at: { type: datetime, required: true }
+    relations:
+      room: { kind: many_to_one, target: Room, required: true }
+      booked_by: { kind: many_to_one, target: Person }
+    rules:
+      ends_after_start:
+        kind: compare
+        field: ends_at
+        op: gt
+        other: starts_at
+        message: The end must be after the start.
+    crud: { views: [table] }
+pages:
+  offices: { path: /offices, title: Offices, content: { view: office_table } }
+  rooms: { path: /rooms, title: Rooms, content: { view: room_table } }
+  features: { path: /features, title: Features, content: { view: feature_table } }
+  people: { path: /people, title: People, content: { view: person_table } }
+  bookings: { path: /bookings, title: Bookings, content: { view: booking_table } }
+auth:
+  user_entity: Person
+  username_field: email
+access:
+  role_field: role
+  roles:
+    admin: { operations: ["*"], pages: ["*"] }
+    staff: { operations: [list_rooms, list_bookings], pages: [rooms, bookings] }
+seed:
+  Office:
+    records:
+      hq: { name: Head office, opened_on: 2020-03-01, manager: ada }
+      lisbon: { name: Lisbon office }
+  Room:
+    file: seed-data/rooms.csv
+    mock: 2
+  Feature:
+    records:
+      screen: { label: Screen }
+      board: { label: Whiteboard }
+  Person:
+    records:
+      ada: { email: ada@example.com, name: Ada Lovelace, role: admin }
+      grace: { email: grace@example.com, name: Grace Hopper }

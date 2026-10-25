@@ -1,16 +1,19 @@
 {{ trace_header("app") }}
 {% set any_links = nextjs.seed | selectattr("links") | list %}
-{% if any_links %}
+{% set any_record_links = nextjs.seed | selectattr("record_links") | list %}
+{% set generated = nextjs.seed | selectattr("rows") | list %}
+{% set password = definition.auth and definition.auth.password %}
+{% if any_links or any_record_links %}
 import { eq } from "drizzle-orm";
 
 {% endif %}
-{% if definition.auth and definition.auth.password %}
+{% if password %}
 import { hashPassword } from "@/shared/auth/password";
 
 {% endif %}
 import type { Database } from "./connect";
 import {
-{% if definition.auth and definition.auth.password %}
+{% if password %}
   credentialsTable,
 {% endif %}
 {% for seed in nextjs.seed %}
@@ -23,12 +26,15 @@ import {
 import * as seed from "./seed-data";
 
 /**
- * Fill each table with the seed records, if all tables are empty, and
- * return true. Return false if a table has records. The seed inserts the
- * tables in the order of their required foreign keys, and sets the
- * optional foreign keys after all inserts.
+ * Add the seed records to the database, and return the number of records
+ * that the seed adds. The seed records of the definition go in by ID: the
+ * seed adds each one that does not exist, and changes no record that
+ * exists. The generated records go in only if all tables are empty. The
+ * seed inserts the tables in the order of their required foreign keys,
+ * and sets the optional foreign keys after all inserts.
  */
-export async function seedDatabase(db: Database): Promise<boolean> {
+export async function seedDatabase(db: Database): Promise<number> {
+{% if generated %}
   const counts = await Promise.all([
 {% for seed in nextjs.seed %}
     db.$count({{ seed.table.const }}),
@@ -37,33 +43,91 @@ export async function seedDatabase(db: Database): Promise<boolean> {
 {% endfor %}
 {% endfor %}
   ]);
-  if (counts.some((count) => count > 0)) {
-    return false;
-  }
-  await db.transaction(async (tx) => {
-{% for seed in nextjs.seed if seed.rows %}
-    await tx.insert({{ seed.table.const }}).values(seed.{{ seed.const }}); {{ trace(seed.table.element_id) }}
+  const empty = counts.every((count) => count === 0);
+{% endif %}
+  return await db.transaction(async (tx) => {
+    let added = 0;
+{% for seed in nextjs.seed %}
+{% set table = seed.table.const %}
+{% set added = seed.records_const | replace("Records", "Added") %}
+{% if seed.records %}
+    {{ trace(seed.seed_id) }}
+    const {{ added }} = new Set(
+      (
+        await tx
+          .insert({{ table }})
+          .values(seed.{{ seed.records_const }})
+          .onConflictDoNothing({ target: {{ table }}.id })
+          .returning({ id: {{ table }}.id })
+      ).map((row) => row.id),
+    );
+    added += {{ added }}.size;
+{% endif %}
+{% if seed.rows %}
+    if (empty) {
+      {{ trace(seed.table.element_id) }}
+      await tx.insert({{ table }}).values(seed.{{ seed.const }});
+      added += seed.{{ seed.const }}.length;
+    }
+{% endif %}
 {% endfor %}
-{% for seed in any_links %}
-    for (const { id, ...values } of seed.{{ seed.links_const }}) { {{ trace(seed.table.element_id) }}
-      await tx.update({{ seed.table.const }}).set(values).where(eq({{ seed.table.const }}.id, id));
+{% for seed in any_record_links %}
+{% set table = seed.table.const %}
+    {{ trace(seed.seed_id) }}
+    for (const { id, ...values } of seed.{{ seed.record_links_const }}) {
+      if ({{ seed.records_const | replace("Records", "Added") }}.has(id)) {
+        await tx.update({{ table }}).set(values).where(eq({{ table }}.id, id));
+      }
     }
 {% endfor %}
 {% for seed in nextjs.seed %}
+{% for seed_join in seed.record_joins if seed_join.rows %}
+{% set rows = seed_join.join.const | replace("Table", "Rows") %}
+    {{ trace(seed.seed_id) }}
+    const {{ rows }} = seed.{{ seed_join.join.const | replace("Table", "Records") }}.filter((row) =>
+      {{ seed.records_const | replace("Records", "Added") }}.has(row.{{ seed_join.join.left_key }}),
+    );
+    if ({{ rows }}.length > 0) {
+      await tx.insert({{ seed_join.join.const }}).values({{ rows }}).onConflictDoNothing();
+    }
+{% endfor %}
+{% endfor %}
+{% if generated %}
+    if (empty) {
+{% for seed in any_links %}
+{% set table = seed.table.const %}
+      for (const { id, ...values } of seed.{{ seed.links_const }}) { {{ trace(seed.table.element_id) }}
+        await tx.update({{ table }}).set(values).where(eq({{ table }}.id, id));
+      }
+{% endfor %}
+{% for seed in nextjs.seed %}
 {% for seed_join in seed.joins if seed_join.rows %}
-    await tx.insert({{ seed_join.join.const }}).values(seed.{{ seed_join.join.const | replace("Table", "Seed") }}); {{ trace(seed_join.join.element_id) }}
+      await tx.insert({{ seed_join.join.const }}).values(seed.{{ seed_join.join.const | replace("Table", "Seed") }}); {{ trace(seed_join.join.element_id) }}
 {% endfor %}
 {% endfor %}
-{% if definition.auth and definition.auth.password %}
-{% set user_seed = nextjs.seed | selectattr("table.entity", "eq", definition.auth.user_entity) | first %}
-    // With SEED_PASSWORD, each seed user can sign in with this password.
-    const password = process.env.SEED_PASSWORD; {{ trace(definition.auth.id) }}
-    if (password) {
-      await tx
-        .insert(credentialsTable)
-        .values(seed.{{ user_seed.const }}.map((row) => ({ userId: String(row.id), passwordHash: hashPassword(password) })));
     }
 {% endif %}
+{% if password %}
+{% set user_seed = nextjs.seed | selectattr("table.entity", "eq", definition.auth.user_entity) | first %}
+    // With SEED_PASSWORD, each new seed user can sign in with this password.
+    const password = process.env.SEED_PASSWORD; {{ trace(definition.auth.id) }}
+    const users = [
+{% if user_seed.records %}
+      ...seed.{{ user_seed.records_const }}.filter((row) =>
+        {{ user_seed.records_const | replace("Records", "Added") }}.has(String(row.id)),
+      ),
+{% endif %}
+{% if user_seed.rows %}
+      ...(empty ? seed.{{ user_seed.const }} : []),
+{% endif %}
+    ];
+    if (password && users.length > 0) {
+      await tx
+        .insert(credentialsTable)
+        .values(users.map((row) => ({ userId: String(row.id), passwordHash: hashPassword(password) })))
+        .onConflictDoNothing();
+    }
+{% endif %}
+    return added;
   });
-  return true;
 }

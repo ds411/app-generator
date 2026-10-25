@@ -154,6 +154,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/nextjs/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-nextjs.sh' \
     'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' 'scripts/smoke_test.py' 'ui-tests/*' \
+    'tests/fixtures/seed-data*' 'scripts/seed_test.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps nextjs"
 fi
@@ -161,6 +162,7 @@ fi
 if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
+    'tests/fixtures/seed-data*' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps react"
 fi

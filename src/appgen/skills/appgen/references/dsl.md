@@ -414,8 +414,11 @@ seed:
   number of the extension key `x-mock-count`. With a seed, the entity has
   its seed records and `mock` generated records. A generated record can
   refer to a seed record.
-- The bindings do not use the seed yet: they exclude the elements of
-  `seed`, so `appgen generate` makes no gap for them.
+- The React app has the seed records first in its mock data. The
+  Next.js seed (`pnpm db:seed`) adds each seed record that the database
+  does not have, by ID, and adds generated records only if all tables
+  are empty. The FastAPI binding excludes the elements of `seed` for now,
+  so `appgen generate` makes no gap for them.
 
 The values:
 
