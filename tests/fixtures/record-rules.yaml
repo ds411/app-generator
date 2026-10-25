@@ -4,7 +4,8 @@
 # tasks of the projects of their teams, and only the open tasks. A
 # reviewer sees only the done tasks and the projects that are not
 # archived. scripts/check-fastapi.sh checks the FastAPI app of this
-# definition.
+# definition, and scripts/auth_ui_test.py signs in to the front ends as
+# a member and as a reviewer.
 version: 0
 
 app:
@@ -60,6 +61,8 @@ entities:
       tasks: { kind: one_to_many, target: Task, inverse: project }
 
   Task:
+    # Enough tasks for done tasks in the mock data: the reviewer sees them.
+    x-mock-count: 20
     crud:
       views: [table, detail]
       forms: [create, update]
@@ -145,7 +148,8 @@ auth:
 
 # An admin may do all. A member sees the teams, and the projects and the
 # open tasks of the teams of the member. A reviewer sees the done tasks,
-# and the projects that are not archived.
+# and the projects that are not archived. A new task of a reviewer is
+# done: the form does not show the status.
 access:
   role_field: role
   roles:
@@ -182,6 +186,7 @@ access:
         - read_project
         - list_tasks
         - read_task
+        - create_task
         - update_task
       pages: [teams, team_detail, projects, project_detail, tasks, task_detail]
       records:

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from appgen.bindings.shared.auth import owner_rules
+from appgen.bindings.shared.auth import record_rules
 from appgen.bindings.shared.gaps import form_values, gap_spec
 from appgen.bindings.shared.i18n import text_js
 from appgen.bindings.shared.typescript import Member, members
@@ -111,6 +111,11 @@ class FieldPlan:
     """The grid classes of the field: its span, with the responsive overrides."""
     owner: bool = False
     """True for the owner of an owner rule (ADR 0018): a user of the rule does not see it."""
+    fixed: bool = False
+    """True if a condition of a record rule with one value can set the field (ADR 0025).
+
+    A user of the rule does not see the field, and the form sets the value.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +185,16 @@ class FormPlan:
     def owner(self) -> FieldPlan | None:
         """Return the field of the owner of an owner rule of the entity (ADR 0018), or None."""
         return next((f for f in self.fields if f.owner), None)
+
+    @property
+    def fixed(self) -> list[FieldPlan]:
+        """Return the fields that a condition of a record rule can set (ADR 0025)."""
+        return [f for f in self.fields if f.fixed]
+
+    @property
+    def scoped(self) -> bool:
+        """Return True if a record rule can hide fields of the form (ADR 0018, ADR 0025)."""
+        return any(f.owner or f.fixed for f in self.fields)
 
     @property
     def type(self) -> str:
@@ -270,7 +285,8 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
     operation: Operation = definition.operations[form.operation]
     params = operation.params if operation.kind == "custom" else None
     by_name = {m.name: m for m in members(entity, definition.entities[entity])}
-    rule = owner_rules(definition).get(entity) if operation.kind in ("create", "update") else None
+    rules = record_rules(definition).get(entity) if operation.kind in ("create", "update") else None
+    owner = rules.path[0].relation if rules is not None and rules.direct else None
     fields: list[FieldPlan] = []
     route_params = False
     for field_name, form_field in form.fields.items():
@@ -288,7 +304,8 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
             plan.gap_module = spec.module + ".gen"
             plan.gap_name = spec.name
         plan.classes = _span_classes(form_field.span, form.grid)
-        plan.owner = rule is not None and field_name == rule.relation
+        plan.owner = field_name == owner
+        plan.fixed = rules is not None and field_name in rules.fixed
         if server and plan.target is not None and plan.widget != "custom":
             # The server searches the options: a select or a radio of a relation is a search box.
             plan.source = f"{camel(plan.target)}Options"

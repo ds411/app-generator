@@ -2,9 +2,10 @@
 // The permissions of the roles (ADR 0012): the operations and the pages
 // that each role may use. The checks of the app and the menus, the
 // links, and the actions of the UI read this table. `*` stands for all
-// operations or pages. A public page or operation needs no role.{% if owner_rules %}
+// operations or pages. A public page or operation needs no role.{% if record_rules %}
 
-// The owner rules (ADR 0018) limit a role to the records of its user.{% endif +%}
+// The record rules (ADR 0018, ADR 0025) limit a role to some records: the
+// records of its user, or the records with some values.{% endif +%}
 import type { PageName } from "@/shared/config/pages";
 
 const ALL = "*";
@@ -38,29 +39,82 @@ export function roleMayCall(role: string | null, operation: string): boolean {
 export function roleMayOpenPage(role: string | null, page: PageName): boolean {
   return PUBLIC_PAGES.includes(page) || (role !== null && allows(PAGES[role], page));
 }
-{% if owner_rules %}
+{% if record_rules %}
 
-/** The records of an owner rule: `read` (the lists and the reads) or `change` (the creates, the changes, the deletes, and the custom operations). */
+/** The records of a rule: `read` (the lists and the reads) or `change` (the creates, the changes, the deletes, and the custom operations). */
 export type RecordAction = "read" | "change";
 
-const OWNER_RULES: Record<string, Record<string, readonly RecordAction[]>> = {
+/** A value of a condition of a record rule. */
+export type RecordValue = string | number | boolean;
+
+/**
+ * A record rule of a role on an entity. With `owner`, the role uses only
+ * the records of its user. With `where`, the role uses only the records
+ * with one of the values of each field.
+ */
+type RecordRule = {
+  actions: readonly RecordAction[];
+  owner?: true;
+  where?: Readonly<Record<string, readonly RecordValue[]>>;
+};
+
+/** The records that a user may use for an action: the user, and the parts of the rule. */
+export type RecordScope = {
+  user: string;
+  /** True if the user uses only the records of the user (the owner path of the entity). */
+  owner: boolean;
+  /** The values that each field must have: one of the values of the list. */
+  where: Readonly<Record<string, readonly RecordValue[]>>;
+};
+
+const RECORD_RULES: Record<string, Record<string, RecordRule>> = {
 {% for name, r in definition.access.roles.items() if r.records %}
   {{ name | tojson }}: {
 {% for entity, rule in r.records.items() %}
-    {{ entity | tojson }}: {{ rule.operations | sort | list | tojson }}, {{ trace(rule.id) }}
+{% set where = rule.conditions() %}
+{% set parts = ["actions: " ~ (rule.operations | sort | list | tojson)] + (["owner: true"] if rule.owner else []) %}
+{% if where %}
+{% set ns = namespace(items=[]) %}
+{% for field, values in where.items() %}
+{% set ns.items = ns.items + [(field | camel) ~ ": " ~ ts_value(values)] %}
+{% endfor %}
+{% set parts = parts + ["where: { " ~ (ns.items | join(", ")) ~ " }"] %}
+{% endif %}
+    {{ entity | tojson }}: { {{ parts | join(", ") }} }, {{ trace(rule.id) }}
 {% endfor %}
   },
 {% endfor %}
 };
 
 /**
- * Return true if an owner rule of a role applies to an action on the
- * records of an entity: the role then uses only the records of its user.
- * A rule for `read` also applies to `change`, because a user cannot change
- * a record that the user cannot see.
+ * Return the records that a user of a role may use for an action on the
+ * records of an entity, or null for all records. A rule for `read` also
+ * applies to `change`, because a user cannot change a record that the
+ * user cannot see.
  */
-export function ownerRuleApplies(role: string | null, entity: string, action: RecordAction): boolean {
-  const actions = role === null ? undefined : OWNER_RULES[role]?.[entity];
-  return actions !== undefined && (action === "change" || actions.includes(action));
+export function recordScopeOf(role: string | null, user: string | null, entity: string, action: RecordAction): RecordScope | null {
+  if (role === null || user === null) {
+    return null;
+  }
+  const rule = RECORD_RULES[role]?.[entity];
+  if (rule === undefined || !(action === "change" || rule.actions.includes(action))) {
+    return null;
+  }
+  return { user, owner: rule.owner === true, where: rule.where ?? {} };
+}
+
+/** Return true if a record has the values of a scope. The owner is not part of the check. */
+export function hasValuesOf(scope: RecordScope, record: object): boolean {
+  const values = record as Record<string, unknown>;
+  return Object.entries(scope.where).every(([key, allowed]) => allowed.some((value) => value === values[key]));
+}
+
+/**
+ * Return the one value of a field that a scope allows, or undefined. A
+ * form sets the value, and does not show the field.
+ */
+export function fixedValue<V>(scope: RecordScope | null, key: string): V | undefined {
+  const values = scope?.where[key];
+  return values?.length === 1 ? (values[0] as V) : undefined;
 }
 {% endif %}

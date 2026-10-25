@@ -29,8 +29,9 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
 import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
 {% endif %}
-{% if plan.owner %}
+{% if plan.scoped %}
 import { useAccess } from "@/shared/lib/access";
+import { {{ "fixedValue, " if plan.fixed }}type RecordScope } from "@/shared/lib/permissions";
 {% endif %}
 {% set form_lib = ["type FormErrors", "schemaErrors", "submitErrors"] %}
 {% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
@@ -128,9 +129,13 @@ function subscribeLookups(listener: () => void): () => void {
 {% endif %}
 
 {% set initial_code = plan.fields | map(attribute="initial") | join(" ") %}
-{% if plan.owner %}
-/** The first values: the record, the defaults of the form, or the defaults of the fields. A user of an owner rule is the owner. */
-function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, owner: string | null): Values {
+{% if plan.scoped %}
+/**
+ * The first values: the record, the defaults of the form, or the defaults
+ * of the fields. A user of a record rule is the owner, and the fields get
+ * the values that the rule allows.
+ */
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, scope: RecordScope | null): Values {
 {% else %}
 /** The first values: the record, the defaults of the form, or the defaults of the fields. */
 function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined): Values {
@@ -138,7 +143,11 @@ function initialValues({{ "record" if "record" in initial_code else "_record" }}
   return {
 {% for f in plan.fields %}
 {% if f.owner %}
-    {{ f.key }}: {{ "owner" if f.initial == "null" else "owner ?? (" ~ f.initial ~ ")" }},
+{% set initial = f.initial if " " not in f.initial else "(" ~ f.initial ~ ")" %}
+    {{ f.key }}: scope?.owner ? scope.user : {{ initial }},
+{% elif f.fixed %}
+{% set initial = f.initial if " " not in f.initial else "(" ~ f.initial ~ ")" %}
+    {{ f.key }}: fixedValue<Values[{{ js(f.key) }}]>(scope, {{ js(f.key) }}) ?? {{ initial }},
 {% else %}
     {{ f.key }}: {{ f.initial }},
 {% endif %}
@@ -227,11 +236,12 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
   const lookups = useResource({{ js(name ~ "_form") }}, loadLookups, subscribeLookups);
   const related: Lookups = lookups.status === "success" ? lookups.data : { {% for entity in plan.lookups %}{{ entity | camel }}: new Map(){{ ", " if not loop.last }}{% endfor %} };
 {% endif %}
-{% if plan.owner %}
-  // A user of an owner rule owns the record, and does not choose the owner (ADR 0018).
-  const owner = useAccess().ownerOf({{ js(plan.entity) }});
+{% if plan.scoped %}
+  // A user of a record rule owns the record, and does not choose the owner
+  // and the values that the rule sets (ADR 0018, ADR 0025).
+  const scope = useAccess().scopeOf({{ js(plan.entity) }});
 {% endif %}
-  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", owner" if plan.owner }}));
+  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}));
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -263,7 +273,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       toast.success({{ tr(js("Saved.")) }});
 {% endif %}
 {% if not close %}
-      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", owner" if plan.owner }}));
+      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}));
       setSubmitted(false);
 {% endif %}
       onSuccess?.();
@@ -297,8 +307,8 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% endif %}
         <div className={{ js(plan.grid) }}>
 {% for f in section.fields %}
-{% if f.owner %}
-          {owner === null && (
+{% if f.owner or f.fixed %}
+          {{ "{" }}{{ "!scope?.owner" if f.owner else "fixedValue(scope, " ~ js(f.key) ~ ") === undefined" }} && (
             {{ fm.field(f, 12, name) | trim }}
           )}
 
@@ -312,8 +322,8 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% if plan.loose %}
       <div className={{ js(plan.grid) }}>
 {% for f in plan.loose %}
-{% if f.owner %}
-        {owner === null && (
+{% if f.owner or f.fixed %}
+        {{ "{" }}{{ "!scope?.owner" if f.owner else "fixedValue(scope, " ~ js(f.key) ~ ") === undefined" }} && (
           {{ fm.field(f, 10, name) | trim }}
         )}
 

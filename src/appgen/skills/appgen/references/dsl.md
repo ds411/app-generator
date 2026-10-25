@@ -1524,13 +1524,15 @@ browser, so they are a demonstration, not a protection.
 The menus, the page search, the links, and the actions of the front
 ends show only the pages and the operations that the role allows. A
 group of a menu without an allowed page does not show.
-The front ends apply the rules with an `owner` of one relation and no
-`where`. The server actions of the Next.js app use only the records of
-the user, and a detail page of a record of another user shows "not
-found". The React app shows the records that the FastAPI app gives, and
-with mock data the mock store applies the rules in the browser, as a
-demonstration. For a user of an owner rule, the create and update forms
-do not show the owner field, and a new record belongs to the user.
+The front ends apply the record rules too. The server actions of the
+Next.js app use only the records of the rule, a detail page of another
+record shows "not found", and a create or a change out of the rule
+gives an error. The React app shows the records that the FastAPI app
+gives, and with mock data the mock store applies the rules in the
+browser, as a demonstration. For a user of a rule, the create and update
+forms do not show the owner field of one relation and the fields of a
+condition with one value: a new record belongs to the user, and gets
+the value of the condition.
 
 ## translations
 
@@ -1719,6 +1721,7 @@ use in the app does not show.
   `The record refers to a record that does not exist, or other records refer to it.`,
   `Another record has the same value, and the value must be unique.`,
   `Sign in to do this.`, `Your role may not do this operation.`,
+  `Your role may not give a record these values.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.

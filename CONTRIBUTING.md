@@ -297,12 +297,14 @@ git config core.hooksPath .githooks
   the hook also runs `scripts/check-auth-ui.sh`. The script builds the room booking example
   with React and Next.js, signs in as a user of each role, and checks
   the menus, the pages, and the actions of the role. It also signs up
-  a new user, resets a password (Next.js), checks that a user of an
-  owner rule sees only the records of the user, and signs in with a
+  a new user, resets a password (Next.js), checks that a user of a
+  record rule sees only the records of the rule, and signs in with a
   provider through the mock provider of `scripts/mock_oidc.py`
   (`scripts/auth_ui_test.py`). The Next.js app sends the links of the
   sign-up and of the reset as emails to the mock SMTP server
-  `scripts/mock_smtp.py`, and the test opens the links of the emails. The binding `react-api` is the React app
+  `scripts/mock_smtp.py`, and the test opens the links of the emails.
+  It also builds `tests/fixtures/record-rules.yaml`, and checks its
+  rules with conditions and owner paths. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
   in through the flow of the FastAPI app. It needs uv and pnpm, but not
   Docker. Update its approved screenshots with
