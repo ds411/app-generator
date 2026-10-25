@@ -1,8 +1,9 @@
 """The sign-in of the apps: the entity that holds the users, and the open parts."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import pydantic
+from pydantic import BeforeValidator
 
 from appgen.dsl.apis import EnvName
 from appgen.dsl.element import Element, EntityName, MemberName, Text
@@ -15,6 +16,8 @@ FORGOT_PASSWORD_PATH = "/forgot-password"
 """The path of the page that asks for a password reset, with `auth.password_reset`."""
 RESET_PASSWORD_PATH = "/reset-password"
 """The path of the page that sets a new password with a reset link, with `auth.password_reset`."""
+VERIFY_EMAIL_PATH = "/verify-email"
+"""The path of the page of the link that confirms an email address, with `verify_email`."""
 PROVIDER_PATHS = "/auth/"
 """With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8
@@ -24,6 +27,31 @@ type Claim = Annotated[str, pydantic.StringConstraints(pattern=r"^[^\s\"\\]+$")]
 """The name of a claim of an ID token, or of a scope, for example `email`."""
 
 
+def flag_input(value: object) -> object:
+    """Return the mapping form of a flag: `true` becomes an empty mapping, `false` None."""
+    if value is True:
+        return {}
+    if value is False:
+        return None
+    return value
+
+
+def flag_schema(schema: dict[str, Any]) -> None:
+    """Add the short form `true` to the JSON Schema of a key."""
+    schema["anyOf"] = [{"type": "boolean"}, *schema.get("anyOf", [])]
+
+
+class EmailVerification(Element):
+    """The verification of the email address of a new user (ADR 0023).
+
+    After the sign-up, the app sends a message with a link to the address.
+    The user can sign in only after the user opens the link.
+    """
+
+    token_minutes: Annotated[int, pydantic.Field(ge=5, le=10080)] = 1440
+    """The time that a verification link stays valid."""
+
+
 class SignUp(Element):
     """The sign-up of new users (ADR 0016): the fields of the form, and the role of a new user."""
 
@@ -31,6 +59,10 @@ class SignUp(Element):
     """The fields of the user entity that the sign-up form asks for, with the user name."""
     default_role: MemberName | None = None
     """With `access`: the role of a new user. The default is the default of the role field."""
+    verify_email: Annotated[EmailVerification | None, BeforeValidator(flag_input)] = pydantic.Field(
+        default=None, json_schema_extra=flag_schema
+    )
+    """`true`: a new user confirms the email address with a link before the first sign-in."""
 
 
 class PasswordReset(Element):

@@ -1885,6 +1885,24 @@
       "title": "DetailView",
       "type": "object"
     },
+    "EmailVerification": {
+      "additionalProperties": false,
+      "description": "The verification of the email address of a new user (ADR 0023).\n\nAfter the sign-up, the app sends a message with a link to the address.\nThe user can sign in only after the user opens the link.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "token_minutes": {
+          "default": 1440,
+          "maximum": 10080,
+          "minimum": 5,
+          "title": "Token Minutes",
+          "type": "integer"
+        }
+      },
+      "title": "EmailVerification",
+      "type": "object"
+    },
     "Entity": {
       "additionalProperties": false,
       "description": "A kind of record that the app stores, for example a task.",
@@ -4650,6 +4668,20 @@
           "anyOf": [
             {
               "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verify_email": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/EmailVerification"
             },
             {
               "type": "null"

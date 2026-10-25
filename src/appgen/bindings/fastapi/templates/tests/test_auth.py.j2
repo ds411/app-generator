@@ -4,7 +4,10 @@
 {% set sign_up = definition.auth.sign_up %}
 {% set reset = definition.auth.password_reset %}
 {% set password = definition.auth.password %}
+{% set verify = sign_up.verify_email if sign_up else none %}
+{% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
 {% set access = definition.access %}
+{% set default_role = none %}
 {% if sign_up and access %}
 {% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
 {% set default_role = sign_up.default_role or definition.entities[u.name].fields[role.name].default %}
@@ -22,7 +25,7 @@
 {% endfor %}
 """The tests of the sign-in: tokens, the auth endpoints, and the protected endpoints."""
 
-{% if reset %}
+{% if reset or verify %}
 import time
 {% endif %}
 {% if sign_up %}
@@ -35,11 +38,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-{% if reset %}
+{% if py.message_elements %}
 from app.core import auth
-from app.core.auth import Credential, make_reset_token, set_password
+{{ py.from_import("app.core.auth", ["Credential", "set_password"] + (["make_reset_token"] if reset else []) + (["make_verification_token"] if verify else [])) }}
 from app.core.config import Settings
-from app.features.{{ u.slice }}.models import {{ u.name }}
+from app.core.messages import Message
 {% elif password %}
 from app.core.auth import set_password
 {% else %}
@@ -134,6 +137,21 @@ async def test_a_protected_endpoint_needs_a_signed_in_user(
     response = await anonymous_client.get("{{ ns.entity.path }}{{ ns.op.path }}", headers=headers)
     assert response.status_code == 200, response.text
 {% endif %}
+{% if py.message_elements %}
+
+
+{{ trace(py.message_elements[0]) }}
+@pytest.fixture
+def messages(monkeypatch: pytest.MonkeyPatch) -> list[Message]:
+    """The messages that the app sends. The tests do not use the delivery of the app."""
+    sent: list[Message] = []
+
+    async def deliver(settings: Settings, message: Message) -> None:
+        sent.append(message)
+
+    monkeypatch.setattr(auth, "deliver_message", deliver)
+    return sent
+{% endif %}
 {% if sign_up %}
 
 
@@ -145,6 +163,34 @@ async def _sign_up_body(session: AsyncSession) -> dict[str, Any]:
     return {name: data[name] for name in names if name in data} | {"password": PASSWORD}
 
 
+{% if verify %}
+{{ trace(verify.id) }}
+def _verification_token(message: Message) -> str:
+    """Return the token of the link of a verification message."""
+    assert message.kind == "email-verification"
+    return message.link.partition("?token=")[2]
+
+
+{{ trace(sign_up.id) }}
+async def test_a_new_user_signs_up_and_signs_in(
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
+) -> None:
+    body = await _sign_up_body(session)
+
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+
+    assert response.status_code == 202, response.text
+    assert "access_token" not in response.json()
+    {{ trace(verify.id) }}
+    assert messages[-1].to == body["{{ address.name }}"]
+    token = _verification_token(messages[-1])
+    confirm = await anonymous_client.post("/auth/verify-email/confirm", json={"token": token})
+    assert confirm.status_code == 204, confirm.text
+    credentials = {"username": body["{{ username.name }}"], "password": PASSWORD}
+    sign_in = await anonymous_client.post("/auth/sign-in", json=credentials)
+    assert sign_in.status_code == 200, sign_in.text
+    headers = {"Authorization": f"Bearer {sign_in.json()['access_token']}"}
+{% else %}
 {{ trace(sign_up.id) }}
 async def test_a_new_user_signs_up_and_signs_in(
     anonymous_client: AsyncClient, session: AsyncSession
@@ -155,15 +201,18 @@ async def test_a_new_user_signs_up_and_signs_in(
 
     assert response.status_code == 201, response.text
     headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+{% endif %}
     me = await anonymous_client.get("/auth/me", headers=headers)
     assert me.status_code == 200, me.text
     assert me.json()["{{ username.name }}"] == body["{{ username.name }}"]
 {% if default_role %}
     assert me.json()["{{ role.name }}"] == "{{ default_role }}"
 {% endif %}
+{% if not verify %}
     credentials = {"username": body["{{ username.name }}"], "password": PASSWORD}
     sign_in = await anonymous_client.post("/auth/sign-in", json=credentials)
     assert sign_in.status_code == 200, sign_in.text
+{% endif %}
 {% if ns.new_op %}
     {{ trace(ns.new_op.id) }}
     response = await anonymous_client.get("{{ ns.new_entity.path }}{{ ns.new_op.path }}", headers=headers)
@@ -173,11 +222,11 @@ async def test_a_new_user_signs_up_and_signs_in(
 
 {{ trace(sign_up.id) }}
 async def test_a_sign_up_with_a_user_name_that_exists_gives_409(
-    anonymous_client: AsyncClient, session: AsyncSession
+    anonymous_client: AsyncClient, session: AsyncSession{{ ", messages: list[Message]" if verify }}
 ) -> None:
     body = await _sign_up_body(session)
     first = await anonymous_client.post("/auth/sign-up", json=body)
-    assert first.status_code == 201, first.text
+    assert first.status_code == {{ 202 if verify else 201 }}, first.text
 
     response = await anonymous_client.post("/auth/sign-up", json=body)
 
@@ -194,36 +243,140 @@ async def test_a_sign_up_needs_a_long_password(
 
     assert_problem(response, 422)
 {% endif %}
+{% if verify %}
+
+
+{{ trace(verify.id) }}
+async def test_a_user_who_is_not_verified_cannot_sign_in(
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
+) -> None:
+    body = await _sign_up_body(session)
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+    assert response.status_code == 202, response.text
+    credentials = {"username": body["{{ username.name }}"], "password": PASSWORD}
+
+    sign_in = await anonymous_client.post("/auth/sign-in", json=credentials)
+
+    assert_problem(sign_in, 403)
+    wrong = await anonymous_client.post("/auth/sign-in", json=credentials | {"password": "wrong"})
+    assert_problem(wrong, 401)
+
+
+{{ trace(verify.id) }}
+async def test_a_user_gets_a_new_link_and_an_unknown_user_gets_the_same_answer(
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
+) -> None:
+    body = await _sign_up_body(session)
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+    assert response.status_code == 202, response.text
+    username = body["{{ username.name }}"]
+
+    again = await anonymous_client.post("/auth/verify-email", json={"username": username})
+    unknown_name = {"username": "nobody@example.com"}
+    unknown = await anonymous_client.post("/auth/verify-email", json=unknown_name)
+
+    assert again.status_code == unknown.status_code == 202, again.text
+    assert again.json() == unknown.json()
+    assert len(messages) == 2
+    token = _verification_token(messages[-1])
+    confirm = await anonymous_client.post("/auth/verify-email/confirm", json={"token": token})
+    assert confirm.status_code == 204, confirm.text
+    verified = await anonymous_client.post("/auth/verify-email", json={"username": username})
+    assert verified.status_code == 202, verified.text
+    assert len(messages) == 2
+
+
+{{ trace(verify.id) }}
+async def test_an_expired_or_a_changed_verification_token_gives_400(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    ended = int(time.time()) - 1
+    later = int(time.time()) + 60
+
+    tokens = [
+        make_verification_token(b"test-secret", user.id, user.{{ address.attr }}, ended),
+        make_verification_token(b"test-secret", user.id, "another@example.com", later),
+        "abc.def",
+    ]
+
+    for token in tokens:
+        response = await anonymous_client.post("/auth/verify-email/confirm", json={"token": token})
+        assert_problem(response, 400)
+
+
+{{ trace(verify.id) }}
+async def test_a_failed_delivery_rolls_back_the_sign_up(
+    anonymous_client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fail(settings: Settings, message: Message) -> None:
+        raise NotImplementedError(message.kind)
+
+    monkeypatch.setattr(auth, "deliver_message", fail)
+    body = await _sign_up_body(session)
+
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+
+    assert_problem(response, 501)
+    again = await anonymous_client.post("/auth/sign-up", json=body)
+    assert_problem(again, 501)
+
+
+{{ trace(verify.id) }}
+async def test_the_users_with_a_password_of_the_administrator_are_verified(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    await set_password(session, user, PASSWORD)
+
+    credential = await session.get(Credential, user.id)
+
+    assert credential is not None
+    await session.refresh(credential)
+    assert credential.email_verified_at is not None
+    credentials = {"username": user.{{ username.attr }}, "password": PASSWORD}
+    assert (await anonymous_client.post("/auth/sign-in", json=credentials)).status_code == 200
+{% if reset %}
+
+
+{{ trace(verify.id) }}
+async def test_a_reset_link_verifies_the_email_address(
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
+) -> None:
+    body = await _sign_up_body(session)
+    response = await anonymous_client.post("/auth/sign-up", json=body)
+    assert response.status_code == 202, response.text
+    username = body["{{ username.name }}"]
+    token = await _reset_token(anonymous_client, username, messages)
+
+    response = await anonymous_client.post(
+        "/auth/password-reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert response.status_code == 204, response.text
+    credentials = {"username": username, "password": "a-new-password"}
+    assert (await anonymous_client.post("/auth/sign-in", json=credentials)).status_code == 200
+{% endif %}
+{% endif %}
 {% if reset %}
 
 
 {{ trace(reset.id) }}
-@pytest.fixture
-def reset_links(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """The reset links that the app sends. The tests do not use the delivery of the app."""
-    links: list[str] = []
-
-    async def deliver(settings: Settings, user: {{ u.name }}, link: str) -> None:
-        links.append(link)
-
-    monkeypatch.setattr(auth, "deliver_password_reset", deliver)
-    return links
-
-
-async def _reset_token(client: AsyncClient, username: str, links: list[str]) -> str:
+async def _reset_token(client: AsyncClient, username: str, messages: list[Message]) -> str:
     """Ask for a reset link, and return the token of the link."""
     response = await client.post("/auth/password-reset", json={"username": username})
     assert response.status_code == 202, response.text
-    return links[-1].partition("?token=")[2]
+    assert messages[-1].kind == "password-reset"
+    return messages[-1].link.partition("?token=")[2]
 
 
 {{ trace(reset.id) }}
 async def test_a_user_resets_a_forgotten_password(
-    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
 ) -> None:
     user = await make_{{ u.snake }}(session)
     await set_password(session, user, PASSWORD)
-    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, messages)
 
     response = await anonymous_client.post(
         "/auth/password-reset/confirm", json={"token": token, "new_password": "a-new-password"}
@@ -238,11 +391,11 @@ async def test_a_user_resets_a_forgotten_password(
 
 {{ trace(reset.id) }}
 async def test_a_used_reset_token_gives_400(
-    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
 ) -> None:
     user = await make_{{ u.snake }}(session)
     await set_password(session, user, PASSWORD)
-    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, messages)
     body = {"token": token, "new_password": "a-new-password"}
     first = await anonymous_client.post("/auth/password-reset/confirm", json=body)
     assert first.status_code == 204, first.text
@@ -254,11 +407,11 @@ async def test_a_used_reset_token_gives_400(
 
 {{ trace(reset.id) }}
 async def test_a_new_password_makes_the_earlier_reset_tokens_invalid(
-    anonymous_client: AsyncClient, session: AsyncSession, reset_links: list[str]
+    anonymous_client: AsyncClient, session: AsyncSession, messages: list[Message]
 ) -> None:
     user = await make_{{ u.snake }}(session)
     await set_password(session, user, PASSWORD)
-    token = await _reset_token(anonymous_client, user.{{ username.attr }}, reset_links)
+    token = await _reset_token(anonymous_client, user.{{ username.attr }}, messages)
     await set_password(session, user, "another-password")
 
     response = await anonymous_client.post(
@@ -288,12 +441,12 @@ async def test_an_expired_reset_token_gives_400(
 
 {{ trace(reset.id) }}
 async def test_a_reset_for_an_unknown_user_name_gives_202(
-    anonymous_client: AsyncClient, reset_links: list[str]
+    anonymous_client: AsyncClient, messages: list[Message]
 ) -> None:
     response = await anonymous_client.post(
         "/auth/password-reset", json={"username": "nobody@example.com"}
     )
 
     assert response.status_code == 202, response.text
-    assert reset_links == []
+    assert messages == []
 {% endif %}

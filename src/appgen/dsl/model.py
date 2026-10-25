@@ -190,3 +190,17 @@ class AppDefinition(Element):
     def find(self, element_id: str) -> Element | None:
         """Return the element with an ID, or None if no element has the ID."""
         return self._index.get(element_id)
+
+    def address_field(self) -> str | None:
+        """Return the field of the user entity with the email address of a user, or None.
+
+        It is the user name field if its type is `email`, else the first
+        required `email` field of the user entity (ADR 0023).
+        """
+        if self.auth is None or self.auth.user_entity not in self.entities:
+            return None
+        fields = self.entities[self.auth.user_entity].stored_fields
+        username = fields.get(self.auth.username_field)
+        if username is not None and username.type == "email":
+            return self.auth.username_field
+        return next((n for n, f in fields.items() if f.type == "email" and f.required), None)

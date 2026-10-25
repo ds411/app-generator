@@ -264,7 +264,8 @@ def definition_messages(definition: AppDefinition) -> set[str]:
 
 def test_the_docs_list_the_messages_of_the_api() -> None:
     texts = set(TITLES)
-    for definition in (load_definition(EXAMPLE), room_booking_in_two_languages()):
+    security = load_definition(ROOT / "tests" / "fixtures" / "account-security.yaml")
+    for definition in (load_definition(EXAMPLE), room_booking_in_two_languages(), security):
         texts |= api_texts(files_of(definition)) - definition_messages(definition)
     docs = (ROOT / "docs" / "dsl.md").read_text(encoding="utf-8")
     section = docs[docs.index("### Messages of the FastAPI app") :]

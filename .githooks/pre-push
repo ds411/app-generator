@@ -143,7 +143,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/fastapi/*' \
     'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-fastapi.sh' \
     'scripts/check_schema_change.py' 'scripts/mock_oidc.py' 'scripts/check_provider_sign_in.py' \
-    'tests/fixtures/provider-sign-in.yaml' \
+    'tests/fixtures/provider-sign-in.yaml' 'tests/fixtures/account-security.yaml' \
     'scripts/smoke_test.py' 'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' \
     '.githooks/*'; then
     apps="$apps fastapi"

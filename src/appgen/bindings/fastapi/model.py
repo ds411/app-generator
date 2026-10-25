@@ -988,6 +988,9 @@ class PyApp:
     providers: list[PyProvider] = field(default_factory=list[PyProvider])
     translated: bool = False
     """True if the app has translations: the messages go through `t` (ADR 0010)."""
+    message_elements: list[str] = field(default_factory=list[str])
+    """The IDs of the elements whose messages the sign-in sends to the users (ADR 0023):
+    `auth.password_reset` and `auth.sign_up.verify_email`."""
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1128,7 +1131,19 @@ def python_app(definition: AppDefinition) -> PyApp:
         deploy=_deploy_targets(definition.app.extensions.get(DEPLOY_KEY)),
         providers=_providers(definition, entities),
         translated=definition.translations is not None,
+        message_elements=_message_elements(definition),
     )
+
+
+def _message_elements(definition: AppDefinition) -> list[str]:
+    """Return the IDs of the elements whose messages the sign-in sends, in a fixed order."""
+    auth = definition.auth
+    if auth is None:
+        return []
+    ids = [auth.password_reset.id] if auth.password_reset is not None else []
+    if auth.sign_up is not None and auth.sign_up.verify_email is not None:
+        ids.append(auth.sign_up.verify_email.id)
+    return ids
 
 
 def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list[PyProvider]:

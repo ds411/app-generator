@@ -1,0 +1,31 @@
+{{ trace_header(*py.message_elements) }}
+"""The delivery of the messages of the sign-in to the users (ADR 0023).
+
+The app sends a message with a link for a password reset (ADR 0017) and
+for the verification of an email address. appgen creates this file once
+and never changes it. The definition does not know the mail service, so
+write the delivery here: one function for all kinds of messages.
+"""
+
+import logging
+
+from app.core.config import Settings
+from app.core.messages import Message
+
+logger = logging.getLogger("app.auth")
+
+
+async def deliver_message(settings: Settings, message: Message) -> None:
+    """Send a message to a user, for example an email to `message.to`.
+
+    `message.kind` is the kind of the message, for example
+    `password-reset`. The subject and the text are in the language of the
+    request, and the text holds the link. The stub writes the link to the
+    log with `ENVIRONMENT=development`. In production, it gives an error
+    (501).
+    """
+    # TODO(appgen): send the message to the user, for example by email.
+    if settings.environment == "development":
+        logger.warning("The %s link of %s: %s", message.kind, message.to, message.link)
+        return
+    raise NotImplementedError(f"The delivery of the {message.kind} message")

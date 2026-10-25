@@ -1,7 +1,7 @@
 {{ trace_header("app") }}
 """The settings of the app, from environment variables or a `.env` file."""
 
-{% if definition.auth and definition.auth.password_reset %}
+{% if py.message_elements %}
 from typing import Literal
 
 {% endif %}
@@ -42,8 +42,15 @@ class Settings(BaseSettings):
 {% if definition.auth and definition.auth.password_reset %}
     password_reset_url: str = "http://localhost:5173/reset-password"
     """The page of the front end that sets a new password. The reset link adds `?token=...`."""
+{% endif %}
+{% if definition.auth and definition.auth.sign_up and definition.auth.sign_up.verify_email %}
+    {{ trace(definition.auth.sign_up.verify_email.id) }}
+    email_verify_url: str = "http://localhost:5173/verify-email"
+    """The page of the front end that confirms an email address. The link adds `?token=...`."""
+{% endif %}
+{% if py.message_elements %}
     environment: Literal["development", "production"] = "production"
-    """`development` for a local run: the stub of the reset delivery writes the link to the log."""
+    """`development` for a local run: the stub of the delivery writes the links to the log."""
 {% endif %}
 {% for api in py_apis.values() %}
     {{ trace(api.id) }}

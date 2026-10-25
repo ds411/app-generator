@@ -40,8 +40,10 @@ class {{ op.name | pascal }}Query(PageQuery):
     """The query parameters of the operation: the page, the order, and the filters."""
 
     model_config = ConfigDict(extra="forbid")
-
 {% for p in e.query.params %}
+{% if loop.first %}
+
+{% endif %}
 {% for id in p.ids %}
     {{ trace(id) }}
 {% endfor %}
