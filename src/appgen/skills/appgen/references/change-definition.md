@@ -72,6 +72,23 @@ After `appgen generate`, the generated code uses the new name. The
 hand-written code keeps the old name, and the check reports each trace
 to the old ID in `invalid`, with the code `unknown-element` and the hint
 `Did you mean '<new ID>'?`. The extension files of the old element stay.
+`appgen orphans` lists them. After a rename of the operation
+`complete_task` to `finish_task`, it gives:
+
+<!-- appgen orphans -->
+```json
+{
+  "version": 1,
+  "orphans": [
+    {
+      "file": "app/features/tasks/complete_task_ext.py",
+      "element_id": "operations.complete_task",
+      "suggestion": "operations.finish_task"
+    }
+  ]
+}
+```
+
 Move the code to the new element:
 
 1. List the extension files of the old elements:

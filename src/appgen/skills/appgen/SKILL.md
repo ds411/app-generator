@@ -84,11 +84,11 @@ the version of the installed appgen:
 The options of `install` and `uninstall`:
 
 - `--target claude` (Claude Code, `.claude/skills/`) or `--target agents`
-  (Codex and other agents, `.agents/skills/`). Repeat it for both, the
-  default.
-- `--scope project` (the default: the folder of `--project-dir <folder>`,
-  or the current folder), `--scope user` (the home folder), or
-  `--scope system` (a system folder, which needs root).
+  (Codex and other agents, `.agents/skills/`). Repeat it for both.
+  Default: both.
+- `--scope project` (the folder of `--project-dir <folder>`, or the
+  current folder), `--scope user` (the home folder), or `--scope system`
+  (a system folder, which needs root). Default: `project`.
 - `--path <folder>`: another skills folder, instead of `--target` and
   `--scope`. `appgen skills list --path <folder>` shows it too.
 - `--dry-run`: show the changes, and write no file.
@@ -133,6 +133,7 @@ Do these steps for each change to a definition:
 
 ### The JSON of `appgen validate`
 
+<!-- appgen validate -->
 ```json
 {
   "file": "app.yaml",
@@ -158,6 +159,7 @@ element with the error, if it is known.
 
 A shortened report:
 
+<!-- appgen check -->
 ```json
 {
   "version": 1,
@@ -175,7 +177,18 @@ A shortened report:
     }
   ],
   "gaps_to_close": [],
-  "coverage": { "percent": 98.31, "total": 59, "covered": 58, "gaps": 1, "uncovered": 0 }
+  "coverage": {
+    "percent": 98.31,
+    "total": 59,
+    "covered": 58,
+    "gaps": 1,
+    "uncovered": 0,
+    "min_percent": null,
+    "excluded_kinds": ["page", "ui"],
+    "by_kind": [
+      { "kind": "operation", "percent": 85.71, "total": 7, "covered": 6, "gaps": 1, "uncovered": 0 }
+    ]
+  }
 }
 ```
 
@@ -192,6 +205,10 @@ A shortened report:
 - `gaps_to_close`: the gap files without stub markers. Change their
   `@trace:gap` trace to `@trace:manual`.
 - `coverage`: the counts, and the percentage of covered elements.
+  `by_kind` gives them for each kind of element. `excluded_kinds` are
+  the kinds that the coverage leaves out: the kinds of
+  `--exclude-kind`, and the kinds that the binding does not generate.
+  `min_percent` is the value of `--min-coverage`, or `null`.
 
 ## Element IDs
 

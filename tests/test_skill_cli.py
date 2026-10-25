@@ -13,14 +13,21 @@ import sys
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
 
 import pytest
 import typer.core
-import typer.main
-from skill_support import ROOT, SKILL, code_texts, front_matter, skill_docs
+from skill_support import (
+    MADE_FROM_DOCS,
+    ROOT,
+    SKILL,
+    Command,
+    cli_commands,
+    code_texts,
+    front_matter,
+    option_names,
+    skill_docs,
+)
 
-from appgen.cli import app
 from appgen.skills import skill_files, skill_names
 
 # An invocation starts at the start of the code, or after a shell
@@ -29,34 +36,6 @@ from appgen.skills import skill_files, skill_names
 _INVOCATION = re.compile(r"(?:^|&&|;|\||\$\(|\buv run|\buvx)\s*appgen(?=\s|$)")
 _END = {"|", "||", "&&", ";", ">", "2>", ")"}
 _LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
-
-MADE_FROM_DOCS = {"references/dsl.md"}
-"""The files of the skill that a script makes from the docs of the repository."""
-
-type Command = typer.core.TyperCommand | typer.core.TyperGroup
-
-
-def cli_commands() -> dict[tuple[str, ...], Command]:
-    """Return each command of the CLI by its path, with the root command at ()."""
-    commands: dict[tuple[str, ...], Command] = {}
-
-    def walk(path: tuple[str, ...], command: Command) -> None:
-        commands[path] = command
-        if isinstance(command, typer.core.TyperGroup):
-            for name, sub in command.commands.items():
-                walk((*path, name), cast(Command, sub))
-
-    walk((), cast(Command, typer.main.get_command(app)))
-    return commands
-
-
-def option_names(command: Command) -> set[str]:
-    """Return the option names of a command, for example `--format` and `-f`."""
-    names = {"--help"}
-    for param in command.params:
-        if isinstance(param, typer.core.TyperOption):
-            names.update(param.opts, param.secondary_opts)
-    return names
 
 
 @dataclass
