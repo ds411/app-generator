@@ -29,6 +29,7 @@ valid.
 - [pages](#pages)
 - [workflows](#workflows)
 - [apis](#apis)
+- [webhooks](#webhooks)
 - [ui](#ui)
   - [theme](#theme)
   - [tokens](#tokens)
@@ -61,6 +62,7 @@ The file is YAML 1.1. The top level has these keys:
 | `pages`      | No       | A mapping from page name to page (the routes of a front end). |
 | `ui`         | No       | The design tokens, layouts, menus, views, forms, and dashboards. |
 | `apis`       | No       | The third-party APIs that the app calls (OpenAPI documents).  |
+| `webhooks`   | No       | The endpoints that other systems send signed events to.       |
 | `seed`       | No       | The records that the apps start with, for each entity.        |
 | `storage`    | No       | The place of the files of the `file` and `image` fields.      |
 
@@ -107,7 +109,7 @@ element, never a list. The name rules:
 | ---------------------------------------- | --------------------- | ----------------- |
 | App name                                 | `^[a-z][a-z0-9-]*$`   | `project-tracker` |
 | Entity                                   | `^[A-Z][A-Za-z0-9]*$` | `Task`            |
-| Field, relation, param, operation, page, enum value, API, UI element | `^[a-z][a-z0-9_]*$` | `due_date` |
+| Field, relation, param, operation, page, enum value, API, webhook, UI element | `^[a-z][a-z0-9_]*$` | `due_date` |
 | Operation of an API (its operation ID)   | `^[A-Za-z_][A-Za-z0-9_]*$` | `getPublicHolidays` |
 | Seed record key                          | `^[A-Za-z0-9_]+$`     | `a101`, `hq`      |
 | Token and token group                    | `^[a-z0-9][a-z0-9_]*$` | `600`, `primary` |
@@ -136,6 +138,7 @@ ID ([traces.md](traces.md)).
 | Seed of an entity | `seed.Room`                            |
 | Seed record  | `seed.Room.records.a101`                   |
 | Storage      | `storage`                                  |
+| Webhook      | `webhooks.commits`                         |
 | Token        | `ui.tokens.color.primary`                  |
 | View column  | `ui.views.task_table.columns.title`        |
 | Form field   | `ui.forms.new_task.fields.title`           |
@@ -824,6 +827,101 @@ apis:
   are reserved. Two keys cannot use the same variable.
 - A view can show the answer of an operation without hand-written code:
   see [Views of API data](#views-of-api-data).
+
+## webhooks
+
+The optional `webhooks` section names the endpoints that other systems
+send events to, for example a payment service, a shipping service, or a
+chat service. Each webhook has a path, a signature, and an optional
+schema of the body. The FastAPI app checks the signature of each
+request, and calls the hand-written logic of the webhook one time for
+each event ([ADR 0028](adr/0028-webhooks.md)).
+
+```yaml
+webhooks:
+  commits:
+    description: The code host reports a commit that refers to a task.
+    path: /webhooks/commits
+    signature:
+      scheme: hmac_sha256
+      header: X-Signature-256
+      prefix: "sha256="
+      secret_env: COMMITS_WEBHOOK_SECRET
+    body: { document: webhooks/commits.openapi.yaml, schema: CommitEvent }
+  payments:
+    path: /webhooks/payments
+    signature:
+      scheme: stripe
+      secret_env: PAYMENTS_WEBHOOK_SECRET
+      tolerance_seconds: 600
+  shipping:
+    path: /webhooks/shipping
+    signature:
+      scheme: hmac_sha256
+      header: X-Shipping-Hmac
+      encoding: base64
+      secret_env: SHIPPING_WEBHOOK_SECRET
+    event_id: { header: X-Shipping-Event }
+```
+
+| Key           | Content                                                                   |
+| ------------- | ------------------------------------------------------------------------- |
+| `path`        | Required. The path of the endpoint, for example `/webhooks/payments`. Each segment has lowercase letters, digits, `.`, `_`, `~`, and `-`. |
+| `signature`   | Required. The check of the signature (see below).                         |
+| `event_id`    | The location of the event ID: `field`, a property of the body (with `.` for a nested property, for example `message.id`), or `header`, a header. The default is `{ field: id }`. |
+| `body`        | The schema of the body: `document`, the path of an OpenAPI document from the folder of the definition, and `schema`, the name of a schema in `components.schemas`. Without `body`, the event is a JSON value. |
+| `description` | Text.                                                                     |
+
+The keys of `signature`:
+
+| Key                 | Content                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `scheme`            | Required. `hmac_sha256` or `stripe`.                                |
+| `secret_env`        | Required. The environment variable of the secret that the sender and the app share. |
+| `header`            | Only `hmac_sha256`, and required: the header with the signature, for example `X-Hub-Signature-256`. |
+| `prefix`            | Only `hmac_sha256`: a text before the signature, for example `sha256=`. The default is no prefix. |
+| `encoding`          | Only `hmac_sha256`: `hex` (the default) or `base64`.                |
+| `tolerance_seconds` | Only `stripe`: the maximum difference in seconds between the time of the signature and now, from 1 to 86400. The default is 300. |
+
+- `hmac_sha256`: the header has the HMAC-SHA256 of the raw body with the
+  secret, in hex or in base64, after the prefix. For example, GitHub
+  uses `X-Hub-Signature-256` with the prefix `sha256=`, and Shopify uses
+  `X-Shopify-Hmac-Sha256` with base64.
+- `stripe`: the header `Stripe-Signature` has `t=<time>,v1=<signature>`.
+  The signature is the HMAC-SHA256 of `<time>.<body>` in hex. A time that
+  is more than `tolerance_seconds` before or after now gives 401, so that
+  a recorded request cannot come again later.
+- The FastAPI app has the endpoint `POST <path>` for each webhook, in
+  `app/webhooks/<webhook>/router.py`. The endpoint reads the raw body,
+  and checks the signature with the secret. A wrong or missing signature
+  gives 401. A body that is not JSON, or an event without an ID, gives
+  400. A body that does not agree with the schema gives 422. A server
+  without the secret gives 500.
+- The answer is `{"event_id": "<id>", "repeated": false}`. The app keeps
+  the event ID of each webhook in the table `webhook_events`. A repeated
+  event gives `"repeated": true`, and the logic does not run again. The
+  row and the changes of the logic are in one transaction: when the
+  logic fails, the app does not keep the row, and the sender can deliver
+  the event again.
+- The logic of each webhook is a gap: the function `handle_<webhook>` in
+  the extension file `app/webhooks/<webhook>/handler_ext.py`. It gets
+  the database session, the event, and the headers of the request. The
+  event is a Pydantic model of the schema, or a `JsonValue` without
+  `body`. Until the function has the logic, the endpoint gives 501. A
+  `ProblemError` of the logic gives its status to the sender.
+- The Next.js binding does not generate the webhooks yet, so each
+  webhook is a gap of the Next.js app. The React app has no server, and
+  leaves out the webhooks.
+- The path of a webhook cannot be the path of another webhook, of a
+  page, or of the endpoints of an entity (`duplicate-path`). It cannot
+  be under a route of the apps, for example `/auth`, `/apis`, or `/docs`
+  (`reserved-name`).
+- The environment variables of the apps are reserved. The secret
+  variable cannot be the variable of an API or of another webhook, and
+  cannot have the prefix `NEXT_PUBLIC_` or `VITE_`.
+- The document must be a local file, as for `apis`. The schema must be
+  in the document, and the property of the event ID must be in the
+  schema. The output manifest records the hash of each document.
 
 ## ui
 
@@ -1945,6 +2043,10 @@ to translate one. The rules and the workflows give their own messages.
 - The endpoints of the exposed APIs:
   `The API {api} answered with the status {status}.`,
   `The API {api} gave no valid answer.`.
+- The webhooks: `The server has no secret for the webhook {name}.`,
+  `The signature of the webhook is not valid.`,
+  `The body of the webhook is not valid JSON.`,
+  `The webhook has no event ID.`.
 
 ## Extension keys
 

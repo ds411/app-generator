@@ -29,6 +29,7 @@ from appgen.bindings.fastapi.pysource import (
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.fastapi.webhooks import python_webhooks
 from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.access import RecordRule
@@ -2510,6 +2511,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py": py,
         "py_seed": python_seed(definition, py),
         "py_apis": apis,
+        "py_webhooks": python_webhooks(definition),
         "py_api_mocks_imports": mocks_imports(apis),
         "py_api_features": py_features(apis),
         "i18n": plan,

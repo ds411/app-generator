@@ -35,11 +35,11 @@ _STRING_ERRORS = frozenset({"string_type", "literal_error", "string_pattern_mism
 def load_definition(path: Path | str) -> AppDefinition:
     """Load an app definition file. Raise DefinitionError if it is not valid.
 
-    The loader reads the OpenAPI documents of the `apis`, the data files
-    of the `seed`, and the files of the file fields of the seed records
-    from the folder of the file. The validator reports a document that is
-    not valid, and a file of a seed record that it cannot read. A data
-    file that is not valid is an error of the loader.
+    The loader reads the OpenAPI documents of the `apis` and the `webhooks`,
+    the data files of the `seed`, and the files of the file fields of the
+    seed records from the folder of the file. The validator reports a
+    document that is not valid, and a file of a seed record that it cannot
+    read. A data file that is not valid is an error of the loader.
     """
     path = Path(path)
     return _load(read_yaml_file(path), path.parent)
@@ -50,8 +50,9 @@ def load_definition_text(
 ) -> AppDefinition:
     """Load an app definition from YAML text. Raise DefinitionError if it is not valid.
 
-    The loader reads the OpenAPI documents of the `apis` and the data files
-    of the `seed` from `base_dir`, by default the folder of `file`.
+    The loader reads the OpenAPI documents of the `apis` and the `webhooks`
+    and the data files of the `seed` from `base_dir`, by default the folder
+    of `file`.
     """
     return _load(read_yaml(text, file), base_dir or Path(file).parent)
 
@@ -99,6 +100,8 @@ def _load(document: YamlDocument, base_dir: Path) -> AppDefinition:
     definition._index = index_elements(definition)  # pyright: ignore[reportPrivateUsage]
     for api in definition.apis.values():
         api.read_document(base_dir)
+    for webhook in definition.webhooks.values():
+        webhook.read_document(base_dir)
     for name, seed in definition.seed.items():
         seed._file_hash = seed_hashes.get(name)  # pyright: ignore[reportPrivateUsage]
     read_seed_media(definition, base_dir)

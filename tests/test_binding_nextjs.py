@@ -126,8 +126,10 @@ def test_pages_without_a_layout_are_in_the_bare_group(edge_files: dict[str, str]
 
 
 def test_the_binding_covers_each_element_of_the_project_tracker(result: GenerationResult) -> None:
-    assert result.gaps == []
-    assert not [path for path in _files(result) if path.startswith("src/gaps/")]
+    # The binding does not generate the webhooks yet (ADR 0028).
+    assert [gap.element_id for gap in result.gaps] == ["webhooks.commits"]
+    gaps = [path for path in _files(result) if path.startswith("src/gaps/")]
+    assert gaps == ["src/gaps/webhooks.commits.ext.ts"]
 
 
 def test_page_and_top_bar_actions_are_widgets(result: GenerationResult) -> None:

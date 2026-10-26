@@ -244,6 +244,35 @@ class OpenApiDocument:
             problems=tuple(builder.problems),
         )
 
+    @property
+    def schema_keys(self) -> tuple[str, ...]:
+        """The names of the schemas in `components.schemas`, in document order."""
+        components = self._data.get("components")
+        if not isinstance(components, dict):
+            return ()
+        found = cast(dict[str, object], components).get("schemas")
+        return tuple(cast(dict[str, object], found)) if isinstance(found, dict) else ()
+
+    def select_schemas(self, keys: Iterable[str]) -> ClientSpec:
+        """Return the component schemas with these names, and the schemas that they need.
+
+        A name that the document does not have gives no schema. The result
+        has no operations.
+        """
+        builder = _Builder(self._data)
+        known = set(self.schema_keys)
+        for key in keys:
+            if key in known:
+                builder.component(key)
+        return ClientSpec((), tuple(sorted(builder.schemas.values(), key=lambda s: s.name)))
+
+    def schema_name(self, key: str) -> str | None:
+        """Return the name of a component schema in the normal form, or None if the document
+        has no schema with the name."""
+        if key not in self.schema_keys:
+            return None
+        return _Builder(self._data).component(key)
+
 
 def read_document(path: Path) -> OpenApiDocument:
     """Read an OpenAPI document (YAML or JSON). Raise DocumentError if it is not valid."""

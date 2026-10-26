@@ -105,6 +105,22 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("user_id", name="pk_credentials"),
     )
 {% endif %}
+{% if py_webhooks %}
+    op.create_table(
+        "webhook_events",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("webhook", sa.String(length=100), nullable=False),
+        sa.Column("event_id", sa.String(length=200), nullable=False),
+        sa.Column(
+            "received_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id", name="pk_webhook_events"),
+        sa.UniqueConstraint("webhook", "event_id", name="uq_webhook_events_webhook_event_id"),
+    )
+{% endif %}
 {% for t in py.join_tables %}
     op.create_table(
         "{{ t.name }}",
@@ -117,6 +133,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
+{% if py_webhooks %}
+    op.drop_table("webhook_events")
+{% endif %}
 {% if definition.auth and definition.auth.password %}
     op.drop_table("credentials")
 {% endif %}

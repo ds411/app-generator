@@ -59,6 +59,11 @@ from app.features.{{ slice }}.router import router as {{ slice }}_router
 from app.integrations.{{ api.module }}.router import router as {{ api.module }}_router
 {% endfor %}
 from app.models import configure_models
+{% for w in py_webhooks.values() | sort(attribute="module") %}
+
+{{ trace(w.id) }}
+from app.webhooks.{{ w.module }}.router import router as {{ w.module }}_webhook
+{% endfor %}
 
 logger = logging.getLogger("app.seed")
 
@@ -160,6 +165,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% if py.dashboards %}
     app.include_router(dashboards_router)
 {% endif %}
+{% for w in py_webhooks.values() %}
+    {{ trace(w.id) }}
+    app.include_router({{ w.module }}_webhook)
+{% endfor %}
     # The hand-written routers come after the generated routers.
     for router in ROUTERS:
         app.include_router(router)

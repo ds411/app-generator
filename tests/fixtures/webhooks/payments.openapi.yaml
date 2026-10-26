@@ -1,0 +1,31 @@
+# The events of a payment service, in the format of Stripe events. Only
+# the parts that tests/fixtures/webhooks.yaml uses.
+openapi: 3.1.0
+info:
+  title: Payment events
+  version: 1.0.0
+components:
+  schemas:
+    Event:
+      type: object
+      description: An event of the payment service.
+      required: [id, type, created, data]
+      properties:
+        id: { type: string, description: The ID of the event. }
+        type:
+          type: string
+          enum: [checkout.session.completed, invoice.paid]
+        created: { type: integer, description: The time of the event, in seconds. }
+        data:
+          type: object
+          required: [object]
+          properties:
+            object: { $ref: "#/components/schemas/Payment" }
+    Payment:
+      type: object
+      required: [id, amount, currency]
+      properties:
+        id: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        customer_email: { type: [string, "null"], format: email }

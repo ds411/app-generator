@@ -146,7 +146,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'scripts/check_schema_change.py' 'scripts/mock_oidc.py' 'scripts/check_provider_sign_in.py' \
     'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' \
     'tests/fixtures/provider-sign-in.yaml' 'tests/fixtures/account-security.yaml' \
-    'tests/fixtures/seed-data*' \
+    'tests/fixtures/seed-data*' 'tests/fixtures/webhooks*' 'scripts/webhook_sender.py' \
     'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
     'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps fastapi"

@@ -35,6 +35,7 @@ _SLICE = "app/features/{{ py.entity(name).slice }}"
 _TESTS = "tests/features/{{ py.entity(name).slice }}"
 _OPERATION = "app/features/{{ py.operations[name].slice }}/{{ name }}"
 _INTEGRATION = "app/integrations/{{ py_apis[name].module }}"
+_WEBHOOK = "app/webhooks/{{ py_webhooks[name].module }}"
 _SECOND_FACTOR = "definition.auth and definition.auth.password and definition.auth.second_factor"
 
 BINDING = Binding(
@@ -328,6 +329,32 @@ BINDING = Binding(
             for_each="api",
             when="py_apis[name].expose",
         ),
+        Output(template="app/core/webhooks.py.j2", path="app/core/webhooks.py", when="py_webhooks"),
+        Output(template="package.py.j2", path="app/webhooks/__init__.py", when="py_webhooks"),
+        Output(template="package.py.j2", path=_WEBHOOK + "/__init__.py", for_each="webhook"),
+        Output(
+            template="app/webhooks/webhook/router.py.j2",
+            path=_WEBHOOK + "/router.py",
+            for_each="webhook",
+        ),
+        Output(
+            template="app/webhooks/webhook/models.py.j2",
+            path=_WEBHOOK + "/models.py",
+            for_each="webhook",
+            when="py_webhooks[name].typed",
+        ),
+        Output(
+            template="app/webhooks/webhook/handler_ext.py.j2",
+            path=_WEBHOOK + "/handler_ext.py",
+            for_each="webhook",
+            extension=True,
+        ),
+        Output(template="package.py.j2", path="tests/webhooks/__init__.py", when="py_webhooks"),
+        Output(
+            template="tests/webhooks/test_webhook.py.j2",
+            path="tests/webhooks/test_{{ py_webhooks[name].module }}.py",
+            for_each="webhook",
+        ),
         Output(template="tests/factories.py.j2", path="tests/factories.py"),
         Output(
             template="tests/ordering.py.j2",
@@ -349,6 +376,7 @@ BINDING = Binding(
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
         | {"access", "role", "record_rule"}
         | {"api", "api_operation"}
+        | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
     ),

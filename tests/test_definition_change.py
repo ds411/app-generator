@@ -131,6 +131,7 @@ def test_the_orphans_command_lists_the_old_extension_file_and_the_new_element(
     changed_file = tmp_path / "changed.yaml"
     changed_file.write_text(change(EXAMPLE.read_text()))
     shutil.copytree(EXAMPLE.parent / "apis", tmp_path / "apis")
+    shutil.copytree(EXAMPLE.parent / "webhooks", tmp_path / "webhooks")
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
     runner = CliRunner()

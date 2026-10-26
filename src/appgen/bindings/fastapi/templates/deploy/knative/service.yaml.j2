@@ -131,6 +131,14 @@ spec:
                   name: {{ app.name }}-{{ api.secret_env | lower | replace("_", "-") }}
                   key: latest
 {% endfor %}
+{% for w in py_webhooks.values() %}
+            {{ trace(w.id) }}
+            - name: {{ w.secret_env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ app.name }}-{{ w.secret_env | lower | replace("_", "-") }}
+                  key: latest
+{% endfor %}
 {% for p in py.providers %}
             {{ trace(p.id) }}
             - name: {{ p.client_secret_env }}

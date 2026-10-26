@@ -20,10 +20,10 @@ EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.y
 runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
-# app has no pages and no UI.
+# app has no pages and no UI, and a front-end app has no webhooks.
 BY_DESIGN: dict[str, list[str]] = {
     "nextjs": [],
-    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule"],
+    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "webhook"],
     "fastapi": ["page", "ui"],
 }
 
@@ -43,12 +43,15 @@ CUSTOM_UI = {
     "ui.dashboards.overview.widgets.workload",
     "ui.dashboards.overview.widgets.holidays",
 }
+# The logic of each webhook is a gap of the FastAPI app. The Next.js
+# binding does not generate the webhooks yet, so each webhook is a gap.
+WEBHOOKS = {"webhooks.commits"}
 # The React app has a client for the API with a secret, because the
 # FastAPI app exposes the API (`expose`): the API is not a gap.
 OPEN_GAPS: dict[str, set[str]] = {
-    "nextjs": CUSTOM_OPERATIONS | CUSTOM_UI,
+    "nextjs": CUSTOM_OPERATIONS | CUSTOM_UI | WEBHOOKS,
     "react": CUSTOM_OPERATIONS | CUSTOM_UI,
-    "fastapi": CUSTOM_OPERATIONS,
+    "fastapi": CUSTOM_OPERATIONS | WEBHOOKS,
 }
 
 

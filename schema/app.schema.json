@@ -3741,6 +3741,10 @@
       "title": "GridOverride",
       "type": "object"
     },
+    "HeaderName": {
+      "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+      "type": "string"
+    },
     "IconName": {
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
@@ -6515,6 +6519,162 @@
       "title": "ViewResponsive",
       "type": "object"
     },
+    "Webhook": {
+      "additionalProperties": false,
+      "description": "An endpoint that another system sends events to, for example a payment service.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/WebhookPath"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "signature": {
+          "$ref": "#/$defs/WebhookSignature"
+        },
+        "event_id": {
+          "$ref": "#/$defs/WebhookEventId",
+          "default": {
+            "field": "id"
+          }
+        },
+        "body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WebhookBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "path",
+        "signature"
+      ],
+      "title": "Webhook",
+      "type": "object"
+    },
+    "WebhookBody": {
+      "additionalProperties": false,
+      "description": "The schema of the body: a component schema of an OpenAPI document.",
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/Text"
+        },
+        "schema": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "document",
+        "schema"
+      ],
+      "title": "WebhookBody",
+      "type": "object"
+    },
+    "WebhookEventId": {
+      "additionalProperties": false,
+      "description": "Where the ID of the event is: a property of the JSON body, or a header.",
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HeaderName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "WebhookEventId",
+      "type": "object"
+    },
+    "WebhookPath": {
+      "pattern": "^(/[a-z0-9][a-z0-9._~-]*)+$",
+      "type": "string"
+    },
+    "WebhookSignature": {
+      "additionalProperties": false,
+      "description": "How the app checks that a request comes from the sender: a signature with a secret.",
+      "properties": {
+        "scheme": {
+          "enum": [
+            "hmac_sha256",
+            "stripe"
+          ],
+          "title": "Scheme",
+          "type": "string"
+        },
+        "secret_env": {
+          "$ref": "#/$defs/EnvName"
+        },
+        "header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HeaderName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "prefix": {
+          "default": "",
+          "title": "Prefix",
+          "type": "string"
+        },
+        "encoding": {
+          "default": "hex",
+          "enum": [
+            "hex",
+            "base64"
+          ],
+          "title": "Encoding",
+          "type": "string"
+        },
+        "tolerance_seconds": {
+          "default": 300,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Tolerance Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scheme",
+        "secret_env"
+      ],
+      "title": "WebhookSignature",
+      "type": "object"
+    },
     "Workflow": {
       "additionalProperties": false,
       "description": "A state machine on an enum field of an entity.\n\nThe apps reject a change of the field that no transition allows. A\nchange to the same value is not a transition.",
@@ -6735,6 +6895,16 @@
         "$ref": "#/$defs/MemberName"
       },
       "title": "Apis",
+      "type": "object"
+    },
+    "webhooks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Webhook"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Webhooks",
       "type": "object"
     },
     "seed": {

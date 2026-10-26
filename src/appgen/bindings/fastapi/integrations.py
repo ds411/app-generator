@@ -660,6 +660,13 @@ def py_features(apis: dict[str, PyApi]) -> frozenset[str]:
     return frozenset(found)
 
 
+def python_models(schemas: tuple[NamedSchema, ...]) -> list[PyApiModel]:
+    """Return the Pydantic models and the type aliases of named schemas, sorted by name."""
+    types = _Types(schemas)
+    models = [types.model(named) for named in schemas]
+    return sorted(models + types.aliases, key=lambda m: m.name)
+
+
 def python_apis(definition: AppDefinition) -> dict[str, PyApi]:
     """Return the model of each API of a definition, by API name."""
     return {name: _api(name, api) for name, api in definition.apis.items()}

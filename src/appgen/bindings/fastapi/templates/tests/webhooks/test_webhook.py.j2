@@ -1,0 +1,175 @@
+{{ trace_header(element_id) }}
+{% set w = py_webhooks[name] %}
+"""The tests of the webhook `{{ w.name }}`: POST {{ w.path }}.
+
+The tests sign each request with a test secret. The fixture `events`
+replaces the logic of `handler_ext.py` with a function that records the
+events, so that the tests check the endpoint without the logic.
+"""
+
+{{ py.imports(
+    ["import hashlib", "import hmac", "import json",
+     "from collections.abc import AsyncIterator, Mapping", "from typing import Any",
+     "import pytest", "from httpx import ASGITransport, AsyncClient",
+     "from sqlalchemy.ext.asyncio import AsyncSession",
+     "from app.core.config import Settings", "from app.main import create_app",
+     "from app.webhooks." ~ w.module ~ " import router as webhook",
+     "from tests.problems import assert_problem"]
+    + (["import time"] if w.scheme == "stripe" else [])
+    + (["import base64"] if w.encoding == "base64" and w.scheme != "stripe" else [])
+    + (["import copy"] if w.event_field else [])
+    + (["from app.webhooks." ~ w.module ~ ".models import " ~ w.body_type] if w.body_class else [])
+) }}
+
+pytestmark = pytest.mark.anyio
+
+PATH = {{ py.string(w.path) }}
+SECRET = "test-secret"
+{% if w.event_header %}
+EVENT_ID = "{{ w.sample_event_id }}"
+{% endif %}
+{{ w.sample_line() }}
+{% if w.scheme == "stripe" %}
+TOLERANCE = {{ w.tolerance }}
+{% endif %}
+
+
+{% if w.scheme == "stripe" %}
+def sign(body: bytes, secret: str = SECRET, at: int | None = None) -> dict[str, str]:
+    """Return the headers of a request that the sender signs, at a time in seconds."""
+    timestamp = int(time.time()) if at is None else at
+    signed = f"{timestamp}.".encode() + body
+    digest = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    headers = {"Content-Type": "application/json"}
+    headers["Stripe-Signature"] = f"t={timestamp},v1={digest}"
+{% else %}
+def sign(body: bytes, secret: str = SECRET) -> dict[str, str]:
+    """Return the headers of a request that the sender signs."""
+    digest = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+{% if w.encoding == "base64" %}
+    signature = {{ py.string(w.prefix) }} + base64.b64encode(digest).decode()
+{% else %}
+    signature = {{ py.string(w.prefix) }} + digest.hex()
+{% endif %}
+    headers = {"Content-Type": "application/json"}
+    headers[{{ py.string(w.header) }}] = signature
+{% endif %}
+{% if w.event_header %}
+    headers[{{ py.string(w.event_header) }}] = EVENT_ID
+{% endif %}
+    return headers
+
+
+def encoded(body: object) -> bytes:
+    return json.dumps(body).encode()
+
+
+@pytest.fixture
+async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """A client of the app with the test secret of the webhook."""
+    app = create_app(Settings(database_url=migrated_url, {{ w.secret_setting }}=SECRET))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    await app.state.engine.dispose()
+
+
+@pytest.fixture
+def events(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """The events that reach the logic of the webhook. The test logic only records them."""
+    found: list[Any] = []
+
+    async def handle(session: AsyncSession, event: Any, headers: Mapping[str, str]) -> None:
+        found.append(event)
+
+    monkeypatch.setattr(webhook, {{ py.string(w.handler) }}, handle)
+    return found
+
+
+async def test_the_logic_runs_one_time_for_each_event(
+    client: AsyncClient, events: list[Any]
+) -> None:
+    body = encoded(BODY)
+
+    first = await client.post(PATH, content=body, headers=sign(body))
+    again = await client.post(PATH, content=body, headers=sign(body))
+
+    assert first.status_code == 200, first.text
+    assert first.json() == {"event_id": "{{ w.sample_event_id }}", "repeated": False}
+    assert again.json() == {"event_id": "{{ w.sample_event_id }}", "repeated": True}
+    assert len(events) == 1
+{% if w.body_class %}
+    assert isinstance(events[0], {{ w.body_type }})
+{% else %}
+    assert events[0] == BODY
+{% endif %}
+
+
+async def test_a_wrong_signature_gives_401(client: AsyncClient, events: list[Any]) -> None:
+    body = encoded(BODY)
+    headers = sign(body)
+    del headers[{{ py.string(w.header) }}]
+
+    wrong = await client.post(PATH, content=body, headers=sign(body, "another-secret"))
+    changed = await client.post(PATH, content=body + b" ", headers=sign(body))
+    missing = await client.post(PATH, content=body, headers=headers)
+
+    for response in (wrong, changed, missing):
+        assert_problem(response, 401)
+    assert events == []
+{% if w.scheme == "stripe" %}
+
+
+async def test_an_old_signature_gives_401(client: AsyncClient, events: list[Any]) -> None:
+    body = encoded(BODY)
+    old = int(time.time()) - TOLERANCE - 60
+
+    response = await client.post(PATH, content=body, headers=sign(body, at=old))
+
+    assert_problem(response, 401)
+    assert events == []
+{% endif %}
+
+
+async def test_an_event_without_an_id_gives_400(client: AsyncClient, events: list[Any]) -> None:
+{% if w.event_header %}
+    body = encoded(BODY)
+    headers = sign(body)
+    del headers[{{ py.string(w.event_header) }}]
+{% else %}
+    data = copy.deepcopy(BODY)
+    inner: Any = data
+{% for part in w.event_field[:-1] %}
+    inner = inner[{{ py.string(part) }}]
+{% endfor %}
+    del inner[{{ py.string(w.event_field[-1]) }}]
+    body = encoded(data)
+    headers = sign(body)
+{% endif %}
+
+    response = await client.post(PATH, content=body, headers=headers)
+
+    assert_problem(response, 400)
+    assert events == []
+
+
+async def test_the_webhook_gives_501_until_it_has_its_logic(client: AsyncClient) -> None:
+    # The stub in handler_ext.py raises NotImplementedError, and the API
+    # gives 501. With the logic of the webhook, it gives no server error.
+    body = encoded(BODY)
+
+    response = await client.post(PATH, content=body, headers=sign(body))
+
+    if response.status_code == 501:
+        assert_problem(response, 501)
+    else:
+        assert response.status_code < 500, response.text
+
+
+async def test_the_webhook_gives_500_without_a_secret(migrated_url: str) -> None:
+    app = create_app(Settings(database_url=migrated_url))
+    body = encoded(BODY)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(PATH, content=body, headers=sign(body, ""))
+    await app.state.engine.dispose()
+
+    assert_problem(response, 500)

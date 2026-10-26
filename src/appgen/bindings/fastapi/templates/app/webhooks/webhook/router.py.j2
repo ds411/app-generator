@@ -1,0 +1,43 @@
+{{ trace_header(element_id) }}
+{% set w = py_webhooks[name] %}
+"""The webhook `{{ w.name }}`: POST {{ w.path }}.
+
+The endpoint checks the signature of the request ({{ w.scheme }}), and calls
+`{{ w.handler }}` of `handler_ext.py` one time for each event ID. A repeated
+event gives the answer again, without a call. appgen creates
+`handler_ext.py` once and never changes it.
+"""
+
+{{ py.imports(w.router_imports()) }}
+
+router = APIRouter(tags=["webhooks"])
+{% if w.typed %}
+_EVENT = TypeAdapter({{ w.body_type }})
+{% endif %}
+
+
+@router.post(
+    {{ py.string(w.path) }},
+    responses=problem_responses(400, 401, 422, 500, 501),
+    summary={{ py.string("Webhook " ~ w.name) }},
+    operation_id={{ py.string("webhook_" ~ w.module) }},
+)
+{{ py.call("async def ", w.endpoint, ["request: Request", "session: SessionDep"], 0, " -> WebhookReceipt:") }}
+    """{{ w.description or ("Receive an event of the webhook " ~ w.name ~ ".") }}"""
+    settings: Settings = request.app.state.settings
+    body = await request.body()
+{% for line in w.check_lines() %}
+    {{ line }}
+{% endfor %}
+    data = read_json(body)
+    {{ w.event_id_line() }}
+{% if w.typed %}
+    event = read_event(data, _EVENT)
+{% else %}
+    event = data
+{% endif %}
+    if not await record_event(session, {{ py.string(w.name) }}, event_id):
+        return WebhookReceipt(event_id=event_id, repeated=True)
+    await {{ w.handler }}(session, event, request.headers)
+    await commit(session)
+    return WebhookReceipt(event_id=event_id, repeated=False)

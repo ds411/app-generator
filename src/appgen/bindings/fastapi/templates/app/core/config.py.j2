@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     """The secret of the API `{{ api.name }}`: `{{ api.secret_env }}`. Keep it out of the code."""
 {% endif %}
 {% endfor %}
+{% for w in py_webhooks.values() %}
+    {{ trace(w.id) }}
+    {{ w.secret_setting }}: str = ""
+    """The secret of the signatures of the webhook `{{ w.name }}`: `{{ w.secret_env }}`."""
+{% endfor %}
 {% if py.providers %}
     public_url: str = ""
     """The URL of the API for the browsers, for example `https://api.example.com`. The

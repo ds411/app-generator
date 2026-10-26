@@ -53,8 +53,8 @@ class GenerationResult:
     """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
     documents: dict[str, str] = field(default_factory=dict[str, str])
     """The hash of each file that the definition reads, by its path in the definition: the OpenAPI
-    documents of the `apis` (ADR 0019), the data files of the `seed` (ADR 0021), and the files of
-    the file fields of the seed records (ADR 0027)."""
+    documents of the `apis` (ADR 0019) and the `webhooks` (ADR 0028), the data files of the `seed`
+    (ADR 0021), and the files of the file fields of the seed records (ADR 0027)."""
     warnings: list[str] = field(default_factory=list[str])
     """The warnings of the binding (`Binding.warnings`)."""
 
@@ -114,6 +114,11 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
                 api.document: api.openapi.hash
                 for api in definition.apis.values()
                 if api.openapi is not None
+            },
+            **{
+                webhook.body.document: webhook.openapi.hash
+                for webhook in definition.webhooks.values()
+                if webhook.body is not None and webhook.openapi is not None
             },
             **{
                 seed.file: seed.file_hash

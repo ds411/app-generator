@@ -1,0 +1,24 @@
+{{ trace_header(element_id) }}
+{% set w = py_webhooks[name] %}
+{% if w.description %}
+"""The logic of the webhook `{{ w.name }}`: POST {{ w.path }}.
+
+{{ w.description | wordwrap(72) }}
+"""
+{% else %}
+"""The logic of the webhook `{{ w.name }}`: POST {{ w.path }}."""
+{% endif %}
+
+{{ py.imports(w.handler_imports()) }}
+
+
+{{ py.call("async def ", w.handler, ["session: AsyncSession", "event: " ~ w.body_type, "headers: Mapping[str, str]"], 0, " -> None:") }}
+    """Handle one event. The endpoint checked the signature of the request.
+
+    The endpoint calls the function one time for each event ID, and
+    commits the session after it, with the row of the event. Raise an
+    error to refuse the event: then the sender can deliver it again.
+    `headers` are the headers of the request.
+    """
+    # TODO(appgen): write the logic of the webhook {{ w.name }}.
+    raise NotImplementedError("{{ element_id }}")
