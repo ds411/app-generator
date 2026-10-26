@@ -20,6 +20,7 @@ from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.notices import has_notices
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import entity_totals, total_keys
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
@@ -196,6 +197,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             else {name: totals for name in entities if (totals := entity_totals(definition, name))},
             # The change log (ADR 0040): the mock store keeps the entries, else the FastAPI app.
             "history": has_history(definition),
+            # The notices (ADR 0041): the mock store adds them, else the FastAPI app.
+            "notices": has_notices(definition),
         },
     }
 

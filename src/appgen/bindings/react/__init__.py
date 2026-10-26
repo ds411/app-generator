@@ -18,6 +18,7 @@ from appgen.bindings.shared import forms, shadcn, ui, views
 from appgen.bindings.shared.auth import auth_rules
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
+from appgen.bindings.shared.notices import notice_rules
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -166,6 +167,7 @@ BINDING = Binding(
         *views.view_rules(),
         *i18n_rules(),
         *auth_rules(),
+        *notice_rules(),
         Output(
             template="src/shared/auth/index.ts.j2",
             path="src/shared/auth/index.ts",
@@ -220,6 +222,11 @@ BINDING = Binding(
             template="src/shared/api/mock-store.ts.j2",
             path="src/shared/api/mock-store.ts",
             when="not react.api",
+        ),
+        Output(
+            template="src/shared/api/notices.ts.j2",
+            path="src/shared/api/notices.ts",
+            when="react.notices",
         ),
         Output(
             template="src/shared/api/http.ts.j2", path="src/shared/api/http.ts", when="react.api"
@@ -405,13 +412,11 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
         | {"event"}
         | {"storage"}
-        | {"history"}
+        | {"history", "notification"}
     ),
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook", "job"}
-        # The notices of the React app follow with the bell of the top bar (#410).
-        | {"notification"}
     ),
     context=context,
     warnings=warnings,

@@ -1,0 +1,46 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{% set links = notice_links(definition) %}
+import type { Notice } from "@/shared/api";
+{% if links %}
+import type { PageName } from "@/shared/config/pages";
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+
+/** The texts of the notifications, by name (ADR 0041). The values of a notice go into the braces. */
+const texts: Readonly<Record<string, string>> = {
+{% for name, notification in definition.notifications.items() %}
+  {{ name | tojson }}: {{ text(notification.text) }}, {{ trace(notification.id) }}
+{% endfor %}
+};
+{% if links %}
+
+/** The detail page of the records of an entity, and the parameter of the ID. */
+const links: Readonly<Record<string, readonly [PageName, string]>> = {
+{% for entity, (page, param) in links.items() %}
+  {{ entity | tojson }}: [{{ page | camel | tojson }}, {{ param | tojson }}],
+{% endfor %}
+};
+{% endif %}
+
+/** Return the text of a notice{{ " in the selected language" if i18n }}, with its values. */
+export function noticeText(notice: Notice): string {
+  const text = texts[notice.notification] ?? notice.notification;
+{% if i18n %}
+  return t(text, notice.values);
+{% else %}
+  return text.replace(/\{(\w+)\}/g, (part, name: string) => notice.values[name] ?? part);
+{% endif %}
+}
+
+{% if links %}
+/** Return the path of the detail page of the record of a notice, or null. */
+export function noticeHref(notice: Notice): string | null {
+  const link = links[notice.entity];
+  return link === undefined ? null : pageHref(link[0], { [link[1]]: notice.recordId });
+}
+{% else %}
+/** Return the path of the detail page of the record of a notice: no entity of a notice has one. */
+export function noticeHref(_notice: Notice): string | null {
+  return null;
+}
+{% endif %}

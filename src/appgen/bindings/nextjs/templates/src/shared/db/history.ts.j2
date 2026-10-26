@@ -2,13 +2,12 @@
 {% set users = nextjs.tables_by_entity[definition.auth.user_entity] if definition.auth else none %}
 import "server-only";
 
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { and, desc, eq{{ ", inArray" if users }} } from "drizzle-orm";
 import { z } from "zod";
 
 import { type HistoryAction, type HistoryEntry, type ListResult, NotFoundError, ValidationError } from "@/shared/api";
 
+import { actingUserId } from "./acting-user";
 import { type Database, getDb } from "./client";
 import { historyEntriesTable{{ ", " ~ users.const if users }} } from "./schema";
 
@@ -23,14 +22,6 @@ export type HistoryMember = readonly [name: string, key: string];
 
 /** The values of the kept fields of a record, by name. */
 export type Snapshot = Record<string, unknown>;
-
-/** The signed-in user of the request: the entries of its changes have the user. */
-const actingUser = new AsyncLocalStorage<string | null>();
-
-/** Run work for a user: the entries of the changes of the work have the user. */
-export function asUser<T>(user: string | null, work: () => Promise<T>): Promise<T> {
-  return actingUser.run(user, work);
-}
 
 /** Return a value as the change log keeps it: a time as text in UTC, and no undefined. */
 function jsonValue(value: unknown): unknown {
@@ -66,7 +57,7 @@ export async function addEntry(
   if ((action === "changed" || action === "restored") && Object.keys(changes).length === 0) {
     return;
   }
-  const userId = actingUser.getStore() ?? null;
+  const userId = actingUserId();
   await tx.insert(historyEntriesTable).values({ entity, recordId, action, userId, at: new Date(), changes });
 }
 

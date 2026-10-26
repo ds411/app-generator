@@ -12,6 +12,14 @@ from typing import Any
 
 from appgen.bindings.shared.integrations import ts_features
 from appgen.bindings.shared.lines import line_items, lines_operations
+from appgen.bindings.shared.notices import (
+    has_notices,
+    mock_notify,
+    notice_links,
+    notice_plans,
+    notice_summary,
+    notice_texts,
+)
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.gen.naming import camel, pascal, words
 
@@ -337,6 +345,12 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "history_members": history_members,
     "has_history": has_history,
     "history_user_key": history_user_key,
+    "has_notices": has_notices,
+    "notice_plans": notice_plans,
+    "notice_texts": notice_texts,
+    "notice_links": notice_links,
+    "notice_summary": notice_summary,
+    "mock_notify": mock_notify,
     "operations_of": operations_of,
     "query_operations": query_operations,
     "inverse_lists": inverse_lists,

@@ -23,7 +23,7 @@ export {
 } from "./dashboards";
 {% endif %}
 {% else %}
-{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore", "TransitionError", "type Workflow"] %}
+{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore"] + (["pathIds", "recordValue"] if react.notices else []) + ["TransitionError", "type Workflow"] %}
 export { {{ mock_names | join(", ") }} } from "./mock-store";
 {% endif %}
 export type {
@@ -42,6 +42,10 @@ export type {
 {% endif %}
   ListQuery,
   ListResult,
+{% if has_notices(definition) %}
+  Notice,
+  NoticeApi,
+{% endif %}
   Search,
   Sort,
   SortDirection,

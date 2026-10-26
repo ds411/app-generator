@@ -1,0 +1,33 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
+import { index, jsonb, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+
+import { {{ users.const }} } from "./{{ users.module }}";
+
+/**
+ * The notices of the users (ADR 0041): one row for each user that a
+ * change of a record concerns. The FastAPI app has the same table, with
+ * the same columns.
+ */
+export const noticesTable = pgTable(
+  "notices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The user that gets the notice. The notices of a user go with the user.
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => {{ users.const }}.id, { onDelete: "cascade" }),
+    // The name of the notification in the app definition.
+    notification: varchar("notification", { length: 63 }).notNull(),
+    entity: varchar("entity", { length: 63 }).notNull(),
+    recordId: uuid("record_id").notNull(),
+    // The user that made the change, or null.
+    actorId: uuid("actor_id"),
+    // The values of the text, by name, as text from the time of the change.
+    values: jsonb("values").$type<Record<string, string>>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    // The time that the user marked the notice read, or null.
+    readAt: timestamp("read_at", { withTimezone: true }),
+  },
+  (table) => [index("ix_notices_user_id").on(table.userId)],
+);

@@ -4,10 +4,9 @@ from textwrap import dedent, indent
 
 import pytest
 
-from appgen.bindings import fastapi, nextjs, react
+from appgen.bindings import fastapi
 from appgen.dsl import load_definition_text, validate_definition
 from appgen.dsl.notifications import Notification
-from appgen.gen.binding import Binding
 from appgen.gen.elements import element_kind
 from appgen.gen.generator import generate
 from appgen.gen.render import GenerationError
@@ -358,8 +357,3 @@ def test_an_entity_with_the_table_of_the_notices_is_an_error() -> None:
     definition = load_definition_text(text, "app.yaml")
     with pytest.raises(GenerationError, match="the table 'notices' of the notices"):
         generate(definition, fastapi.BINDING)
-
-
-@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
-def test_the_front_ends_exclude_the_notifications_until_the_bell(binding: Binding) -> None:
-    assert "notification" in binding.excludes

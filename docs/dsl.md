@@ -1324,6 +1324,11 @@ notifications:
     transition: confirm
     receivers: [organizer]
     text: The booking {title} is confirmed.
+  booking_cancelled:
+    entity: Booking
+    transition: cancel
+    receivers: [organizer]
+    text: The booking {title} is cancelled.
 ```
 
 | Key           | Required | Content                                                         |
@@ -1362,8 +1367,16 @@ notifications:
   `GET /notices` gives the notices of the signed-in user, the newest
   first (`unread=true`: only the unread notices), `POST
   /notices/{id}/read` marks a notice read, and `POST /notices/read`
-  marks all notices of the user read. The Next.js and the React apps
-  have no notices yet.
+  marks all notices of the user read. The Next.js app keeps them in the
+  same table. The React app with mock data keeps them in the browser
+  tab until it closes, and with `x-react-data: api` it reads them from
+  the FastAPI app.
+- The top bar of a layout, and the header of the pages without a
+  layout, show a bell: the count of the unread notices of the signed-in
+  user, and the newest notices. A click on a notice
+  marks it read, and opens the detail page of its record: the first
+  page with a detail view of the entity and one parameter in its path.
+  "Mark all read" marks all notices of the user read.
 
 ## apis
 
@@ -2828,6 +2841,9 @@ use in the app does not show.
   `Last 90 days`, `Last 365 days`, `This week`, `This month`,
   `This year`, `Last week`, `Last month`, `Last year`, `All time`,
   `Custom range`, `Pick the days`, `{change} from the previous period`.
+- The bell of the notices (see [notifications](#notifications)):
+  `Notices`, `Notices: {count} unread`, `Mark all read`,
+  `No notices yet.`.
 - The change log of a record (see [History](#history)): `History`,
   `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
   `Older`, `No changes yet.`, `The history did not load.`,

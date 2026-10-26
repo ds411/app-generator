@@ -117,16 +117,27 @@ def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
             ids.setdefault(entity, []).append(rule.id)
     found: dict[str, EntityRules] = {}
     for entity in ids:
-        steps: list[PathStep] = []
-        current = entity
-        for name in owners[entity].split(".") if entity in owners else []:
-            relation = definition.entities[current].relations[name]
-            many = relation.kind == "many_to_many"
-            key = camel(name) if many else camel(name) + "Id"
-            steps.append(PathStep(current, name, key, many, relation.target, relation.id))
-            current = relation.target
-        found[entity] = EntityRules(tuple(steps), tuple(sorted(fixed[entity])), tuple(ids[entity]))
+        steps = path_steps(definition, entity, owners[entity]) if entity in owners else ()
+        found[entity] = EntityRules(steps, tuple(sorted(fixed[entity])), tuple(ids[entity]))
     return found
+
+
+def path_steps(definition: AppDefinition, entity: str, path: str) -> tuple[PathStep, ...]:
+    """Return the steps of a path of relations to the user entity, for example `project.members`.
+
+    The owner paths of the record rules (ADR 0025) and the receiver paths
+    of the notifications (ADR 0041) have such paths. The validator checks
+    that each step exists.
+    """
+    steps: list[PathStep] = []
+    current = entity
+    for name in path.split("."):
+        relation = definition.entities[current].relations[name]
+        many = relation.kind == "many_to_many"
+        key = camel(name) if many else camel(name) + "Id"
+        steps.append(PathStep(current, name, key, many, relation.target, relation.id))
+        current = relation.target
+    return tuple(steps)
 
 
 def auth_rules() -> tuple[Output, ...]:

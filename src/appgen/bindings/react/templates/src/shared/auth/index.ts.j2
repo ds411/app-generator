@@ -4,8 +4,8 @@
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set sf = definition.auth.second_factor %}
 {% set required = sf.required_roles if sf and definition.access else [] %}
-{# The change log (ADR 0040) names a user with the display field, else with the user name. #}
-{% set history_users = has_history(definition) and not react.api %}
+{# The change log (ADR 0040) and the notices (ADR 0041) name a user with the display field, else with the user name. #}
+{% set history_users = (has_history(definition) or has_notices(definition)) and not react.api %}
 {% set label_key = history_user_key(definition) if history_users else none %}
 {% set label_key = none if label_key == key else label_key %}
 {% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; label?: string | null" if label_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
@@ -191,7 +191,7 @@ export function currentUserId(): string | null {
 }
 {% if history_users %}
 
-/** Return the display value of a mock user for the change log (ADR 0040), or null. */
+/** Return the display value of a mock user for the change log (ADR 0040) and the notices (ADR 0041), or null. */
 export function userLabel(id: string): string | null {
   const user = {{ "allUsers()" if sign_up else "users" }}.find((item) => item.id === id);
   return user === undefined ? null : {{ "(user.label ?? user.username)" if label_key else "user.username" }};

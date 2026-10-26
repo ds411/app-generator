@@ -21,6 +21,7 @@ from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kind
 from appgen.bindings.shared.events import ts_events
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
+from appgen.bindings.shared.notices import notice_rules
 from appgen.bindings.shared.totals import rule_side_key
 from appgen.dsl.storage import format_size
 from appgen.gen.binding import Binding, ExtensionKey, Output
@@ -215,6 +216,7 @@ BINDING = Binding(
             when="i18n",
         ),
         *auth_rules(),
+        *notice_rules(),
         *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
@@ -302,6 +304,20 @@ BINDING = Binding(
         *(
             Output(template=f"{path}.j2", path=path, when="nextjs.history")
             for path in ("src/shared/db/schema/history-entries.ts", "src/shared/db/history.ts")
+        ),
+        Output(
+            template="src/shared/db/acting-user.ts.j2",
+            path="src/shared/db/acting-user.ts",
+            when="definition.auth and (nextjs.history or nextjs.notices)",
+        ),
+        *(
+            Output(template=f"{path}.j2", path=path, when="nextjs.notices")
+            for path in (
+                "src/shared/db/schema/notices.ts",
+                "src/shared/db/notices.ts",
+                "src/shared/api/notice-actions.ts",
+                "src/shared/api/notices.ts",
+            )
         ),
         *(
             Output(
@@ -612,10 +628,8 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
         | {"job", "event"}
         | {"storage"}
-        | {"history"}
+        | {"history", "notification"}
     ),
-    # The notices of the Next.js app follow with the bell of the top bar (#410).
-    excludes=frozenset({"notification"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

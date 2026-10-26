@@ -91,6 +91,7 @@ from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.access import ALL, RecordRule
 from appgen.dsl.model import Page
+from appgen.dsl.rules import EntityOverlapRule
 from appgen.dsl.ui.common import FormAction, NavigateAction, OperationAction
 from appgen.dsl.ui.states import effective_states
 from appgen.gen.naming import kebab
@@ -277,6 +278,105 @@ def expected_second_factor(definition: AppDefinition, used: set[str]) -> dict[st
         "username": user[auth.username_field],
         "menu": menu_labels(definition, Permissions(definition, role)),
     }
+
+
+def overlaps(definition: AppDefinition, entity: str, record: dict[str, Any]) -> bool:
+    """Return True if a record breaks a `no_overlap` rule of its entity: a change of it fails."""
+    records = mock_data(definition)[entity]
+    for rule in definition.entities[entity].rules.values():
+        if not isinstance(rule, EntityOverlapRule):
+            continue
+        for other in records:
+            if other["id"] == record["id"] or any(
+                other.get(name) != record.get(name) for name in rule.scope
+            ):
+                continue
+            if str(other[rule.start]) < str(record[rule.end]) and str(record[rule.start]) < str(
+                other[rule.end]
+            ):
+                return True
+    return False
+
+
+def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
+    """Return the values of the test of the notices (ADR 0041): a change, and its receiver.
+
+    The first notification of a transition without `run`, with a receiver
+    of one relation, gives the values. A user of a role with all
+    operations changes the state of a record of another user with the edit
+    form of the detail page. Then the receiver signs in, and finds the
+    notice in the bell of the top bar. The record breaks no `no_overlap`
+    rule, because the Next.js app checks the rules of a change. The
+    receiver is a user of the other tests if one fits. The React app with
+    mock data keeps the notices in the browser tab.
+    """
+    auth, access = definition.auth, definition.access
+    assert auth is not None and access is not None
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    actor = next(
+        (u for u in users if Permissions(definition, u.get(access.role_field)).operation(ALL)),
+        None,
+    )
+    for notification in definition.notifications.values():
+        parts = notification.transition_parts()
+        page = next(
+            (
+                p
+                for p in definition.pages.values()
+                if p.entity == notification.entity and p.path.endswith("/{id}")
+            ),
+            None,
+        )
+        if parts is None or actor is None or page is None:
+            continue
+        entity = definition.entities[notification.entity]
+        workflow = next(
+            w
+            for w in definition.workflows.values()
+            if w.entity == notification.entity and parts[1] in w.transitions
+        )
+        transition = workflow.transitions[parts[1]]
+        if transition.run is not None:
+            # The custom operation of the transition is a stub: the change fails.
+            continue
+        receivers = [
+            r
+            for r in notification.receivers
+            if "." not in r and entity.relations[r].kind == "many_to_one"
+        ]
+        records = [
+            (record, user)
+            for receiver in receivers
+            for record in data[notification.entity]
+            if record.get(workflow.field) in transition.from_
+            for user in users
+            if user["id"] == record.get(receiver)
+            and user["id"] != actor["id"]
+            and not overlaps(definition, notification.entity, record)
+        ]
+        records.sort(key=lambda item: item[1][auth.username_field] not in used)
+        if not records:
+            continue
+        record, user = records[0]
+        values: dict[str, str] = {}
+        for name in notification.values():
+            if name in entity.fields:
+                values[name] = str(record.get(name) or "")
+                continue
+            target = entity.relations[name].target
+            display = definition_display(definition.entities[target])
+            related = next((r for r in data[target] if r["id"] == record.get(name)), {})
+            values[name] = str(related.get(display) or "")
+        return {
+            "actor": actor[auth.username_field],
+            "receiver": user[auth.username_field],
+            "path": page.path.replace("{id}", str(record["id"])),
+            "field": label(workflow.field),
+            "value": label(transition.to),
+            "text": notification.text.format_map(values),
+        }
+    return None
 
 
 def entity_pages(
@@ -515,6 +615,9 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         )
     record_checks = expected_record_rules(binding, definition)
     used = {check["username"] for check in [*roles, *record_checks]}
+    notice = expected_notice(definition, used)
+    if notice is not None:
+        used.add(notice["receiver"])
     password_reset = expected_password_reset(binding, definition, app, used)
     if password_reset is not None:
         used.add(password_reset["username"])
@@ -537,6 +640,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         "secondFactor": expected_second_factor(definition, used),
         "recordRules": record_checks,
         "providers": expected_providers(binding, definition),
+        "notice": notice,
     }
 
 

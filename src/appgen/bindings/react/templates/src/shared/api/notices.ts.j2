@@ -1,0 +1,219 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{% if react.api %}
+import { apiRequest } from "./http";
+import type { Notice, NoticeApi } from "./types";
+
+// The notices of the signed-in user (ADR 0041): the endpoints /notices of
+// the FastAPI app. The FastAPI app adds the notices in the transaction of
+// a change of a record.
+
+/** The listeners of the notices in this browser tab. */
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/** Return a notice of the API as a Notice. */
+function fromJson(item: Record<string, unknown>): Notice {
+  return {
+    id: String(item.id),
+    notification: String(item.notification),
+    entity: String(item.entity),
+    recordId: String(item.record_id),
+    actorId: typeof item.actor_id === "string" ? item.actor_id : null,
+    actor: typeof item.actor === "string" ? item.actor : null,
+    values: (item.values ?? {}) as Record<string, string>,
+    at: String(item.at),
+    readAt: typeof item.read_at === "string" ? item.read_at : null,
+  };
+}
+
+/** The notices of the signed-in user: `GET /notices`, `POST /notices/{id}/read`, and `POST /notices/read`. */
+export const notices: NoticeApi = {
+  async list(query = {}) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const params = new URLSearchParams({ limit: String(pageSize), offset: String((page - 1) * pageSize) });
+    if (query.unread) {
+      params.set("unread", "true");
+    }
+    const result = (await apiRequest("GET", `/notices?${params.toString()}`)) as {
+      items: Record<string, unknown>[];
+      total: number;
+    };
+    return { items: result.items.map(fromJson), total: result.total, page, pageSize };
+  },
+  async read(id) {
+    const notice = fromJson((await apiRequest("POST", `/notices/${encodeURIComponent(id)}/read`)) as Record<string, unknown>);
+    notifyListeners();
+    return notice;
+  },
+  async readAll() {
+    await apiRequest("POST", "/notices/read");
+    notifyListeners();
+  },
+  subscribe(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+};
+{% else %}
+import { currentUserId, userLabel } from "@/shared/auth";
+
+import { type Notice, type NoticeApi, NotFoundError } from "./types";
+
+// The notices of the users (ADR 0041), with mock data. The mock stores
+// add them after a change of a record. The notices stay in the session
+// storage of the browser tab, so that a user that signs in after the
+// change sees them. The records go back to the mock data when the page
+// reloads, so a notice can name a value that the record no longer has.
+
+/** A notice, and the user that gets it. */
+type StoredNotice = Omit<Notice, "actor"> & { userId: string };
+
+const STORAGE_KEY = {{ (definition.app.name ~ ".notices") | tojson }};
+
+/** The listeners of the notices in this browser tab. */
+const listeners = new Set<() => void>();
+
+function load(): StoredNotice[] {
+  try {
+    const text = window.sessionStorage.getItem(STORAGE_KEY);
+    return text === null ? [] : (JSON.parse(text) as StoredNotice[]);
+  } catch {
+    return [];
+  }
+}
+
+let stored: StoredNotice[] = load();
+
+/** Keep the notices, and call the listeners. */
+function save(items: StoredNotice[]): void {
+  stored = items;
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {
+    // Without the session storage, the notices stay until the page reloads.
+  }
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/** Return a value of a record as text, for the text of a notice: a time is in UTC, without the seconds. */
+export function textValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    const time = new Date(value);
+    if (!Number.isNaN(time.getTime())) {
+      return `${time.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    }
+  }
+  return String(value);
+}
+
+/** Return true if a change gave one of the keys of a record a new value. */
+export function changed(record: object, before: object | undefined, keys: readonly string[]): boolean {
+  if (before === undefined) {
+    return false;
+  }
+  const now = record as Record<string, unknown>;
+  const old = before as Record<string, unknown>;
+  return keys.some((key) => JSON.stringify(now[key] ?? null) !== JSON.stringify(old[key] ?? null));
+}
+
+/** Add a notice for each user. Each user gets one notice. The signed-in user of the change gets none. */
+export function addNotices(
+  notification: string,
+  entity: string,
+  recordId: string,
+  users: readonly unknown[],
+  values: Record<string, string>,
+): void {
+  const actorId = currentUserId();
+  const ids = [...new Set(users)].filter((id): id is string => typeof id === "string" && id !== actorId);
+  if (ids.length === 0) {
+    return;
+  }
+  const at = new Date().toISOString();
+  const added = ids.map(
+    (userId): StoredNotice => ({
+      id: crypto.randomUUID(),
+      userId,
+      notification,
+      entity,
+      recordId,
+      actorId,
+      values,
+      at,
+      readAt: null,
+    }),
+  );
+  save([...stored, ...added]);
+}
+
+/** Return a notice as the API gives it, with the display value of the user of the change. */
+function toNotice(item: StoredNotice): Notice {
+  return {
+    id: item.id,
+    notification: item.notification,
+    entity: item.entity,
+    recordId: item.recordId,
+    actorId: item.actorId,
+    actor: item.actorId === null ? null : userLabel(item.actorId),
+    values: item.values,
+    at: item.at,
+    readAt: item.readAt,
+  };
+}
+
+/** Return the notice of the signed-in user with an ID. A notice of another user does not exist. */
+function own(id: string): StoredNotice {
+  const notice = stored.find((item) => item.id === id && item.userId === currentUserId());
+  if (notice === undefined) {
+    throw new NotFoundError("Notice", id);
+  }
+  return notice;
+}
+
+/** The notices of the signed-in user, with mock data. */
+export const notices: NoticeApi = {
+  async list(query = {}) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const userId = currentUserId();
+    if (userId === null) {
+      // As the servers do, the list needs a signed-in user.
+      throw new Error({{ tr(js("The sign-in has ended. Sign in again.")) }});
+    }
+    const items = stored
+      .filter((item) => item.userId === userId && (!query.unread || item.readAt === null))
+      .reverse();
+    const start = (page - 1) * pageSize;
+    return { items: items.slice(start, start + pageSize).map(toNotice), total: items.length, page, pageSize };
+  },
+  async read(id) {
+    const notice = { ...own(id), readAt: new Date().toISOString() };
+    save(stored.map((item) => (item.id === id ? notice : item)));
+    return toNotice(notice);
+  },
+  async readAll() {
+    const userId = currentUserId();
+    const at = new Date().toISOString();
+    save(stored.map((item) => (item.userId === userId && item.readAt === null ? { ...item, readAt: at } : item)));
+  },
+  subscribe(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+};
+{% endif %}

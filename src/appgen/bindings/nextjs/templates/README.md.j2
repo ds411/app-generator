@@ -422,6 +422,29 @@ change outside the repositories adds no entry: SQL in a script, a
 delete of the database (`on_delete: cascade`), and the seed.
 
 {% endif %}
+{% if nextjs.notices %}
+## Notices
+
+A change of a record gives each user that it concerns a notice in the
+table `notices`, except the user that made the change. The repositories
+add the notices in the transaction of the change, after the events and
+the change log.
+
+| Notification | Change | Receivers | Text |
+| ------------ | ------ | --------- | ---- |
+{% for name, n in definition.notifications.items() %}
+| `{{ name }}` | {{ notice_summary(n) }} | {% for r in n.receivers %}`{{ r }}`{{ ", " if not loop.last }}{% endfor %} | {{ n.text }} |
+{% endfor %}
+
+- The bell in the top bar shows the count of the unread notices of the
+  signed-in user, and the newest notices. A click on a notice marks it
+  read, and opens the detail page of its record. "Mark all read" marks
+  all notices of the user read.
+- A notice keeps the values of its text from the time of the change.
+- A change outside the repositories gives no notice: SQL in a script,
+  and the seed.
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 

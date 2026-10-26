@@ -12,6 +12,7 @@ from typing import Any, cast
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
+from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
@@ -21,6 +22,7 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
+from appgen.bindings.shared.notices import has_notices, notice_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
 from appgen.bindings.shared.typescript import has_history
@@ -311,6 +313,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     by_entity = {table.entity: table for table in tables}
     rules = record_rules(definition)
     jobs = ts_jobs(definition, by_entity)
+    if has_notices(definition):
+        check_notice_table(by_entity)
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     return {
@@ -341,6 +345,11 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "layers": FSD_LAYERS,
             "tables": tables,
             "tables_by_entity": by_entity,
+            # The notices of the changes of the records of each entity (ADR 0041).
+            "notify": {
+                entity: ts_notify(notice_plans(definition, entity), by_entity)
+                for entity in definition.entities
+            },
             # The conditions of the owner paths of the record rules (ADR 0025).
             "owner_conditions": {
                 entity: belongs_to(r.path, by_entity, 4)
@@ -374,6 +383,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             ),
             # The change log (ADR 0040): one table for all entities, and the helpers.
             "history": has_history(definition),
+            # The notices (ADR 0041): one table for all users, and the helpers.
+            "notices": has_notices(definition),
             "frame_headers": frame_headers(definition),
             # The public pages with metadata: `sitemap.xml` and `robots.txt`.
             "sitemap": sitemap_pages(definition),
