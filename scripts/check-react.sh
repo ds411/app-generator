@@ -5,7 +5,9 @@
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
 # app, request it, and run the Playwright tests in ui-tests/). Then it
 # generates tests/fixtures/seed-data.yaml, and runs lint, type check, and
-# appgen check on it.
+# appgen check on it. Last, it generates tests/fixtures/invoices.yaml (the
+# small DSL additions of M33), and runs lint, type check, appgen check,
+# and the sequence test of the mock store (scripts/sequence_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the React binding. Run it by hand from the repository root:
 #
@@ -28,14 +30,17 @@ root=$(pwd)
 # The app of the seed data fixture (ADR 0021), in a temporary folder.
 seed_definition=tests/fixtures/seed-data.yaml
 seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-seed.XXXXXX")
+# The app of the invoices fixture (M33), in a temporary folder.
+invoices_definition=tests/fixtures/invoices.yaml
+invoices_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-invoices.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out"' EXIT
+    trap 'rm -rf "$seed_out" "$invoices_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react.XXXXXX")
-    trap 'rm -rf "$out" "$seed_out"' EXIT
+    trap 'rm -rf "$out" "$seed_out" "$invoices_out"' EXIT
 fi
 
 step() {
@@ -97,5 +102,22 @@ uv run --locked appgen generate "$seed_definition" -b react -o "$seed_out" >/dev
 )
 step "appgen check (seed data)"
 uv run --locked appgen check "$seed_definition" "$seed_out"
+
+step "generate $invoices_definition in $invoices_out"
+uv run --locked appgen generate "$invoices_definition" -b react -o "$invoices_out" >/dev/null
+(
+    cd "$invoices_out"
+    step "pnpm install (invoices)"
+    pnpm install --silent
+    step "pnpm lint (invoices)"
+    pnpm --silent lint
+    step "pnpm typecheck (invoices)"
+    pnpm --silent typecheck
+)
+step "appgen check (invoices)"
+uv run --locked appgen check "$invoices_definition" "$invoices_out"
+
+step "sequence test"
+uv run --locked scripts/sequence_test.py --app "$invoices_out" --binding react
 
 step "passed"

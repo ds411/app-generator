@@ -3197,6 +3197,17 @@
           ],
           "default": null,
           "title": "Types"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sequence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5549,6 +5560,51 @@
         "field"
       ],
       "title": "SelectFilter",
+      "type": "object"
+    },
+    "Sequence": {
+      "additionalProperties": false,
+      "description": "The numbers of a database sequence: a new record gets the next number.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "start": {
+          "default": 1,
+          "maximum": 1000000000000000,
+          "minimum": 1,
+          "title": "Start",
+          "type": "integer"
+        },
+        "prefix": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9._/#-]{1,20}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "maximum": 15,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "title": "Sequence",
       "type": "object"
     },
     "Sidebar": {

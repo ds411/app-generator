@@ -14,7 +14,7 @@
 class {{ e.name }}Create(InputModel):
     """The input to create a record of the entity {{ e.name }}."""
 
-{% for f in e.fields %}
+{% for f in e.input_fields %}
     {{ trace(f.id) }}
     {{ f.declaration("create") }}
 {% if f.translatable %}
@@ -39,7 +39,7 @@ class {{ e.name }}Create(InputModel):
 class {{ e.name }}Update(InputModel):
     """The input to change a record of the entity {{ e.name }}. Only the given fields change."""
 
-{% for f in e.fields %}
+{% for f in e.input_fields %}
     {{ trace(f.id) }}
     {{ f.declaration("update") }}
 {% if f.translatable %}
@@ -77,7 +77,7 @@ class {{ lines.item_class }}(InputModel):
     """
 
     id: UUID | None = Field(default=None, description="The ID of a line that stays.")
-{% for f in e.fields %}
+{% for f in e.input_fields %}
     {{ trace(f.id) }}
     {{ f.declaration("create") }}
 {% if f.translatable %}

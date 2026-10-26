@@ -12,7 +12,23 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends, Request
+{% if py.sequences %}
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    Dialect,
+    Enum,
+    MetaData,
+    String,
+    TypeDecorator,
+    event,
+    select,
+)
+from sqlalchemy import Sequence as DatabaseSequence
+{% else %}
 from sqlalchemy import JSON, DateTime, Dialect, Enum, MetaData, TypeDecorator, event, select
+{% endif %}
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
@@ -21,7 +37,14 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+{% if py.sequences %}
+from sqlalchemy.ext.compiler import compiles
+{% endif %}
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+{% if py.sequences %}
+from sqlalchemy.sql.compiler import SQLCompiler
+from sqlalchemy.sql.expression import ColumnElement
+{% endif %}
 
 from app.core.errors import ProblemError
 {% if i18n %}
@@ -93,6 +116,64 @@ class Timestamp(TypeDecorator[dt.datetime]):
         if value is not None and value.tzinfo is None:
             return value.replace(tzinfo=dt.UTC)
         return value
+{% if py.sequences %}
+
+
+{% for seq in py.sequences %}
+{{ trace(seq.id) }}
+{% endfor %}
+class NextNumber(ColumnElement[Any]):
+    """The next number of a sequence: the value of a field with `sequence` in a new record.
+
+    Postgres takes the number from the database sequence. SQLite has no
+    sequences: it takes the largest number of the column plus one, in the
+    insert of the row. A text has the prefix, and the number with zeros on
+    the left up to the width. The insert of the row writes the value, so the
+    seed and the repositories get the numbers in the same way.
+    """
+
+    inherit_cache = False
+
+    def __init__(
+        self,
+        sequence: DatabaseSequence,
+        table: str,
+        column: str,
+        prefix: str = "",
+        width: int | None = None,
+    ) -> None:
+        self.sequence = sequence
+        self.table_name = table
+        self.column_name = column
+        self.prefix = prefix
+        self.width = width
+        """The least number of digits of a text, or None for an integer."""
+        self.type = BigInteger() if width is None else String()
+
+
+@compiles(NextNumber, "postgresql")
+def _next_number_postgresql(element: NextNumber, compiler: SQLCompiler, **kw: Any) -> str:
+    number = f"nextval('{element.sequence.name}')"
+    if element.width is None:
+        return number
+    # The format keeps all digits of a number that is longer than the width.
+    digits = f"to_char({number}, 'FM{'9' * (19 - element.width)}{'0' * element.width}')"
+    return f"'{element.prefix}' || {digits}" if element.prefix else digits
+
+
+@compiles(NextNumber)
+def _next_number(element: NextNumber, compiler: SQLCompiler, **kw: Any) -> str:
+    quote = compiler.preparer.quote
+    value = quote(element.column_name)
+    if element.width is not None:
+        value = f"CAST(substr({value}, {len(element.prefix) + 1}) AS INTEGER)"
+    start = (element.sequence.start or 1) - 1
+    number = f"(SELECT coalesce(max({value}), {start}) + 1 FROM {quote(element.table_name)})"
+    if element.width is None:
+        return number
+    digits = f"printf('%0{element.width}d', {number})"
+    return f"'{element.prefix}' || {digits}" if element.prefix else digits
+{% endif %}
 
 
 def _enable_foreign_keys(connection: Any, _record: Any) -> None:

@@ -121,8 +121,18 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% endif %}
   },
 {% endif %}
-{% if events %}
+{% set sequences = element.sequence_fields %}
+{% if sequences %}
+).withSequences([
+{% for field_name, field in sequences.items() %}
+{% set seq = field.sequence %}
+  { key: {{ ts_value(field_name | camel) }}, start: {{ seq.start }}{% if seq.prefix %}, prefix: {{ ts_value(seq.prefix) }}{% endif %}{% if field.type == "string" %}, width: {{ seq.width or 1 }}{% endif %} }, {{ trace(seq.id) }}
+{% endfor %}
+]){{ ".withEvents({" if events else ";" }}
+{% elif events %}
 ).withEvents({
+{% endif %}
+{% if events %}
   // The events (ADR 0031). The store imports the extension file of an
   // operation when its event runs, because the operation imports the store.
 {% for event in events | rejectattr("kind", "eq", "transition") %}
@@ -158,7 +168,7 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
   ],
 {% endif %}
 });
-{% else %}
+{% elif not sequences %}
 );
 {% endif %}
 {% endif %}

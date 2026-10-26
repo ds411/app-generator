@@ -39,9 +39,12 @@
 # tests/fixtures/api-connections.yaml with its hand-written logic (an API
 # with the authorization code flow), check it, run its tests on Postgres
 # and SQLite, and connect a user at the mock OAuth server
-# (scripts/api_connection_test.py). Last, generate tests/fixtures/totals.yaml
+# (scripts/api_connection_test.py). Then generate tests/fixtures/totals.yaml
 # (the totals of the relations in computed fields), and check it and run
-# its tests on Postgres and SQLite.
+# its tests on Postgres and SQLite. Last, generate
+# tests/fixtures/invoices.yaml (the small DSL additions of M33: the
+# sequences of the numbers on Postgres, and the largest number plus one
+# on SQLite), and check it and run its tests on Postgres and SQLite.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -54,8 +57,8 @@
 # "<output folder>-record-rules", "<output folder>-webhooks",
 # "<output folder>-jobs", "<output folder>-files",
 # "<output folder>-inbound-email", "<output folder>-api-connections",
-# "<output folder>-totals", and "<output folder>-rate-limit" (the app of
-# the rate limit check). The
+# "<output folder>-totals", "<output folder>-invoices", and
+# "<output folder>-rate-limit" (the app of the rate limit check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
@@ -81,6 +84,7 @@ files_definition=tests/fixtures/files.yaml
 email_definition=tests/fixtures/inbound-email.yaml
 connections_definition=tests/fixtures/api-connections.yaml
 totals_definition=tests/fixtures/totals.yaml
+invoices_definition=tests/fixtures/invoices.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -88,7 +92,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
@@ -101,6 +105,7 @@ files_out="$out-files"
 email_out="$out-inbound-email"
 connections_out="$out-api-connections"
 totals_out="$out-totals"
+invoices_out="$out-invoices"
 
 step() {
     echo "check-fastapi: $*"
@@ -363,6 +368,23 @@ uv run pyright
 step "totals: pytest"
 uv run pytest -q
 step "totals: pytest on SQLite"
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+cd "$root"
+
+step "generate $invoices_definition in $invoices_out"
+rm -rf "$invoices_out"
+uv run --locked appgen generate "$invoices_definition" -b fastapi -o "$invoices_out" >/dev/null
+uv run --locked appgen check "$invoices_definition" "$invoices_out"
+cd "$invoices_out"
+step "invoices: uv sync, ruff, pyright"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+step "invoices: pytest"
+uv run pytest -q
+step "invoices: pytest on SQLite"
 TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
 rm -f test.db
 cd "$root"

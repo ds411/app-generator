@@ -68,6 +68,28 @@ FIELD_TYPES: tuple[str, ...] = FieldType.__value__.__args__
 RELATION_KINDS: tuple[str, ...] = RelationKind.__value__.__args__
 OPERATION_KINDS: tuple[str, ...] = OperationKind.__value__.__args__
 
+SEQUENCE_TYPES = ("string", "integer")
+"""The field types that take a `sequence`."""
+MAX_SEQUENCE_START = 10**15
+"""The largest first number of a sequence. The numbers stay exact in JavaScript."""
+MAX_SEQUENCE_WIDTH = 15
+"""The largest `width` of a sequence: the digits of the largest number."""
+
+
+class Sequence(Element):
+    """The numbers of a database sequence: a new record gets the next number."""
+
+    start: Annotated[int, pydantic.Field(ge=1, le=MAX_SEQUENCE_START)] = 1
+    """The number of the first record."""
+    prefix: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._/#-]{1,20}$")] | None = None
+    """`string` fields: the text before the number, for example `INV-`."""
+    width: Annotated[int, pydantic.Field(ge=1, le=MAX_SEQUENCE_WIDTH)] | None = None
+    """`string` fields: the least number of digits. Zeros fill the number on the left."""
+
+    def text(self, number: int) -> str:
+        """Return the value of a `string` field for a number, for example `INV-0042`."""
+        return f"{self.prefix or ''}{number:0{self.width or 1}d}"
+
 
 class Field(Element):
     """A field of an entity, or a param of a custom operation."""
@@ -102,6 +124,9 @@ class Field(Element):
     """`file` and `image`: the largest file in bytes. A text can give a unit, for example `5MB`."""
     types: list[Annotated[str, StringConstraints(pattern=MEDIA_TYPE_PATTERN)]] | None = None
     """`file` and `image`: the media types that the field allows, for example `image/*`."""
+    sequence: Sequence | None = None
+    """`string` and `integer` fields: a new record gets the next number of a database
+    sequence. The inputs and the forms do not have the field."""
 
     @property
     def is_file(self) -> bool:
@@ -170,6 +195,11 @@ class Entity(Element):
     def file_fields(self) -> dict[str, Field]:
         """The fields that hold a file: the `file` and the `image` fields (ADR 0027)."""
         return {name: f for name, f in self.fields.items() if f.is_file}
+
+    @property
+    def sequence_fields(self) -> dict[str, Field]:
+        """The fields whose values come from a database sequence (`sequence`)."""
+        return {name: f for name, f in self.fields.items() if f.sequence is not None}
 
 
 class Operation(Element):

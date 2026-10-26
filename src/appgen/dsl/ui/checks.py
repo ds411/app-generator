@@ -196,6 +196,15 @@ def _check_form_field(field: FormField, target: FieldTarget) -> Iterator[Diagnos
             hint="Remove the field from the form.",
         )
         return
+    if isinstance(target.member, Field) and target.member.sequence is not None:
+        yield _error(
+            "unsuitable-field",
+            f"The field '{target.entity}.{target.name}' has a sequence: the database gives "
+            "its value. A form cannot change it.",
+            field,
+            hint="Remove the field from the form.",
+        )
+        return
     widget = field.widget or default_widget(target)
     if widget is None:
         shown = target.relation_kind or target.type

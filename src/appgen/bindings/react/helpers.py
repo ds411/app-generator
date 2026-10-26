@@ -176,6 +176,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # The events (ADR 0031): the mock store runs their operations. With the
             # FastAPI app, the FastAPI app runs them.
             "events": has_events(definition) and not api,
+            # The fields with a sequence: the mock store gives the next number. With
+            # the FastAPI app, the database gives it.
+            "sequences": not api
+            and any(entity.sequence_fields for entity in definition.entities.values()),
             "frame_rules": frame_rules(definition),
         },
     }

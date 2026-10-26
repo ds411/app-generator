@@ -341,7 +341,7 @@ BINDING = Binding(
         *(rule for kind in _FUNCTION_GAPS for rule in _gap_rules("function", "ts", kind)),
     ),
     covers=frozenset(
-        {"app", "page", "entity", "field", "relation", "operation", "param"}
+        {"app", "page", "entity", "field", "sequence", "relation", "operation", "param"}
         | {"theme", "tokens", "token_group", "token"}
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}

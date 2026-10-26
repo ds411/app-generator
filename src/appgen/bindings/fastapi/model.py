@@ -163,6 +163,38 @@ class PyEnum:
     """The length of the longest value."""
 
 
+@dataclass(frozen=True, slots=True)
+class PySequence:
+    """The database sequence of a field with `sequence`: the numbers of the new records."""
+
+    id: str
+    """The element ID, for example `entities.Invoice.fields.number.sequence`."""
+    name: str
+    """The name of the Postgres sequence, for example `invoices_number_seq`."""
+    const: str
+    """The module constant of the `Sequence`, for example `NUMBER_SEQUENCE`."""
+    start: int
+    table: str
+    column: str
+    prefix: str | None
+    width: int | None
+    """The least number of digits of a `string` field, else None for an `integer` field."""
+
+    def declaration(self) -> str:
+        """Return the declaration of the `Sequence` in the models module."""
+        args = [f'"{self.name}"', f"start={self.start}", "metadata=Base.metadata"]
+        return call(f"{self.const} = ", "Sequence", args)
+
+    def default(self) -> str:
+        """Return the `NextNumber` default of the column."""
+        args = [self.const, f'"{self.table}"', f'"{self.column}"']
+        if self.prefix:
+            args.append(f'prefix="{self.prefix}"')
+        if self.width is not None:
+            args.append(f"width={self.width}")
+        return f"NextNumber({', '.join(args)})"
+
+
 @dataclass(slots=True)
 class PyField:
     """A field of an entity, or a param of a custom operation."""
@@ -196,6 +228,8 @@ class PyField:
     """A Python expression for a valid JSON value. It can use the integer `n`."""
     translatable: bool = False
     """True if the records have a value in each language (ADR 0026)."""
+    sequence: PySequence | None = None
+    """The sequence of the field: the database gives the value, and the inputs do not have it."""
 
     @property
     def aliased(self) -> bool:
@@ -233,6 +267,8 @@ class PyField:
         args.append(self.sa_type)
         if self.unique:
             args.append("unique=True")
+        if self.sequence is not None:
+            args.append(f"default={self.sequence.default()}")
         return call(f"{self.attr}: Mapped[{type_}] = ", "mapped_column", args)
 
     def translations_column(self) -> str:
@@ -1218,6 +1254,16 @@ class PyEntity:
         return [r for r in self.relations if r.side in ("fk", "m2m")]
 
     @property
+    def input_fields(self) -> list[PyField]:
+        """The fields of the inputs: all fields except the fields with a sequence."""
+        return [f for f in self.fields if f.sequence is None]
+
+    @property
+    def sequences(self) -> list[PySequence]:
+        """The sequences of the fields with `sequence`."""
+        return [f.sequence for f in self.fields if f.sequence is not None]
+
+    @property
     def filters(self) -> list[PyField]:
         """The fields that a list endpoint can filter by equality."""
         return [f for f in self.fields if f.filterable]
@@ -1333,13 +1379,13 @@ class PyEntity:
     @property
     def exact_fields(self) -> list[PyField]:
         """The fields with JSON values that a test can compare with the response."""
-        return [f for f in self.fields if f.exact]
+        return [f for f in self.input_fields if f.exact]
 
     @property
     def has_unique_input(self) -> bool:
         """True if two records with the same input break a unique constraint."""
         return (
-            any(f.unique for f in self.fields)
+            any(f.unique for f in self.input_fields)
             or any(r.unique for r in self.fk_relations)
             or bool(self.unique_rules)
         )
@@ -1707,7 +1753,7 @@ class PyEntity:
     @property
     def not_null(self) -> list[str]:
         """The attributes that an update cannot set to null."""
-        names = [f.attr for f in self.fields if f.required]
+        names = [f.attr for f in self.input_fields if f.required]
         return names + [r.fk_attr for r in self.fk_relations if r.required and r.fk_attr]
 
     def model_imports(self) -> str:
@@ -1724,7 +1770,7 @@ class PyEntity:
             lines.add("from decimal import Decimal")
         targets = {r.target for r in self.relations if r.target != self.name}
         typing = {"TYPE_CHECKING"} if targets or self.totals else set[str]()
-        if "Any" in types:
+        if "Any" in types or self.sequences:
             typing.add("Any")
         if typing:
             lines.add(from_import("typing", typing))
@@ -1740,13 +1786,18 @@ class PyEntity:
         if self.search_index is not None:
             sqlalchemy.add("Index")
             lines.add("from app.core.search import search_vector")
+        if self.sequences:
+            sqlalchemy.add("Sequence")
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
         orm = {"Mapped", "mapped_column"}
         if self.relations:
             orm.add("relationship")
+        if self.sequences:
+            orm.add("declared_attr")
         lines.add(from_import("sqlalchemy.orm", orm))
-        core = {"Record"} | ({"Base"} if self.join_tables else set[str]())
+        core = {"Record"} | ({"Base"} if self.join_tables or self.sequences else set[str]())
+        core |= {"NextNumber"} if self.sequences else set[str]()
         core |= sa_types & set(_MIGRATION_TYPES)
         field_enums = {f.enum.name for f in self.fields if f.enum is not None}
         core |= {"enum_type"} if field_enums else set[str]()
@@ -2006,6 +2057,11 @@ class PyApp:
     def file_entities(self) -> list[PyEntity]:
         """The entities with file fields (ADR 0027), in source order."""
         return [e for e in self.entity_order() if e.files]
+
+    @property
+    def sequences(self) -> list[PySequence]:
+        """The sequences of the fields with `sequence`, in source order."""
+        return [s for e in self.entity_order() for s in e.sequences]
 
     @property
     def file_slices(self) -> list[PyEntity]:
@@ -2746,6 +2802,21 @@ def _computed_path(entities: dict[str, PyEntity], entity: str, path: str) -> str
     return "compute.get(self, " + ", ".join(f'"{a}"' for a in attrs) + ")"
 
 
+def _sequence(name: str, f: Field, table: str) -> PySequence | None:
+    if f.sequence is None:
+        return None
+    return PySequence(
+        id=f.sequence.id,
+        name=f"{table}_{name}_seq",
+        const=f"{constant(name)}_SEQUENCE",
+        start=f.sequence.start,
+        table=table,
+        column=name,
+        prefix=f.sequence.prefix,
+        width=(f.sequence.width or 1) if f.type == "string" else None,
+    )
+
+
 def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
     enum = None
     if f.type == "enum":
@@ -2757,6 +2828,9 @@ def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
             length=max((len(v) for v in values), default=1),
         )
     model_type, schema_type, sa_type = _types(f, enum)
+    sequence = _sequence(name, f, table)
+    if sequence is not None and f.type == "integer":
+        sa_type = "BigInteger"  # The numbers of a sequence grow.
     return PyField(
         name=name,
         attr=attribute(name),
@@ -2765,7 +2839,8 @@ def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
         model_type=model_type,
         schema_type=schema_type,
         sa_type=sa_type,
-        required=f.required,
+        # A field with a sequence always has a value.
+        required=f.required or sequence is not None,
         has_default=f.default is not None,
         default=_default(f, enum),
         unique=f.unique,
@@ -2777,6 +2852,7 @@ def _field(name: str, f: Field, enum_name: str, table: str) -> PyField:
         exact=f.type in _EXACT_TYPES,
         sample=_sample(f, enum),
         translatable=f.translatable,
+        sequence=sequence,
     )
 
 

@@ -1,6 +1,6 @@
 {{ trace_header(element_id) }}
 {% set e = py.entity(name) %}
-{% set required = e.fields | selectattr("required") | rejectattr("has_default") | list %}
+{% set required = e.input_fields | selectattr("required") | rejectattr("has_default") | list %}
 {% set required_fks = e.fk_relations | selectattr("required") | list %}
 {% if required or required_fks or e.not_null %}
 import pytest
