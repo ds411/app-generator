@@ -31,7 +31,6 @@ from appgen.bindings.fastapi.integrations import (
 )
 from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
-from appgen.bindings.fastapi.snapshots import PySnapshots, python_snapshots
 from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.me import PyMeTest, me_tests
 from appgen.bindings.fastapi.names import attribute, plural, singular
@@ -54,6 +53,7 @@ from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_que
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
 from appgen.bindings.fastapi.sharing import PyShare, python_shares
+from appgen.bindings.fastapi.snapshots import PySnapshots, python_snapshots
 from appgen.bindings.fastapi.total_rules import fix_rule_samples, total_rule_cases
 from appgen.bindings.fastapi.totals import (
     PyTotal,

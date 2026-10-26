@@ -1072,6 +1072,8 @@ def _check_period_field(
     definition: AppDefinition, dashboard: Dashboard, widget: StatWidget | ChartWidget | ListWidget
 ) -> Iterator[Diagnostic]:
     """A widget shows the records of the period by a date field. A compare needs the period."""
+    if isinstance(widget, ChartWidget) and widget.snapshots is not None:
+        return  # The check of the chart of snapshots reports its 'period_field'.
     compare = isinstance(widget, StatWidget) and widget.compare is not None
     if widget.period_field is None:
         if compare:
@@ -1146,7 +1148,16 @@ def _check_widget(
             pass
 
 
-_SNAPSHOT_CHART_KEYS = ("entity", "group_by", "interval", "aggregate", "field", "filter", "badge")
+_SNAPSHOT_CHART_KEYS = (
+    "entity",
+    "group_by",
+    "interval",
+    "aggregate",
+    "field",
+    "filter",
+    "badge",
+    "period_field",
+)
 """The keys of a chart of records, which a chart of snapshots does not take."""
 
 
@@ -1189,7 +1200,16 @@ def _check_snapshot_chart(dashboard: Dashboard, widget: ChartWidget) -> Iterator
 def _check_snapshot_stat(
     definition: AppDefinition, widget: StatWidget, entity: str
 ) -> Iterator[Diagnostic]:
-    """A snapshot has the value of all records: the entity has no record rule (ADR 0042)."""
+    """A snapshot has the value of all records of a day: the entity has no record rule, and
+    the stat has no period (ADR 0042)."""
+    if widget.period_field is not None:
+        yield _error(
+            "invalid-option",
+            "The snapshots of a stat have the value of a day, not of the period of the dashboard.",
+            widget,
+            at="period_field",
+            hint="Remove 'period_field', or remove 'snapshots'.",
+        )
     roles = definition.access.roles if definition.access else {}
     ruled = sorted(name for name, role in roles.items() if entity in role.records)
     if ruled:

@@ -154,6 +154,14 @@ def test_a_stat_with_snapshots_has_no_record_rule() -> None:
     assert codes(text + access) == [("invalid-option", OPEN_POINTS)]
 
 
+def test_the_snapshots_have_no_period() -> None:
+    assert codes(chart("period_field: due_on")) == [("invalid-option", BURNDOWN)]
+    period = BASE.replace(
+        "      widgets:\n", "      period: { default: last_30_days }\n      widgets:\n"
+    ).replace(f"{W}snapshots: daily\n", f"{W}period_field: due_on\n{W}snapshots: daily\n")
+    assert codes(period) == [("invalid-option", OPEN_POINTS)]
+
+
 def test_the_fastapi_app_stores_the_values_with_a_built_in_job() -> None:
     files = files_of(BASE, fastapi.BINDING)
     module = files["app/features/dashboards/overview.py"]
