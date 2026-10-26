@@ -13,6 +13,7 @@ from appgen.gen.generator import generate
 ROOT = Path(__file__).parent.parent
 EXAMPLE = ROOT / "examples" / "room-booking" / "app.yaml"
 TOTALS = ROOT / "tests" / "fixtures" / "totals.yaml"
+INVOICES = ROOT / "tests" / "fixtures" / "invoices.yaml"
 
 BASE = dedent(
     """\
@@ -147,6 +148,21 @@ def test_the_lines_of_a_record_add_entries_too() -> None:
     assert remove.endswith(
         '    add_entry(session, "InvoiceLine", record.id, "deleted", kept, None)'
     )
+
+
+def test_the_entry_of_a_create_has_the_number_of_a_sequence() -> None:
+    definition = load_definition(INVOICES)
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    repository = files["app/features/invoices/repository.py"]
+    assert (
+        "    session.add(record)\n"
+        "    # The database gives the numbers of the sequences, for the entry of the change log.\n"
+        "    await flush(session)\n"
+    ) in repository
+    # The inputs do not have the number, so a restore keeps it, and the tests change another field.
+    assert '    values.pop("number", None)\n' in repository
+    tests = files["tests/features/invoices/test_history.py"]
+    assert "    old = record.issued_on\n" in tests
 
 
 def test_the_fastapi_app_has_the_endpoints_and_the_tests_of_the_change_log() -> None:

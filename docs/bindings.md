@@ -656,7 +656,9 @@ helpers of the log.
   and `POST /<entity>/{id}/history/{entry_id}/restore` (with the guard
   of the update operation). The restore gives the old values of the
   entry to `restore()` of the repository, which validates them with the
-  update schema and calls `update` with the action `restored`. The
+  update schema and calls `update` with the action `restored`. It keeps
+  the values of the fields with a sequence. With a sequence, `add` writes
+  the record before the entry, so that the entry has the number. The
   record rules of a read and of a change apply.
 - The generated tests in `tests/features/<slice>/test_history.py` check
   the entries of a create, a change, a change without a new value, and

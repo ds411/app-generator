@@ -834,6 +834,8 @@ class PyHistory:
     attribute of the model."""
     translatable: list[str] = field(default_factory=list[str])
     """The attributes of the kept translatable fields: the log keeps the default language."""
+    sequences: list[str] = field(default_factory=list[str])
+    """The attributes of the kept fields with a sequence: a restore keeps their values."""
     read: PyOperation | None = None
     """The read operation of the entity: the endpoint of the entries needs its permission."""
     update: PyOperation | None = None
@@ -1603,10 +1605,21 @@ class PyEntity:
         return h is not None and (h.read is not None or h.update is not None)
 
     @property
+    def history_flush(self) -> bool:
+        """True if `add` writes the new record before the entry of the change log.
+
+        The database gives the values of the fields with a sequence in the
+        insert, so that the entry has them. The event `created` writes the
+        record anyway.
+        """
+        return self.history is not None and bool(self.sequences) and self.created_event is None
+
+    @property
     def history_test_field(self) -> PyField | None:
         """A field of the change log that the tests change, or None if the tests cannot change one.
 
-        Its test value varies, and no rule or workflow of the entity reads it.
+        Its test value varies, the inputs have it (no sequence), and no rule
+        or workflow of the entity reads it.
         """
         h = self.history
         if h is None:
@@ -1618,6 +1631,7 @@ class PyEntity:
                 f
                 for f in self._test_fields()
                 if f.attr in kept
+                and f.sequence is None
                 and _varies(f)
                 and f.attr not in ruled
                 and f.attr not in self._workflow_attrs()
@@ -1775,7 +1789,8 @@ class PyEntity:
             ),
             f"from app.features.{self.slice}.validation_ext import validate",
         }
-        core = {"commit"} | ({"flush"} if self.scoped or self.events or self.lines else set[str]())
+        flush = self.scoped or self.events or self.lines or self.history_flush
+        core = {"commit"} | ({"flush"} if flush else set[str]())
         if self.events:
             core.add("run_event")
         if self.fk_relations:
@@ -2967,12 +2982,15 @@ def _history(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
         relations = {r.name: r for r in py_entity.relations}
         members: list[tuple[str, str]] = []
         translatable: list[str] = []
+        sequences: list[str] = []
         for member in entity.history_members:
             f = fields.get(member)
             if f is not None:
                 members.append((member, f.attr))
                 if f.translatable:
                     translatable.append(f.attr)
+                if f.sequence is not None:
+                    sequences.append(f.attr)
             else:
                 fk_attr = relations[member].fk_attr
                 assert fk_attr is not None
@@ -2982,6 +3000,7 @@ def _history(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
             id=entity.history.id,
             members=members,
             translatable=translatable,
+            sequences=sequences,
             read=operations.get("read"),
             update=operations.get("update"),
             user_entity=definition.auth.user_entity if definition.auth else None,

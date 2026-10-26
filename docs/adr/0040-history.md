@@ -66,7 +66,8 @@ rules of a read. The restore is a change: it needs the permission of
 the update operation, and it goes through `update`, with its checks:
 the validation, the rules, the workflows, the record rules, and the
 events. It adds an entry `restored`. An entry of a create or of a
-delete has no old values to restore. Without a read operation, the
+delete has no old values to restore. A restore keeps the values of the
+fields with a sequence (ADR 0037), because the inputs do not have them. Without a read operation, the
 entries have no endpoint, and without an update operation the restore
 has none.
 

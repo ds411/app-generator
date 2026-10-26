@@ -202,6 +202,10 @@ async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     await flush(session)
     await on_created(session, record)
 {% endif %}
+{% if e.history_flush %}
+    # The database gives the numbers of the sequences, for the entry of the change log.
+    await flush(session)
+{% endif %}
 {% if e.history %}
     {{ trace(e.history.id) }}
     add_entry(session, "{{ e.name }}", record.id, "created", None, snapshot(record, HISTORY))
@@ -418,6 +422,12 @@ async def restore(
     The restore is a change, with the checks of `update`. It adds an entry `restored`.
     """
     values = old_values(entry, HISTORY)
+{% if e.history.sequences %}
+    # The database gives the numbers of the sequences: a restore keeps them.
+{% for attr in e.history.sequences %}
+    values.pop("{{ attr }}", None)
+{% endfor %}
+{% endif %}
 {% for attr in e.history.translatable %}
     if "{{ attr }}" in values:
         # The log keeps the value of the default language.

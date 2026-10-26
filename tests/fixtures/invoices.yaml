@@ -5,6 +5,7 @@
 # scripts/check-react.sh, and scripts/check-fastapi.sh generate and check
 # the apps of this definition, and scripts/sequence_test.py creates
 # invoices in the Next.js app and in the mock store of the React app.
+# The invoices keep a change log (ADR 0040), with the numbers.
 version: 0
 
 app:
@@ -22,6 +23,7 @@ entities:
   Invoice:
     display_field: number
     crud: { views: [table, detail], forms: [create, update] }
+    history: true
     fields:
       number:
         type: string
