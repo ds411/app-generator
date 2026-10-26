@@ -21,6 +21,19 @@ export type {{ type }} = {
 {% for m in all %}
   {{ m.key }}: {{ m.ts_type }}{{ " | null" if m.nullable }}; {{ trace(m.element_id) }}
 {% endfor %}
+{% for t in record_totals[name] %}
+{% if loop.first %}
+{% if react is defined and react.api %}
+  // The computed fields with totals: the FastAPI app sends their values (ADR 0034).
+{% else %}
+  // The totals of the related records, for the computed fields (ADR 0034).
+{% endif %}
+{% endif %}
+{% for id in t.ids[1:] %}
+  {{ trace(id) }}
+{% endfor %}
+  {{ t.key }}?: number | null; {{ trace(t.ids[0]) }}
+{% endfor %}
 };
 
 /** The values that create a {{ type }}. The keys without a value get their defaults.{{ " The files have their own upload." if files }} */

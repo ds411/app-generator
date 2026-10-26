@@ -25,9 +25,12 @@
 # operations of tests/fixtures/events-extensions/nextjs/, and run lint,
 # type check, appgen check, and the test of the events
 # (scripts/events_test.py) on it.
-# Last, generate tests/fixtures/invoices.yaml (the small DSL additions of
+# Then generate tests/fixtures/invoices.yaml (the small DSL additions of
 # M33), and run lint, type check, appgen check, and the sequence test
 # (scripts/sequence_test.py) on it.
+# Last, generate tests/fixtures/totals.yaml (totals of relations, ADR
+# 0034), and run lint, type check, appgen check, and the totals test
+# (scripts/totals_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -73,14 +76,17 @@ events_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-events.XXXXXX")
 # The app of the invoices fixture (M33), in a temporary folder.
 invoices_definition=tests/fixtures/invoices.yaml
 invoices_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-invoices.XXXXXX")
+# The app of the totals fixture (ADR 0034), in a temporary folder.
+totals_definition=tests/fixtures/totals.yaml
+totals_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-totals.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out"' EXIT
 fi
 
 step() {
@@ -265,5 +271,22 @@ uv run --locked appgen check "$invoices_definition" "$invoices_out"
 
 step "sequence test"
 uv run --locked scripts/sequence_test.py --app "$invoices_out"
+
+step "generate $totals_definition in $totals_out"
+uv run --locked appgen generate "$totals_definition" -b nextjs -o "$totals_out" >/dev/null
+(
+    cd "$totals_out"
+    step "pnpm install (totals)"
+    pnpm install --silent
+    step "pnpm lint (totals)"
+    pnpm --silent lint
+    step "pnpm typecheck (totals)"
+    pnpm --silent typecheck
+)
+step "appgen check (totals)"
+uv run --locked appgen check "$totals_definition" "$totals_out"
+
+step "totals test"
+uv run --locked scripts/totals_test.py --app "$totals_out"
 
 step "passed"

@@ -72,8 +72,24 @@ with the parameters `<field>_min` and `<field>_max`. An expression with
 sort and the filters, because the database and Python round and divide
 in different ways.
 
-The front-end bindings do not compute totals in this decision: they
-stop with an error for a computed field with a total.
+The front ends give the same values:
+
+- A record of the Next.js app and of the React app with mock data has
+  a key for each distinct total, with the name of the attribute of the
+  FastAPI model in camel case, for example `sumLinesAmount`. The views
+  compute the field from the keys, as from the other values of the
+  record.
+- The repository of the Next.js app reads the totals of its records in
+  one more query, with a correlated subquery for each total (`total` in
+  `src/shared/db/repository.ts`). The query names the table of the
+  records `record`, so that the subquery of a relation of an entity to
+  itself tells the record from its related records. Each list, read,
+  create, and update of the repository gives the totals.
+- The mock store of the React app computes each total from the records
+  of the store of the related entity. A change of the related records
+  notifies the views of the records with the totals.
+- The React app with the FastAPI app (`x-react-data: api`) reads the
+  value of each computed field with totals from the API.
 
 ## Consequences
 
@@ -91,3 +107,6 @@ stop with an error for a computed field with a total.
   module makes its sort keys.
 - The filter of a total cannot use the time, a related record, or a
   computed field. A total of a total is not possible.
+- The views of the Next.js app and of the React app with mock data sort
+  and filter the computed fields with totals in the browser, as the
+  other computed fields.

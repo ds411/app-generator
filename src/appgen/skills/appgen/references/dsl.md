@@ -338,8 +338,9 @@ The FastAPI app computes each total in the database, with a subquery in
 each read and list query of the entity. When the expression has only
 totals, numbers, stored number fields of the entity, `+`, `-`, and `*`,
 the list endpoint can sort by the field, and filter it with the
-parameters `<field>_min` and `<field>_max`. The front-end bindings do
-not compute totals yet: they stop with an error.
+parameters `<field>_min` and `<field>_max`. The Next.js app computes
+the totals in the database too, and the React app from its mock data,
+or it reads the value from the FastAPI app.
 
 ```yaml
 # example: room-booking

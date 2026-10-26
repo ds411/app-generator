@@ -293,10 +293,127 @@ def test_a_total_needs_a_free_attribute_name_in_the_fastapi_model() -> None:
         files_of(text)
 
 
+FRONT_END_FIELDS = (
+    "total: { type: decimal, scale: 2, computed: sum(lines.amount) + fee }\n"
+    "      line_count: { type: integer, computed: count(lines) }\n"
+    "      debits:\n"
+    "        type: decimal\n"
+    "        computed: sum(lines.amount)\n"
+    "        filter: { kind: debit }\n"
+    "      tag_weight: { type: integer, computed: sum(tags.weight) }"
+)
+
+
+def test_the_nextjs_repository_reads_each_total_in_a_subquery() -> None:
+    files = files_of(order_field(FRONT_END_FIELDS), nextjs.BINDING)
+    repository = files["src/entities/order/api/order-repository.ts"]
+    assert 'import { eq } from "drizzle-orm";' in repository
+    assert 'import { lineTable, orderTable, orderTagsTable, tagTable } from "@/shared/db";' in (
+        repository
+    )
+    assert 'import { Repository, total } from "@/shared/db/repository";' in repository
+    assert (
+        "  totals: (record) => ({\n"
+        "    // @trace entities.Order.fields.total\n"
+        '    sumLinesAmount: total("sum", lineTable, lineTable.amount, '
+        "eq(lineTable.orderId, record.id)),\n"
+        "    // @trace entities.Order.fields.line_count\n"
+        '    countLines: total("count", lineTable, null, eq(lineTable.orderId, record.id)),\n'
+    ) in repository
+    assert (
+        "    debitsSumLinesAmount: total(\n"
+        '      "sum",\n'
+        "      lineTable,\n"
+        "      lineTable.amount,\n"
+        "      eq(lineTable.orderId, record.id),\n"
+        '      eq(lineTable.kind, "debit"),\n'
+        "    ),\n"
+    ) in repository
+    assert (
+        "    sumTagsWeight: total(\n"
+        '      "sum",\n'
+        "      [tagTable, orderTagsTable],\n"
+        "      tagTable.weight,\n"
+        "      eq(orderTagsTable.orderId, record.id),\n"
+        "      eq(orderTagsTable.tagId, tagTable.id),\n"
+        "    ),\n"
+    ) in repository
+    shared = files["src/shared/db/repository.ts"]
+    assert "export function total(" in shared
+    assert 'const record = alias(this.table, "record");' in shared
+    # An app without totals keeps its repository.
+    plain = files_of(order_field(""), nextjs.BINDING)["src/shared/db/repository.ts"]
+    assert "function total(" not in plain
+    assert "alias" not in plain
+
+
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
-def test_the_front_ends_do_not_compute_the_totals_yet(binding: Binding) -> None:
-    text = order_field("n: { type: integer, computed: count(lines) }")
-    with pytest.raises(GenerationError, match="do not compute the totals"):
+def test_the_views_compute_the_fields_from_the_totals_of_the_records(binding: Binding) -> None:
+    files = files_of(order_field(FRONT_END_FIELDS), binding)
+    types = files["src/entities/order/model/types.ts"]
+    assert (
+        "  // The totals of the related records, for the computed fields (ADR 0034).\n"
+        "  sumLinesAmount?: number | null; // @trace entities.Order.fields.total\n"
+        "  countLines?: number | null; // @trace entities.Order.fields.line_count\n"
+        "  debitsSumLinesAmount?: number | null; // @trace entities.Order.fields.debits\n"
+        "  sumTagsWeight?: number | null; // @trace entities.Order.fields.tag_weight\n"
+    ) in types
+    table = next(v for k, v in files.items() if k.endswith("order-table-view.tsx"))
+    assert (
+        "compute.round(compute.add(compute.num(row.sumLinesAmount), compute.num(row.fee)), 2)"
+    ) in table
+    assert "compute.num(row.debitsSumLinesAmount)" in table
+
+
+def test_the_react_mock_store_computes_the_totals_from_the_related_records() -> None:
+    files = files_of(order_field(FRONT_END_FIELDS), react.BINDING)
+    api = files["src/entities/order/api/order-api.ts"]
+    assert (
+        ").withTotals([\n"
+        "  { // @trace entities.Order.fields.total begin\n"
+        '    key: "sumLinesAmount",\n'
+        '    fn: "sum",\n'
+        '    target: "Line",\n'
+        '    link: "orderId",\n'
+        '    field: "amount",\n'
+        "  }, // @trace entities.Order.fields.total end\n"
+    ) in api
+    assert '    filter: [\n      ["kind", "eq", "debit"],\n    ],\n' in api
+    assert '    list: "tags",\n    field: "weight",\n' in api
+    store = files["src/shared/api/mock-store.ts"]
+    assert "withTotals(totals: readonly Total[]): this {" in store
+    assert "values[total.key] = totalOf(total, items);" in store
+    plain = files_of(order_field(""), react.BINDING)["src/shared/api/mock-store.ts"]
+    assert "withTotals" not in plain
+    assert "recordsByEntity" not in plain
+
+
+def test_the_react_app_reads_the_totals_from_the_fastapi_app() -> None:
+    text = order_field(FRONT_END_FIELDS).replace(
+        "app: { name: shop, title: Shop }", "app: { name: shop, title: Shop, x-react-data: api }"
+    )
+    files = files_of(text, react.BINDING)
+    api = files["src/entities/order/api/order-api.ts"]
+    assert '    "line_count": "lineCount",\n' in api
+    assert '    "tag_weight": "tagWeight",\n' in api
+    assert 'numbers: ["fee", "total", "debits"],' in api
+    assert "withTotals" not in api
+    types = files["src/entities/order/model/types.ts"]
+    assert (
+        "  // The computed fields with totals: the FastAPI app sends their values (ADR 0034).\n"
+        "  total?: number | null; // @trace entities.Order.fields.total\n"
+    ) in types
+    table = next(v for k, v in files.items() if k.endswith("order-table-view.tsx"))
+    assert "compute.num(row.total)" in table
+    assert "compute.add(" not in table
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
+def test_a_total_needs_a_free_key_in_the_records_of_the_front_ends(binding: Binding) -> None:
+    text = order_field(
+        "count_lines: { type: integer }\n      n: { type: integer, computed: count(lines) }"
+    )
+    with pytest.raises(GenerationError, match="the key 'countLines'"):
         files_of(text, binding)
 
 

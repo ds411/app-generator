@@ -3,16 +3,18 @@
 {% set var = name | camel %}
 {% set rules = record_rules.get(name) %}
 {% set condition = nextjs.owner_conditions.get(name) %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) %}
+{% set totals = nextjs.totals.get(name) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) %}
+{% set operators = (condition.operators if condition else []) + (totals.operators if totals else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
 
-{% if condition %}
-import { {{ condition.operators | join(", ") }} } from "drizzle-orm";
+{% if operators %}
+import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 
 {% endif %}
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
-import { Repository } from "@/shared/db/repository";
+import { Repository{{ ", total" if totals }} } from "@/shared/db/repository";
 
 {% set events = ts_events(definition, name) %}
 {% set schemas = events | map(attribute="schema") | select | unique | sort | list %}
@@ -70,6 +72,17 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
     }, {{ trace(item.element_id, scope="end") }}
 {% endfor %}
   ],
+{% endif %}
+{% if totals %}
+  // The totals of the related records (ADR 0034): a subquery for each one, of the record `record`.
+  totals: (record) => ({
+{% for t in totals.totals %}
+{% for id in t.ids %}
+    {{ trace(id) }}
+{% endfor %}
+    {{ t.code }}
+{% endfor %}
+  }),
 {% endif %}
 {% set compares = element.rules.values() | selectattr("kind", "eq", "compare") | list %}
 {% set overlaps = element.rules.values() | selectattr("kind", "eq", "no_overlap") | list %}

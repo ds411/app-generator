@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from appgen.bindings.shared.auth import kind_operations
 from appgen.bindings.shared.gaps import gap_spec
+from appgen.bindings.shared.totals import has_totals, total_key
 from appgen.bindings.shared.ui import css_class_var, css_var, js
 from appgen.dsl.expressions import (
     Binary,
@@ -945,8 +946,16 @@ class ViewContext:
         )
 
     def computed_expr(self, entity: str, member: Field, row: str, optional: bool) -> str:
-        """Return the TypeScript expression of a computed field of a record."""
+        """Return the TypeScript expression of a computed field of a record.
+
+        A total of a relation is a key of the record (ADR 0034). With the
+        FastAPI app, the record has the value of a field with totals.
+        """
         assert member.computed is not None
+        dot = "?." if optional else "."
+        field_name = member.id.rsplit(".", 1)[-1]
+        if self.server and has_totals(self.definition, entity, field_name):
+            return f"compute.num({row}{dot}{camel(field_name)})"
 
         def render(expression: Expression) -> str:
             match expression:
@@ -964,11 +973,7 @@ class ViewContext:
                 case Negate(operand):
                     return f"compute.neg({render(operand)})"
                 case Total():
-                    raise GenerationError(
-                        f"The computed field '{entity}.{member.id.rsplit('.', 1)[-1]}' has the "
-                        f"total '{expression}'. The front-end bindings do not compute the totals "
-                        "of the relations yet: only the FastAPI binding does."
-                    )
+                    return f"compute.num({row}{dot}{total_key(field_name, member, expression)})"
 
         def render_raw(expression: Expression) -> str:
             assert isinstance(expression, FieldRef)

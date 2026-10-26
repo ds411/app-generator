@@ -81,6 +81,9 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             names = json_names if member.translations is None else translations
             if member.element_id in names:
                 keys[names[member.element_id]] = member.key
+        # The computed fields with totals: the FastAPI app computes them (ADR 0034).
+        totals = [c for c in py.computed if c.totals]
+        keys |= {c.attr: camel(c.name) for c in totals}
         query = py.query
         params = {p.name: p for p in query.params if p.kind in ("eq", "in")}
         filters = {
@@ -99,7 +102,10 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             name=name,
             path=py.path,
             keys=keys,
-            numbers=[keys[f.name] for f in py.fields if f.type == "decimal" and f.name in keys],
+            numbers=[
+                *(keys[f.name] for f in py.fields if f.type == "decimal" and f.name in keys),
+                *(keys[c.attr] for c in totals if c.type == "Decimal"),
+            ],
             filters=filters,
             sorts=[key for json, key in keys.items() if json in sort_keys],
             display=camel(display),

@@ -5,7 +5,8 @@
 # one_to_many and over a many_to_many relation. The create and the
 # update operations of the invoices write the lines with the invoice
 # (ADR 0035), and the lines have a workflow.
-# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition, and
+# scripts/check-nextjs.sh the Next.js app (scripts/totals_test.py).
 version: 0
 
 app:
@@ -80,6 +81,12 @@ entities:
     fields:
       name: { type: string, required: true, max_length: 40 }
       weight: { type: integer, min: 0 }
+
+pages:
+  invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
+  invoice_detail: { path: "/invoices/{id}", title: Invoice, content: { view: invoice_detail } }
+  posts: { path: /posts, title: Posts, content: { view: post_table } }
+  post_detail: { path: "/posts/{id}", title: Post, content: { view: post_detail } }
 
 operations:
   create_invoice: { kind: create, entity: Invoice, lines: [lines] }
