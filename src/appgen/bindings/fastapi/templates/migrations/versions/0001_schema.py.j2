@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 {% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
-{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history or py.notifications %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -183,6 +183,31 @@ def upgrade() -> None:
     )
     op.create_index("ix_history_entries_record_id", "history_entries", ["record_id"])
 {% endif %}
+{% if py.notifications %}
+{% set u = py.entity(definition.auth.user_entity) %}
+    op.create_table(
+        "notices",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("notification", sa.String(length=63), nullable=False),
+        sa.Column("entity", sa.String(length=63), nullable=False),
+        sa.Column("record_id", sa.Uuid(), nullable=False),
+        sa.Column("actor_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "values", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False
+        ),
+        sa.Column("at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["{{ u.table }}.id"],
+            name="fk_notices_user_id_{{ u.table }}",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name="pk_notices"),
+    )
+    op.create_index("ix_notices_user_id", "notices", ["user_id"])
+{% endif %}
 {% if py.jobs %}
     op.create_table(
         "job_runs",
@@ -205,6 +230,10 @@ def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
 {% if py.jobs %}
     op.drop_table("job_runs")
+{% endif %}
+{% if py.notifications %}
+    op.drop_index("ix_notices_user_id", table_name="notices")
+    op.drop_table("notices")
 {% endif %}
 {% if py.history %}
     op.drop_index("ix_history_entries_record_id", table_name="history_entries")

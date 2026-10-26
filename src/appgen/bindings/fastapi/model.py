@@ -33,6 +33,11 @@ from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.names import attribute, plural, singular
+from appgen.bindings.fastapi.notifications import (
+    PyNotification,
+    PyReceiver,
+    python_notifications,
+)
 from appgen.bindings.fastapi.pysource import (
     LINE_LENGTH,
     call,
@@ -1234,6 +1239,8 @@ class PyEntity:
     have an item for each, and the repository has `change` and `remove`."""
     history: PyHistory | None = None
     """The change log of the records (ADR 0040), or None."""
+    notifications: list[PyNotification] = field(default_factory=list[PyNotification])
+    """The notifications of the changes of the records (ADR 0041)."""
 
     @property
     def guard_module(self) -> str:
@@ -1475,11 +1482,28 @@ class PyEntity:
         return [e for e in self.events if e.kind == "transition"] + ([changed] if changed else [])
 
     @property
+    def created_notifications(self) -> list[PyNotification]:
+        """The notifications of a new record (ADR 0041)."""
+        return [n for n in self.notifications if n.kind == "created"]
+
+    @property
+    def change_notifications(self) -> list[PyNotification]:
+        """The notifications of a change: `changed` and the transitions (ADR 0041)."""
+        return [n for n in self.notifications if n.kind != "created"]
+
+    @property
     def before_attrs(self) -> list[str]:
-        """The attributes that an update reads before the change: workflows and `changed`."""
+        """The attributes that an update reads before the change.
+
+        They are the fields of the workflows, of the event `changed`, and of
+        the notifications of a change (ADR 0041).
+        """
         attrs = [w.attr for w in self.workflows]
         changed = self.changed_event
-        for attr in changed.attrs if changed else []:
+        watched = [*(changed.attrs if changed else [])]
+        for notification in self.change_notifications:
+            watched += notification.attrs
+        for attr in watched:
             if attr not in attrs:
                 attrs.append(attr)
         return attrs
@@ -1530,6 +1554,74 @@ class PyEntity:
             and f.attr not in self._workflow_attrs()
             and _varies(f)
         ]
+
+    def notification_test_changes(self, notification: PyNotification) -> list[str]:
+        """The input keys of a change that gives the notices of a notification `changed`.
+
+        The tests change all fields to the values of other valid input, so
+        that the rules of the entity hold, and the watched relations to new
+        records. The workflow fields keep their state. The list is empty if
+        no change can give the notices.
+        """
+        fields = [f for f in self._test_fields() if f.attr not in self._workflow_attrs()]
+        relations = [
+            r for r in self.relations if r.kind == "many_to_one" and r.fk_attr in notification.attrs
+        ]
+        if not relations and not any(f.attr in notification.attrs and _varies(f) for f in fields):
+            return []
+        return [f.name for f in fields] + [f"{r.name}_id" for r in relations]
+
+    @property
+    def notification_sets_state(self) -> bool:
+        """True if a test of a transition notification sets the state before the transition."""
+        return any(
+            n.workflow is not None and n.before[0] != n.workflow.start for n in self.notifications
+        )
+
+    def notification_tested(self) -> list[PyNotification]:
+        """The notifications that the tests check: a notification `changed` needs a test change."""
+        return [
+            n
+            for n in self.notifications
+            if n.kind != "changed" or self.notification_test_changes(n)
+        ]
+
+    def notification_test_receivers(self) -> list[PyReceiver]:
+        """The first receiver path of each tested notification, each path one time."""
+        found: dict[str, PyReceiver] = {}
+        for n in self.notification_tested():
+            found.setdefault(n.receivers[0].path, n.receivers[0])
+        return list(found.values())
+
+    def notification_test_imports(self) -> str:
+        """Return the import block of the tests of the notifications."""
+        tested = self.notification_tested()
+        changes = any(n.kind == "changed" for n in tested)
+        updates = any(n.kind != "created" for n in tested)
+        users = self.app_entities[self.notifications[0].user_entity]
+        factories = {f"make_{self.snake}", f"make_{users.snake}"}
+        if changes:
+            factories.add(f"{self.snake}_input")
+        for n in tested:
+            factories |= set(re.findall(r"\bmake_\w+", "\n".join(n.receivers[0].setup)))
+        sqlalchemy = {"select"} | ({"update"} if self.notification_sets_state else set[str]())
+        lines = {
+            "from typing import Any",
+            "from uuid import UUID",
+            "import pytest",
+            from_import("sqlalchemy", sqlalchemy),
+            "from sqlalchemy.ext.asyncio import AsyncSession",
+            "from app.core.db import USER_KEY",
+            from_import("app.core.notifications", {"Notice", "notice_text", "path_users"}),
+            f"from app.features.{self.slice}.models import {self.name}",
+            from_import("tests.factories", factories),
+        }
+        if users.name != self.name:
+            lines.add(f"from app.features.{users.slice}.models import {users.name}")
+        if updates:
+            lines.add(f"from app.features.{self.slice} import repository")
+            lines.add(f"from app.features.{self.slice}.schemas import {self.name}Update")
+        return import_block(lines)
 
     @property
     def event_operations(self) -> list[PyOperation]:
@@ -1881,6 +1973,22 @@ class PyEntity:
             target = self.target(rel)
             if target.name != self.name:
                 lines.add(f"from app.features.{target.slice}.models import {target.name}")
+        if self.notifications:
+            code = "\n".join(n.body(8) for n in self.notifications)
+            names = {"add_notices"} | {
+                name for name in ("path_users", "record_text", "text_value") if name + "(" in code
+            }
+            if any(n.kind == "changed" for n in self.notifications):
+                names.add("changed")
+            lines.add(from_import("app.core.notifications", names))
+            for n in self.notifications:
+                for value in n.values:
+                    if value.target is not None and value.label is not None:
+                        target = self.app_entities[value.target]
+                        if target.name != self.name:
+                            lines.add(
+                                f"from app.features.{target.slice}.models import {target.name}"
+                            )
         return import_block(lines)
 
     def list_imports(self, op: PyOperation | None = None) -> str:
@@ -2244,6 +2352,24 @@ class PyApp:
         return [e.history.id for e in self.history if e.history is not None]
 
     @property
+    def notifications(self) -> list[PyNotification]:
+        """The notifications (ADR 0041), by entity in the order of the tables."""
+        return [n for e in self.entity_order() for n in e.notifications]
+
+    @property
+    def notification_ids(self) -> list[str]:
+        """The IDs of the notifications, in the order of `notifications`."""
+        return [n.id for n in self.notifications]
+
+    @property
+    def user_key(self) -> bool:
+        """True if the session of a request keeps the ID of the signed-in user (`USER_KEY`).
+
+        The change log (ADR 0040) and the notices (ADR 0041) name the user of a change.
+        """
+        return self.auth and (bool(self.history) or bool(self.notifications))
+
+    @property
     def full_text(self) -> bool:
         """True if the list endpoints use the full-text search of Postgres."""
         return self.search_config is not None
@@ -2513,6 +2639,14 @@ def python_app(definition: AppDefinition) -> PyApp:
     total_rule_cases(definition, entities)
     _record_rules(definition, entities)
     _history(definition, entities)
+    python_notifications(definition, entities)
+    for entity in entities.values():
+        for notification in entity.notifications:
+            for receiver in notification.receivers:
+                path = _owner_path(entities, entity, receiver.path)
+                receiver.setup = path.owner_lines("user_id")
+                rel = path.steps[0][1]
+                receiver.key = (rel.fk_attr if rel.side == "fk" else rel.ids_field) or ""
     search_config = _search_config(definition)
     for entity in entities.values():
         if definition.access is not None:

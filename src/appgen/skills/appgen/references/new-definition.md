@@ -41,6 +41,7 @@ next step. One error can cause more errors later in the file.
 | `ui`           | No       | Tokens, badges, layouts, menus, views, forms, dashboards, and defaults. | The pages show views, forms, or dashboards. |
 | `workflows`    | No       | State machines on `enum` fields.                           | A status field allows only some changes.       |
 | `jobs`         | No       | Work on a schedule (cron, UTC), or at the time of a date field of each record. | The app does work at a time, for example a reminder. |
+| `notifications` | No      | Notices for the users of a change of a record: the entity, the change (`event: created`, `event: changed` with `fields`, or `transition`), `receivers` (paths of relations to the user entity), and `text` (`{field}` gives a value). Needs `auth`. | Users must learn about the changes that concern them, for example a task that a colleague gives them. |
 | `apis`         | No       | Third-party APIs: a local OpenAPI document and the operations that the app calls. | The app calls an outside service. |
 | `webhooks`     | No       | The endpoints that other systems send signed events to: the path, the signature, and the schema of the body, or the inbound emails of a mail service (`format: email`). | An outside service sends events to the app, for example payments, or the app receives email. |
 | `auth`         | No       | The sign-in: the user entity and the public parts.         | The users must sign in.                        |

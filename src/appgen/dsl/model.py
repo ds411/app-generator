@@ -16,6 +16,7 @@ from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.events import EventInput, EventName
 from appgen.dsl.history import HistoryInput
 from appgen.dsl.jobs import Job
+from appgen.dsl.notifications import Notification
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
 from appgen.dsl.storage import (
@@ -299,6 +300,10 @@ class AppDefinition(Element):
     """The storage of the files of the file fields (ADR 0027)."""
     jobs: dict[MemberName, Job] = pydantic.Field(default_factory=dict[str, Job])
     """The work that the apps run on a schedule, or at the time of a date field (ADR 0029)."""
+    notifications: dict[MemberName, Notification] = pydantic.Field(
+        default_factory=dict[str, Notification]
+    )
+    """The notices that users get when a record that concerns them changes (ADR 0041)."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

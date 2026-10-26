@@ -1,0 +1,159 @@
+{{ trace_header(*py.notification_ids) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set n = py.notifications[0] %}
+"""The tests of the notices of the signed-in user (ADR 0041): the list and the reads."""
+
+from uuid import UUID, uuid4
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import make_token
+from app.core.db import USER_KEY
+from app.core.notifications import Notice, add_notices
+from app.features.{{ u.slice }}.models import {{ u.name }}
+from tests.factories import make_{{ u.snake }}
+from tests.problems import assert_problem
+
+pytestmark = pytest.mark.anyio
+
+NAME = {{ py.string(n.name) }}
+"""The notification of the notices of the tests."""
+ENTITY = {{ py.string(n.entity) }}
+{{ py.literal(n.sample_values(), "VALUES: dict[str, str] = ") }}
+"""The values of the text of the notices of the tests."""
+TEXT = {{ py.string(n.sample_text()) }}
+"""The text of the notices of the tests, with `VALUES`."""
+{% set translation = n.sample_translation(i18n) %}
+{% if translation %}
+LANGUAGE = {{ py.string(translation[0]) }}
+"""A language that translates the text."""
+TRANSLATION = {{ py.string(translation[1]) }}
+"""The text of the notices of the tests in `LANGUAGE`, with `VALUES`."""
+{% endif %}
+
+
+async def signed_in(session: AsyncSession) -> tuple[{{ u.name }}, dict[str, str]]:
+    """Store a user, and return the user and the headers of its sign-in."""
+    user = await make_{{ u.snake }}(session)
+    return user, {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+
+
+async def add(session: AsyncSession, *users: UUID) -> list[Notice]:
+    """Store a notice for each user, and return the notices."""
+    notices = add_notices(session, NAME, ENTITY, uuid4(), users, VALUES)
+    await session.commit()
+    return notices
+
+
+async def test_a_notice_goes_to_each_user_one_time_but_not_to_the_user_of_the_change(
+    session: AsyncSession,
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    other = await make_{{ u.snake }}(session)
+    session.info[USER_KEY] = user.id
+
+    notices = add_notices(session, NAME, ENTITY, uuid4(), [user.id, other.id, other.id, None], {})
+
+    assert [notice.user_id for notice in notices] == [other.id]
+    assert notices[0].actor_id == user.id
+
+
+async def test_the_list_has_the_notices_of_the_user_the_newest_first(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user, headers = await signed_in(session)
+    other = await make_{{ u.snake }}(session)
+    [first, _] = await add(session, user.id, other.id)
+    [second] = await add(session, user.id)
+
+    response = await anonymous_client.get("/notices", headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 2
+    assert [item["id"] for item in body["items"]] == [str(second.id), str(first.id)]
+    assert [item["text"] for item in body["items"]] == [TEXT, TEXT]
+    assert [item["read_at"] for item in body["items"]] == [None, None]
+
+
+async def test_a_notice_names_the_user_of_the_change(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user, headers = await signed_in(session)
+    actor = await make_{{ u.snake }}(session)
+    session.info[USER_KEY] = actor.id
+    await add(session, user.id)
+
+    response = await anonymous_client.get("/notices", headers=headers)
+
+    [item] = response.json()["items"]
+    assert item["actor_id"] == str(actor.id)
+    assert item["actor"] == str(actor.{{ py.user_label_attr }})
+
+
+async def test_a_read_marks_the_notice_and_the_unread_filter_skips_it(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user, headers = await signed_in(session)
+    [first] = await add(session, user.id)
+    await add(session, user.id)
+
+    response = await anonymous_client.post(f"/notices/{first.id}/read", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["read_at"] is not None
+    unread = await anonymous_client.get("/notices", params={"unread": True}, headers=headers)
+    assert unread.json()["total"] == 1
+
+
+async def test_a_read_of_the_notice_of_another_user_gives_404(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await signed_in(session)
+    other = await make_{{ u.snake }}(session)
+    [notice] = await add(session, other.id)
+
+    response = await anonymous_client.post(f"/notices/{notice.id}/read", headers=headers)
+
+    assert_problem(response, 404)
+
+
+async def test_read_all_marks_the_notices_of_the_user_only(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user, headers = await signed_in(session)
+    other = await make_{{ u.snake }}(session)
+    await add(session, user.id, other.id)
+    await add(session, user.id)
+
+    response = await anonymous_client.post("/notices/read", headers=headers)
+
+    assert response.status_code == 204, response.text
+    unread = await anonymous_client.get("/notices", params={"unread": True}, headers=headers)
+    assert unread.json()["total"] == 0
+    statement = select(Notice.read_at).where(Notice.user_id == other.id)
+    assert list(await session.scalars(statement)) == [None]
+
+
+async def test_the_notices_need_a_signed_in_user(anonymous_client: AsyncClient) -> None:
+    response = await anonymous_client.get("/notices")
+
+    assert_problem(response, 401)
+{% if translation %}
+
+
+async def test_the_text_has_the_language_of_the_request(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    user, headers = await signed_in(session)
+    await add(session, user.id)
+    headers["Accept-Language"] = LANGUAGE
+
+    response = await anonymous_client.get("/notices", headers=headers)
+
+    [item] = response.json()["items"]
+    assert item["text"] == TRANSLATION
+{% endif %}

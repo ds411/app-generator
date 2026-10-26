@@ -272,6 +272,13 @@ BINDING = Binding(
             when="name in py.dashboards",
         ),
         Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
+        *(
+            Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
+            for module, when in (
+                ("notifications", "py.notifications"),
+                ("notices", "py.notifications"),
+            )
+        ),
         Output(template="app/core/jobs.py.j2", path="app/core/jobs.py", when="py.jobs"),
         Output(template="package.py.j2", path="app/jobs/__init__.py", when="py.jobs"),
         Output(template="app/jobs/job.py.j2", path="app/jobs/{{ name }}.py", for_each="job"),
@@ -305,6 +312,17 @@ BINDING = Binding(
             path=_TESTS + "/test_history.py",
             for_each="entity",
             when="py.entity(name).history",
+        ),
+        Output(
+            template="tests/test_notices.py.j2",
+            path="tests/test_notices.py",
+            when="py.notifications",
+        ),
+        Output(
+            template="tests/features/slice/test_notifications.py.j2",
+            path=_TESTS + "/test_notifications.py",
+            for_each="entity",
+            when="py.entity(name).notifications",
         ),
         Output(
             template="tests/features/slice/test_schemas.py.j2",
@@ -495,7 +513,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
-        | {"job", "event", "history"}
+        | {"job", "event", "history", "notification"}
         | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),

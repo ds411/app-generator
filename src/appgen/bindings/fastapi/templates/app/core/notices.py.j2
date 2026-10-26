@@ -1,0 +1,114 @@
+{{ trace_header(*py.notification_ids) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+"""The endpoints of the notices of the signed-in user (ADR 0041): the list, and the reads.
+
+The repositories of the entities add the notices (`app/core/notifications.py`).
+"""
+
+import datetime as dt
+from collections.abc import Sequence
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Query
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import CurrentUser
+from app.core.db import SessionDep, commit
+from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.core.notifications import Notice, NoticeQuery, NoticeRead, notice_text
+from app.core.pagination import Page
+from app.features.{{ u.slice }}.models import {{ u.name }}
+
+router = APIRouter(prefix="/notices", tags=["notices"])
+
+
+async def _actors(session: AsyncSession, ids: set[UUID]) -> dict[UUID | None, str]:
+    """Return the display value of each user of a set of IDs: `{{ py.user_label_attr }}`."""
+    if not ids:
+        return {}
+    statement = select({{ u.name }}.id, {{ u.name }}.{{ py.user_label_attr }}).where({{ u.name }}.id.in_(ids))
+    return {id: str(label) for id, label in await session.execute(statement)}
+
+
+async def _reads(session: AsyncSession, notices: Sequence[Notice]) -> list[NoticeRead]:
+    """Return the notices as the API returns them: with the text and the user of the change."""
+    actors = await _actors(session, {n.actor_id for n in notices if n.actor_id is not None})
+    return [
+        NoticeRead.model_validate(notice).model_copy(
+            update={"text": notice_text(notice), "actor": actors.get(notice.actor_id)}
+        )
+        for notice in notices
+    ]
+
+
+{% for id in py.notification_ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.get(
+    "",
+    responses=problem_responses(401),
+    summary="List notices",
+    operation_id="list_notices",
+)
+async def list_notices(
+    query: Annotated[NoticeQuery, Query()], session: SessionDep, user: CurrentUser
+) -> Page[NoticeRead]:
+    """Return a page of the notices of the signed-in user, the newest first."""
+    where = [Notice.user_id == user.id]
+    if query.unread:
+        where.append(Notice.read_at.is_(None))
+    total = await session.scalar(select(func.count()).select_from(Notice).where(*where))
+    statement = (
+        select(Notice)
+        .where(*where)
+        .order_by(Notice.at.desc(), Notice.id.desc())
+        .limit(query.limit)
+        .offset(query.offset)
+    )
+    notices = list(await session.scalars(statement))
+    return Page[NoticeRead](
+        items=await _reads(session, notices),
+        total=total or 0,
+        limit=query.limit,
+        offset=query.offset,
+    )
+
+
+@router.post(
+    "/{id}/read",
+    responses=problem_responses(401, 404),
+    summary="Mark a notice read",
+    operation_id="read_notice",
+)
+async def read_notice(id: UUID, session: SessionDep, user: CurrentUser) -> NoticeRead:
+    """Mark a notice of the signed-in user read, and return it. A read notice stays read."""
+    notice = await session.get(Notice, id)
+    if notice is None or notice.user_id != user.id:
+        {{ py.problem(404, "You have no notice with the ID {id}.", 8, id="id") }}
+    if notice.read_at is None:
+        notice.read_at = dt.datetime.now(dt.UTC)
+        await commit(session)
+    return (await _reads(session, [notice]))[0]
+
+
+@router.post(
+    "/read",
+    status_code=204,
+    responses=problem_responses(401),
+    summary="Mark all notices read",
+    operation_id="read_all_notices",
+)
+async def read_all_notices(session: SessionDep, user: CurrentUser) -> None:
+    """Mark all notices of the signed-in user read."""
+    statement = (
+        update(Notice)
+        .where(Notice.user_id == user.id, Notice.read_at.is_(None))
+        .values(read_at=dt.datetime.now(dt.UTC))
+    )
+    await session.execute(statement)
+    await commit(session)

@@ -469,3 +469,16 @@ access:
       pages: [dashboard, room_detail, bookings, booking_calendar, booking_detail, amenities]
       records:
         Booking: { owner: organizer }
+
+notifications:
+  booking_moved:
+    entity: Booking
+    event: changed
+    fields: [starts_at, ends_at, room]
+    receivers: [organizer]
+    text: The booking {title} in {room} has a new time.
+  booking_confirmed:
+    entity: Booking
+    transition: confirm
+    receivers: [organizer]
+    text: The booking {title} is confirmed.

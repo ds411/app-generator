@@ -1,0 +1,198 @@
+{{ trace_header(*py.notification_ids) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+"""The notices of the users (ADR 0041): who gets a notice when a record changes, and its text.
+
+A change of a record that a notification of the app definition names
+adds a notice for each receiver, except the user that made the change,
+in the transaction of the change. The repository of the entity adds the
+notices, after the events and the change log, so that the generated and
+the custom operations both add them. A notice keeps the values of its
+text from the time of the change, and the text has the language of the
+request that lists it (`app/core/notices.py`).
+"""
+
+import datetime as dt
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from decimal import Decimal
+from enum import Enum
+from typing import Any
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
+from sqlalchemy import ForeignKey, String, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, aliased, mapped_column
+
+from app.core.db import JSON_TYPE, USER_KEY, Base, Timestamp, flush
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.core.schemas import ReadModel
+
+TEXTS: dict[str, str] = {
+{% for n in py.notifications %}
+    {{ trace(n.id) }}
+    {{ py.string(n.name) }}: {{ py.string(n.text) }},
+{% endfor %}
+}
+"""The text of each notification, by name: a name in braces is a value of the record."""
+_VALUE = re.compile(r"\{(\w+)\}")
+
+
+class Notice(Base):
+    """A notice for a user: a change of a record that concerns the user."""
+
+    __tablename__ = "notices"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+{% set fk = 'ForeignKey("' ~ u.table ~ '.id", ondelete="CASCADE"), index=True' %}
+{% if (fk | length) + 43 <= 100 %}
+    user_id: Mapped[UUID] = mapped_column({{ fk }})
+{% else %}
+    user_id: Mapped[UUID] = mapped_column(
+        {{ fk }}
+    )
+{% endif %}
+    """The user that gets the notice. The notices of a user go with the user."""
+    notification: Mapped[str] = mapped_column(String(63))
+    """The name of the notification in the app definition."""
+    entity: Mapped[str] = mapped_column(String(63))
+    record_id: Mapped[UUID]
+    actor_id: Mapped[UUID | None]
+    """The user that made the change, or None for a change without one, for example a job."""
+    values: Mapped[dict[str, str]] = mapped_column(JSON_TYPE)
+    """The values of the text, by name, as text from the time of the change."""
+    at: Mapped[dt.datetime] = mapped_column(Timestamp)
+    read_at: Mapped[dt.datetime | None] = mapped_column(Timestamp)
+    """The time that the user marked the notice read, or None for an unread notice."""
+
+
+class NoticeRead(ReadModel):
+    """A notice of the signed-in user, as the API returns it."""
+
+    id: UUID
+    notification: str = Field(description="The name of the notification in the app definition.")
+    entity: str = Field(description="The entity of the record.")
+    record_id: UUID
+    actor_id: UUID | None
+    actor: str | None = Field(
+        default=None, description="The display value of the user that made the change."
+    )
+    text: str = Field(default="", description="The text in the language of the request.")
+    values: dict[str, str]
+    at: dt.datetime
+    read_at: dt.datetime | None
+
+
+class NoticeQuery(BaseModel):
+    """The query parameters of the notices of the user: the page, the newest notice first."""
+
+    unread: bool = Field(default=False, description="True: only the notices that are not read.")
+    limit: int = Field(default=50, ge=1, le=200, description="The maximum count of items.")
+    offset: int = Field(default=0, ge=0, description="The count of items to skip.")
+
+
+def text_value(value: object) -> str:
+    """Return a value of a record as text, for the text of a notice.
+
+    An enum gives its value, a decimal number has no zeros at the end, a
+    time is in UTC, and an empty value is an empty text.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
+    if isinstance(value, dt.datetime):
+        return value.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value)
+
+
+async def record_text(
+    session: AsyncSession,
+    label: InstrumentedAttribute[Any],
+    key: InstrumentedAttribute[UUID],
+    id: UUID | None,
+) -> str:
+    """Return the display value of the record of a relation: `label` of the record with the ID."""
+    if id is None:
+        return ""
+    return text_value(await session.scalar(select(label).where(key == id)))
+
+
+def changed(record: object, before: Mapping[str, Any], attrs: Iterable[str]) -> bool:
+    """Return True if a change gave one of the attributes of a record a new value."""
+    return any(getattr(record, attr) != before[attr] for attr in attrs)
+
+
+async def path_users(
+    session: AsyncSession, model: type[Any], record_id: UUID, path: Sequence[str]
+) -> list[UUID]:
+    """Return the IDs of the users at the end of a path of relations of a record.
+
+    Each step is a many-to-one or a many-to-many relation. The changes of
+    the transaction go to the database first, so that the new links count.
+    """
+    await flush(session)
+    ids = [record_id]
+    for attr in path:
+        relation = getattr(model, attr)
+        target: type[Any] = relation.property.mapper.class_
+        step = aliased(target)
+        statement = (
+            select(step.id).join_from(model, relation.of_type(step)).where(model.id.in_(ids))
+        )
+        ids = list(await session.scalars(statement))
+        model = target
+    return ids
+
+
+def add_notices(
+    session: AsyncSession,
+    notification: str,
+    entity: str,
+    record_id: UUID,
+    users: Iterable[UUID | None],
+    values: Mapping[str, str],
+) -> list[Notice]:
+    """Add a notice for each user to the session, without a commit, and return the notices.
+
+    Each user gets one notice. The user that made the change gets none.
+    """
+    actor: UUID | None = session.info.get(USER_KEY)
+    at = dt.datetime.now(dt.UTC)
+    notices = [
+        Notice(
+            id=uuid4(),
+            user_id=user,
+            notification=notification,
+            entity=entity,
+            record_id=record_id,
+            actor_id=actor,
+            values=dict(values),
+            at=at,
+        )
+        for user in dict.fromkeys(users)
+        if user is not None and user != actor
+    ]
+    session.add_all(notices)
+    return notices
+
+
+def notice_text(notice: Notice) -> str:
+    """Return the text of a notice in the language of the request, with its values.
+
+    A value can have any name, also `text`, so the values go into the
+    translation here, and not as the arguments of `t`.
+    """
+{% if i18n %}
+    text = t(TEXTS.get(notice.notification, notice.notification))
+{% else %}
+    text = TEXTS.get(notice.notification, notice.notification)
+{% endif %}
+    values = notice.values
+    return _VALUE.sub(lambda m: values.get(m[1], m[0]), text)

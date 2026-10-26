@@ -192,3 +192,16 @@ access:
       records:
         Project: { where: { archived: false } }
         Task: { where: { status: done } }
+
+notifications:
+  task_added:
+    entity: Task
+    event: created
+    receivers: [project.team.members]
+    text: The task {title} is new in the project {project}.
+  task_renamed:
+    entity: Task
+    event: changed
+    fields: [title]
+    receivers: [project.team.members]
+    text: The task {title} has a new title.

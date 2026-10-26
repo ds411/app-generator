@@ -36,6 +36,9 @@
     {{ trace(e.history.id) }}
     add_entry(session, "{{ e.name }}", record.id, action, kept, snapshot(record, HISTORY))
 {% endif %}
+{% if e.change_notifications %}
+    await notify(session, record, before)
+{% endif %}
 {% endmacro %}
 """The data access of the slice `{{ e.slice }}`, which its operations share."""
 
@@ -63,6 +66,12 @@
 {{ e.history_code() }}
 """The fields of the change log (ADR 0040): the name in the definition, and the attribute."""
 {% endif %}
+{% for n in e.change_notifications if n.kind == "changed" %}
+
+{{ trace(n.id) }}
+{{ n.constant_code() }}
+"""The fields of the notification `{{ n.name }}`: a change of one of them gives its notices."""
+{% endfor %}
 
 
 {% if e.scoped %}
@@ -212,6 +221,9 @@ async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
 {% if e.history %}
     {{ trace(e.history.id) }}
     add_entry(session, "{{ e.name }}", record.id, "created", None, snapshot(record, HISTORY))
+{% endif %}
+{% if e.created_notifications %}
+    await notify(session, record, None)
 {% endif %}
     return record
 
@@ -495,6 +507,41 @@ async def on_deleted(session: AsyncSession, record: {{ e.name }}) -> None:
 
     {{ trace(ev.id) }}
     {{ ev.call(4) }}
+{% endif %}
+{% if e.notifications %}
+
+
+{{ py.signature("async def notify", ["session: AsyncSession", "record: " ~ e.name, "before: dict[str, Any] | None"], " -> None:") }}
+    """Add the notices of a new or a changed record (ADR 0041). `before` is None for a new record.
+
+    Each user at the end of a receiver path gets a notice, except the user
+    that made the change.
+    """
+{% if e.created_notifications %}
+{% if e.change_notifications %}
+    if before is None:
+{% for n in e.created_notifications %}
+        {{ trace(n.id) }}
+        {{ n.body(8) }}
+{% endfor %}
+        return
+{% else %}
+    if before is not None:
+        return
+{% for n in e.created_notifications %}
+    {{ trace(n.id) }}
+    {{ n.body(4) }}
+{% endfor %}
+{% endif %}
+{% else %}
+    if before is None:
+        return
+{% endif %}
+{% for n in e.change_notifications %}
+    {{ trace(n.id) }}
+    if {{ n.condition() }}:
+        {{ n.body(8) }}
+{% endfor %}
 {% endif %}
 
 

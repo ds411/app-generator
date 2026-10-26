@@ -21,14 +21,15 @@ runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI, and a front-end app has no webhooks. The
-# front ends keep the change log later (#399).
+# front ends show the notices later, with the bell of the top bar (#410).
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": [],
+    "nextjs": ["notification"],
     "react": [
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
         "job",
+        "notification",
         "webhook",
     ],
     "fastapi": ["page", "ui"],

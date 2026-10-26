@@ -17,6 +17,9 @@
 {% if py.history %}
 {% set first = first + [(py.history_ids, "from app.core.history import HistoryEntry")] %}
 {% endif %}
+{% if py.notifications %}
+{% set first = first + [(py.notification_ids, "from app.core.notifications import Notice")] %}
+{% endif %}
 
 {{ py.models_head() }}
 {% for ids, line in py.models_imports(first) %}
@@ -43,7 +46,7 @@
 {% endif %}
 
 __all__ = [
-{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else [])) | sort %}
+{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else []) + (["Notice"] if py.notifications else [])) | sort %}
     "{{ model }}",
 {% endfor %}
 ]
