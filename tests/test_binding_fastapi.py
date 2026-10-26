@@ -283,6 +283,7 @@ def test_routes_with_a_fixed_path_come_before_routes_with_an_id() -> None:
         ("DELETE", "/{id}"),
         ("POST", "/{id}/assign-task"),
         ("POST", "/{id}/complete-task"),
+        ("POST", "/{id}/record-completion"),
         ("POST", "/{id}/schedule-task"),
     ]
 

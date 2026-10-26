@@ -89,6 +89,13 @@ of the entity in snake case, for example `bookings`.
   change the data with the repositories of
   `@/entities/<entity>/server`, for example `bookingRepository.get(id)`,
   `list()`, `create(input)`, `update(id, patch)`, and `remove(id)`.
+- An operation of an event or of a transition with `run` (ADR 0031)
+  also runs after the change of a record, in the transaction of the
+  change, with the default values of its params. Change the record or
+  other records with the repositories: they write in the transaction of
+  the change, and they start no other event. Throw an error to roll back
+  the change. Until the operation has its logic, the stub throws, and so
+  each change that starts the event fails.
 - A third-party API of the definition has a server-only client in
   `@/shared/api/<api>`, for example `holidaysClient()`, which reads the
   base URL and the secret from the environment. Call it in an operation
@@ -140,6 +147,10 @@ of the entity in snake case, for example `bookings`.
   `<entity>Api` of `@/entities/<entity>`, for example
   `bookingApi.update(record.id, { status: "cancelled" })`. Load data in
   a component with `useResource` of `@/shared/lib/use-resource`.
+- With mock data, the mock store runs the operation of an event or of a
+  transition with `run` (ADR 0031) after the change, as a demonstration.
+  A change in the operation starts no other event. The store has no
+  transactions: an error of the operation does not undo the change.
 - `list`, `subscribe`, `useResource`, and the view states work as in
   the Next.js app.
 - A third-party API without a secret and without a cookie parameter has a client in `@/shared/api/<api>`,

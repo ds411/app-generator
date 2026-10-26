@@ -18,9 +18,13 @@
 # of tests/fixtures/jobs-extensions/nextjs/, and run lint, type check,
 # appgen check, and the test of the routes of the jobs with a fixed clock
 # (scripts/jobs_test.py) on it.
-# Last, generate tests/fixtures/files.yaml (file fields, ADR 0027), and
+# Then generate tests/fixtures/files.yaml (file fields, ADR 0027), and
 # run lint, type check, appgen check, and the files test
 # (scripts/files_test.py) on it.
+# Last, generate tests/fixtures/events.yaml with the hand-written
+# operations of tests/fixtures/events-extensions/nextjs/, and run lint,
+# type check, appgen check, and the test of the events
+# (scripts/events_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -60,14 +64,17 @@ jobs_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-jobs.XXXXXX")
 # The app of the files fixture (ADR 0027), in a temporary folder.
 files_definition=tests/fixtures/files.yaml
 files_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-files.XXXXXX")
+# The app of the events fixture (ADR 0031), in a temporary folder.
+events_definition=tests/fixtures/events.yaml
+events_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-events.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out"' EXIT
 fi
 
 step() {
@@ -217,5 +224,23 @@ uv run --locked appgen check "$files_definition" "$files_out"
 
 step "files test"
 uv run --locked scripts/files_test.py "$files_definition" --app "$files_out"
+
+step "generate $events_definition in $events_out"
+cp -R tests/fixtures/events-extensions/nextjs/. "$events_out"/
+uv run --locked appgen generate "$events_definition" -b nextjs -o "$events_out" >/dev/null
+(
+    cd "$events_out"
+    step "pnpm install (events)"
+    pnpm install --silent
+    step "pnpm lint (events)"
+    pnpm --silent lint
+    step "pnpm typecheck (events)"
+    pnpm --silent typecheck
+)
+step "appgen check (events)"
+uv run --locked appgen check "$events_definition" "$events_out"
+
+step "events test"
+uv run --locked scripts/events_test.py --app "$events_out"
 
 step "passed"

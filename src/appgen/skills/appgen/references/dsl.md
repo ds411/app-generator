@@ -464,8 +464,11 @@ Booking:
 - A change outside these functions starts no event: SQL in a script, a
   record that the database deletes with `on_delete: cascade`, and the
   seed.
-- The FastAPI app runs the events. The Next.js app and the mock store
-  of the React app do not run them yet.
+- The FastAPI app and the Next.js app run the events in their
+  repositories. The mock store of the React app runs them after the
+  change, as a demonstration: it has no transactions, so an error of the
+  operation does not undo the change. With the FastAPI app
+  (`x-react-data: api`), the FastAPI app runs them.
 
 ### Relations
 

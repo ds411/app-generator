@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The events of the entities (ADR 0031): an operation after a create, a
+# change of a field, a transition, and a delete. The hand-written
+# operations of tests/fixtures/events-extensions/nextjs/ write an entry of
+# the log for each event, and fail for some values. scripts/events_test.py
+# checks the Next.js app of this definition (scripts/check-nextjs.sh).
+version: 0
+
+app:
+  name: event-check
+  title: Event Check
+  description: Tasks with a log of their changes.
+
+entities:
+  Task:
+    display_field: title
+    crud: { views: [table] }
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      points: { type: integer, min: 0 }
+      score: { type: integer }
+      status: { type: enum, values: [open, done], default: open }
+    events:
+      created: log_created
+      changed: { operation: recount, fields: [points] }
+      deleted: log_deleted
+
+  Entry:
+    display_field: text
+    crud: { views: [table] }
+    fields:
+      text: { type: string, required: true, max_length: 200 }
+
+operations:
+  log_created:
+    kind: custom
+    entity: Task
+    description: Write the new task in the log, and give it 1 point.
+  recount:
+    kind: custom
+    entity: Task
+    description: Compute the score of the task from its points.
+    params:
+      factor: { type: integer, default: 2 }
+  log_finished:
+    kind: custom
+    entity: Task
+    description: Write the finished task in the log.
+  log_deleted:
+    kind: custom
+    entity: Task
+    description: Write the deleted task in the log.
+
+workflows:
+  task_flow:
+    entity: Task
+    field: status
+    initial: open
+    transitions:
+      finish: { from: [open], to: done, run: log_finished }
+      reopen: { from: [done], to: open }
+
+pages:
+  tasks: { path: /tasks, title: Tasks, content: { view: task_table } }
+  entries: { path: /entries, title: Entries, content: { view: entry_table } }

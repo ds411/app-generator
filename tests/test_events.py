@@ -1,4 +1,4 @@
-"""The events of the entities: the DSL, the checks, and the FastAPI repositories (ADR 0031)."""
+"""The events of the entities: the DSL, the checks, and the data access of the apps (ADR 0031)."""
 
 from pathlib import Path
 from textwrap import dedent
@@ -8,6 +8,7 @@ from appgen.dsl import load_definition, load_definition_text, validate_definitio
 from appgen.dsl.diagnostics import DefinitionError
 from appgen.dsl.events import Event
 from appgen.dsl.schema import json_schema
+from appgen.gen import Binding
 from appgen.gen.elements import element_kind
 from appgen.gen.generator import generate
 
@@ -270,7 +271,90 @@ def test_the_room_booking_example_tells_the_organizer_of_a_confirmation() -> Non
     assert "tests/features/bookings/test_events.py" in files
 
 
-def test_the_front_ends_leave_out_the_events_until_they_run_them() -> None:
-    assert "event" in nextjs.BINDING.excludes
-    assert "event" in react.BINDING.excludes
-    assert "event" in fastapi.BINDING.covers
+def test_the_three_bindings_run_the_events() -> None:
+    for binding in (fastapi, nextjs, react):
+        assert "event" in binding.BINDING.covers
+        assert "event" not in binding.BINDING.excludes
+
+
+def ts_files_of(text: str, binding: Binding) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml")
+    return {f.path: f.content for f in generate(definition, binding).files}
+
+
+def test_the_nextjs_repository_runs_the_events_in_the_transaction_of_the_change() -> None:
+    files = ts_files_of(EVENTS, nextjs.BINDING)
+    repository = files["src/entities/task/api/task-repository.ts"]
+    assert 'import { notifyParamsSchema } from "../model/schema";\n' in repository
+    assert (
+        "    created: async (record) => { // @trace entities.Task.events.created begin\n"
+        '      const { notify } = await import("@/features/notify/api/notify.ext");\n'
+        "      await notify(record, notifyParamsSchema.parse({}));\n"
+        "    }, // @trace entities.Task.events.created end\n"
+    ) in repository
+    assert '      keys: ["points"],\n' in repository
+    assert (
+        '        field: "status",\n        from: ["open"],\n        to: "done",\n'
+    ) in repository
+    shared = files["src/shared/db/repository.ts"]
+    assert 'import { type Database, getDb, runEvent } from "./client";' in shared
+    assert "private changeEvents(before: Row | undefined, after: Row)" in shared
+    assert "await this.runEvents(tx, record as T, [deleted]);" in shared
+    client = files["src/shared/db/client.ts"]
+    assert "const inEvent = new AsyncLocalStorage<true>();" in client
+    assert "await inEvent.run(true, () => ambient.run(transaction, operation));" in client
+
+
+def test_the_nextjs_repository_deletes_the_files_after_the_event_deleted() -> None:
+    text = EVENTS.replace(
+        "      status: { type: enum, values: [open, done], default: open }\n",
+        "      status: { type: enum, values: [open, done], default: open }\n"
+        "      scan: { type: file }\n",
+    ).replace("entities:\n", "storage: { kind: local }\nentities:\n", 1)
+    shared = ts_files_of(text, nextjs.BINDING)["src/shared/db/repository.ts"]
+    # The operation gets the record in the transaction, and the files go after the commit.
+    assert (
+        "      const removed: Row[] = await getDb().transaction(async (tx) => {\n"
+        "        const rows: Row[] = await tx.select().from(this.table)"
+        ".where(eq(this.table.id, id)).limit(1);\n"
+    ) in shared
+    assert (
+        "        await this.runEvents(tx, record as T, [deleted]);\n"
+        "        return rows;\n"
+        "      });\n"
+        "      await deleteFiles(Object.keys(this.files)"
+        ".map((key) => removed[0]?.[key] as StoredFile | null));\n"
+        "      return;\n"
+    ) in shared
+
+
+def test_the_react_mock_store_runs_the_events_after_the_change() -> None:
+    files = ts_files_of(EVENTS, react.BINDING)
+    api = files["src/entities/task/api/task-api.ts"]
+    assert ").withEvents({\n" in api
+    assert "      await recount(record);\n" in api
+    # The React app has no zod schema of the params without forms.
+    assert "      await notify(record, {});\n" in api
+    store = files["src/shared/api/mock-store.ts"]
+    assert "  withEvents(events: Events<T>): this {" in store
+    assert "let inEvent = false;" in store
+
+
+def test_with_the_fastapi_app_the_react_app_runs_no_event() -> None:
+    text = EVENTS.replace(
+        "app: { name: tracker, title: Tracker }",
+        "app:\n  name: tracker\n  title: Tracker\n  x-react-data: api",
+    )
+    files = ts_files_of(text, react.BINDING)
+    api = files["src/entities/task/api/task-api.ts"]
+    assert "// The FastAPI app runs the events of Task (ADR 0031).\n" in api
+    assert "// @trace entities.Task.events.changed\n" in api
+    assert "withEvents" not in api
+
+
+def test_the_front_ends_without_events_run_none() -> None:
+    text = BASE.replace(", run: notify", "")
+    files = ts_files_of(text, nextjs.BINDING)
+    assert "runEvent" not in files["src/shared/db/client.ts"]
+    assert "events" not in files["src/entities/task/api/task-repository.ts"]
+    assert "withEvents" not in ts_files_of(text, react.BINDING)["src/shared/api/mock-store.ts"]

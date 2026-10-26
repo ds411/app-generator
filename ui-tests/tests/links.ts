@@ -17,11 +17,21 @@ async function matchingLinks(page: Page, pattern: RegExp): Promise<string[]> {
  * pattern, or undefined when no link shows in LINK_TIMEOUT.
  */
 export async function firstRecordLink(page: Page, parent: string, pattern: RegExp): Promise<string | undefined> {
+  return recordLink(page, parent, pattern, 0);
+}
+
+/**
+ * Open the parent page and return the link to the record at an index
+ * (0 is the first record) that matches the pattern, or undefined when the
+ * page does not show the link in LINK_TIMEOUT.
+ */
+export async function recordLink(page: Page, parent: string, pattern: RegExp, index: number): Promise<string | undefined> {
   await page.goto(parent);
   await page.waitForLoadState("networkidle");
   const deadline = Date.now() + LINK_TIMEOUT;
   for (;;) {
-    const [href] = await matchingLinks(page, pattern);
+    // A record can have more than one link, for example its title and an action.
+    const href = [...new Set(await matchingLinks(page, pattern))][index];
     if (href) return href;
     if (Date.now() > deadline) return undefined;
     await page.waitForTimeout(200);

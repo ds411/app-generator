@@ -74,9 +74,14 @@ and check each kind of event, the rollback of a failed operation, and
 the stop after one level. A test with the mark `events` runs the real
 operations.
 
-The Next.js app runs the operation in the transaction of the server
-action, and the React app runs it in the mock store after the change
-(#392).
+The Next.js app runs the operation in its repositories too, in the
+transaction of the change: the repositories in the operation write in
+that transaction. The repository of an entity (the entities layer)
+imports the extension file of the operation (the features layer) only
+when the event runs, because the operation imports the repository. The
+mock store of the React app runs the operation after the change, as a
+demonstration, without a transaction. With the FastAPI app, the React
+app runs no event.
 
 ## Consequences
 

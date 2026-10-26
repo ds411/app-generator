@@ -629,6 +629,49 @@ definition in the route `POST /api/jobs/<job>`
   `tests/fixtures/jobs.yaml` with a fixed clock and PGlite, with the
   hand-written operations of `tests/fixtures/jobs-extensions/nextjs/`.
 
+### The events of the Next.js app and of the React app
+
+The repository of each entity in the Next.js app runs its `events` and
+the `run` operations of its transitions
+([ADR 0031](adr/0031-events.md)), as the FastAPI repository does. The
+server actions and the custom operations use the repositories, so both
+start the events.
+
+- The options of the repository have `events`: `created`, `changed`
+  (with the `keys` of the fields that it watches), `deleted`, and
+  `transitions` (the field, the states before, and the state after).
+  Each one is a function that imports the extension file of the
+  operation (`import()`) when the event runs, because the operation
+  imports the repository. This is the one import from the entities
+  layer to the features layer, and it happens only when an event runs.
+- `create` and `update` run the operations in their transaction, after
+  the change, and give the record as the operations leave it. `update`
+  runs the operations of the transitions first, then the operation of
+  `changed`. With `deleted`, `remove` reads the record, deletes it, and
+  runs the operation in one transaction. It deletes the files of the
+  file fields after the commit (ADR 0027). A new file of a file field
+  (`setFile`) runs no event, as in the FastAPI app.
+- `runEvent` of `src/shared/db/client.ts` runs an operation with the
+  transaction of the change as the transaction of `getDb()`
+  (`AsyncLocalStorage`), so the repositories in the operation write in
+  it: a transaction of a repository becomes a savepoint. An error rolls
+  back the change and the writes of the operation. In the operation,
+  `runEvent` runs no other operation: the events stop after one level.
+- `scripts/events_test.py` changes the tasks of
+  `tests/fixtures/events.yaml` with PGlite, with the hand-written
+  operations of `tests/fixtures/events-extensions/nextjs/`, and checks
+  each kind of event, the roll back of each failed operation, and the
+  stop after one level.
+
+The mock store of the React app has the same `events` (`withEvents` in
+`src/entities/<entity>/api/<entity>-api.ts`), and runs an operation
+after the change, as a demonstration. The store has no transactions: an
+error of the operation does not undo the change. With the FastAPI app
+(`x-react-data: api`), the React app runs no event: the FastAPI app
+runs them. The UI test `ui-tests/tests/events.spec.ts` changes the
+status of a task of the project tracker in both front ends, and sees
+the completion time that the operation `record_completion` sets.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in
