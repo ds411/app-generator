@@ -323,7 +323,11 @@ def history_plan(ctx: ViewContext, entity_name: str) -> HistoryPlan:
         if isinstance(member, Field):
             value = ctx.value(entity_name, name, row=_ROW)
             fmt = value.format if value.format in _HISTORY_FORMATS else "text"
-            result.fields.append(HistoryField(name, value.label, fmt, value.currency))
+            if value.currency_expr is not None:
+                # The currency of the record can change: an old amount shows as a number.
+                fmt = "number"
+            currency = value.currency if fmt == "currency" else None
+            result.fields.append(HistoryField(name, value.label, fmt, currency))
             continue
         relation = entity.relations[name]
         result.fields.append(HistoryField(name, relation.label or label(name)))

@@ -343,7 +343,13 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   /** Return a function that restores the records of now, for `inTransaction` (ADR 0035). */
   snapshot(): () => void {
     const records = this.records;
+{% if react.history %}
+    const entries = this.entries;
+{% endif %}
     return () => {
+{% if react.history %}
+      this.entries = entries;
+{% endif %}
       if (this.records !== records) {
         this.records = records;
         this.notify();

@@ -902,13 +902,16 @@ tab of a detail view with `history: true`.
   has the mock user. With access, the entries need the read operation,
   and a restore the update operation. With the FastAPI app
   (`x-react-data: api`), the HTTP store reads the endpoints of the
-  FastAPI app.
+  FastAPI app. `inTransaction` of the mock store (ADR 0035) also
+  removes the entries of a failed change.
 - `<entity>History` of `@/entities/<entity>` is a `HistoryApi`:
   `list(id, page)` and `restore(id, entryId)`. The component
   `HistoryList` (`src/shared/ui/history-list.tsx`) shows a page of the
   entries, the newest first: the action, the user, the time, and the
   old and the new value of each field, in the format of the field. A
-  relation shows the display value of its record. An entry of a change
+  relation shows the display value of its record. An amount in the
+  currency of its record (`currency_field`) shows as a number, because
+  the currency can change. An entry of a change
   has the button "Restore" if the user may call the update operation.
 - The UI test `ui-tests/tests/history.spec.ts` changes the title of a
   task of the project tracker in both front ends, sees the entry in the

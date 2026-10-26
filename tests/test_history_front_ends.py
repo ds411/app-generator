@@ -13,6 +13,8 @@ from appgen.gen.generator import generate
 
 ROOT = Path(__file__).parent.parent
 ROOM_BOOKING = ROOT / "examples" / "room-booking" / "app.yaml"
+INVOICES = ROOT / "tests" / "fixtures" / "invoices.yaml"
+TOTALS = ROOT / "tests" / "fixtures" / "totals.yaml"
 
 BASE = dedent(
     """\
@@ -190,3 +192,18 @@ def test_the_front_ends_cover_the_change_log() -> None:
     for binding in (nextjs.BINDING, react.BINDING):
         assert "history" in binding.covers
         assert "history" not in binding.excludes
+
+
+def test_an_amount_in_the_currency_of_its_record_shows_as_a_number() -> None:
+    definition = load_definition(INVOICES)
+    files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+    view = files["src/widgets/invoice-detail/ui/invoice-detail-view.tsx"]
+    assert '    total: { label: "Total", format: "number" },\n' in view
+
+
+def test_a_failed_transaction_of_the_mock_store_removes_its_entries() -> None:
+    definition = load_definition(TOTALS)
+    files = {f.path: f.content for f in generate(definition, react.BINDING).files}
+    store = files["src/shared/api/mock-store.ts"]
+    assert "    const entries = this.entries;\n" in store
+    assert "      this.entries = entries;\n" in store
