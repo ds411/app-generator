@@ -308,7 +308,8 @@ BINDING = Binding(
         Output(
             template="src/shared/db/acting-user.ts.j2",
             path="src/shared/db/acting-user.ts",
-            when="definition.auth and (nextjs.history or nextjs.notices)",
+            # The change log without auth has no user of a change: the module gives null.
+            when="nextjs.history or nextjs.notices",
         ),
         *(
             Output(template=f"{path}.j2", path=path, when="nextjs.notices")

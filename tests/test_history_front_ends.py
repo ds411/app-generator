@@ -108,6 +108,9 @@ def test_the_nextjs_app_keeps_the_change_log_in_its_server_actions() -> None:
     assert 'pgTable(\n  "history_entries",' in schema
     assert 'export * from "./history-entries";' in files["src/shared/db/schema/index.ts"]
     assert "export async function addEntry(" in files["src/shared/db/history.ts"]
+    # Without auth, a change has no user: `actingUserId()` gives null.
+    assert 'import { actingUserId } from "./acting-user";' in files["src/shared/db/history.ts"]
+    assert "export function actingUserId()" in files["src/shared/db/acting-user.ts"]
     repository = files["src/entities/task/api/task-repository.ts"]
     assert '["title", "title"],' in repository
     assert '["due_on", "dueOn"],' in repository
