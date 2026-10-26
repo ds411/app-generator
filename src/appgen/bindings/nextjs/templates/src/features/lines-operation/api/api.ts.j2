@@ -1,0 +1,41 @@
+{% set op = lines_ops[name] %}
+{% set fn = name | camel %}
+{% set type = element.entity | pascal %}
+{{ trace_header(element_id) }}
+import type { {{ type }}, {{ type }}Input } from "@/entities/{{ element.entity | kebab }}";
+{% for target in op.targets %}
+import type { {{ op.items | selectattr("target", "eq", target) | map(attribute="type") | join(", ") }} } from "@/entities/{{ target | kebab }}";
+{% endfor %}
+import { notifyChange, unwrap } from "@/shared/api";
+
+import { {{ fn }}Action } from "./{{ name | kebab }}-action";
+
+{% if op.kind == "create" %}
+/** The lines of the operation {{ name }} (ADR 0035): the new lines of each relation. */
+{% else %}
+/** The lines of the operation {{ name }} (ADR 0035): all lines of each relation. Without a key, its lines stay. */
+{% endif %}
+export type {{ op.type }} = {
+{% for item in op.items %}
+  {{ item.key }}?: {{ item.type }}[]; {{ trace(item.element_id) }}
+{% endfor %}
+};
+
+{% if element.description %}
+/** {{ element.description }} */
+{% else %}
+/** The operation {{ name }}: the record and its lines, in one transaction. */
+{% endif %}
+{% if op.kind == "create" %}
+export async function {{ fn }}(input: {{ type }}Input, lines: {{ op.type }} = {}): Promise<{{ type }}> {
+  const record = unwrap(await {{ fn }}Action(input, lines));
+{% else %}
+export async function {{ fn }}(id: string, patch: Partial<{{ type }}Input>, lines: {{ op.type }} = {}): Promise<{{ type }}> {
+  const record = unwrap(await {{ fn }}Action(id, patch, lines));
+{% endif %}
+  notifyChange({{ ts_value(element.entity) }});
+{% for target in op.targets if target != element.entity %}
+  notifyChange({{ ts_value(target) }});
+{% endfor %}
+  return record;
+}

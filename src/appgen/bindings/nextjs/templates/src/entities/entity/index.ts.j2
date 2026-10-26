@@ -1,6 +1,7 @@
 {{ trace_header(element_id) }}
 {% set var = name | camel %}
-{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | map(attribute=0) | map("camel") | list %}
+{# An operation with lines (ADR 0035) is in its own feature slice. #}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | rejectattr("1.lines") | map(attribute=0) | map("camel") | list %}
 {% set lists = inverse_lists(definition, name) %}
 {% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
 export {
@@ -21,6 +22,9 @@ export {
   {{ var }}PatchSchema,
 {% for op in customs %}
   {{ op }}ParamsSchema,
+{% endfor %}
+{% for item in line_items(definition, name) %}
+  {{ item.schema }},
 {% endfor %}
 } from "./model/schema";
 export * from "./model/types";

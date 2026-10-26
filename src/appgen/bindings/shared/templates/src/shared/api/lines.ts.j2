@@ -1,0 +1,84 @@
+{{ trace_header("app") }}
+// The lines of a record in the input of an operation (ADR 0035), for
+// example the lines of an invoice. The {{ "server action" if nextjs is defined else "function" }} of the operation writes
+// them in its transaction.
+{% if nextjs is defined %}
+import { type Issue, ValidationError } from "./errors";
+{% endif %}
+import { type EntityApi, type EntityRecord, NotFoundError } from "./types";
+{% if nextjs is not defined %}
+
+/** A problem with one value of an input, for example the amount of the third line: `lines.2.amount`. */
+export type Issue = { path: string; message: string };
+
+/** An error of a line: the message, and the place of the line in `issues`. */
+export class LineError extends Error {
+  readonly issues: Issue[];
+
+  constructor(message: string, issues: Issue[]) {
+    super(message);
+    this.name = "LineError";
+    this.issues = issues;
+  }
+}
+{% endif %}
+
+/** A line in an input: the ID of a line that stays, or no ID for a new line, and the values. */
+export type LineItem = { id?: string };
+
+/** The data access of the lines{{ ": the repository of their entity" if nextjs is defined }}. */
+type LinesApi<T extends EntityRecord, TInput> = Pick<EntityApi<T, TInput>, "list" | "create" | "update" | "remove">;
+
+/**
+ * Replace the lines of a record with the items of an input. An item with
+ * the ID of a line changes that line, an item without an ID adds a line,
+ * and the other lines go. Each change goes through the data access of the
+ * lines, so their rules and workflows apply. An error of a line gives the
+ * place of the line in its issues, for example `lines.2.amount`. Without
+ * items, the lines stay.
+ */
+export async function writeLines<T extends EntityRecord, TInput extends object>(
+  lines: LinesApi<T, TInput>,
+  entity: string,
+  link: keyof T & string,
+  owner: string,
+  items: readonly LineItem[] | undefined,
+  key: string,
+): Promise<void> {
+  if (items === undefined) {
+    return;
+  }
+  const { items: current } = await lines.list({ filters: [{ field: link, op: "eq", value: owner }] });
+  const kept = new Set(items.flatMap((item) => (item.id === undefined ? [] : [item.id])));
+  for (const line of current) {
+    if (!kept.has(line.id)) {
+      await lines.remove(line.id);
+    }
+  }
+  const ids = new Set(current.map((line) => line.id));
+  for (const [index, { id, ...values }] of items.entries()) {
+    try {
+      if (id === undefined) {
+        await lines.create({ ...values, [link]: owner } as unknown as TInput);
+      } else if (ids.has(id)) {
+        await lines.update(id, values as Partial<TInput>);
+      } else {
+        throw new NotFoundError(entity, id);
+      }
+    } catch (error) {
+      throw lineError(error, `${key}.${index}`);
+    }
+  }
+}
+
+/** Return an error of a line: its issues, or its message, at the place of the line. */
+function lineError(error: unknown, at: string): unknown {
+  if (!(error instanceof Error)) {
+    return error;
+  }
+  const found: unknown = "issues" in error ? error.issues : undefined;
+  const issues: Issue[] = Array.isArray(found)
+    ? (found as Issue[]).map((issue) => ({ path: issue.path ? `${at}.${issue.path}` : at, message: issue.message }))
+    : [];
+  return new {{ "ValidationError" if nextjs is defined else "LineError" }}(error.message, issues.length > 0 ? issues : [{ path: at, message: error.message }]);
+}

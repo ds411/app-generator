@@ -54,6 +54,15 @@ export const {{ name | camel }}Defaults: Partial<Omit<{{ type }}, "id">> = {
 /** The file fields of {{ type }} (ADR 0027). */
 export type {{ type }}FileField = {{ files | map(attribute="key") | map("tojson") | join(" | ") }};
 {% endif %}
+{% for item in line_items(definition, name) %}
+
+/**
+ * A line of `{{ item.relation }}` of a {{ item.owner | pascal }} in the input of an operation
+ * (ADR 0035): an item with the ID of a line changes that line, and an item
+ * without an ID is a new line.
+ */
+export type {{ item.type }} = Omit<{{ type }}Input, {{ ts_value(item.link) }}> & { id?: string }; {{ trace(item.element_id) }}
+{% endfor %}
 {% for op_name, op in operations_of(definition, name) if op.kind == "custom" and op.params %}
 
 /** The parameters of the operation {{ op_name }}. */

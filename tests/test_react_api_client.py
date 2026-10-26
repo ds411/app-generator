@@ -44,7 +44,7 @@ def test_with_the_key_the_app_uses_the_api_client() -> None:
     assert '"due_date": "dueDate",' in api
     assert '"owner_id": "ownerId",' in api
     assert '"member_ids": "members",' in api
-    assert 'numbers: ["budget"],' in api
+    assert 'numbers: ["budget", "plannedCost"],' in api
     assert "VITE_API_URL" in output["src/vite-env.d.ts"]
     assert "ARG VITE_API_URL" in output["Dockerfile"]
 

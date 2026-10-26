@@ -6,6 +6,8 @@
 # update operations of the invoices write the lines with the invoice
 # (ADR 0035), and the lines have a workflow. The invoices and the lines
 # keep a change log (ADR 0040), also of the lines that an invoice writes.
+# The forms of the invoices edit the lines in a lines editor, and show the
+# totals before the save.
 # scripts/check-fastapi.sh checks the FastAPI app of this definition, and
 # scripts/check-nextjs.sh the Next.js app (scripts/totals_test.py).
 version: 0
@@ -88,6 +90,8 @@ entities:
 pages:
   invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
   invoice_detail: { path: "/invoices/{id}", title: Invoice, content: { view: invoice_detail } }
+  new_invoice: { path: /invoices/new, title: New invoice, content: { form: new_invoice } }
+  edit_invoice: { path: "/invoices/{id}/edit", title: Edit invoice, content: { form: edit_invoice } }
   posts: { path: /posts, title: Posts, content: { view: post_table } }
   post_detail: { path: "/posts/{id}", title: Post, content: { view: post_detail } }
 
@@ -102,3 +106,22 @@ workflows:
     initial: open
     transitions:
       approve: { from: [open], to: approved, label: Approve }
+
+ui:
+  forms:
+    new_invoice:
+      entity: Invoice
+      operation: create_invoice
+      title: New invoice
+      fields:
+        number: {}
+        discount: {}
+        lines: { widget: lines, fields: [description, quantity, amount], rules: { required: {} } }
+    edit_invoice:
+      entity: Invoice
+      operation: update_invoice
+      title: Edit invoice
+      fields:
+        number: {}
+        discount: {}
+        lines: { widget: lines, label: Invoice lines, fields: [description, amount] }

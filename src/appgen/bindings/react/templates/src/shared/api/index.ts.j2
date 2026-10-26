@@ -23,11 +23,8 @@ export {
 } from "./dashboards";
 {% endif %}
 {% else %}
-{% if definition.storage %}
-export { FileError, type FileRule, MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
-{% else %}
-export { MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
-{% endif %}
+{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore", "TransitionError", "type Workflow"] %}
+export { {{ mock_names | join(", ") }} } from "./mock-store";
 {% endif %}
 export type {
   EntityApi,

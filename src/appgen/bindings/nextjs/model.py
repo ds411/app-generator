@@ -20,6 +20,7 @@ from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
+from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
 from appgen.bindings.shared.ui import ui_plan
@@ -261,6 +262,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "record_totals": {
             name: total_keys(definition, name, api=False) for name in definition.entities
         },
+        # The create and the update operations with lines (ADR 0035), by name.
+        "lines_ops": lines_operations(definition),
         **text_helpers(definition),
         "nextjs": {
             "default_layout": default_layout,

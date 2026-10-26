@@ -16,6 +16,9 @@ import {
   type {{ op_name | pascal }}Params,
 {% endfor %}
   type {{ type }}Input,
+{% for item in line_items(definition, name) %}
+  type {{ item.type }},
+{% endfor %}
 } from "./types";
 
 /** The rules of the values that create a {{ type }}. */
@@ -27,6 +30,11 @@ export const {{ var }}InputSchema = z.object({
 
 /** The rules of the values that change a {{ type }}: each key is optional. */
 export const {{ var }}PatchSchema = {{ var }}InputSchema.partial();
+{% for item in line_items(definition, name) %}
+
+/** The rules of a line of `{{ item.relation }}` of a {{ item.owner | pascal }} (ADR 0035). */
+export const {{ item.schema }} = {{ var }}InputSchema.omit({ {{ item.link }}: true }).extend({ id: z.uuid().optional() }) satisfies z.ZodType<{{ item.type }}>; {{ trace(item.element_id) }}
+{% endfor %}
 {% for op_name, op in customs %}
 
 /** The rules of the parameters of the operation {{ op_name }}. */

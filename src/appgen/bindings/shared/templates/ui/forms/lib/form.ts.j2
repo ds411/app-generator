@@ -70,18 +70,29 @@ function issueKey(path: readonly PropertyKey[]): string {
   return key.endsWith("Translations") && path.length > 1 ? `${key}.${String(path[1])}` : key;
 }
 
-/** Add the messages of a zod error to the form errors. A field keeps its first message. */
-export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
+/**
+ * Add the messages of a zod error to the form errors. A field keeps its
+ * first message. `at` is the place of a row of a lines editor, for
+ * example `lines.2`: the keys start with it.
+ */
+export function schemaErrors(error: z.ZodError, errors: FormErrors, at?: string): void {
   for (const issue of error.issues) {
-    errors[issueKey(issue.path)] ??= issueMessage(issue);
+    const key = issueKey(issue.path);
+    const place = at === undefined ? key : key === "_form" ? at : `${at}.${key}`;
+    errors[place] ??= issueMessage(issue);
   }
 }
 {% else %}
-/** Add the messages of a zod error to the form errors. A field keeps its first message. */
-export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
+/**
+ * Add the messages of a zod error to the form errors. A field keeps its
+ * first message. `at` is the place of a row of a lines editor, for
+ * example `lines.2`: the keys start with it.
+ */
+export function schemaErrors(error: z.ZodError, errors: FormErrors, at?: string): void {
   for (const issue of error.issues) {
     const key = issue.path.length > 0 ? String(issue.path[0]) : "_form";
-    errors[key] ??= issueMessage(issue);
+    const place = at === undefined ? key : key === "_form" ? at : `${at}.${key}`;
+    errors[place] ??= issueMessage(issue);
   }
 }
 {% endif %}
@@ -89,18 +100,86 @@ export function schemaErrors(error: z.ZodError, errors: FormErrors): void {
 /**
  * Return the form errors of an error of a submit. A server error with
  * issues (for example a `ValidationError` of a server action) puts each
- * message on its field.
+ * message on its field.{% if ui_forms.lines %} An issue of a line of a lines editor (`lines`)
+ * keeps its place, for example `lines.2.amount` (ADR 0035).{% endif %}
+
  */
+{% if ui_forms.lines %}
+export function submitErrors(error: unknown, lines: readonly string[] = []): FormErrors {
+{% else %}
 export function submitErrors(error: unknown): FormErrors {
+{% endif %}
   const message = error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The form did not save.")) }};
   const errors: FormErrors = { _form: message };
   const issues: unknown = error instanceof Error && "issues" in error ? error.issues : undefined;
   if (Array.isArray(issues)) {
     for (const issue of issues as { path?: unknown; message?: unknown }[]) {
       if (typeof issue.path !== "string" || typeof issue.message !== "string") continue;
+{% if ui_forms.lines %}
+      const first = issue.path.split(".")[0] ?? "";
+      const key = lines.includes(first) ? issue.path : first || "_form";
+{% else %}
       const key = issue.path.split(".")[0] || "_form";
+{% endif %}
       if (key !== "_form") errors[key] ??= {{ tr("issue.message") }};
     }
   }
   return errors;
 }
+{% if ui_forms.previews %}
+
+/** A condition of the filter of a total: the key of a value, an operator, and an operand. */
+export type TotalCondition = readonly [key: string, op: string, operand: unknown];
+
+/** Return true if a value passes a condition of a filter, as the filters of the back ends do. */
+function passes(value: unknown, op: string, operand: unknown): boolean {
+  const actual = value ?? null;
+  switch (op) {
+    case "eq":
+      return actual === operand;
+    case "ne":
+      return actual !== operand;
+    case "in":
+      return Array.isArray(operand) && operand.includes(actual);
+    case "not_in":
+      return !Array.isArray(operand) || !operand.includes(actual);
+  }
+  if (actual === null || operand === null) return false;
+  const a = actual as number | string;
+  const b = operand as number | string;
+  switch (op) {
+    case "lt":
+      return a < b;
+    case "lte":
+      return a <= b;
+    case "gt":
+      return a > b;
+    default:
+      return a >= b;
+  }
+}
+
+/**
+ * Return a total of the lines of a form, before the save (ADR 0034): the
+ * count of the lines, or the sum, the average, the smallest, or the
+ * largest value of a number field. The conditions filter the lines. The
+ * count and the sum of no lines are 0, the others null.
+ */
+export function linesTotal(
+  fn: "count" | "sum" | "avg" | "min" | "max",
+  lines: readonly Record<string, unknown>[],
+  field: string | null,
+  conditions: readonly TotalCondition[] = [],
+): number | null {
+  const kept = lines.filter((line) => conditions.every(([key, op, operand]) => passes(line[key], op, operand)));
+  if (fn === "count") return kept.length;
+  const numbers = kept.flatMap((line) => {
+    const value = line[field ?? ""];
+    return typeof value === "number" && Number.isFinite(value) ? [value] : [];
+  });
+  if (fn === "sum") return numbers.reduce((total, value) => total + value, 0);
+  if (numbers.length === 0) return null;
+  if (fn === "avg") return numbers.reduce((total, value) => total + value, 0) / numbers.length;
+  return fn === "min" ? Math.min(...numbers) : Math.max(...numbers);
+}
+{% endif %}

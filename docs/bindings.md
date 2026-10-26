@@ -820,6 +820,44 @@ for example `sum(lines.amount)`, from the same data as the FastAPI app
   projects, in the detail view, and in the pagination of the tasks of
   the project, in both front ends.
 
+### The lines of the Next.js app and of the React app
+
+A create or an update operation with `lines` writes the record and its
+lines in one request ([ADR 0035](adr/0035-lines.md)).
+
+- The operation is in its own feature slice,
+  `src/features/<operation>`, and not in the slice of its entity. Its
+  function takes the lines as a second argument, for example
+  `createInvoice(input, { lines })`. The slice of the entity of the
+  lines has the item type and its zod schema
+  (`src/entities/<entity>/model/`), for example `InvoiceLinesItem` and
+  `invoiceLinesItemSchema`. `writeLines` of `src/shared/api/lines.ts`
+  removes the lines that no item names, and adds or changes each line
+  through the data access of the lines. An error of a line gets the
+  place of the line in its issues, for example `lines.2.amount`.
+- Next.js: the server action (`api/<operation>-action.ts` of the slice)
+  checks the input and the items, and writes the record and the lines
+  in `inTransaction` of `src/shared/db`. The repositories use the
+  transaction of the action, so an error rolls back all.
+- React with mock data: `inTransaction` of the mock store keeps a copy
+  of the records of each store, and an error restores them.
+- React with the FastAPI app: the API client sends the items in the
+  body of the request, and the FastAPI app writes them.
+- A form field with `widget: lines` is a lines editor in the form
+  (`src/appgen/bindings/shared/templates/ui/forms/fields.j2`). The
+  values of the form keep a row for each line, with a key for React and
+  the ID of a line of the record. The form checks each row with the item
+  schema, sends the items with the input, and puts the errors of a line
+  on its cells. The record of the preview has the totals of the rows
+  (`linesTotal` of `src/shared/lib/form.ts`), and the form shows the
+  computed fields with these totals. An update form reads the lines of
+  the record with the list function of the slice of the lines, for
+  example `listLinesOfInvoice`, before it shows its fields.
+- The UI test `ui-tests/tests/lines.spec.ts` adds three budget lines to
+  a project of the project tracker in the form "Edit project", sees the
+  planned cost before the save, saves, and finds the lines when the
+  form opens again, in both front ends.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

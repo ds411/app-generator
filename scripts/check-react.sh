@@ -5,9 +5,12 @@
 # the smoke test with the UI tests (scripts/smoke_test.py --ui: start the
 # app, request it, and run the Playwright tests in ui-tests/). Then it
 # generates tests/fixtures/seed-data.yaml, and runs lint, type check, and
-# appgen check on it. Last, it generates tests/fixtures/invoices.yaml (the
+# appgen check on it. Then it generates tests/fixtures/invoices.yaml (the
 # small DSL additions of M33), and runs lint, type check, appgen check,
 # and the sequence test of the mock store (scripts/sequence_test.py) on it.
+# Last, it does lint, type check, and appgen check for
+# tests/fixtures/totals.yaml (the totals of the relations, ADR 0034, and
+# the lines editors, ADR 0035).
 # The pre-push hook runs this script when a push changes the generator
 # or the React binding. Run it by hand from the repository root:
 #
@@ -33,14 +36,17 @@ seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-seed.XXXXXX")
 # The app of the invoices fixture (M33), in a temporary folder.
 invoices_definition=tests/fixtures/invoices.yaml
 invoices_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-invoices.XXXXXX")
+# The app of the totals fixture, in a temporary folder.
+totals_definition=tests/fixtures/totals.yaml
+totals_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react-totals.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$invoices_out"' EXIT
+    trap 'rm -rf "$seed_out" "$invoices_out" "$totals_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-react.XXXXXX")
-    trap 'rm -rf "$out" "$seed_out" "$invoices_out"' EXIT
+    trap 'rm -rf "$out" "$seed_out" "$invoices_out" "$totals_out"' EXIT
 fi
 
 step() {
@@ -119,5 +125,19 @@ uv run --locked appgen check "$invoices_definition" "$invoices_out"
 
 step "sequence test"
 uv run --locked scripts/sequence_test.py --app "$invoices_out" --binding react
+
+step "generate $totals_definition in $totals_out"
+uv run --locked appgen generate "$totals_definition" -b react -o "$totals_out" >/dev/null
+(
+    cd "$totals_out"
+    step "pnpm install (totals)"
+    pnpm install --silent
+    step "pnpm lint (totals)"
+    pnpm --silent lint
+    step "pnpm typecheck (totals)"
+    pnpm --silent typecheck
+)
+step "appgen check (totals)"
+uv run --locked appgen check "$totals_definition" "$totals_out"
 
 step "passed"

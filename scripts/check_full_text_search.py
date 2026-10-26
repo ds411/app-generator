@@ -35,7 +35,7 @@ from pathlib import Path
 DEFINITION = Path("examples/project-tracker/app.yaml")
 FIRST = Path("migrations/versions/0001_schema.py")
 KEY = "  x-fastapi-search: fulltext\n"
-INDEXES = ("ix_people_search", "ix_projects_search", "ix_tasks_search")
+INDEXES = ("ix_budget_lines_search", "ix_people_search", "ix_projects_search", "ix_tasks_search")
 GUARD = 'if op.get_bind().dialect.name == "postgresql":'
 # The query of the list endpoint of the projects, with the helpers of the app.
 EXPLAIN = """

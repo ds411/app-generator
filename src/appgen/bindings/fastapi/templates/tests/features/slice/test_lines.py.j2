@@ -4,6 +4,10 @@
 {% macro sig(fn) %}
 {{ py.signature("async def " ~ fn, ["client: AsyncClient", "session: AsyncSession"], " -> None:") }}
 {% endmacro %}
+{#- A request of the test client, on one line if it fits. #}
+{% macro request(method, args) -%}
+{{ py.call("response = await ", "client." ~ method, args) }}
+{%- endmacro %}
 {% set url = e.path ~ op.path %}
 {% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
 """The tests of the lines of the operation `{{ op.name }}` (ADR 0035): the record and its lines
@@ -53,7 +57,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
 {{ sig("test_" ~ op.name ~ "_stores_the_" ~ ln.name) }}    payload = await {{ e.snake }}_input(session)
     payload["{{ ln.name }}"] = [await {{ item }}(session) for _ in range(3)]
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert response.status_code == 201, response.text
     assert len(await _{{ ln.name }}_of(session, UUID(response.json()["id"]))) == 3
@@ -70,7 +74,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
     # End the read, so that the app can write (SQLite locks the database for a write).
     await session.commit()
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert_problem(response, 422)
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
@@ -87,7 +91,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
         await {{ item }}(session, {{ w.field }}="{{ w.other_state }}"),
     ]
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert_problem(response, 422)
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
@@ -104,7 +108,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
         await {{ item }}(session),
     ]
 
-    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+    {{ request("patch", [id_url, 'json={"' ~ ln.name ~ '": items}']) }}
 
     assert response.status_code == 200, response.text
     ids = await _{{ ln.name }}_of(session, record.id)
@@ -117,7 +121,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
 {{ sig("test_" ~ op.name ~ "_keeps_the_" ~ ln.name ~ "_without_" ~ ln.name) }}    record = await make_{{ e.snake }}(session)
     line = await make_{{ t.snake }}(session, {{ ln.link_attr }}=str(record.id))
 
-    response = await client.patch({{ id_url }}, json={})
+    {{ request("patch", [id_url, "json={}"]) }}
 
     assert response.status_code == 200, response.text
     assert await _{{ ln.name }}_of(session, record.id) == [line.id]
@@ -131,7 +135,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
         {**await {{ item }}(session), "id": str(uuid4())},
     ]
 
-    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+    {{ request("patch", [id_url, 'json={"' ~ ln.name ~ '": items}']) }}
 
     assert_problem(response, 422)
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
@@ -147,7 +151,7 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
         await {{ item }}(session, {{ w.field }}="{{ w.other_state }}"),
     ]
 
-    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+    {{ request("patch", [id_url, 'json={"' ~ ln.name ~ '": items}']) }}
 
     assert_problem(response, 422)
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]

@@ -20,6 +20,7 @@ type Widget = Literal[
     "datetime",
     "relation",
     "file",
+    "lines",
     "custom",
 ]
 type FormMode = Literal["dialog", "sheet", "page"]
@@ -80,6 +81,8 @@ class FormField(Element):
         None
     )
     """The step of a `number`."""
+    fields: Annotated[list[MemberName], pydantic.Field(min_length=1)] | None = None
+    """For `widget: lines`: the fields of the related records, one column each (ADR 0035)."""
     rules: FieldRules | None = None
 
 

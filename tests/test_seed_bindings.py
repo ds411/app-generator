@@ -137,8 +137,9 @@ def test_an_empty_seed_gives_no_target_to_an_optional_relation() -> None:
 @pytest.mark.parametrize(
     ("example", "digest"),
     [
-        # The values of the translatable fields in German (ADR 0026) are not in the screenshots.
-        ("project-tracker", "fb327d1305905bb9ce701f1e0f26efcef512238161759cfd836ad387c847bf89"),
+        # The values of the translatable fields in German (ADR 0026) and the budget lines
+        # (ADR 0035) are not in the screenshots.
+        ("project-tracker", "34805d1946f52d76c58ca8da61cd9850980fffb6f8cbf1606223a930df00acf3"),
         ("room-booking", "abcb48e23d20a6069a9f52da0f235bfb0dc9ec0c52da839c5be0836343aca506"),
     ],
 )

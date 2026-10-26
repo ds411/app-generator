@@ -242,6 +242,27 @@ function checkFile(file: File, rule: FileRule): void {
 {% endif %}
 /** The time that each call waits, so that the UI shows its loading states. */
 export const MOCK_LATENCY_MS = 250;
+{% if lines_ops %}
+
+/** The snapshots of the records of all stores, for `inTransaction`. */
+const snapshots = new Set<() => () => void>();
+
+/**
+ * Run changes of the stores as one (ADR 0035), for example a record and its
+ * lines: an error restores the records of all stores, and throws again.
+ */
+export async function inTransaction<R>(work: () => Promise<R>): Promise<R> {
+  const restores = [...snapshots].map((snapshot) => snapshot());
+  try {
+    return await work();
+  } catch (error) {
+    for (const restore of restores) {
+      restore();
+    }
+    throw error;
+  }
+}
+{% endif %}
 
 function wait(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, MOCK_LATENCY_MS));
@@ -289,7 +310,23 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if record_rules or react.totals %}
     recordsByEntity.set(entity, () => this.records);
 {% endif %}
+{% if lines_ops %}
+    snapshots.add(() => this.snapshot());
+{% endif %}
   }
+{% if lines_ops %}
+
+  /** Return a function that restores the records of now, for `inTransaction` (ADR 0035). */
+  snapshot(): () => void {
+    const records = this.records;
+    return () => {
+      if (this.records !== records) {
+        this.records = records;
+        this.notify();
+      }
+    };
+  }
+{% endif %}
 
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
     await wait();

@@ -55,6 +55,11 @@ entities:
       budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
       # A total of a relation (ADR 0034): each app counts the tasks in its data.
       task_count: { type: integer, label: Tasks, computed: count(tasks) }
+      planned_cost:
+        type: decimal
+        scale: 2
+        format: currency
+        computed: sum(budget_lines.amount)
     relations:
       owner:
         kind: many_to_one
@@ -64,6 +69,7 @@ entities:
         inverse: owned_projects
       tasks: { kind: one_to_many, target: Task, inverse: project }
       members: { kind: many_to_many, target: Person }
+      budget_lines: { kind: one_to_many, target: BudgetLine, inverse: project }
 
   Task:
     crud: true
@@ -118,7 +124,27 @@ entities:
         inverse: comments
       author: { kind: many_to_one, target: Person, required: true, on_delete: restrict }
 
+  BudgetLine:
+    # The edit form of a project lists the lines of the project.
+    crud: [list]
+    description: A planned cost of a project. The forms of a project edit its lines.
+    display_field: item
+    fields:
+      item: { type: string, required: true, max_length: 120 }
+      amount: { type: decimal, required: true, min: 0, precision: 12, scale: 2, format: currency }
+    relations:
+      project:
+        kind: many_to_one
+        target: Project
+        required: true
+        on_delete: cascade
+        inverse: budget_lines
+
 operations:
+  # The forms of a project save the project and its budget lines in one
+  # request (ADR 0035).
+  create_project: { kind: create, entity: Project, lines: [budget_lines] }
+  update_project: { kind: update, entity: Project, lines: [budget_lines] }
   archive_project:
     kind: custom
     entity: Project
@@ -840,6 +866,7 @@ ui:
       sections:
         basics: { title: Basics, fields: [name, key, owner, status] }
         planning: { title: Planning, fields: [start_date, due_date, budget, description] }
+        costs: { title: Costs, fields: [budget_lines] }
       fields:
         name:
           placeholder: Website relaunch
@@ -857,6 +884,9 @@ ui:
         due_date: {}
         budget: { step: 100, rules: { min: { value: 0, message: The budget cannot be negative. } } }
         description: { widget: textarea, rows: 4, span: 2 }
+        # A lines editor (ADR 0035): a row for each budget line, and the
+        # planned cost of the lines before the save.
+        budget_lines: { widget: lines, fields: [item, amount], span: 2 }
       rules:
         due_after_start:
           kind: compare
@@ -881,6 +911,7 @@ ui:
         due_date: {}
         budget: {}
         description: { widget: textarea, rows: 6 }
+        budget_lines: { widget: lines, fields: [item, amount] }
       rules:
         due_after_start:
           kind: compare
@@ -1148,6 +1179,7 @@ translations:
         Active projects: Aktive Projekte
         Activity: Aktivität
         Add a comment: Kommentar hinzufügen
+        Add a line: Zeile hinzufügen
         Add a person: Person hinzufügen
         Add comment: Kommentieren
         Add person: Person anlegen
@@ -1159,6 +1191,7 @@ translations:
         Author: Autor
         Basics: Grunddaten
         breadcrumb: Navigationspfad
+        Budget lines: Budgetzeilen
         Budget of active projects: Budget der aktiven Projekte
         Change or reset the filters.: Ändern Sie die Filter, oder setzen Sie sie zurück.
         Clear: Leeren
@@ -1172,6 +1205,7 @@ translations:
         Comments: Kommentare
         Completed at: Abgeschlossen am
         Continue: Weiter
+        Costs: Kosten
         Create a project to plan your work.: Legen Sie ein Projekt an, um Ihre Arbeit zu planen.
         Create project: Projekt anlegen
         Create task: Aufgabe anlegen
@@ -1200,10 +1234,12 @@ translations:
         Find a page by its title.: Suchen Sie eine Seite nach ihrem Titel.
         First page: Erste Seite
         Go to the start page: Zur Startseite
+        Item: Posten
         Language: Sprache
         Last page: Letzte Seite
         Lead: Leitung
         Light: Hell
+        'Line {number}: {message}': 'Zeile {number}: {message}'
         Loading: Wird geladen
         Loading the board: Das Board wird geladen
         Loading…: Wird geladen …
@@ -1220,6 +1256,7 @@ translations:
         'No': Nein
         No comments yet: Noch keine Kommentare
         No data yet: Noch keine Daten
+        No lines yet.: Noch keine Zeilen.
         No matching records: Keine passenden Datensätze
         No page has this title.: Keine Seite hat diesen Titel.
         No results.: Keine Ergebnisse.
@@ -1242,6 +1279,7 @@ translations:
         Plan projects, split them into tasks, and assign the tasks to people.: Planen Sie Projekte, teilen Sie sie in Aufgaben auf, und weisen Sie die Aufgaben Personen zu.
         '{entity} {id} does not exist.': '{entity} {id} gibt es nicht.'
         The input is not valid.: Die Eingabe ist nicht gültig.
+        The lines did not load.: Die Zeilen wurden nicht geladen.
         The server could not do the operation.: Der Server konnte die Operation nicht ausführen.
         The record refers to a record that does not exist, or other records refer to it.: Der Datensatz verweist auf einen Datensatz, den es nicht gibt, oder andere Datensätze verweisen auf ihn.
         Another record has the same value, and the value must be unique.: Ein anderer Datensatz hat denselben Wert, und der Wert muss eindeutig sein.
@@ -1252,6 +1290,7 @@ translations:
         Choose the year: Jahr wählen
         'Today, {date}': 'Heute, {date}'
         '{date}, selected': '{date}, ausgewählt'
+        '{field}, line {number}': '{field}, Zeile {number}'
         "Cannot sort by '{name}'. Use one of: {names}.": "Sortieren nach '{name}' ist nicht möglich. Verwenden Sie eines von: {names}."
         Enter a number.: Geben Sie eine Zahl ein.
         No {entity} has the ID {id}.: Es gibt kein {entity} mit der ID {id}.
@@ -1275,11 +1314,13 @@ translations:
         Internal Server Error: Interner Serverfehler
         Not Implemented: Nicht implementiert
         Plan a new body of work.: Planen Sie ein neues Arbeitspaket.
+        Planned cost: Geplante Kosten
         Planning: Planung
         Posted: Verfasst
         Previous page: Vorherige Seite
         Priority: Priorität
         Project Tracker, generated by appgen.: Projekt-Tracker, generiert von appgen.
+        Remove line {number}: Zeile {number} entfernen
         Remove {label}: '{label} entfernen'
         Screenshot: Bildschirmfoto
         Drop a file here, or: Ziehen Sie eine Datei hierher, oder

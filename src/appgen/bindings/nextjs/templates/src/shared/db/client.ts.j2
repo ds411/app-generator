@@ -1,7 +1,8 @@
 {{ trace_header("app") }}
 import "server-only";
 
-{% set ambient = nextjs.jobs or nextjs.events %}
+{% set ambient = nextjs.jobs or nextjs.events or lines_ops %}
+{% set transactions = nextjs.jobs or lines_ops %}
 {% if ambient %}
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -13,7 +14,7 @@ export { type Database, usesPglite } from "./connect";
 const globalForDb = globalThis as unknown as { appgenDb?: Database };
 {% if ambient %}
 
-/** The transaction of {{ "the work in `inTransaction()`" if nextjs.jobs }}{{ " and of " if nextjs.jobs and nextjs.events }}{{ "the operation of an event" if nextjs.events }}. */
+/** The transaction of {{ "the work in `inTransaction()`" if transactions }}{{ " and of " if transactions and nextjs.events }}{{ "the operation of an event" if nextjs.events }}. */
 const ambient = new AsyncLocalStorage<Database>();
 {% endif %}
 {% if nextjs.events %}
@@ -25,7 +26,7 @@ const inEvent = new AsyncLocalStorage<true>();
 /**
  * Return the database client. It connects on the first call, so that
  * `next build` needs no database. In development, the client survives
- * hot reloads.{% if nextjs.jobs %} In the work of `inTransaction()`, it returns the
+ * hot reloads.{% if transactions %} In the work of `inTransaction()`, it returns the
  * transaction.{% endif %}{% if nextjs.events %} In the operation of an event, it returns the
  * transaction of the change.{% endif %}
 
@@ -52,7 +53,7 @@ export function getDb(): Database {
 
 {% if ambient %}
 /**
- * Return the database client outside the transaction of {{ "the work in `inTransaction()`" if nextjs.jobs }}{{ " and of " if nextjs.jobs and nextjs.events }}{{ "the operation of an event" if nextjs.events }}.
+ * Return the database client outside the transaction of {{ "the work in `inTransaction()`" if transactions }}{{ " and of " if transactions and nextjs.events }}{{ "the operation of an event" if nextjs.events }}.
  * A write in it stays after an error of the work: for example a new
  * token of a user (ADR 0033). PGlite has one connection, so with PGlite
  * it returns the transaction.
@@ -71,10 +72,10 @@ export function ownDb(): Database {
 }
 {% endif %}
 {% endif %}
-{% if nextjs.jobs %}
+{% if transactions %}
 
 /**
- * Run work in one transaction, for example a run of a job (ADR 0029). In
+ * Run work in one transaction, for example {{ "a run of a job (ADR 0029)" if nextjs.jobs else "an operation with lines (ADR 0035)" }}. In
  * the work, `getDb()` returns the transaction, so the repositories write
  * in it too: a transaction of a repository becomes a savepoint. An error
  * rolls back all the writes of the work.
