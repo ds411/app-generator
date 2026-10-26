@@ -2,10 +2,11 @@
 
 Each binding has its own `src/shared/auth/` with `signIn`, `signOut`,
 and the calls of the password reset (ADR 0017), of the verification of
-the email address (ADR 0023), and of the second factor (ADR 0024). The
-sign-in form, the sign-up form (ADR 0016), the forms of the password
-reset, the page of the verification link, the page of the second
-factor, and the sign-out button are shared templates. Each binding has its own
+the email address (ADR 0023), of the second factor (ADR 0024), and of the
+connections to the APIs (ADR 0033). The sign-in form, the sign-up form
+(ADR 0016), the forms of the password reset, the page of the
+verification link, the page of the second factor, the page of the
+connections, and the sign-out button are shared templates. Each binding has its own
 `src/features/sign-up/api/` with `signUp`. The table of the permissions
 of the roles (ADR 0012) is a shared template too. The checks of the app
 and the menus, the links, and the actions of the UI read it. Each
@@ -35,6 +36,9 @@ class AuthPages:
     """The page `/verify-email` of the link that confirms the email address (ADR 0023)."""
     second_factor: bool = False
     """The page `/second-factor` of the account, and the code step of the sign-in (ADR 0024)."""
+    connections: bool = False
+    """The page `/connections` of the accounts of the APIs with the authorization code flow
+    (ADR 0033)."""
 
 
 def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
@@ -54,6 +58,7 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
         password_reset=auth.password_reset is not None and server,
         verify_email=auth.sign_up is not None and auth.sign_up.verify_email is not None and server,
         second_factor=auth.second_factor is not None and auth.password,
+        connections=any(api.user_flow for api in definition.apis.values()),
     )
 
 
@@ -193,6 +198,14 @@ def auth_rules() -> tuple[Output, ...]:
                 "second-factor-page.tsx",
                 "second-factor-setup.tsx",
             )
+        ),
+        *(
+            Output(
+                template=f"ui/features/connections/{name}.j2",
+                path=f"src/features/connections/{'' if name == 'index.ts' else 'ui/'}{name}",
+                when="auth_pages.connections",
+            )
+            for name in ("index.ts", "connections-link.tsx", "connections-page.tsx")
         ),
         Output(
             template="ui/lib/permissions.ts.j2",

@@ -20,6 +20,9 @@ VERIFY_EMAIL_PATH = "/verify-email"
 """The path of the page of the link that confirms an email address, with `verify_email`."""
 SECOND_FACTOR_PATH = "/second-factor"
 """The path of the page that turns the second factor on and off, with `auth.second_factor`."""
+CONNECTIONS_PATH = "/connections"
+"""The path of the page of the connections of a user to the APIs with the authorization code
+flow (ADR 0033), and the start of the paths of the flow in the Next.js app."""
 PROVIDER_PATHS = "/auth/"
 """With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8

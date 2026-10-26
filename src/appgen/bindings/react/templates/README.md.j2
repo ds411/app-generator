@@ -126,6 +126,21 @@ set `x-react-data: api`, so that this app calls the FastAPI app. The file
 `src/shared/api/<api>/client.ext.ts` of each API marks the gap.
 
 {% endif %}
+{% if ts_connections %}
+### Connections of the users
+
+The FastAPI app of the same definition calls {% for api in ts_connections %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} with the access token of a
+user: the authorization code flow of OAuth 2.0. A signed-in user
+connects an account of the service on the page `/connections`.
+{% if react.api %}
+The page uses `/auth/connections` of the FastAPI app: the API sends the
+browser to the service, and back to `/connections` of this app.
+{% else %}
+The app has mock data, so the page keeps the connections in
+`sessionStorage`, and sends the browser to no service.
+{% endif %}
+
+{% endif %}
 {% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites

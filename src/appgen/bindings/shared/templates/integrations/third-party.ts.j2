@@ -3,6 +3,8 @@
 {% set features = ts_features(ts_apis) %}
 {% set forms = "form" in features or "multipart" in features %}
 {% set oauth = server and "oauth2" in features %}
+{# The client credentials flow, or the token of a user (ADR 0033). #}
+{% set tokens = server and ("oauth2" in features or "user" in features) %}
 {{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
 {% if server %}
 import "server-only";
@@ -38,6 +40,10 @@ export interface ClientOptions {
   /** The client ID of an API with OAuth 2.0. */
   clientId?: string;
 {% endif %}
+{% if "user" in features %}
+  /** The access tokens of a user, for an API with the authorization code flow. */
+  token?: TokenSource;
+{% endif %}
 {% endif %}
   /** The time limit of a request, in milliseconds. */
   timeoutMs?: number;
@@ -71,7 +77,7 @@ export interface RequestParts {
   accept?: string;
 {% endif %}
 }
-{% if oauth %}
+{% if tokens %}
 
 /** The source of the access tokens of an API with OAuth 2.0. */
 export interface TokenSource {
@@ -92,7 +98,7 @@ export class HttpClient {
     private readonly options: {
       headers?: Record<string, string>;
       query?: Record<string, string>;
-{% if oauth %}
+{% if tokens %}
       /** The access tokens of an API with OAuth 2.0. */
       token?: TokenSource;
 {% endif %}
@@ -107,7 +113,7 @@ export class HttpClient {
    * Send a request, and return the answer: the JSON value, or `null` for an
    * answer without content{% if "text" in features %}, or the text{% endif %}{% if "binary" in features %}, or a `Blob`{% endif %}. An error status throws an
    * `ApiError`.
-{% if oauth %}
+{% if tokens %}
    * With OAuth 2.0, the request sends the access token, and an answer with
    * the status 401 gets a new token and sends the request one more time.
 {% endif %}
@@ -152,7 +158,7 @@ export class HttpClient {
       body = JSON.stringify(parts.body);
     }
     const send = this.options.fetch ?? fetch;
-{% if oauth %}
+{% if tokens %}
     const tokens = this.options.token;
     let token = tokens ? await tokens.get() : undefined;
     let response: Response | undefined;

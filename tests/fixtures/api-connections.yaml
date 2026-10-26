@@ -7,6 +7,8 @@
 # logic is in tests/fixtures/api-connections/extensions/.
 # scripts/check-fastapi.sh checks the FastAPI app of this definition, and
 # scripts/api_connection_test.py connects a user at the mock server.
+# scripts/connection_ui_test.py connects a user on the page /connections
+# of the front ends, and syncs a calendar on the page /calendars.
 version: 0
 
 app:
@@ -46,6 +48,26 @@ operations:
     entity: Calendar
     description: Count the events of the calendar of the user.
     apis: [calendar]
+
+pages:
+  calendars: { path: /calendars, title: Calendars, content: { view: calendar_table } }
+
+ui:
+  views:
+    calendar_table:
+      kind: table
+      entity: Calendar
+      title: Calendars
+      columns:
+        title: { label: Title }
+        events: { label: Events, align: end }
+      row_actions:
+        sync:
+          kind: operation
+          operation: sync_calendar
+          label: Sync
+          icon: refresh-cw
+          on_success: { toast: The calendar is synced. }
 
 apis:
   calendar:

@@ -127,6 +127,17 @@ export type ExpectedAuth = {
   providers?: { name: string; title: string; menu: string[] }[];
 };
 
+/** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */
+export type ExpectedConnections = {
+  /** The APIs with the authorization code flow: the name in the paths, and the title. */
+  apis: { api: string; title: string }[];
+  /** The inputs of the sign-up of a new user, by ID: `{n}` in a value is a new number. */
+  signUp: { id: string; value: string }[];
+  password: string;
+  /** The row action that calls an API in the name of the user, or null for an app with mock data. */
+  sync: { path: string; action: string; toast: string; notConnected: string } | null;
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -138,6 +149,8 @@ export type Expected = {
   testLanguage?: ExpectedTestLanguage;
   /** Only for the test of the sign-in and the permissions. */
   auth?: ExpectedAuth;
+  /** Only for the test of the connections to the APIs. */
+  connections?: ExpectedConnections;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

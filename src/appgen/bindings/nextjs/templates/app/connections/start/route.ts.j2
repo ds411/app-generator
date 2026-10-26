@@ -1,0 +1,50 @@
+{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
+
+import {
+  CONNECTIONS_PATH,
+  FLOW_SECONDS,
+  connectionFlowCookie,
+  connectionFlowPath,
+  connectionsPage,
+  isConnectionName,
+  startConnection,
+} from "@/shared/auth/connections";
+import { SIGN_IN_PATH, sessionUserId } from "@/shared/auth/session";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+
+/** Send the browser of the signed-in user to the page where the user allows the access to an API (ADR 0033). */
+export async function GET(_request: NextRequest, { params }: RouteContext<"/connections/[api]/start">) {
+  const { api } = await params;
+  if (!isConnectionName(api)) notFound();
+  const userId = await sessionUserId();
+  if (userId === null) redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(CONNECTIONS_PATH)}`);
+  let target: string;
+  try {
+{% if i18n %}
+    const { url, flow } = await inRequestLanguage(() => startConnection(api, userId));
+{% else %}
+    const { url, flow } = startConnection(api, userId);
+{% endif %}
+    (await cookies()).set(connectionFlowCookie(api), flow, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: connectionFlowPath(api),
+      maxAge: FLOW_SECONDS,
+    });
+    target = url;
+  } catch (error) {
+    console.error(error);
+{% if i18n %}
+    target = await inRequestLanguage(() => connectionsPage({ error }));
+{% else %}
+    target = connectionsPage({ error });
+{% endif %}
+  }
+  redirect(target);
+}

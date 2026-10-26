@@ -7,7 +7,9 @@
 # (also with conditions and owner paths, in tests/fixtures/record-rules.yaml),
 # turn on a second factor and sign in with a code, and sign in with a
 # provider through the mock provider: in Next.js, and in React with the
-# FastAPI app (scripts/auth_ui_test.py).
+# FastAPI app (scripts/auth_ui_test.py). Then connect a new user to an API
+# on the page /connections, through the authorization page of the mock
+# server of the API (scripts/connection_ui_test.py, ADR 0033).
 # The pre-push hook runs this script when a push changes the generator
 # or a front-end binding. Run it by hand from the repository root:
 #
@@ -25,3 +27,4 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
 fi
 
 uv run --locked scripts/auth_ui_test.py "$@"
+uv run --locked scripts/connection_ui_test.py "$@"

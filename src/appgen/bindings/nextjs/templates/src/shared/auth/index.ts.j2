@@ -3,6 +3,9 @@
 {% set sf = definition.auth.second_factor %}
 {{ trace_header(definition.auth.id) }}
 import { {{ actions | join(", ") }} } from "./actions";
+{% if ts_connections %}
+import { deleteConnectionAction, listConnectionsAction } from "./connection-actions";
+{% endif %}
 {% if sf %}
 import {
   confirmSecondFactorAction,
@@ -115,6 +118,42 @@ export async function confirmSecondFactor(code: string, challenge: string | null
 /** Turn off the second factor with a code, or a recovery code. Return null, or the message of the error. */
 export async function disableSecondFactor(code: string): Promise<string | null> { {{ trace(sf.id) }}
   const result = await disableSecondFactorAction(code);
+  return result.ok ? null : result.message;
+}
+{% endif %}
+{% if ts_connections %}
+
+/** An API with the authorization code flow, and the connection of the signed-in user (ADR 0033). */
+export type Connection = {
+  /** The name of the API in the paths of the connections. */
+  api: string;
+  title: string;
+  connected: boolean;
+  /** The time of the connection, as an ISO 8601 text, or null. */
+  connectedAt: string | null;
+};
+
+/** List the APIs with the authorization code flow, with the connections of the signed-in user. */
+export async function listConnections(): Promise<Connection[]> {
+  const result = await listConnectionsAction();
+  if (!result.ok) throw new Error(result.message);
+  return result.value;
+}
+
+/**
+ * Connect an account of an API: the browser goes to the authorization
+ * server, and then back to the page of the connections. Return null, or
+ * the message of the error.
+ */
+export async function connectAccount(api: string): Promise<string | null> {
+  // The start is a route handler, not a page: the browser loads it from the server.
+  window.location.assign(new URL(`/connections/${encodeURIComponent(api)}/start`, window.location.origin));
+  return null;
+}
+
+/** Delete the connection of the signed-in user to an API. Return null, or the message of the error. */
+export async function disconnectAccount(api: string): Promise<string | null> {
+  const result = await deleteConnectionAction(api);
   return result.ok ? null : result.message;
 }
 {% endif %}

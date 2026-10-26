@@ -6,7 +6,7 @@ import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 {% endif %}
-import { connect, type Database } from "./connect";
+import { connect, type Database{{ ", usesPglite" if ambient and ts_connections }} } from "./connect";
 
 export { type Database, usesPglite } from "./connect";
 
@@ -48,6 +48,29 @@ export function getDb(): Database {
   }
   return globalForDb.appgenDb;
 }
+{% if ts_connections %}
+
+{% if ambient %}
+/**
+ * Return the database client outside the transaction of {{ "the work in `inTransaction()`" if nextjs.jobs }}{{ " and of " if nextjs.jobs and nextjs.events }}{{ "the operation of an event" if nextjs.events }}.
+ * A write in it stays after an error of the work: for example a new
+ * token of a user (ADR 0033). PGlite has one connection, so with PGlite
+ * it returns the transaction.
+ */
+export function ownDb(): Database {
+  return usesPglite() ? getDb() : ambient.exit(getDb);
+}
+{% else %}
+/**
+ * Return the database client for a write that must stay after an error of
+ * the work, for example a new token of a user (ADR 0033). The app has no
+ * transaction around the work, so it is `getDb()`.
+ */
+export function ownDb(): Database {
+  return getDb();
+}
+{% endif %}
+{% endif %}
 {% if nextjs.jobs %}
 
 /**

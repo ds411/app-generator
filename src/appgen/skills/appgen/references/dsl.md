@@ -1104,7 +1104,18 @@ apis:
   token ends, and one time after an answer with the status 401. A custom
   operation gets the client of the signed-in user, and gives 409 when
   the user has no connection. A job names the user of each record in
-  `user`. The Next.js binding does not generate the flow yet.
+  `user`, and does nothing for a record whose user has no connection.
+  The Next.js app has the same table, and the routes
+  `/connections/<api>/start` and `/connections/<api>/callback`. Its
+  server action gives an error result when the user has no connection.
+  The front ends have the page `/connections` and a link to it in the
+  layout: a signed-in user connects and disconnects the accounts there.
+  The React app with `x-react-data: api` uses the routes of the FastAPI
+  app: add the origin of the React app to `CORS_ORIGINS`. The React app
+  with mock data keeps the connections in the browser. The OAuth app of
+  the service must allow the URL of the callback. The Next.js app builds
+  it from `PUBLIC_URL`, and the FastAPI app from `PUBLIC_URL` or the
+  URL of the request.
 
 ```yaml
 # not valid alone: the definition is tests/fixtures/api-connections.yaml.
@@ -1898,8 +1909,9 @@ auth:
 - No page can use the path `/sign-in`, `/sign-up` with a sign-up,
   `/verify-email` with `verify_email`, `/forgot-password` and
   `/reset-password` with a password reset, `/second-factor` with a
-  second factor, or a path under `/auth/` with providers: they are the
-  pages of the front ends.
+  second factor, a path under `/auth/` with providers, or
+  `/connections` and a path under `/connections/` with an API with the
+  authorization code flow: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -2376,6 +2388,19 @@ use in the app does not show.
   `The body of the webhook does not agree with its schema.`,
   `The logic of the webhook failed. Deliver the event again later.`,
   `The body of the webhook is not a valid email.`.
+- The page of the connections to the APIs with the authorization code
+  flow: `Connections`,
+  `Connect your accounts of other services, so that the app can use them in your name.`,
+  `The account is connected.`, `Connected`, `Not connected`, `Connect`,
+  `Disconnect`. The flow of the Next.js app:
+  `Connect an account of the API {api} first.`,
+  `The server has no client ID or client secret for the API {api}.`,
+  `The authorization server gave the error '{error}'.`,
+  `The callback has no code. Connect the account again.`,
+  `The authorization server did not accept the code. Connect the account again.`,
+  `The token endpoint of the API {api} did not answer correctly.`,
+  `The state of the callback is not correct. Connect the account again.`,
+  `The connection failed.`.
 
 ### Messages of the FastAPI app
 

@@ -9,7 +9,6 @@ from appgen.dsl import load_definition, load_definition_text, validate_definitio
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic
 from appgen.dsl.openapi import AuthorizationCodeFlow
 from appgen.gen import GenerationResult, find_binding, generate
-from appgen.gen.render import GenerationError
 
 ROOT = Path(__file__).parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "api-connections.yaml"
@@ -167,17 +166,99 @@ def test_the_job_calls_the_api_with_the_token_of_the_owner(fastapi: dict[str, st
     assert 'monkeypatch.setattr(nightly_sync, "connected", connected)' in test
 
 
+def test_a_page_cannot_have_the_path_of_the_connections() -> None:
+    page = "  calendars: { path: /calendars, title: Calendars, content: { view: calendar_table } }"
+    for path in ("/connections", "/connections/calendar"):
+        text = TEXT.replace(page, f"{page}\n  other: {{ path: {path}, title: Other }}")
+
+        assert _codes(text) == [("duplicate-name", "pages.other")], path
+
+
+@pytest.fixture(scope="module")
+def nextjs() -> dict[str, str]:
+    return _files(generate(load_definition(FIXTURE), find_binding("nextjs")))
+
+
+def test_the_nextjs_app_keeps_the_tokens_of_the_users(nextjs: dict[str, str]) -> None:
+    connections = nextjs["src/shared/auth/connections.ts"]
+
+    assert 'export const CONNECTION_NAMES = ["calendar"] as const;' in connections
+    assert 'authorizationUrl: "/oauth/authorize"' in connections
+    assert 'refreshUrl: "/oauth/token"' in connections
+    assert 'scopes: ["events:read"]' in connections
+    assert 'createCipheriv("aes-256-gcm", key, nonce)' in connections
+    assert 'export * from "./api-connections";' in nextjs["src/shared/db/schema/index.ts"]
+    assert '"api_connections"' in nextjs["src/shared/db/schema/api-connections.ts"]
+    for path in (
+        "app/connections/page.tsx",
+        "app/connections/[api]/start/route.ts",
+        "app/connections/[api]/callback/route.ts",
+        "src/shared/auth/connection-actions.ts",
+    ):
+        assert path in nextjs
+    assert "error instanceof NotConnectedError" in nextjs["src/shared/api/server.ts"]
+    assert "# The connections to the APIs use it.\nPUBLIC_URL=" in nextjs[".env.example"]
+
+
+def test_the_nextjs_client_sends_the_token_of_a_user(nextjs: dict[str, str]) -> None:
+    client = nextjs["src/shared/api/calendar/client.ts"]
+    http = nextjs["src/shared/api/third-party.ts"]
+
+    assert "export function calendarClientFor(userId: string | null): CalendarClient {" in client
+    assert 'token: new UserToken("calendar", userId),' in client
+    assert "clientCredentials" not in client
+    assert "  token?: TokenSource;" in http
+    assert "class ClientCredentials" not in http
+
+
+def test_the_nextjs_job_runs_in_the_name_of_the_owner(nextjs: dict[str, str]) -> None:
+    job = nextjs["src/app/jobs/nightly-sync.ts"]
+
+    assert "const userId = record.ownerId;" in job
+    assert 'if (!(await connected("calendar", userId))) {' in job
+    assert "await asUser(userId, () => syncCalendar(record));" in job
+
+
+def test_a_job_skips_a_record_without_a_user() -> None:
+    text = TEXT.replace(
+        "owner: { kind: many_to_one, target: User, required: true, inverse: calendars }",
+        "owner: { kind: many_to_one, target: User, inverse: calendars }",
+    )
+    definition = load_definition_text(text, str(FIXTURE))
+
+    job = _files(generate(definition, find_binding("nextjs")))["src/app/jobs/nightly-sync.ts"]
+
+    assert 'if (userId === null || !(await connected("calendar", userId))) {' in job
+
+
+def test_the_front_ends_have_the_page_of_the_connections(nextjs: dict[str, str]) -> None:
+    react = _files(generate(load_definition(FIXTURE), find_binding("react")))
+    text = TEXT.replace("\napp:\n", "\napp:\n  x-react-data: api\n", 1)
+    react_api = _files(generate(load_definition_text(text, str(FIXTURE)), find_binding("react")))
+
+    assert "<ConnectionsLink />" in nextjs["app/(bare)/layout.tsx"]
+    for files in (react, react_api):
+        assert "<ConnectionsLink />" in files["src/app/layout/root-layout.tsx"]
+    for files in (nextjs, react, react_api):
+        assert "src/features/connections/ui/connections-page.tsx" in files
+    assert '{ path: "/connections", element: <ConnectionsRoute /> }' in react["src/app/router.tsx"]
+    assert "CONNECTIONS_KEY" in react["src/shared/auth/index.ts"]
+    auth = react_api["src/shared/auth/index.ts"]
+    assert 'await apiRequest("GET", "/auth/connections")' in auth
+    assert "return_to: `${window.location.origin}/connections`," in auth
+
+
 def test_an_app_without_the_flow_has_no_connections() -> None:
     definition = load_definition(ROOT / "examples" / "project-tracker" / "app.yaml")
 
     files = _files(generate(definition, find_binding("fastapi")))
+    nextjs = _files(generate(definition, find_binding("nextjs")))
+    react = _files(generate(definition, find_binding("react")))
 
     assert "app/core/connections.py" not in files
     assert "TokenSource" in files["app/integrations/http.py"]
     assert "StaticToken" not in files["app/integrations/http.py"]
     assert "cryptography" not in files["pyproject.toml"]
-
-
-def test_the_nextjs_binding_does_not_generate_the_flow_yet() -> None:
-    with pytest.raises(GenerationError, match="authorization code flow"):
-        generate(load_definition(FIXTURE), find_binding("nextjs"))
+    for front_end in (nextjs, react):
+        assert not [path for path in front_end if "connections" in path]
+        assert not [path for path, text in front_end.items() if "ConnectionsLink" in text]

@@ -1,0 +1,22 @@
+{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+import type { Metadata } from "next";
+
+import { ConnectionsPage } from "@/features/connections";
+import { requirePageUser } from "@/shared/auth/session";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+/** The title of the page, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js("Connections")) }} }));
+}
+{% else %}
+
+export const metadata: Metadata = { title: "Connections" };
+{% endif %}
+
+/** The page of the connections of the signed-in user to the APIs (ADR 0033). */
+export default async function Route() {
+  await requirePageUser("/connections");
+  return <ConnectionsPage />;
+}

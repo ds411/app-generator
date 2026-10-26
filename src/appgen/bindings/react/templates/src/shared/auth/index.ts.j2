@@ -671,3 +671,114 @@ export async function signOut(): Promise<void> {
   }
 }
 {% endif %}
+{% if auth_pages.connections %}
+
+/** An API with the authorization code flow, and the connection of the signed-in user (ADR 0033). */
+export type Connection = {
+  /** The name of the API in the paths of the connections. */
+  api: string;
+  title: string;
+  connected: boolean;
+  /** The time of the connection, as an ISO 8601 text, or null. */
+  connectedAt: string | null;
+};
+{% if react.api %}
+
+/** A connection in the answer of the FastAPI app. */
+type ConnectionRead = { api: string; title: string; connected: boolean; connected_at?: string | null };
+
+/** List the APIs with the authorization code flow, with the connections of the signed-in user (`GET /auth/connections`). */
+export async function listConnections(): Promise<Connection[]> {
+  const rows = (await apiRequest("GET", "/auth/connections")) as ConnectionRead[];
+  return rows.map((row) => ({ api: row.api, title: row.title, connected: row.connected, connectedAt: row.connected_at ?? null }));
+}
+
+/**
+ * Connect an account of an API (`POST /auth/connections/<api>`): the
+ * browser goes to the authorization server, and the FastAPI app sends it
+ * back to the page of the connections. Return null, or the message of the
+ * error.
+ */
+export async function connectAccount(api: string): Promise<string | null> {
+  try {
+    const link = (await apiRequest("POST", `/auth/connections/${encodeURIComponent(api)}`, {
+      return_to: `${window.location.origin}/connections`,
+    })) as { authorization_url: string };
+    window.location.assign(link.authorization_url);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+}
+
+/** Delete the connection of the signed-in user to an API (`DELETE /auth/connections/<api>`). Return null, or the message of the error. */
+export async function disconnectAccount(api: string): Promise<string | null> {
+  try {
+    await apiRequest("DELETE", `/auth/connections/${encodeURIComponent(api)}`);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+}
+{% else %}
+
+// The connections of the mock users (ADR 0033) are a demonstration: a
+// connection starts at once, without an authorization server, and stays in
+// the browser tab. An app with a back end keeps the tokens on the server.
+const CONNECTIONS_KEY = {{ (app.name ~ "-connections") | tojson }};
+
+/** The APIs with the authorization code flow: the name in the paths, and the title. */
+function connectionApis(): { api: string; title: string }[] {
+  return [
+{% for api in ts_connections %}
+    { api: {{ api.connection_name | tojson }}, title: {{ tr(js(api.title)) }} }, {{ trace(api.id) }}
+{% endfor %}
+  ];
+}
+
+/** The time of each connection, by user and API. */
+function mockConnections(): Record<string, Record<string, string>> {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(CONNECTIONS_KEY) ?? "{}") as Record<string, Record<string, string>>;
+  } catch {
+    return {};
+  }
+}
+
+/** Keep the connections of a user. Return null, or the message of the error. */
+function saveConnections(userId: string, connections: Record<string, string>): string | null {
+  try {
+    window.sessionStorage.setItem(CONNECTIONS_KEY, JSON.stringify({ ...mockConnections(), [userId]: connections }));
+    return null;
+  } catch {
+    return {{ tr(js("The browser does not keep the session.")) }};
+  }
+}
+
+/** List the APIs with the authorization code flow, with the connections of the signed-in user. */
+export async function listConnections(): Promise<Connection[]> {
+  const userId = currentUserId();
+  if (userId === null) throw new Error({{ tr(js("Sign in to do this.")) }});
+  const own = mockConnections()[userId] ?? {};
+  return connectionApis().map(({ api, title }) => ({ api, title, connected: api in own, connectedAt: own[api] ?? null }));
+}
+
+/** Connect an account of an API at once, and show it on the page of the connections. Return null, or the message of the error. */
+export async function connectAccount(api: string): Promise<string | null> {
+  const userId = currentUserId();
+  if (userId === null) return {{ tr(js("Sign in to do this.")) }};
+  const message = saveConnections(userId, { ...mockConnections()[userId], [api]: new Date().toISOString() });
+  if (message === null) window.location.hash = new URLSearchParams({ connected: api }).toString();
+  return message;
+}
+
+/** Delete the connection of the signed-in user to an API. Return null, or the message of the error. */
+export async function disconnectAccount(api: string): Promise<string | null> {
+  const userId = currentUserId();
+  if (userId === null) return {{ tr(js("Sign in to do this.")) }};
+  const own = { ...mockConnections()[userId] };
+  delete own[api];
+  return saveConnections(userId, own);
+}
+{% endif %}
+{% endif %}

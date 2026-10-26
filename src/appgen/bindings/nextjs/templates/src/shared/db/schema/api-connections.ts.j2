@@ -1,0 +1,32 @@
+{% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{# The alias keeps the column type apart from the helper text() of the fixed texts. #}
+import { bigint, pgTable, text as textColumn, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
+
+import { {{ table.const }} } from "./{{ table.module }}";
+
+/**
+ * The tokens of the users for the APIs with the authorization code flow
+ * (ADR 0033), encrypted with a key from AUTH_SECRET. The FastAPI app has
+ * the same table.
+ */
+export const apiConnectionsTable = pgTable(
+  "api_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => {{ table.const }}.id, { onDelete: "cascade" }),
+    /** The name of the API in the definition. */
+    api: varchar("api", { length: 100 }).notNull(),
+    accessToken: textColumn("access_token").notNull(),
+    /** The refresh token, or null if the authorization server gave none. */
+    refreshToken: textColumn("refresh_token"),
+    /** The time (in seconds since 1970) at which the access token ends, or null if the server gave no time. */
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    /** The scopes that the user allowed, with spaces between. */
+    scope: textColumn("scope").notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("uq_api_connections_user_id_api").on(t.userId, t.api)],
+);

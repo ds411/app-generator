@@ -96,6 +96,13 @@ class TsJob:
     param_defaults: dict[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The default values of the params of the operation, by TypeScript key."""
     filter: TsFilter = field(default_factory=TsFilter)
+    user_key: str | None = None
+    """The key of the record with the ID of the user of a run (`user`, ADR 0033), for example
+    `ownerId`, or None."""
+    user_required: bool = True
+    """False if the record can have no user: a run for it does nothing."""
+    user_apis: list[str] = field(default_factory=list[str])
+    """The APIs with the authorization code flow that the operation calls."""
 
     @property
     def module(self) -> str:
@@ -219,7 +226,24 @@ class TsJob:
             ]
             given = "{ " + ", ".join(values) + " }" if values else "{}"
             args.append(f"{camel(self.operation)}ParamsSchema.parse({given})")
-        lines.append(format_ts(TsCall(camel(self.operation), args), 4, "await ", ";"))
+        call = TsCall(camel(self.operation), args)
+        if self.user_key is None:
+            lines.append(format_ts(call, 4, "await ", ";"))
+            return _block(lines, 4)
+        # The clients of the APIs send the token of the user of the record (ADR 0033).
+        lines.append(f"const userId = record.{self.user_key};")
+        checks = [f"!(await connected({json.dumps(api)}, userId))" for api in self.user_apis]
+        if not self.user_required:
+            checks.insert(0, "userId === null")
+        if checks:
+            lines.append(
+                f"if ({' || '.join(checks)}) {{\n"
+                "      // The user has not connected an API of the operation: do nothing.\n"
+                "      return;\n"
+                "    }"
+            )
+        work = f"() => {call.name}({', '.join(str(arg) for arg in args)})"
+        lines.append(format_ts(TsCall("asUser", ["userId", work]), 4, "await ", ";"))
         return _block(lines, 4)
 
     def imports(self) -> list[str]:
@@ -251,6 +275,9 @@ class TsJob:
             app.append(
                 _import(f"@/features/{operation}/api/{operation}.ext", [camel(self.operation)])
             )
+            if self.user_key is not None:
+                names = ["asUser", "connected"] if self.user_apis else ["asUser"]
+                app.append(_import("@/shared/auth/connections", names))
             tables = self.filter.tables | {self.table.const}
             app.append(_import("@/shared/db", ["getDb", *tables]))
         types = ["type JobResult"]
@@ -302,6 +329,15 @@ def ts_jobs(definition: AppDefinition, tables: dict[str, Table]) -> dict[str, Ts
                 result.at_name = job.at
                 result.offset = job.offset or "0m"
                 result.offset_ms = int(job.offset_delta().total_seconds() * 1000)
+            if job.user is not None:
+                relation = entity.relations.get(job.user)
+                result.user_key = "id" if relation is None else f"{camel(job.user)}Id"
+                result.user_required = relation is None or relation.required
+                result.user_apis = [
+                    api
+                    for api in definition.operations[job.operation].apis
+                    if definition.apis[api].user_flow
+                ]
             builder = _FilterBuilder(definition, tables, job.id, result.filter)
             conditions = [builder.filter(job.entity, path, c) for path, c in job.filter.items()]
             if conditions:

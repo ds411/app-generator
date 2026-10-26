@@ -7,6 +7,9 @@ import { z } from "zod";
 {% if definition.access %}
 import { ForbiddenError, requireOperation } from "@/shared/auth/access";
 {% endif %}
+{% if ts_connections %}
+import { NotConnectedError } from "@/shared/auth/connections";
+{% endif %}
 {% if definition.auth %}
 import { UnauthorizedError, requireUser } from "@/shared/auth/session";
 {% endif %}
@@ -111,7 +114,7 @@ export async function runAction<T>(
     return { ok: true, data };
   } catch (error) {
 {% if definition.auth %}
-    if (error instanceof UnauthorizedError{% if definition.access %} || error instanceof ForbiddenError{% endif %}) {
+    if (error instanceof UnauthorizedError{% if definition.access %} || error instanceof ForbiddenError{% endif %}{% if ts_connections %} || error instanceof NotConnectedError{% endif %}) {
       return { ok: false, error: { name: "Error", message: error.message } };
     }
 {% endif %}

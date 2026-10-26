@@ -103,6 +103,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 | Test language check   | `uv run scripts/translation_test.py [react] [nextjs]`      |
 | Sign-in UI check      | `uv run scripts/auth_ui_test.py [react] [nextjs]`          |
+| Connections UI check  | `uv run scripts/connection_ui_test.py [react] [nextjs] [react-api]` |
 
 ## Layout
 
@@ -258,6 +259,15 @@ the menu with the menu that the role allows and with an approved
 screenshot (`ui-tests/approved/<binding>/room-booking/<mode>/`), opens
 the pages that the role may not open, and checks the page actions. The
 pre-push hook runs it with `scripts/check-auth-ui.sh`.
+
+`scripts/connection_ui_test.py` checks the page `/connections` of the
+front ends (ADR 0033). It builds `tests/fixtures/api-connections.yaml`
+with React, Next.js, and React with the FastAPI app. The UI test
+`ui-tests/tests/connections.spec.ts` signs up, connects an account of
+the calendar API at the mock OAuth server, syncs a calendar, and
+disconnects the account. The script checks that the app sent the code
+and the token to the mock server. The pre-push hook runs it with
+`scripts/check-auth-ui.sh`.
 
 The check scripts reuse caches, so a second run is faster:
 
@@ -650,7 +660,9 @@ A webhook with `format: email` reads the inbound emails of Mailgun,
 Postmark, or SendGrid. Each third-party API has a typed client. With the
 authorization code flow of OAuth 2.0, a user connects an account of the
 service, and the client sends the token of the user ([ADR
-0033](docs/adr/0033-api-connections.md)).
+0033](docs/adr/0033-api-connections.md)). The Next.js app has the same
+flow, and the front ends show the page `/connections`, where a user
+connects and disconnects the accounts.
 Each operation has generated API tests that run against Postgres in a
 container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. `uv run python -m app.cli
