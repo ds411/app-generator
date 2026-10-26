@@ -1,0 +1,35 @@
+{% set w = ts_webhooks[name] %}
+{{ trace_header(element_id) }}
+import "server-only";
+
+{% if w.typed %}
+import type { z } from "zod";
+
+{% endif %}
+import {
+  {{ "checkStripe" if w.scheme == "stripe" else "checkHmacSha256" }},
+  {{ "eventIdInHeader" if w.event_header else "eventIdInBody" }},
+  receiveWebhook,
+} from "@/shared/webhooks";
+
+{% if w.typed %}
+import { type {{ w.body_type }}, {{ w.body_type }}Schema } from "../model/event";
+{% endif %}
+import { {{ w.handler }} } from "./{{ w.slice }}.ext";
+
+/**
+ * Receive an event of the webhook `{{ w.name }}`: check the signature ({{ w.scheme }}),
+ * and call `{{ w.handler }}` of the extension file one time for each event ID.
+ */
+export function {{ w.receive }}(request: Request): Promise<Response> {
+  return receiveWebhook(request, {
+    name: {{ w.name | tojson }},
+    secret: process.env.{{ w.secret_env }},
+    check: (secret, body, headers) => {{ w.check_call() }},
+    eventId: ({{ "_data" if w.event_header else "data" }}, {{ "headers" if w.event_header else "_headers" }}) => {{ w.event_id_call() }},
+{% if w.typed %}
+    schema: {{ w.body_type }}Schema as z.ZodType<{{ w.body_type }}>,
+{% endif %}
+    handle: {{ w.handler }},
+  });
+}

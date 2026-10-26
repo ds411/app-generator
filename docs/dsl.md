@@ -1016,9 +1016,22 @@ The keys of `signature`:
   event is a Pydantic model of the schema, or a `JsonValue` without
   `body`. Until the function has the logic, the endpoint gives 501. A
   `ProblemError` of the logic gives its status to the sender.
-- The Next.js binding does not generate the webhooks yet, so each
-  webhook is a gap of the Next.js app. The React app has no server, and
-  leaves out the webhooks.
+- The Next.js app has the route handler `app/<path>/route.ts` for each
+  webhook, and the feature slice `src/features/<webhook>-webhook/`. The
+  endpoint gives the same statuses and the same answer, and keeps the
+  event IDs in the table `webhook_events` too. It adds the row before
+  the logic runs, and removes the row when the logic fails. The changes
+  of the logic are not in the transaction of the row: when the logic
+  fails after a change, the change stays.
+- The logic of each webhook of the Next.js app is a gap: the function
+  `handle<Webhook>` in the extension file
+  `src/features/<webhook>-webhook/api/<webhook>-webhook.ext.ts`. It gets
+  the event and the headers of the request. The event has the TypeScript
+  type of the schema, and a zod schema of the type checks the body.
+  Without `body`, the event is `unknown`. Until the function has the
+  logic, the endpoint gives 501. A `WebhookError` of the logic gives its
+  status to the sender.
+- The React app has no server, and leaves out the webhooks.
 - The path of a webhook cannot be the path of another webhook, of a
   page, or of the endpoints of an entity (`duplicate-path`). It cannot
   be under a route of the apps, for example `/auth`, `/apis`, or `/docs`
@@ -2074,6 +2087,13 @@ use in the app does not show.
   `Send not more than {limit} requests in each minute.`, and with the
   store in Redis
   `The store of the rate limit is not available. Try again later.`.
+- The webhooks of the Next.js app:
+  `The server has no secret for the webhook {name}.`,
+  `The signature of the webhook is not valid.`,
+  `The body of the webhook is not valid JSON.`,
+  `The webhook has no event ID.`,
+  `The body of the webhook does not agree with its schema.`,
+  `The logic of the webhook failed. Deliver the event again later.`.
 
 ### Messages of the FastAPI app
 

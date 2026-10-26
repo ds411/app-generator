@@ -27,6 +27,7 @@ _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
+_WEBHOOK = "src/features/{{ ts_webhooks[name].slice }}"
 _DEPLOY_TARGET = Literal["kubernetes", "knative"]
 """A deployment target (`DEPLOY_TARGETS`)."""
 _VERIFY_EMAIL = (
@@ -393,6 +394,44 @@ BINDING = Binding(
             )
             for template in ("index.ts", "types.ts", "client.ts")
         ),
+        Output(
+            template="src/shared/db/schema/webhook-events.ts.j2",
+            path="src/shared/db/schema/webhook-events.ts",
+            when="ts_webhooks",
+        ),
+        *(
+            Output(
+                template=f"src/shared/webhooks/{module}.ts.j2",
+                path=f"src/shared/webhooks/{module}.ts",
+                when="ts_webhooks",
+            )
+            for module in ("index", "receive", "signature")
+        ),
+        Output(
+            template="app/webhook/route.ts.j2",
+            path="{{ ts_webhooks[name].route_file }}",
+            for_each="webhook",
+        ),
+        Output(
+            template="src/features/webhook/index.ts.j2",
+            path=_WEBHOOK + "/index.ts",
+            for_each="webhook",
+        ),
+        Output(
+            template="src/features/webhook/model/event.ts.j2",
+            path=_WEBHOOK + "/model/event.ts",
+            for_each="webhook",
+            when="ts_webhooks[name].typed",
+        ),
+        *(
+            Output(
+                template=f"src/features/webhook/api/webhook.{part}.ts.j2",
+                path=_WEBHOOK + "/api/{{ ts_webhooks[name].slice }}." + part + ".ts",
+                for_each="webhook",
+                extension=part == "ext",
+            )
+            for part in ("gen", "ext")
+        ),
         *gap_rules(),
         *_SHADCN,
         *_HOOKS,
@@ -424,6 +463,7 @@ BINDING = Binding(
         | {"email_verification", "second_factor"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
+        | {"webhook"}
         | {"entity_seed", "seed_record"}
     ),
     # The jobs of the Next.js app follow (#391).

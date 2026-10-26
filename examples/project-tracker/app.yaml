@@ -1227,6 +1227,12 @@ translations:
         Enter a number.: Geben Sie eine Zahl ein.
         No {entity} has the ID {id}.: Es gibt kein {entity} mit der ID {id}.
         Send not more than {limit} requests in each minute.: Senden Sie nicht mehr als {limit} Anfragen pro Minute.
+        The server has no secret for the webhook {name}.: Der Server hat kein Geheimnis für den Webhook {name}.
+        The signature of the webhook is not valid.: Die Signatur des Webhooks ist nicht gültig.
+        The body of the webhook is not valid JSON.: Der Inhalt des Webhooks ist kein gültiges JSON.
+        The webhook has no event ID.: Der Webhook hat keine Ereignis-ID.
+        The body of the webhook does not agree with its schema.: Der Inhalt des Webhooks entspricht nicht seinem Schema.
+        The logic of the webhook failed. Deliver the event again later.: Die Logik des Webhooks ist fehlgeschlagen. Liefern Sie das Ereignis später erneut.
         'The change breaks a rule of the data: a value must be unique, or other records refer to this record.': 'Die Änderung verletzt eine Regel der Daten: Ein Wert muss eindeutig sein, oder andere Datensätze verweisen auf diesen Datensatz.'
         "The field '{field}' refers to {entity} records that do not exist: {ids}.": "Das Feld '{field}' verweist auf {entity}-Datensätze, die es nicht gibt: {ids}."
         "The field '{field}' refers to {entity} {id}, which does not exist.": "Das Feld '{field}' verweist auf {entity} {id}, das es nicht gibt."

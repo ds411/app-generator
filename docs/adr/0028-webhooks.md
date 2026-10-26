@@ -103,8 +103,23 @@ The constraints:
 
 - The React app has no server, so it leaves out the kind `webhook` by
   design.
-- The Next.js binding does not generate the webhooks in this version:
-  each webhook is a gap of the Next.js app.
+- The Next.js app has a route handler `app/<path>/route.ts` for each
+  webhook, and a feature slice `src/features/<webhook>-webhook/`: the
+  function that receives the request (`api/<webhook>-webhook.gen.ts`),
+  the extension file with the gap function `handle<Webhook>`
+  (`api/<webhook>-webhook.ext.ts`), and the TypeScript types and zod
+  schemas of the schema (`model/event.ts`). The suffix `-webhook` keeps
+  the slice apart from the slice of an operation with the same name.
+- `src/shared/webhooks/` checks the signatures with `timingSafeEqual`,
+  and gives the same statuses and answers as the FastAPI app. The
+  Drizzle table `webhook_events` has the same columns and the same
+  unique constraint.
+- PGlite cannot nest a transaction, and the repositories of the app
+  open their own transactions. So the endpoint adds the row of the event
+  with `onConflictDoNothing` before it calls the logic, and deletes the
+  row when the logic fails. A failed logic thus keeps the changes that
+  it made before the error. A `WebhookError(status, message)` of the
+  logic gives its status to the sender.
 
 ## Consequences
 

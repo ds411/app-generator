@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from appgen.bindings.fastapi.webhooks import TEST_EVENT_ID, python_webhooks
+from appgen.bindings.fastapi.webhooks import python_webhooks
+from appgen.bindings.shared.webhooks import TEST_EVENT_ID
 from appgen.dsl import load_definition, load_definition_text
 from appgen.gen import GenerationResult, find_binding, generate
 
@@ -163,13 +164,8 @@ def test_the_manifest_has_the_hash_of_the_document(result: GenerationResult) -> 
     assert result.documents["webhooks/payments.openapi.yaml"] == f"sha256:{digest}"
 
 
-def test_the_front_ends_leave_out_the_webhooks() -> None:
-    definition = load_definition(EXAMPLE)
-
-    react = generate(definition, find_binding("react"))
-    nextjs = generate(definition, find_binding("nextjs"))
+def test_the_react_app_leaves_out_the_webhooks() -> None:
+    react = generate(load_definition(EXAMPLE), find_binding("react"))
 
     assert "webhook" in react.excluded_kinds
     assert "webhooks.commits" not in {gap.element_id for gap in react.gaps}
-    gaps = {gap.element_id: gap for gap in nextjs.gaps}
-    assert gaps["webhooks.commits"].path == "src/gaps/webhooks.commits.ext.ts"

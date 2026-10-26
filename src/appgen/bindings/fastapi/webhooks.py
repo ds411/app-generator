@@ -9,17 +9,13 @@ for the generated tests.
 """
 
 from dataclasses import dataclass, field
-from typing import cast
 
 from appgen.bindings.fastapi.integrations import PyApiModel, python_models
 from appgen.bindings.fastapi.pysource import call, from_import, literal, string
+from appgen.bindings.shared.webhooks import sample_event, sample_event_id
 from appgen.dsl.model import AppDefinition
-from appgen.dsl.openapi import Ref, ScalarSchema, property_chain, resolved, sample
 from appgen.dsl.webhooks import Webhook
 from appgen.gen.naming import snake
-
-TEST_EVENT_ID = "evt-1"
-"""The event ID of the sample body of the generated tests."""
 
 
 @dataclass(slots=True)
@@ -49,7 +45,9 @@ class PyWebhook:
     """The type of the event: the model of the schema of the body, or `JsonValue`."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
     sample: dict[str, object] = field(default_factory=dict[str, object])
-    """A valid body with the event ID `TEST_EVENT_ID`, for the generated tests."""
+    """A valid body with the event ID, for the generated tests (`sample_event`)."""
+    sample_event_id: str = ""
+    """The event ID of the sample body or of the header of the generated tests."""
 
     @property
     def handler(self) -> str:
@@ -69,16 +67,6 @@ class PyWebhook:
     def body_class(self) -> bool:
         """True if the type of the event is a Pydantic model (an object schema)."""
         return any(m.name == self.body_type and m.fields is not None for m in self.models)
-
-    @property
-    def sample_event_id(self) -> str:
-        """The event ID of the sample body or of the header of the generated tests."""
-        if self.event_header:
-            return TEST_EVENT_ID
-        value: object = self.sample
-        for name in self.event_field:
-            value = _member(value, name)
-        return str(value)
 
     def model_imports(self) -> list[str]:
         """Return the import lines of `models.py`."""
@@ -183,35 +171,9 @@ def _webhook(name: str, webhook: Webhook) -> PyWebhook:
     )
     spec = webhook.spec
     schema_name = webhook.body_schema
-    body: dict[str, object] = {}
     if schema_name is not None and spec.schemas:
         py.models = python_models(spec.schemas)
         py.body_type = schema_name
-        found = sample(Ref(schema_name), spec)
-        body = dict(found) if isinstance(found, dict) else {}
-    if event_id.field is not None:
-        value: object = TEST_EVENT_ID
-        chain = property_chain(Ref(schema_name), event_id.field, spec) if schema_name else None
-        if chain:
-            last = resolved(chain[-1].schema, spec)
-            if isinstance(last, ScalarSchema) and last.type == "integer":
-                value = 1
-        _set_path(body, event_id.path, value)
-    py.sample = body
+    py.sample = sample_event(webhook)
+    py.sample_event_id = sample_event_id(webhook, py.sample)
     return py
-
-
-def _member(value: object, name: str) -> object:
-    """Return a property of an object of a sample, or None."""
-    return cast(dict[str, object], value).get(name) if isinstance(value, dict) else None
-
-
-def _set_path(data: dict[str, object], path: tuple[str, ...], value: object) -> None:
-    """Set the value at a path of properties, with an object for each missing step."""
-    current = data
-    for name in path[:-1]:
-        step: object = current.get(name)
-        if not isinstance(step, dict):
-            step = current[name] = dict[str, object]()
-        current = cast(dict[str, object], step)
-    current[path[-1]] = value

@@ -158,6 +158,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-nextjs.sh' \
     'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' 'scripts/smoke_test.py' 'ui-tests/*' \
     'tests/fixtures/seed-data*' 'scripts/seed_test.py' \
+    'tests/fixtures/webhooks*' 'scripts/webhook_sender.py' 'scripts/webhook_test.py' \
     'scripts/mock_api.py' 'scripts/api_calls.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps nextjs"

@@ -134,6 +134,14 @@ spec:
                   name: {{ name }}-{{ api.secret_env | lower | replace("_", "-") }}
                   key: latest
 {% endfor %}
+{% for w in ts_webhooks.values() %}
+            {{ trace(w.id) }}
+            - name: {{ w.secret_env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-{{ w.secret_env | lower | replace("_", "-") }}
+                  key: latest
+{% endfor %}
           resources:
             limits:
               cpu: "1"

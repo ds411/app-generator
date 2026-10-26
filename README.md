@@ -430,7 +430,11 @@ slice (`server.ts`, only on the server). A server action returns its
 errors as data, and `<entity>Api` throws them again as `NotFoundError`
 or `ValidationError`. Each custom operation is a features slice with a
 server action (`.gen.ts`) that calls the extension file (`.ext.ts`),
-where the developer writes the logic. Custom UI parts (page content,
+where the developer writes the logic. Each webhook is a route handler
+`app/<path>/route.ts` that checks the signature of the sender and
+records the ID of each event, with a features slice
+`src/features/<webhook>-webhook/` whose extension file has the logic.
+Custom UI parts (page content,
 detail tabs and sections, dashboard widgets, form widgets, form rules,
 and actions) get the same generated and extension files as in the React
 app, from the shared templates in `gap/` and `appgen.bindings.shared.gaps`.

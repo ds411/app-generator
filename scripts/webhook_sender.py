@@ -7,9 +7,10 @@ test secret for each webhook, as environment variables for the app.
 
 The smoke test (`scripts/smoke_test.py`) starts the project tracker with
 these secrets, and calls `check_commits`: it sends the event of the
-webhook `commits` two times with a correct signature and one time with a
-wrong signature, and checks that the hand-written logic of the example
-adds one comment to the task.
+webhook `commits` two times with a correct signature, one time with a
+wrong signature, and one time with a body that does not agree with the
+schema. With the FastAPI app, it checks that the hand-written logic of
+the example adds one comment to the task.
 """
 
 import base64
@@ -75,14 +76,15 @@ def check_commits(
     base: str,
     task_id: str,
     author_email: str,
-    comments: Callable[[], int],
+    comments: Callable[[], int] | None,
     log: Callable[[str], None],
 ) -> None:
     """Send the event of the webhook `commits` of the project tracker, and check the comments.
 
-    `comments` gives the number of comments of the task. A correct
-    signature adds one comment, also when the event comes again, and a
-    wrong signature gives 401 and no comment.
+    `comments` gives the number of comments of the task, or None if the
+    app has no endpoint for it. A correct signature adds one comment, also
+    when the event comes again, a wrong signature gives 401 and no
+    comment, and a task ID that is not a UUID gives 422.
     """
     webhook = definition.webhooks["commits"]
     secret = secrets(definition)[webhook.signature.secret_env]
@@ -95,13 +97,18 @@ def check_commits(
     }
     body = json.dumps(event).encode()
     url = base + webhook.path
-    before = comments()
+    before = comments() if comments else 0
     wrong = send(url, body, sign(webhook, body, "a-wrong-secret"))
     if wrong.status != 401:
         raise WebhookError(f"POST {webhook.path} with a wrong signature gave {wrong.status}.")
-    if comments() != before:
+    if comments and comments() != before:
         raise WebhookError(f"POST {webhook.path} with a wrong signature added a comment.")
     log(f"POST {webhook.path} with a wrong signature gives 401")
+    invalid = json.dumps({**event, "id": f"evt-invalid-{task_id}", "task_id": "T-1"}).encode()
+    answer = send(url, invalid, sign(webhook, invalid, secret))
+    if answer.status != 422:
+        raise WebhookError(f"POST {webhook.path} with a task ID 'T-1' gave {answer.status}.")
+    log(f"POST {webhook.path} with a body that does not agree with the schema gives 422")
     for repeated in (False, True):
         answer = send(url, body, sign(webhook, body, secret))
         if answer.status != 200:
@@ -109,6 +116,9 @@ def check_commits(
         receipt = json.loads(answer.body)
         if receipt.get("repeated") is not repeated:
             raise WebhookError(f"POST {webhook.path} gave {receipt}, not repeated={repeated}.")
+    if comments is None:
+        log(f"POST {webhook.path} two times with one event ID runs the logic one time")
+        return
     added = comments() - before
     if added != 1:
         raise WebhookError(f"Two deliveries of one event added {added} comments, not 1.")

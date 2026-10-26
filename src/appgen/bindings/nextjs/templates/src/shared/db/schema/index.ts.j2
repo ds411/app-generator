@@ -6,3 +6,9 @@ export * from "./{{ table.module }}"; {{ trace(table.element_id) }}
 {% if definition.auth and definition.auth.password %}
 export * from "./credentials"; {{ trace(definition.auth.id) }}
 {% endif %}
+{% if ts_webhooks %}
+export * from "./webhook-events";
+{% for w in ts_webhooks.values() %}
+{{ trace(w.id) }}
+{% endfor %}
+{% endif %}

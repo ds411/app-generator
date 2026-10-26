@@ -10,7 +10,7 @@ clients of the two apps agree.
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from appgen.dsl.apis import Api
@@ -381,7 +381,7 @@ def _api(name: str, api: Api) -> TsApi:
         scopes=tuple(security.scopes) if security else (),
     )
     taken = {s.name for s in spec.schemas}
-    ts.types = sorted((_named(s) for s in spec.schemas), key=lambda t: t.name)
+    ts.types = ts_types(spec.schemas)
     methods: set[str] = set()
     for operation in spec.operations:
         description = api.operations[operation.id].description or operation.description
@@ -390,6 +390,11 @@ def _api(name: str, api: Api) -> TsApi:
             method = replace(method, endpoint=f"{ts.prefix}/{kebab(operation.id)}")
         ts.methods.append(method)
     return ts
+
+
+def ts_types(schemas: Iterable[NamedSchema]) -> list[TsType]:
+    """Return the TypeScript types of named schemas of the normal form, sorted by name."""
+    return sorted((_named(s) for s in schemas), key=lambda t: t.name)
 
 
 def _named(named: NamedSchema) -> TsType:

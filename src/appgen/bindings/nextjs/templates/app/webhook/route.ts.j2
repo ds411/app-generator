@@ -1,0 +1,8 @@
+{% set w = ts_webhooks[name] %}
+{{ trace_header(element_id) }}
+import { {{ w.receive }} } from "@/features/{{ w.slice }}";
+
+/** POST {{ w.path }}: an event of the webhook `{{ w.name }}`. */
+export async function POST(request: Request): Promise<Response> {
+  return {{ w.receive }}(request);
+}
