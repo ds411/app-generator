@@ -4860,6 +4860,22 @@
             }
           ],
           "default": null
+        },
+        "embed": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Text"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embed"
         }
       },
       "required": [

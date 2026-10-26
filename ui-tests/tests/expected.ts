@@ -15,6 +15,8 @@ export type ExpectedPage = {
   detail: boolean;
   /** The labels of the page actions that run an operation on the record, for example "Delete". */
   recordActions: string[];
+  /** The origins of the websites that can show the page in a frame (`embed`). */
+  embed: string[];
 };
 
 /** An ID that no record has. */

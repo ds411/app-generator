@@ -263,6 +263,13 @@ pages:
     path: /budget
     title: Budget
     content: { view: project_budget }
+  # Other websites can show this page in a frame (ADR 0032), for example
+  # the intranet of a customer. The page shows without the app shell.
+  holiday_widget:
+    path: /embed/holidays
+    title: Public holidays
+    content: { view: public_holidays }
+    embed: [https://partner.example]
 
 ui:
   theme:

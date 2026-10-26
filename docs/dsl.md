@@ -732,6 +732,7 @@ ignores the pages.
 | `actions`     | Actions in the page header (see [Actions](#actions)).                   |
 | `breadcrumb`  | The label in the breadcrumbs. Default: the label of the menu item of the page, else the title, or the display field of the record for a page with an entity and a path parameter. |
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
+| `embed`       | The origins of the websites that can show the page in a frame, for example `[https://www.example.com]` (see [Pages in frames](#pages-in-frames)). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
 longest prefix of the page path. Two pages cannot have the same path.
@@ -776,6 +777,44 @@ pages:
         confirm: { title: "Delete the task?", confirm_label: Delete }
         on_success: { toast: The task is deleted., navigate: task_board }
 ```
+
+### Pages in frames
+
+Other websites can show a public page of the app in a frame, for
+example a booking form on the website of a customer
+([ADR 0032](adr/0032-pages-in-frames.md)). `embed` lists the origins of
+these websites. The page then shows without the app shell: no sidebar,
+no top bar, and no header with the app title. The page search does not
+find it.
+
+```yaml
+pages:
+  holiday_widget:
+    path: /embed/holidays
+    title: Public holidays
+    content: { view: public_holidays }
+    embed: [https://www.example.com, https://intranet.example.com]
+```
+
+The other website shows the page with an `iframe`:
+
+```html
+<iframe src="https://tracker.example.org/embed/holidays" title="Public holidays"
+        width="100%" height="600" style="border: 0"></iframe>
+```
+
+- Only a public page takes `embed`: the definition has no `auth`, or the
+  page is in `auth.public_pages`. A page with `embed` has no `layout`.
+- Each origin is `https://`, a host name in lower case, and an optional
+  port, without a path, for example `https://www.example.com:8443`.
+- The Next.js app sends the header `Content-Security-Policy:
+  frame-ancestors 'self' <origins>` for the page (`next.config.ts`).
+  The nginx configuration of the Docker image of the React app sends
+  the same header. The servers of Vite (`pnpm dev`) do not send it.
+- The other pages send `frame-ancestors 'self'`: other websites cannot
+  show them in a frame.
+- A browser can block the cookies of the app in a frame of another
+  website. The page then shows in the language of the browser.
 
 ## workflows
 

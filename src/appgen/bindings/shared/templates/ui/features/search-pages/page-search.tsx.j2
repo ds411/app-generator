@@ -21,8 +21,15 @@ import { pageHref } from "@/shared/lib/pages";
 import { useNavigate } from "@/shared/lib/router";
 import { cn } from "@/shared/lib/utils";
 
+{% if ui_plan.embedded_pages %}
+/** The pages that the search finds: the pages without path parameters, and without `embed` (ADR 0032). */
+const searchPages = (Object.keys(pages) as PageName[]).filter(
+  (name) => !pages[name].path.includes("{"){% for info in ui_plan.embedded_pages %} && name !== {{ info.name | camel | tojson }}{% endfor %},
+);
+{% else %}
 /** The pages that the search finds: the pages without path parameters. */
 const searchPages = (Object.keys(pages) as PageName[]).filter((name) => !pages[name].path.includes("{"));
+{% endif %}
 
 /** A search button that opens a list of the pages{{ " that the user may open" if definition.access }}. Ctrl+K or Cmd+K opens it too. */
 export function PageSearch({ className }: { className?: string }) {

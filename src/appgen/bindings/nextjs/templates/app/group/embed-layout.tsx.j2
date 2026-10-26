@@ -1,0 +1,10 @@
+{{ trace_header(*(ui_plan.embedded_pages | map(attribute="page.id"))) }}
+import type { ReactNode } from "react";
+
+/**
+ * The frame of the pages with `embed` (ADR 0032): the page without the app
+ * shell, so that another website can show it in a frame.
+ */
+export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
+  return <main className="min-h-svh bg-background p-6 text-foreground">{children}</main>;
+}

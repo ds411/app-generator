@@ -163,10 +163,13 @@ class PageInfo:
     page: Page
     parent: str | None
     layout: str | None
-    """The effective layout: the page layout, else `ui.defaults.layout`."""
+    """The effective layout: the page layout, else `ui.defaults.layout`. None for a page with
+    `embed`."""
     params: tuple[str, ...]
     crumbs: tuple[tuple[str, str, bool], ...]
     """The breadcrumbs: (page name, label, label from the record)."""
+    embedded: bool = False
+    """True for a page with `embed`: it shows without the app shell (ADR 0032)."""
 
 
 @dataclass(slots=True)
@@ -194,8 +197,14 @@ class UiPlan:
         return utility if utility in self.typography else fallback
 
     def pages_of(self, layout: str | None) -> list[PageInfo]:
-        """Return the pages with an effective layout, in definition order."""
-        return [info for info in self.pages.values() if info.layout == layout]
+        """Return the pages with an effective layout, in definition order, without the pages
+        with `embed`."""
+        return [info for info in self.pages.values() if info.layout == layout and not info.embedded]
+
+    @property
+    def embedded_pages(self) -> list[PageInfo]:
+        """The pages with `embed`, in definition order."""
+        return [info for info in self.pages.values() if info.embedded]
 
 
 def menu_labels(definition: AppDefinition, layout: str | None) -> dict[str, str]:
@@ -254,9 +263,10 @@ def ui_plan(definition: AppDefinition) -> UiPlan:
             name=name,
             page=page,
             parent=page_parent(definition.pages, name),
-            layout=page.layout or default_layout,
+            layout=None if page.embed else page.layout or default_layout,
             params=tuple(page_params(page.path)),
             crumbs=crumbs,
+            embedded=page.embed is not None,
         )
     entities = {
         definition.pages[crumb[0]].entity

@@ -379,6 +379,28 @@ delete of a record deletes its files. The files of the records that the
 database deletes with `on_delete: cascade` stay in the storage.
 
 {% endif %}
+{% if ui_plan.embedded_pages %}
+## Pages in frames of other websites
+
+Other websites can show these pages in a frame (`embed`). The pages are
+in `app/(embed)/`, without the app shell. `next.config.ts` sends the
+header `Content-Security-Policy: frame-ancestors` with the websites of
+each page. The other pages send `frame-ancestors 'self'`, so that other
+websites cannot show them in a frame.
+
+| Page | Path | Websites |
+| ---- | ---- | -------- |
+{% for info in ui_plan.embedded_pages %}
+| `{{ info.name }}` | `{{ info.page.path }}` | {{ info.page.embed | join(", ") }} |
+{% endfor %}
+
+A website shows a page with an `iframe`, for example:
+
+```html
+<iframe src="https://app.example.com{{ ui_plan.embedded_pages[0].page.path }}" title="{{ ui_plan.embedded_pages[0].page.title }}" width="100%" height="600" style="border: 0"></iframe>
+```
+
+{% endif %}
 ## Structure
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

@@ -189,6 +189,11 @@ BINDING = Binding(
         Output(template="src/app/providers/index.tsx.j2", path="src/app/providers/index.tsx"),
         Output(template="src/app/layout/root-layout.tsx.j2", path="src/app/layout/root-layout.tsx"),
         Output(
+            template="src/app/layout/embed-layout.tsx.j2",
+            path="src/app/layout/embed-layout.tsx",
+            when="ui_plan.embedded_pages",
+        ),
+        Output(
             template="src/features/toggle-theme/index.ts.j2",
             path="src/features/toggle-theme/index.ts",
             when="react.mode_toggle",

@@ -1667,6 +1667,55 @@ def _check_email_webhook(webhook: Webhook) -> Iterator[Diagnostic]:
             )
 
 
+_ORIGIN = re.compile(
+    r"^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$"
+)
+"""An https origin: the scheme, a host name in lower case, and an optional port."""
+
+
+def check_pages(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A page with `embed` is public, has no layout, and names https origins (ADR 0032)."""
+    auth = definition.auth
+    for name, page in definition.pages.items():
+        if page.embed is None:
+            continue
+        if auth is not None and name not in auth.public_pages:
+            yield _error(
+                "invalid-option",
+                "Only a public page can show in a frame of another website.",
+                page,
+                at="embed",
+                hint=f"Add '{name}' to 'auth.public_pages', or remove the key 'embed'.",
+            )
+        if page.layout is not None:
+            yield _error(
+                "invalid-option",
+                "A page with 'embed' shows without the app shell, so it has no layout.",
+                page,
+                at="layout",
+                hint="Remove the key 'layout'.",
+            )
+        seen: set[str] = set()
+        for origin in page.embed:
+            if not _ORIGIN.match(origin):
+                yield _error(
+                    "invalid-value",
+                    f"{_show(origin)} is not an https origin.",
+                    page,
+                    at="embed",
+                    hint="Give the scheme 'https://', the host name in lower case, and an "
+                    "optional port, without a path: for example 'https://www.example.com'.",
+                )
+            elif origin in seen:
+                yield _error(
+                    "duplicate-value",
+                    f"The origin '{origin}' is in the list two times.",
+                    page,
+                    at="embed",
+                )
+            seen.add(origin)
+
+
 def _setting_envs(definition: AppDefinition) -> dict[str, str]:
     """Return the key of each environment variable of the APIs and the storage, by variable."""
     envs: dict[str, str] = {}
@@ -2335,6 +2384,7 @@ CHECKS: list[Check] = [
     check_access,
     check_apis,
     check_webhooks,
+    check_pages,
     check_seed,
     check_ui_tokens,
     check_ui_views,

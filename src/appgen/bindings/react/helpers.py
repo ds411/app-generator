@@ -40,6 +40,22 @@ def route_path(path: str) -> str:
     return _PARAM.sub(lambda match: ":" + match.group(1), path)
 
 
+def frame_rules(definition: AppDefinition) -> list[tuple[str, str]]:
+    """Return the pattern of the request URI and the `frame-ancestors` of each page with
+    `embed`, for the map of `nginx.conf` (ADR 0032)."""
+    rules: list[tuple[str, str]] = []
+    for page in definition.pages.values():
+        if not page.embed:
+            continue
+        segments = [segment for segment in page.path.split("/") if segment]
+        path = "".join(
+            "/" + ("[^/?]+" if _PARAM.fullmatch(segment) else re.escape(segment))
+            for segment in segments
+        )
+        rules.append((f"~^{path}/?(\\?|$)", " ".join(["'self'", *page.embed])))
+    return rules
+
+
 def route_params(path: str) -> list[str]:
     """Return the names of the path parameters of a page path, in order."""
     return _PARAM.findall(path)
@@ -139,6 +155,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # The events (ADR 0031): the mock store runs their operations. With the
             # FastAPI app, the FastAPI app runs them.
             "events": has_events(definition) and not api,
+            "frame_rules": frame_rules(definition),
         },
     }
 

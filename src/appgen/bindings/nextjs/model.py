@@ -5,6 +5,7 @@ paths that the Next.js app uses for the elements of a definition, so that
 the templates do not compute them again in Jinja2.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -88,6 +89,8 @@ def route_dir(path: str) -> tuple[str, tuple[str, ...]]:
 
 BARE_GROUP = "(bare)"
 """The route group of the pages without a layout."""
+EMBED_GROUP = "(embed)"
+"""The route group of the pages with `embed`: without the app shell (ADR 0032)."""
 
 
 def route_group(layout: str | None) -> str:
@@ -105,8 +108,24 @@ def page_info(name: str, page: Page, layout: str | None = None) -> PageInfo:
         component=f"{pascal(name)}Page",
         route_dir=folder,
         params=params,
-        group=route_group(layout),
+        group=EMBED_GROUP if page.embed else route_group(layout),
     )
+
+
+def route_source(path: str) -> str:
+    """Return the `source` of a page path in `next.config.ts`: `/rooms/{id}` gives
+    `/rooms/:id`."""
+    return re.sub(r"\{([^}]+)\}", r":\1", path)
+
+
+def frame_headers(definition: AppDefinition) -> list[tuple[str, str, str]]:
+    """Return the page ID, the `source`, and the `frame-ancestors` of each page with `embed`
+    (ADR 0032)."""
+    return [
+        (page.id, route_source(page.path), " ".join(["'self'", *page.embed]))
+        for page in definition.pages.values()
+        if page.embed
+    ]
 
 
 def package_json(definition: AppDefinition) -> dict[str, Any]:
@@ -217,7 +236,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     components = shadcn.used_components(definition)
     ui = definition.ui
     default_layout = ui.defaults.layout if ui is not None and ui.defaults else None
-    groups = {info.layout for info in plan.pages.values()}
+    groups = {info.layout for info in plan.pages.values() if not info.embedded}
     theme = ui.theme if ui is not None else None
     tables = build_tables(definition)
     by_entity = {table.entity: table for table in tables}
@@ -267,5 +286,6 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "upload_limit": upload_limit(definition),
             # The events (ADR 0031): the repositories run their operations.
             "events": has_events(definition),
+            "frame_headers": frame_headers(definition),
         },
     }
