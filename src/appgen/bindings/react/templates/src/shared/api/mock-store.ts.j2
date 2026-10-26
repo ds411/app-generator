@@ -57,6 +57,29 @@ function idsOf(value: unknown): string[] {
 }
 
 {% endif %}
+{% if react.events %}
+/** The custom operation of an event (ADR 0031): it gets the record after the change. */
+export type EventOperation<T> = (record: T) => Promise<void>;
+
+/** The events of an entity (ADR 0031): the custom operations that run after a change of a record. */
+export type Events<T> = {
+  created?: EventOperation<T>;
+  /** Runs when a field of `keys` has a new value. */
+  changed?: { keys: string[]; run: EventOperation<T> };
+  deleted?: EventOperation<T>;
+  /** The transitions of the workflows with `run`: a change of `field` from a state of `from` to `to`. */
+  transitions?: { field: string; from: string[]; to: string; run: EventOperation<T> }[];
+};
+
+/** True while the operation of an event runs: its changes start no event. */
+let inEvent = false;
+
+/** Return true if two values of a field are the same. */
+function sameValue(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
+{% endif %}
 /** A change of state that no transition of a workflow allows. */
 export class TransitionError extends Error {
   constructor(message: string) {
@@ -87,6 +110,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {
   private records: T[];
   private readonly listeners = new Set<() => void>();
+{% if react.events %}
+  private events: Events<T> = {};
+{% endif %}
 
   constructor(
     private readonly entity: string,
@@ -143,7 +169,13 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.records = [...this.records, record];
     this.notify();
+{% if react.events %}
+    const created = this.events.created;
+    await this.runEvents(record, created ? [created] : []);
+    return this.show(this.current(record));
+{% else %}
     return this.show(record);
+{% endif %}
   }
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
@@ -162,16 +194,42 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
+{% if react.events %}
+    await this.runEvents(record, this.changeEvents(before, record));
+    return this.show(this.current(record));
+{% else %}
     return this.show(record);
+{% endif %}
   }
 
   async remove(id: string): Promise<void> {
     await wait();
+{% if react.events %}
+    const record = this.find(id{{ ', "change"' if record_rules }});
+{% else %}
     this.find(id{{ ', "change"' if record_rules }});
+{% endif %}
     this.records = this.records.filter((item) => item.id !== id);
     this.notify();
+{% if react.events %}
+    const deleted = this.events.deleted;
+    await this.runEvents(record, deleted ? [deleted] : []);
+{% endif %}
   }
 
+{% if react.events %}
+  /**
+   * Set the events of the entity (ADR 0031). The store runs the operation
+   * of an event after the change, as a demonstration of the events of the
+   * back ends. It has no transactions: a failed operation gives its
+   * error, and the change stays.
+   */
+  withEvents(events: Events<T>): this {
+    this.events = events;
+    return this;
+  }
+
+{% endif %}
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -273,6 +331,45 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 {% endif %}
 
+{% if react.events %}
+  /**
+   * Return the operations of the events of a change: the transitions with
+   * `run` first, then `changed` if a field that it watches has a new value.
+   */
+  private changeEvents(before: T, after: T): EventOperation<T>[] {
+    const was = before as Record<string, unknown>;
+    const now = after as Record<string, unknown>;
+    const operations = (this.events.transitions ?? [])
+      .filter(({ field, from, to }) => now[field] === to && was[field] !== to && from.includes(String(was[field])))
+      .map(({ run }) => run);
+    const changed = this.events.changed;
+    if (changed !== undefined && changed.keys.some((key) => !sameValue(was[key], now[key]))) {
+      operations.push(changed.run);
+    }
+    return operations;
+  }
+
+  /** Run the operations of the events of a change, in order. A change in an operation starts no event. */
+  private async runEvents(record: T, operations: EventOperation<T>[]): Promise<void> {
+    if (operations.length === 0 || inEvent) {
+      return;
+    }
+    inEvent = true;
+    try {
+      for (const operation of operations) {
+        await operation(this.show(record));
+      }
+    } finally {
+      inEvent = false;
+    }
+  }
+
+  /** Return the stored record with the ID of a record, as the operations of the events leave it. */
+  private current(record: T): T {
+    return this.records.find((item) => item.id === record.id) ?? record;
+  }
+
+{% endif %}
   private notify(): void {
     for (const listener of this.listeners) {
       listener();

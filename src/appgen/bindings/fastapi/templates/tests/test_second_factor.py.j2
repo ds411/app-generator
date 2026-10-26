@@ -121,10 +121,12 @@ async def test_each_code_is_valid_one_time(
 ) -> None:
     user = await _user(session)
     secret, _ = await _turn_on(anonymous_client, user)
-    first = await _second_step(anonymous_client, user, _code(secret, 1))
+    # One code for both steps: the time step can change between two calls of _code.
+    code = _code(secret, 1)
+    first = await _second_step(anonymous_client, user, code)
     assert first.status_code == 200, first.text
 
-    again = await _second_step(anonymous_client, user, _code(secret, 1))
+    again = await _second_step(anonymous_client, user, code)
 
     assert_problem(again, 401)
     # The code of the confirmation is used too.
@@ -199,10 +201,11 @@ async def test_a_user_turns_off_the_factor_with_a_code(
 ) -> None:
     user = await _user(session{{ (", " ~ role.attr ~ "=" ~ py.string(free_roles[0])) if role }})
     secret, codes = await _turn_on(anonymous_client, user)
-    response = await _second_step(anonymous_client, user, _code(secret, 1))
+    code = _code(secret, 1)
+    response = await _second_step(anonymous_client, user, code)
     headers = _bearer(response.json()["access_token"])
     used = await anonymous_client.post(
-        "/auth/second-factor/disable", json={"code": _code(secret, 1)}, headers=headers
+        "/auth/second-factor/disable", json={"code": code}, headers=headers
     )
     assert_problem(used, 401)
 

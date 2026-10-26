@@ -56,7 +56,7 @@ import { deleteFiles, type StoredFile } from "@/shared/storage";
 {% if record_rules or translatable or storage %}
 
 {% endif %}
-import { type Database, getDb } from "./client";
+import { type Database, getDb{{ ", runEvent" if nextjs.events }} } from "./client";
 
 type Row = Record<string, unknown>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -109,6 +109,24 @@ export type Workflow = {
   message?: string;
 };
 
+{% if nextjs.events %}
+/** The custom operation of an event (ADR 0031): it gets the record after the change. */
+export type EventOperation<T> = (record: T) => Promise<void>;
+
+/**
+ * The events of an entity (ADR 0031): the custom operations that run after
+ * a change of a record, in the transaction of the change.
+ */
+export type Events<T> = {
+  created?: EventOperation<T>;
+  /** Runs when a field of `keys` has a new value. */
+  changed?: { keys: string[]; run: EventOperation<T> };
+  deleted?: EventOperation<T>;
+  /** The transitions of the workflows with `run`: a change of `field` from a state of `from` to `to`. */
+  transitions?: { field: string; from: string[]; to: string; run: EventOperation<T> }[];
+};
+
+{% endif %}
 {% if record_rules %}
 /**
  * The options of a create: the records that the user may use (ADR 0025),
@@ -140,6 +158,10 @@ export type RepositoryOptions<T> = {
   noOverlap?: OverlapRule[];
   /** The workflows of the entity. A change that no transition allows gives a ValidationError. */
   workflows?: Workflow[];
+{% if nextjs.events %}
+  /** The events of the entity. An error of an operation rolls back the change. */
+  events?: Events<T>;
+{% endif %}
 {% if translatable %}
   /**
    * The keys of the translatable fields (ADR 0026). The table keeps the
@@ -213,6 +235,14 @@ function toColumnValue(column: Column, value: unknown): unknown {
   return value;
 }
 
+{% if nextjs.events %}
+/** Return true if two values of a column are the same: two equal times, or two equal JSON values. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
+{% endif %}
 /** Return a value of a row as the record has it: a Date becomes an ISO 8601 text. */
 function toRecordValue(value: unknown): unknown {
   return value instanceof Date ? value.toISOString() : value;
@@ -252,6 +282,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
   private readonly compare: CompareRule[];
   private readonly noOverlap: OverlapRule[];
   private readonly workflows: Workflow[];
+{% if nextjs.events %}
+  private readonly events: Events<T>;
+{% endif %}
 {% if translatable %}
   private readonly translatable: string[];
 {% endif %}
@@ -270,6 +303,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.compare = options.compare ?? [];
     this.noOverlap = options.noOverlap ?? [];
     this.workflows = options.workflows ?? [];
+{% if nextjs.events %}
+    this.events = options.events ?? {};
+{% endif %}
 {% if translatable %}
     this.translatable = options.translatable ?? [];
 {% endif %}
@@ -382,6 +418,13 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if definition.auth and definition.auth.sign_up %}
       await {{ "options.then" if record_rules else "then" }}?.(tx, record as T);
 {% endif %}
+{% if nextjs.events %}
+      const created = this.events.created;
+      if (created !== undefined && (await this.runEvents(tx, record as T, [created]))) {
+        // The operation of the event can change the record.
+        return this.reread(tx, String(row.id));
+      }
+{% endif %}
       return record as T;
     });
   }
@@ -396,11 +439,16 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
     return getDb().transaction(async (tx) => {
 {% if translatable %}
-      const reads = this.workflows.length > 0 || this.translatable.length > 0;
+      const reads = this.workflows.length > 0 || this.translatable.length > 0{{ " || this.events.changed !== undefined" if nextjs.events }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(
         before[0] ? { ...patch, ...storeTranslations(before[0], patch, this.translatable) } : patch,
       );
+{% elif nextjs.events %}
+      // The workflows and the event `changed` compare the record before and after the change.
+      const reads = this.workflows.length > 0 || this.events.changed !== undefined;
+      const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
+      const values = this.toRow(patch);
 {% else %}
       const before: Row[] =
         this.workflows.length > 0 ? await tx.select().from(this.table).where(where).limit(1) : [];
@@ -418,6 +466,12 @@ export class Repository<T extends EntityRecord, TInput extends object>
       await this.checkScope(tx, id, scope);
 {% endif %}
       const [record] = await this.toRecords(tx, rows);
+{% if nextjs.events %}
+      if (await this.runEvents(tx, record as T, this.changeEvents(before[0], rows[0] as Row))) {
+        // The operations of the events can change the record.
+        return this.reread(tx, id);
+      }
+{% endif %}
       return record as T;
     });
   }
@@ -427,19 +481,35 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if record_rules %}
   async remove(id: string, scope: RecordScope | null = null): Promise<void> {
-    const rows: Row[] = await getDb()
-      .delete(this.table)
-      .where(this.byId(id, scope))
-      .returning({{ "" if storage else "{ id: this.table.id }" }});
-    this.found(rows, id);
+{% set where = "this.byId(id, scope)" %}
 {% else %}
   async remove(id: string): Promise<void> {
+{% set where = "eq(this.table.id, id)" %}
+{% endif %}
+{% if nextjs.events %}
+    const deleted = this.events.deleted;
+    if (deleted !== undefined) {
+      // The operation of the event gets the record, in the transaction of the delete.
+      {{ "const removed: Row[] = " if storage }}await getDb().transaction(async (tx) => {
+        const rows: Row[] = await tx.select().from(this.table).where({{ where }}).limit(1);
+        const [record] = await this.toRecords(tx, this.found(rows, id));
+        await tx.delete(this.table).where(eq(this.table.id, id));
+        await this.runEvents(tx, record as T, [deleted]);
+{% if storage %}
+        return rows;
+{% endif %}
+      });
+{% if storage %}
+      await deleteFiles(Object.keys(this.files).map((key) => removed[0]?.[key] as StoredFile | null));
+{% endif %}
+      return;
+    }
+{% endif %}
     const rows: Row[] = await getDb()
       .delete(this.table)
-      .where(eq(this.table.id, id))
+      .where({{ where }})
       .returning({{ "" if storage else "{ id: this.table.id }" }});
     this.found(rows, id);
-{% endif %}
 {% if storage %}
     await deleteFiles(Object.keys(this.files).map((key) => rows[0]?.[key] as StoredFile | null));
 {% endif %}
@@ -496,6 +566,53 @@ export class Repository<T extends EntityRecord, TInput extends object>
       const [record] = await this.toRecords(tx, changed);
       return { record: record as T, before };
     });
+  }
+{% endif %}
+{% if nextjs.events %}
+
+  /**
+   * Return the operations of the events of a change (ADR 0031): the
+   * transitions with `run` first, then `changed` if a field that it
+   * watches has a new value.
+   */
+  private changeEvents(before: Row | undefined, after: Row): EventOperation<T>[] {
+    if (before === undefined) {
+      return [];
+    }
+    const operations = (this.events.transitions ?? [])
+      .filter(
+        ({ field, from, to }) =>
+          after[field] === to && before[field] !== to && from.includes(String(before[field])),
+      )
+      .map(({ run }) => run);
+    const changed = this.events.changed;
+    if (changed !== undefined && changed.keys.some((key) => !sameValue(before[key], after[key]))) {
+      operations.push(changed.run);
+    }
+    return operations;
+  }
+
+  /**
+   * Run the operations of the events of a change in the transaction of the
+   * change, in order. Return false if none runs: a change in the operation
+   * of an event starts no event.
+   */
+  private async runEvents(tx: Transaction, record: T, operations: EventOperation<T>[]): Promise<boolean> {
+    if (operations.length === 0) {
+      return false;
+    }
+    return runEvent(tx, async () => {
+      for (const operation of operations) {
+        await operation(record);
+      }
+    });
+  }
+
+  /** Return the record of an ID as the transaction has it, for example after the events. */
+  private async reread(tx: Transaction, id: string): Promise<T> {
+    const rows: Row[] = await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+    const [record] = await this.toRecords(tx, this.found(rows, id));
+    return record as T;
   }
 {% endif %}
 

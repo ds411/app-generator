@@ -13,6 +13,7 @@ from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
+from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
@@ -135,6 +136,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
             "api": api,
+            # The events (ADR 0031): the mock store runs their operations. With the
+            # FastAPI app, the FastAPI app runs them.
+            "events": has_events(definition) and not api,
         },
     }
 
@@ -160,5 +164,6 @@ def warnings(definition: AppDefinition) -> Iterator[str]:
 HELPERS: dict[str, Callable[..., Any]] = {
     "route_path": route_path,
     "route_params": route_params,
+    "ts_events": ts_events,
     **TYPESCRIPT_HELPERS,
 }

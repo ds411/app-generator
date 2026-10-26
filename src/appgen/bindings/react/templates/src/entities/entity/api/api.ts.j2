@@ -10,6 +10,7 @@
 {% endif %}
 {%- endmacro %}
 {% set store = "HttpStore" if react.api else "MockStore" %}
+{% set events = ts_events(definition, name) %}
 {# With mock data, the store applies the record rules of the entity (ADR 0018, ADR 0025). #}
 {% set rule = record_rules.get(name) if not react.api else none %}
 {% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded else []) %}
@@ -45,6 +46,13 @@ export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_val
 
 /** The records of {{ type }} for a choice, with the text of the display field: the server searches them. */
 export const {{ var }}Options = {{ var }}Api.options((item) => String(item.{{ api.display }} ?? ""));
+{% if events %}
+
+// The FastAPI app runs the events of {{ type }} (ADR 0031).
+{% for event in events %}
+{{ trace(event.element_id) }}
+{% endfor %}
+{% endif %}
 {% else %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";
@@ -105,7 +113,46 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
 {% endif %}
   },
 {% endif %}
+{% if events %}
+).withEvents({
+  // The events (ADR 0031). The store imports the extension file of an
+  // operation when its event runs, because the operation imports the store.
+{% for event in events | rejectattr("kind", "eq", "transition") %}
+{% if event.kind == "changed" %}
+  changed: { {{ trace(event.element_id, scope="begin") }}
+    keys: {{ ts_value(event.keys | list) }},
+    run: async (record) => {
+      const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+      await {{ event.call(parse=False) }};
+    },
+  }, {{ trace(event.element_id, scope="end") }}
+{% else %}
+  {{ event.kind }}: async (record) => { {{ trace(event.element_id, scope="begin") }}
+    const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+    await {{ event.call(parse=False) }};
+  }, {{ trace(event.element_id, scope="end") }}
+{% endif %}
+{% endfor %}
+{% set transitions = events | selectattr("kind", "eq", "transition") | list %}
+{% if transitions %}
+  transitions: [
+{% for event in transitions %}
+    { {{ trace(event.element_id, scope="begin") }}
+      field: {{ ts_value(event.field) }},
+      from: {{ ts_value(event.before | list) }},
+      to: {{ ts_value(event.after) }},
+      run: async (record) => {
+        const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+        await {{ event.call(parse=False) }};
+      },
+    }, {{ trace(event.element_id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
+});
+{% else %}
 );
+{% endif %}
 {% endif %}
 {% for op_name, op in ops %}
 

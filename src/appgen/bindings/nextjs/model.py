@@ -14,6 +14,7 @@ from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
+from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -264,5 +265,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "jobs": jobs,
             "cron_jobs": cron_jobs(f"{definition.app.name}-web", jobs),
             "upload_limit": upload_limit(definition),
+            # The events (ADR 0031): the repositories run their operations.
+            "events": has_events(definition),
         },
     }

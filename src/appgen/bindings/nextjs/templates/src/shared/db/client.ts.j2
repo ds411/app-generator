@@ -1,7 +1,8 @@
 {{ trace_header("app") }}
 import "server-only";
 
-{% if nextjs.jobs %}
+{% set ambient = nextjs.jobs or nextjs.events %}
+{% if ambient %}
 import { AsyncLocalStorage } from "node:async_hooks";
 
 {% endif %}
@@ -10,21 +11,27 @@ import { connect, type Database } from "./connect";
 export { type Database, usesPglite } from "./connect";
 
 const globalForDb = globalThis as unknown as { appgenDb?: Database };
-{% if nextjs.jobs %}
+{% if ambient %}
 
-/** The transaction of the work in `inTransaction()`. */
+/** The transaction of {{ "the work in `inTransaction()`" if nextjs.jobs }}{{ " and of " if nextjs.jobs and nextjs.events }}{{ "the operation of an event" if nextjs.events }}. */
 const ambient = new AsyncLocalStorage<Database>();
+{% endif %}
+{% if nextjs.events %}
+
+/** True in the operation of an event (ADR 0031). */
+const inEvent = new AsyncLocalStorage<true>();
 {% endif %}
 
 /**
  * Return the database client. It connects on the first call, so that
  * `next build` needs no database. In development, the client survives
  * hot reloads.{% if nextjs.jobs %} In the work of `inTransaction()`, it returns the
- * transaction.{% endif %}
+ * transaction.{% endif %}{% if nextjs.events %} In the operation of an event, it returns the
+ * transaction of the change.{% endif %}
 
  */
 export function getDb(): Database {
-{% if nextjs.jobs %}
+{% if ambient %}
   const transaction = ambient.getStore();
   if (transaction) {
     return transaction;
@@ -51,5 +58,23 @@ export function getDb(): Database {
  */
 export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
   return getDb().transaction((transaction) => ambient.run(transaction, work));
+}
+{% endif %}
+{% if nextjs.events %}
+
+/**
+ * Run the operation of an event (ADR 0031) in the transaction of a change.
+ * In the operation, `getDb()` returns the transaction, so the repositories
+ * write in it, and an error rolls back the change. A change in the
+ * operation starts no event: the events stop after one level. Return
+ * false if the operation does not run, because the change is in the
+ * operation of an event.
+ */
+export async function runEvent(transaction: Database, operation: () => Promise<void>): Promise<boolean> {
+  if (inEvent.getStore()) {
+    return false;
+  }
+  await inEvent.run(true, () => ambient.run(transaction, operation));
+  return true;
 }
 {% endif %}

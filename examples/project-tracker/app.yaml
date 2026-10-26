@@ -91,6 +91,9 @@ entities:
         on_delete: set_null
         inverse: assigned_tasks
       comments: { kind: one_to_many, target: Comment, inverse: task }
+    events:
+      # A new status sets the time of the completion, or clears it.
+      changed: { operation: record_completion, fields: [status] }
 
   Comment:
     crud: [create, list, delete]
@@ -127,6 +130,10 @@ operations:
     entity: Task
     description: Set the task to done and record the time.
     returns: Task
+  record_completion:
+    kind: custom
+    entity: Task
+    description: Set the completion time of a task that is done, and clear it for other tasks.
   schedule_task:
     kind: custom
     entity: Task

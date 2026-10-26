@@ -163,6 +163,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/jobs.yaml' 'tests/fixtures/jobs-extensions/*' 'scripts/jobs_test.py' \
     'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
     'tests/fixtures/files*' 'scripts/files_test.py' \
+    'tests/fixtures/events.yaml' 'tests/fixtures/events-extensions/*' 'scripts/events_test.py' \
     'scripts/mock_api.py' 'scripts/api_calls.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps nextjs"

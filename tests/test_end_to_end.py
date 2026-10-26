@@ -20,18 +20,10 @@ EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.y
 runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
-# app has no pages and no UI, and a front-end app has no webhooks. The
-# front ends run the events later (#392).
+# app has no pages and no UI, and a front-end app has no webhooks.
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": ["event"],
-    "react": [
-        "entity_compare_rule",
-        "entity_overlap_rule",
-        "entity_unique_rule",
-        "event",
-        "job",
-        "webhook",
-    ],
+    "nextjs": [],
+    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "job", "webhook"],
     "fastapi": ["page", "ui"],
 }
 
@@ -41,6 +33,7 @@ CUSTOM_OPERATIONS = {
     "operations.archive_project",
     "operations.assign_task",
     "operations.complete_task",
+    "operations.record_completion",
     "operations.schedule_task",
 }
 CUSTOM_UI = {

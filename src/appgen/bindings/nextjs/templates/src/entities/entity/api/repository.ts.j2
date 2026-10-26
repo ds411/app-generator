@@ -14,6 +14,11 @@ import { {{ condition.operators | join(", ") }} } from "drizzle-orm";
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
 import { Repository } from "@/shared/db/repository";
 
+{% set events = ts_events(definition, name) %}
+{% set schemas = events | map(attribute="schema") | select | unique | sort | list %}
+{% if schemas %}
+import { {{ schemas | join(", ") }} } from "../model/schema";
+{% endif %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 
 /** The data access of {{ type }} in the database. Use it only on the server. */
@@ -114,5 +119,43 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
     }, {{ trace(w.id, scope="end") }}
 {% endfor %}
   ],
+{% endif %}
+{% if events %}
+  events: {
+    // The events (ADR 0031). The repository imports the extension file of an
+    // operation when its event runs, because the operation imports the repository.
+{% for event in events | rejectattr("kind", "eq", "transition") %}
+{% if event.kind == "changed" %}
+    changed: { {{ trace(event.element_id, scope="begin") }}
+      keys: {{ ts_value(event.keys | list) }},
+      run: async (record) => {
+        const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+        await {{ event.call() }};
+      },
+    }, {{ trace(event.element_id, scope="end") }}
+{% else %}
+    {{ event.kind }}: async (record) => { {{ trace(event.element_id, scope="begin") }}
+      const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+      await {{ event.call() }};
+    }, {{ trace(event.element_id, scope="end") }}
+{% endif %}
+{% endfor %}
+{% set transitions = events | selectattr("kind", "eq", "transition") | list %}
+{% if transitions %}
+    transitions: [
+{% for event in transitions %}
+      { {{ trace(event.element_id, scope="begin") }}
+        field: {{ ts_value(event.field) }},
+        from: {{ ts_value(event.before | list) }},
+        to: {{ ts_value(event.after) }},
+        run: async (record) => {
+          const { {{ event.function }} } = await import({{ ts_value(event.module) }});
+          await {{ event.call() }};
+        },
+      }, {{ trace(event.element_id, scope="end") }}
+{% endfor %}
+    ],
+{% endif %}
+  },
 {% endif %}
 });
