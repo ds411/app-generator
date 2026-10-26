@@ -508,7 +508,8 @@ function check(ok, message) {
     await entry.waitFor({ timeout });
     const restored = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname.endsWith("/restore") && response.request().method() === "POST",
+        new URL(response.url()).pathname.endsWith("/restore") &&
+        response.request().method() === "POST",
       { timeout },
     );
     await entry.getByRole("button", { name: "Restore", exact: true }).click();
