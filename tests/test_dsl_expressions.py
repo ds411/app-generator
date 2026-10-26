@@ -9,8 +9,10 @@ from appgen.dsl.expressions import (
     FieldRef,
     Negate,
     Number,
+    Total,
     date_paths,
     expression_paths,
+    expression_totals,
     parse_expression,
 )
 
@@ -35,6 +37,23 @@ def test_a_function_takes_field_paths() -> None:
     assert list(date_paths(expression)) == ["starts_at", "ends_at"]
 
 
+def test_a_total_counts_or_adds_the_records_of_a_relation() -> None:
+    expression = parse_expression("sum(lines.amount) - discount + count(votes) * 2")
+    assert expression == Binary(
+        "+",
+        Binary("-", Total("sum", "lines", "amount"), FieldRef("discount")),
+        Binary("*", Total("count", "votes"), Number("2")),
+    )
+    assert list(expression_paths(expression)) == ["discount"]
+    assert list(expression_totals(expression)) == [
+        Total("sum", "lines", "amount"),
+        Total("count", "votes"),
+    ]
+    assert [str(t) for t in expression_totals(expression)] == ["sum(lines.amount)", "count(votes)"]
+    for function in ("avg", "min", "max"):
+        assert parse_expression(f"{function}(lines.amount)") == Total(function, "lines", "amount")
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [
@@ -43,7 +62,30 @@ def test_a_function_takes_field_paths() -> None:
         ("a b", "Unexpected 'b'."),
         ("a % b", "Unexpected '%'."),
         ("(a + b", "The expression ends too early."),
-        ("sum(a, b)", "Unknown function 'sum'. The functions are 'hours', 'days'."),
+        (
+            "total(a, b)",
+            "Unknown function 'total'. The functions are 'hours', 'days', 'count', 'sum', "
+            "'avg', 'min', 'max'.",
+        ),
+        (
+            "count(lines.amount)",
+            "The function 'count' takes a relation, not 'lines.amount', for example count(lines).",
+        ),
+        (
+            "sum(lines)",
+            "The function 'sum' takes a field of a relation, not 'lines', for "
+            "example sum(lines.amount).",
+        ),
+        (
+            "avg(lines.product.price)",
+            "The function 'avg' takes a field of a relation, not "
+            "'lines.product.price', for example avg(lines.amount).",
+        ),
+        (
+            "max(1)",
+            "The function 'max' takes a field of a relation, not '1', for example "
+            "max(lines.amount).",
+        ),
         ("hours(a)", "The function 'hours' takes 2 arguments, not 1."),
     ],
 )

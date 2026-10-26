@@ -1,0 +1,43 @@
+{{ trace_header("app") }}
+"""The subqueries of the totals of the relations, for the computed fields (ADR 0034).
+
+`app/models.py` adds each total to its model as a column property, so
+that each query of the model reads the total of each record in a
+correlated subquery. A total of no records is 0 for `count` and `sum`,
+and None for `avg`, `min`, and `max`.
+"""
+
+from typing import Any
+
+from sqlalchemy import ColumnElement, Numeric, ScalarSelect, Table, func, select
+from sqlalchemy.orm import QueryableAttribute
+
+
+def total(
+    function: str,
+    source: Any,
+    value: QueryableAttribute[Any] | None,
+    *conditions: ColumnElement[bool],
+    via: Table | None = None,
+) -> ScalarSelect[Any]:
+    """Return the subquery of a total of the related records of a record.
+
+    `source` is the model (or an alias of it) of the related records, and
+    `value` is their field (None for `count`). The conditions join the
+    related records to the record, and give the filter of the total. `via`
+    is the join table of a many-to-many relation.
+    """
+    match function:
+        case "count":
+            aggregate: ColumnElement[Any] = func.count()
+        case "sum":
+            aggregate = func.coalesce(func.sum(value), 0)
+        case "avg":
+            aggregate = func.avg(value, type_=Numeric())
+        case "min":
+            aggregate = func.min(value)
+        case _:
+            aggregate = func.max(value)
+    statement = select(aggregate).select_from(source).where(*conditions)
+    excluded = [source] if via is None else [source, via]
+    return statement.correlate_except(*excluded).scalar_subquery()

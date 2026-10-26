@@ -284,11 +284,57 @@ An expression has:
 | `( )`                | `(a + b) / 2`                   | A group.                                        |
 | `hours(start, end)`  | `hours(starts_at, ends_at)`     | The hours between two `date` or `datetime` fields. |
 | `days(start, end)`   | `days(start_date, due_date)`    | The days between two `date` or `datetime` fields.  |
+| `count(relation)`    | `count(lines)`                  | The number of related records.                  |
+| `sum(relation.field)` | `sum(lines.amount)`            | The sum of a field of the related records.      |
+| `avg`, `min`, `max`  | `max(lines.amount)`             | The average, the smallest, and the largest value of a field of the related records. |
 
 An empty operand, or a division by zero, gives an empty value. The apps
 round a `decimal` field to its `scale`, and an `integer` field to a
 whole number. The FastAPI app returns the value in the read schema (a
 property of the model), and the front ends compute it in the views.
+
+A total (`count`, `sum`, `avg`, `min`, or `max`) uses the related
+records of a `one_to_many` or a `many_to_many` relation of the entity
+([ADR 0034](adr/0034-totals.md)). The field of a total is a stored
+`integer` or `decimal` field of the related entity, one step away: not
+a computed field, and not a field of a record further away. The total
+of no records is 0 for `count` and `sum`, and empty for `avg`, `min`,
+and `max`.
+
+`filter` selects the related records of all totals of the expression.
+It is the filter of the [dashboards](#dashboards): stored fields of the
+related entity, each with a value or with operators, but without
+`$today` and `$now`. A field without totals takes no `filter`.
+
+```yaml
+# in: entities
+Invoice:
+  fields:
+    discount: { type: decimal, min: 0, scale: 2, default: 0 }
+    line_count: { type: integer, computed: count(lines) }
+    total: { type: decimal, scale: 2, computed: sum(lines.amount) - discount }
+    largest_line: { type: decimal, scale: 2, computed: max(lines.amount) }
+    credits:
+      type: decimal
+      scale: 2
+      computed: sum(lines.amount)
+      filter: { kind: credit }
+  relations:
+    lines: { kind: one_to_many, target: InvoiceLine, inverse: invoice }
+InvoiceLine:
+  fields:
+    amount: { type: decimal, required: true, scale: 2 }
+    kind: { type: enum, values: [charge, credit], default: charge }
+  relations:
+    invoice: { kind: many_to_one, target: Invoice, required: true, inverse: lines }
+```
+
+The FastAPI app computes each total in the database, with a subquery in
+each read and list query of the entity. When the expression has only
+totals, numbers, stored number fields of the entity, `+`, `-`, and `*`,
+the list endpoint can sort by the field, and filter it with the
+parameters `<field>_min` and `<field>_max`. The front-end bindings do
+not compute totals yet: they stop with an error.
 
 ```yaml
 # example: room-booking

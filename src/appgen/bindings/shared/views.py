@@ -31,6 +31,7 @@ from appgen.dsl.expressions import (
     FieldRef,
     Negate,
     Number,
+    Total,
     expression_paths,
     parse_expression,
 )
@@ -962,6 +963,12 @@ class ViewContext:
                     return f"compute.{_COMPUTE_OPS[op]}({render(left)}, {render(right)})"
                 case Negate(operand):
                     return f"compute.neg({render(operand)})"
+                case Total():
+                    raise GenerationError(
+                        f"The computed field '{entity}.{member.id.rsplit('.', 1)[-1]}' has the "
+                        f"total '{expression}'. The front-end bindings do not compute the totals "
+                        "of the relations yet: only the FastAPI binding does."
+                    )
 
         def render_raw(expression: Expression) -> str:
             assert isinstance(expression, FieldRef)

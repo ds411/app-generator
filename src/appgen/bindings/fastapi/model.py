@@ -33,11 +33,22 @@ from appgen.bindings.fastapi.pysource import (
     import_block,
     literal,
     raise_problem,
+    signature,
     string,
 )
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.fastapi.totals import (
+    PyTotal,
+    TotalsTest,
+    computed_sql,
+    entity_totals,
+    models_code,
+    models_head,
+    models_imports,
+    totals_test,
+)
 from appgen.bindings.fastapi.webhooks import python_webhooks
 from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.access import RecordRule
@@ -49,6 +60,9 @@ from appgen.dsl.expressions import (
     FieldRef,
     Negate,
     Number,
+    Total,
+    date_paths,
+    expression_paths,
     parse_expression,
 )
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
@@ -566,6 +580,26 @@ class PyComputed:
     """The statements of the body of the property, of `self`."""
     source: str
     """The expression in the definition."""
+    expression: Expression | None = None
+    totals: dict[str, PyTotal] = field(default_factory=dict[str, PyTotal])
+    """The totals of the relations in the expression, by their text (ADR 0034)."""
+    sql: str | None = None
+    """The SQL form of a field with totals, for the sort and the filters of the lists, or None."""
+
+    @property
+    def paths(self) -> list[str]:
+        """The field paths of the record in the expression."""
+        return list(expression_paths(self.expression)) if self.expression is not None else []
+
+    @property
+    def testable(self) -> bool:
+        """True if the expression has totals, numbers, and stored fields of the record only.
+
+        The generated tests give these fields known values.
+        """
+        if self.expression is None or not self.totals or any(date_paths(self.expression)):
+            return False
+        return all("." not in path for path in self.paths)
 
     def property_lines(self) -> list[str]:
         """Return the lines of the property of the model."""
@@ -1091,6 +1125,10 @@ class PyEntity:
     events: list[PyEvent] = field(default_factory=list[PyEvent])
     """The events and the transitions with `run` (ADR 0031): created, changed, deleted, the
     transitions."""
+    totals: list[PyTotal] = field(default_factory=list[PyTotal])
+    """The totals of the relations that the computed fields read: column properties (ADR 0034)."""
+    totals_test: TotalsTest | None = None
+    """The generated tests of the totals, or None."""
 
     @property
     def guard_module(self) -> str:
@@ -1556,9 +1594,11 @@ class PyEntity:
         if search:
             lines.add(from_import("app.core.search", search))
         classes = {self.name} | {e.name for e in query.entities()}
-        if query.aliases:
-            # `aliased()` prepares the mappers: all models must be imported first.
-            lines.add("from sqlalchemy.orm import aliased")
+        if query.aliases or self.totals:
+            # `aliased()` prepares the mappers, and `app.models` adds the totals (ADR 0034):
+            # all models must be imported first.
+            if query.aliases:
+                lines.add("from sqlalchemy.orm import aliased")
             lines.add(from_import("app.models", classes))
         else:
             for entity in [self, *query.entities()]:
@@ -1627,6 +1667,7 @@ class PyEntity:
     def model_imports(self) -> str:
         """Return the import block of the models module of the slice."""
         types = {f.model_type for f in self.fields} | {c.type for c in self.computed}
+        types |= {t.type for t in self.totals}
         sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
         if self.translatable or self.files:
             sa_types.add("JSON_TYPE")
@@ -1636,7 +1677,7 @@ class PyEntity:
         if "Decimal" in types:
             lines.add("from decimal import Decimal")
         targets = {r.target for r in self.relations if r.target != self.name}
-        typing = {"TYPE_CHECKING"} if targets else set[str]()
+        typing = {"TYPE_CHECKING"} if targets or self.totals else set[str]()
         if "Any" in types:
             typing.add("Any")
         if typing:
@@ -1884,6 +1925,18 @@ class PyApp:
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
 
+    def models_head(self) -> str:
+        """Return the imports of `app/models.py` from the standard library and SQLAlchemy."""
+        return models_head(self.entity_order())
+
+    def models_imports(self, first: list[tuple[list[str], str]]) -> list[tuple[list[str], str]]:
+        """Return the imports of `app/models.py` from the app: the traces and the line of each."""
+        return models_imports(self.entity_order(), first)
+
+    def models_totals(self) -> list[tuple[list[str], str]]:
+        """Return the statements of `app/models.py` that add the totals (ADR 0034)."""
+        return models_code(self.entity_order())
+
     def entity_order(self) -> list[PyEntity]:
         """The entities in source order."""
         return list(self.entities.values())
@@ -1969,6 +2022,10 @@ class PyApp:
     ) -> str:
         """Return a call on one line if it fits, else with one argument on each line."""
         return call(prefix, func, args, indent, suffix)
+
+    def signature(self, head: str, params: str | list[str], tail: str, indent: int = 0) -> str:
+        """Return a function signature in the format of the Ruff formatter."""
+        return signature(head, params, tail, indent)
 
     def string(self, value: str) -> str:
         """Return a text as a Python string literal, with the quotes of the Ruff formatter."""
@@ -2085,6 +2142,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         _check_names(entity)
         entity.full_text = search_config is not None
         entity.query = list_query(definition, entity)
+        entity.totals_test = totals_test(definition, entity)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -2435,12 +2493,17 @@ def _entity(name: str, entity: Entity) -> PyEntity:
 
 
 def _computed(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
-    """Add the computed fields to the entities, and load the relations that they read."""
+    """Add the computed fields to the entities, and load the relations that they read.
+
+    A total of a relation becomes a column property of the model (ADR 0034).
+    """
     for name, entity in definition.entities.items():
         for field_name, f in entity.computed_fields.items():
             assert f.computed is not None
+            expression = parse_expression(f.computed)
+            totals = entity_totals(definition, entities, name, field_name, expression)
             lines: list[str] = []
-            result = _render_computed(entities, name, parse_expression(f.computed), lines)
+            result = _render_computed(entities, name, expression, lines, totals)
             if f.type == "integer":
                 result, type_ = f"compute.to_int({result})", "int"
             else:
@@ -2454,6 +2517,9 @@ def _computed(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
                     type=type_,
                     lines=[*lines, f"return {result}"],
                     source=f.computed,
+                    expression=expression,
+                    totals=totals,
+                    sql=computed_sql(entities[name], expression, totals),
                 )
             )
 
@@ -2572,12 +2638,16 @@ def _later_sample(f: PyField) -> None:
 
 
 def _render_computed(
-    entities: dict[str, PyEntity], entity: str, expression: Expression, lines: list[str]
+    entities: dict[str, PyEntity],
+    entity: str,
+    expression: Expression,
+    lines: list[str],
+    totals: dict[str, PyTotal],
 ) -> str:
     """Add the statements of an expression to `lines`, and return the name of its value.
 
     Each statement computes one part of the expression in a local variable,
-    so that the lines stay short.
+    so that the lines stay short. A total reads its column property.
     """
 
     def assign(code: str) -> str:
@@ -2590,17 +2660,20 @@ def _render_computed(
             return f'Decimal("{value}")'
         case FieldRef(path):
             return assign(f"compute.num({_computed_path(entities, entity, path)})")
+        case Total():
+            return assign(f"compute.num(self.{totals[str(expression)].attr})")
         case Call(function, args):
             values = [
                 _computed_path(entities, entity, a.path) for a in args if isinstance(a, FieldRef)
             ]
             return assign(f"compute.{function}({', '.join(values)})")
         case Binary(op, left, right):
-            a = _render_computed(entities, entity, left, lines)
-            b = _render_computed(entities, entity, right, lines)
+            a = _render_computed(entities, entity, left, lines, totals)
+            b = _render_computed(entities, entity, right, lines, totals)
             return assign(f"compute.{_COMPUTE_OPS[op]}({a}, {b})")
         case Negate(operand):
-            return assign(f"compute.neg({_render_computed(entities, entity, operand, lines)})")
+            inner = _render_computed(entities, entity, operand, lines, totals)
+            return assign(f"compute.neg({inner})")
 
 
 def _computed_path(entities: dict[str, PyEntity], entity: str, path: str) -> str:

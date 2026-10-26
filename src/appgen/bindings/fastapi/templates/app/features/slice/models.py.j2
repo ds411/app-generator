@@ -48,6 +48,17 @@ class {{ e.name }}(Record):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% if e.totals %}
+
+    if TYPE_CHECKING:
+        # The totals of the relations: app/models.py adds them as column properties.
+{% for t in e.totals %}
+{% for id in t.ids %}
+        {{ trace(id) }}
+{% endfor %}
+        {{ t.declaration() }}
+{% endfor %}
+{% endif %}
 {% for c in e.computed %}
 
     {{ trace(c.id) }}

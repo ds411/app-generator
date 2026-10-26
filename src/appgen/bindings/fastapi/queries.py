@@ -10,8 +10,11 @@ of its field a list (`?status=a&status=b`), which also takes one value.
 A field path of a view can go through relations, for example
 `owner.name`. A filter goes through them with `has()` (an `EXISTS`
 subquery), and a sort key reads the related value with a correlated
-subquery. A computed field and a relation to many records have no sort
-key, because their values are not columns.
+subquery. A relation to many records has no sort key, and neither has a
+computed field, because its value is not a column. A computed field with
+a total of a relation is the exception: when the expression of the field
+has an SQL form (`app/core/totals.py`), it has a sort key, and the
+parameters `<field>_min` and `<field>_max`.
 
 Each list endpoint takes `id`, a list of record IDs: the React app
 sends it to load the related records of a page, and the records of a
@@ -110,13 +113,18 @@ class PyPath:
     relation: PyRelation | None = None
     computed: bool = False
     """True for a computed field: it has no column."""
+    sql: str | None = None
+    """For a computed field with totals: its SQL expression, if it has one."""
 
     @property
     def column(self) -> str:
         """The column at the end of the path, on the class of its entity.
 
         For a relation, it is the foreign key column. For `id`, the primary key.
+        For a computed field with totals, it is the SQL expression of the field.
         """
+        if self.sql is not None:
+            return self.sql
         if self.field is not None:
             return f"{self.entity.name}.{self.field.attr}"
         if self.relation is not None:
@@ -453,6 +461,17 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
         builder.add(PyParam(r.fk_attr, r.fk_attr, "UUID", "eq", path, [r.id]))
     for f in entity.sortable:
         builder.keys[f.name] = PySortKey(f.name, PyPath(f.name, (), entity, field=f))
+    for c in entity.computed:
+        if c.sql is None:
+            continue
+        path = PyPath(c.name, (), entity, computed=True, sql=c.sql)
+        builder.keys[c.name] = PySortKey(c.name, path)
+        for end, word in (("min", "smallest"), ("max", "largest")):
+            kind = "from" if end == "min" else "to"
+            description = f"The {word} value of `{c.name}`."
+            param = PyParam(f"{c.name}_{end}", f"{c.attr}_{end}", c.type, kind, path, [c.id])
+            param.description = description
+            builder.add(param)
     views: list[View] = list(definition.ui.views.values()) if definition.ui is not None else []
     for view in views:
         if isinstance(view, ApiViewBase):
@@ -570,7 +589,9 @@ class _Builder:
                 return
             display = definition_display(self.definition.entities[relation.target])
             path = self.resolve(f"{path_text}.{display}")
-        if path.computed or (path.field is not None and path.field.type not in _SORT_TYPES):
+        if (path.computed and path.sql is None) or (
+            path.field is not None and path.field.type not in _SORT_TYPES
+        ):
             return
         last = path_text.rsplit(".", 1)[-1]
         if path.field is None and any(f.name == last for f in path.entity.files):
@@ -650,8 +671,9 @@ def resolve_path(entity: PyEntity, path: str) -> PyPath:
     relation = next((r for r in entity.relations if r.name == last), None)
     if relation is not None:
         return PyPath(path, tuple(hops), entity, relation=relation)
-    computed = any(c.name == last for c in entity.computed)
-    return PyPath(path, tuple(hops), entity, computed=computed)
+    computed = next((c for c in entity.computed if c.name == last), None)
+    sql = computed.sql if computed is not None and not hops else None
+    return PyPath(path, tuple(hops), entity, computed=computed is not None, sql=sql)
 
 
 _ID_TEST = TestPlan(attr="id")

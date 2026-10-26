@@ -41,6 +41,45 @@ def call(prefix: str, func: str, args: list[str], indent: int = 4, suffix: str =
     return f"{prefix}{func}(\n{inner}{pad}){suffix}"
 
 
+def signature(head: str, params: str | list[str], tail: str, indent: int = 0) -> str:
+    """Return a function signature in the format of the Ruff formatter.
+
+    `head` is for example `async def list_tasks`, `params` the parameters (a
+    list, or a text with commas between them), and `tail` for example
+    ` -> None:`. The signature is on one line if it fits. Else two or more
+    parameters that fit on one line go on one line between the brackets.
+    Else each parameter is on its own line, with a trailing comma.
+    """
+    items = _split_params(params) if isinstance(params, str) else params
+    pad = " " * indent
+    one_line = f"{head}({', '.join(items)}){tail}"
+    if indent + len(one_line) <= LINE_LENGTH:
+        return one_line
+    joined = ", ".join(items)
+    if len(items) > 1 and indent + 4 + len(joined) <= LINE_LENGTH:
+        return f"{head}(\n{pad}    {joined}\n{pad}){tail}"
+    inner = "".join(f"{pad}    {item},\n" for item in items)
+    return f"{head}(\n{inner}{pad}){tail}"
+
+
+def _split_params(text: str) -> list[str]:
+    """Split parameters at the commas outside brackets."""
+    items: list[str] = []
+    depth = 0
+    current = ""
+    for char in text:
+        depth += char in "([{"
+        depth -= char in ")]}"
+        if char == "," and depth == 0:
+            items.append(current.strip())
+            current = ""
+        else:
+            current += char
+    if current.strip():
+        items.append(current.strip())
+    return items
+
+
 def literal(value: object, prefix: str = "", indent: int = 0, suffix: str = "") -> str:
     """Return a JSON value as a Python literal, in the format of the Ruff formatter.
 

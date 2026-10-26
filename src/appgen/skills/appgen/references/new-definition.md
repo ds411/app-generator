@@ -213,7 +213,11 @@ generated app has a stub for it, and the check reports it in `gaps`.
 - `rules` check more than one field (`compare`), or more than one
   record (`unique`, `no_overlap`).
 - A `computed` field gets its value from other fields, for example
-  `computed: hours(starts_at, ends_at) * room.hourly_rate`.
+  `computed: hours(starts_at, ends_at) * room.hourly_rate`. A total of a
+  `one_to_many` or a `many_to_many` relation counts or adds the related
+  records: `count(lines)`, or `sum(lines.amount) - discount`. `filter`
+  selects the related records of the totals. Only the FastAPI binding
+  computes totals for now.
 - `events` run a custom operation of the entity after a record is
   `created`, `changed` (optionally only for some `fields`), or
   `deleted`, in the transaction of the change. A transition of a

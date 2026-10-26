@@ -427,12 +427,18 @@ class FilterBuilder:
     """
 
     def __init__(
-        self, definition: AppDefinition, widget: FilterTarget, what: str = "widget"
+        self,
+        definition: AppDefinition,
+        widget: FilterTarget,
+        what: str = "widget",
+        source: str | None = None,
     ) -> None:
         self.definition = definition
         self.widget = widget
         self.entity = widget.entity
         self.what = what
+        self.source_name = source or widget.entity.name
+        """The class or the alias of the entity in the conditions."""
 
     def resolve(self, path: str) -> PyPath:
         resolved = resolve_path(self.entity, path)
@@ -446,7 +452,7 @@ class FilterBuilder:
 
     def source(self, path: PyPath, hops: int | None = None) -> str:
         """Return the class or the alias of the entity after the hops of a path, with its joins."""
-        source = self.entity.name
+        source = self.source_name
         segments = path.path.split(".")
         for index, hop in enumerate(path.hops[:hops]):
             alias = "_" + "_".join([self.entity.snake, *segments[: index + 1]])
@@ -675,7 +681,7 @@ class FilterValues:
         failing: list[TestValue] = []
         for candidate in candidates:
             ok = all(
-                _passes(candidate.value, op, self.operand(f, operand))
+                passes(candidate.value, op, self.operand(f, operand))
                 for op, operand in conditions.items()
             )
             (passing if ok else failing).append(candidate)
@@ -921,7 +927,7 @@ class _Tests(FilterValues):
         return True
 
 
-def _passes(value: object, op: str, operand: object) -> bool:
+def passes(value: object, op: str, operand: object) -> bool:
     """Return True if a test value passes an operator of the filter.
 
     The values have no empty value, so that the operators are the plain

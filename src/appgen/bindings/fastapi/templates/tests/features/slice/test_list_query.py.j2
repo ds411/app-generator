@@ -4,14 +4,7 @@
 {% set query = e.query %}
 {% set url = e.path ~ op.path %}
 {% macro sig(fn, args) %}
-{% set line = "async def " ~ fn ~ "(" ~ args ~ ") -> None:" %}
-{% if line | length <= 100 %}
-{{ line }}
-{% else %}
-async def {{ fn }}(
-    {{ args }}
-) -> None:
-{% endif %}
+{{ py.signature("async def " ~ fn, args, " -> None:") }}
 {% endmacro %}
 {% set tested = query.params | selectattr("test") | list %}
 {% set sorted_keys = query.view_sort_keys | selectattr("test") | list %}
