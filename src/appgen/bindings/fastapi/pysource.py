@@ -192,9 +192,9 @@ def _f_string(parts: list[str], values: dict[str, str]) -> str:
 def from_import(module: str, names: set[str]) -> str:
     """Return a `from` import with the names in the order of the Ruff import sorter."""
 
-    def key(name: str) -> tuple[int, str]:
+    def key(name: str) -> tuple[int, str, str]:
         kind = 0 if name.isupper() and len(name) > 1 else 1 if name[0].isupper() else 2
-        return (kind, name)
+        return (kind, name.lower(), name)
 
     ordered = sorted(names, key=key)
     line = f"from {module} import {', '.join(ordered)}"

@@ -25,6 +25,7 @@ from appgen.bindings.fastapi.integrations import (
 )
 from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
+from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import (
     LINE_LENGTH,
@@ -1050,10 +1051,37 @@ class PyOperation:
     """The names of the third-party APIs that a custom operation calls."""
     scope_action: str | None = None
     """`read` or `change`, if a record rule of a role can apply to the operation (ADR 0025)."""
+    lines: list[PyLines] = dataclass_field(default_factory=list[PyLines])
+    """The lines that a create or an update operation writes with the record (ADR 0035)."""
 
     @property
     def custom(self) -> bool:
         return self.kind == "custom"
+
+    def line_imports(self) -> list[str]:
+        """Return the imports of the schemas of the items of the lines of other slices."""
+        schemas: dict[str, set[str]] = {}
+        for ln in self.lines:
+            if ln.target.slice != self.slice:
+                module = f"app.features.{ln.target.slice}.schemas"
+                schemas.setdefault(module, set()).add(ln.item_class)
+        return [from_import(module, names) for module, names in sorted(schemas.items())]
+
+    @property
+    def own_line_items(self) -> list[str]:
+        """The schemas of the items of the lines in the slice of the operation."""
+        return [ln.item_class for ln in self.lines if ln.target.slice == self.slice]
+
+    @property
+    def input_class(self) -> str:
+        """The schema of the body of a create or an update operation.
+
+        With lines, the module of the operation has its own schema: the input of
+        the record and the lines.
+        """
+        if self.lines:
+            return pascal(self.name) + "Input"
+        return self.entity + ("Create" if self.kind == "create" else "Update")
 
     @property
     def params_class(self) -> str:
@@ -1129,6 +1157,12 @@ class PyEntity:
     """The totals of the relations that the computed fields read: column properties (ADR 0034)."""
     totals_test: TotalsTest | None = None
     """The generated tests of the totals, or None."""
+    lines: list[PyLines] = field(default_factory=list[PyLines])
+    """The lines of the records that the operations write (ADR 0035): the repository has a
+    function for each."""
+    line_items: list[PyLines] = field(default_factory=list[PyLines])
+    """The lines of other entities whose records are records of this entity: the schemas
+    have an item for each, and the repository has `change` and `remove`."""
 
     @property
     def guard_module(self) -> str:
@@ -1501,11 +1535,12 @@ class PyEntity:
                 f"app.features.{self.slice}.schemas",
                 {f"{self.name}Create", f"{self.name}Update"}
                 | ({f"{self.name}Read"} if self.hides else set[str]())
-                | {e.operation.params_class for e in self.events if e.operation.params},
+                | {e.operation.params_class for e in self.events if e.operation.params}
+                | {ln.item_class for ln in self.lines if ln.target.name == self.name},
             ),
             f"from app.features.{self.slice}.validation_ext import validate",
         }
-        core = {"commit"} | ({"flush"} if self.scoped or self.events else set[str]())
+        core = {"commit"} | ({"flush"} if self.scoped or self.events or self.lines else set[str]())
         if self.events:
             core.add("run_event")
         if self.fk_relations:
@@ -1515,16 +1550,27 @@ class PyEntity:
         lines.add(from_import("app.core.db", core))
         if self.workflows:
             lines.add("from app.core.workflows import check_transition")
+        sqlalchemy = {"select"} if self.lines else set[str]()
         if self.scoped:
-            sqlalchemy = {"Select", "select"}
+            sqlalchemy |= {"Select", "select"}
             if self.owner_path:
                 sqlalchemy.add("ColumnElement")
-            lines |= {
-                from_import("sqlalchemy", sqlalchemy),
-                "from app.core.access import RecordScope",
-            }
-        if self.scoped:
+            lines.add("from app.core.access import RecordScope")
+        if sqlalchemy:
+            lines.add(from_import("sqlalchemy", sqlalchemy))
+        if self.scoped or self.lines:
             lines.add("from collections.abc import Sequence")
+        line_schemas: dict[str, set[str]] = {}
+        for ln in self.lines:
+            target = ln.target
+            if target.name != self.name:
+                module = f"app.features.{target.slice}"
+                lines.add(f"from {module} import repository as {target.snake}_repository")
+                lines.add(f"from {module}.models import {target.name}")
+                line_schemas.setdefault(f"{module}.schemas", set()).update(
+                    {ln.item_class, f"{target.name}Create", f"{target.name}Update"}
+                )
+        lines |= {from_import(module, names) for module, names in line_schemas.items()}
         if self.hides:
             lines.add("from collections.abc import Sequence")
             lines.add("from app.core.access import RecordScope")
@@ -1767,8 +1813,9 @@ class PyEntity:
         for name in ("AwareDatetime", "EmailStr", "JsonValue"):
             if name in types:
                 pydantic.add(name)
-        if self.sign_up_fields is not None:
-            # The password of the sign-up schema has a minimum length.
+        if self.sign_up_fields is not None or self.line_items:
+            # The password of the sign-up schema has a minimum length, and the ID of an item
+            # of the lines has a description.
             pydantic.add("Field")
         typing: set[str] = set()
         if self.not_null or self.translatable:
@@ -1899,6 +1946,11 @@ class PyApp:
         return self.search_config is not None
 
     @property
+    def lines(self) -> bool:
+        """True if an operation writes lines (ADR 0035): an error can give its place."""
+        return any(e.lines for e in self.entities.values())
+
+    @property
     def search_indexes(self) -> list[PyEntity]:
         """The entities with a GIN index for the full-text search, in the order of the tables."""
         return [e for e in self.entity_order() if e.search_index is not None]
@@ -1991,7 +2043,10 @@ class PyApp:
             entity = self.entities[op.entity]
             if op.kind in ("create", "read", "update", "list"):
                 found[f"{entity.name}Read"] = entity.id
-            if op.kind in ("create", "update"):
+            if op.kind in ("create", "update") and op.lines:
+                found[op.input_class] = op.id
+                found.update({ln.item_class: ln.id for ln in op.lines})
+            elif op.kind in ("create", "update"):
                 found[f"{entity.name}{op.kind.capitalize()}"] = entity.id
             if op.custom and op.params:
                 found[op.params_class] = op.id
@@ -2129,6 +2184,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         by_name = {f.name: f for f in users.fields}
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
     _events(definition, entities, operations)
+    python_lines(definition, entities, operations)
     _record_rules(definition, entities)
     search_config = _search_config(definition)
     for entity in entities.values():

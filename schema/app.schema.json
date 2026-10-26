@@ -4713,6 +4713,13 @@
           },
           "title": "Apis",
           "type": "array"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Lines",
+          "type": "array"
         }
       },
       "required": [

@@ -571,6 +571,30 @@ A computed field with a total of a relation, for example
   check the value of each computed field with totals in the read
   endpoint, the sort, and the filters.
 
+### The lines of the FastAPI app
+
+A create or an update operation with `lines` writes the record and its
+lines in one transaction ([ADR 0035](adr/0035-lines.md)).
+
+- The module of the operation has its input schema, for example
+  `CreateInvoiceInput`: the input of the record and a list for each
+  relation of lines. The lines leave the dump of the schema
+  (`exclude=True`), so that the repository of the record does not set
+  them. The schema of an item (`InvoiceLinesItem`) is in the slice of
+  the lines.
+- The repository of the record has `write_<relation>`. It removes the
+  lines that no item names, and adds or changes each line with `add` and
+  `change` of the repository of the lines, without a commit. It catches
+  a `ProblemError` of a line and raises it again with the place of the
+  line (`ProblemError.at`), which the response gives in `errors`.
+- A create adds the record, writes it to the database (a flush), writes
+  the lines, and commits. An update writes the lines first, then changes
+  the record with `update`, which commits.
+- The generated tests in `tests/features/<slice>/test_<operation>_lines.py`
+  write three lines, replace the lines and keep the ID of a line that
+  stays, keep the lines without the key, check a workflow of the lines,
+  and check that an error in the second line stores nothing.
+
 ### The events of the FastAPI app
 
 The repository of an entity runs its `events` and the `run` operations

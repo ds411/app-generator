@@ -1,5 +1,32 @@
 {{ trace_header(element_id) }}
 {% set e = py.entity(name) %}
+{% macro change_body(e) %}
+{% if e.before_attrs %}
+    {{ e.before_code() }}
+{% endif %}
+{% if e.owner %}
+    values = data.model_dump(by_alias=False, exclude_unset=True)
+    if (owner := _owner(scope)) is not None and "{{ e.owner.fk_attr }}" in values:
+        values["{{ e.owner.fk_attr }}"] = owner
+    await _apply(session, record, values)
+{% else %}
+    await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
+{% endif %}
+{% if e.workflows %}
+    check_workflows(record, before)
+{% endif %}
+{% if e.check_rules %}
+    await check_rules(session, record)
+{% endif %}
+    await validate(session, record, created=False)
+{% if e.scoped %}
+    await check_scope(session, record, scope)
+{% endif %}
+{% if e.update_events %}
+    await flush(session)
+    await on_changed(session, record, before)
+{% endif %}
+{% endmacro %}
 """The data access of the slice `{{ e.slice }}`, which its operations share."""
 
 {{ e.repository_imports() }}
@@ -183,6 +210,27 @@ async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }
     return await get(session, record.id)
 
 
+{% if e.line_items %}
+{% if e.scoped %}
+async def change(
+    session: AsyncSession,
+    record: {{ e.name }},
+    data: {{ e.name }}Update,
+    scope: RecordScope | None = None,
+) -> None:
+    """Change the fields that the request gives, and validate the record, without a commit.
+
+    The record must stay in the scope of the request.{% if e.owner %} With a scope of an owner
+    rule, the record stays with the user.{% endif +%}
+    """
+{% else %}
+{{ py.signature("async def change", ["session: AsyncSession", "record: " ~ e.name, "data: " ~ e.name ~ "Update"], " -> None:") }}
+    """Change the fields that the request gives, and validate the record, without a commit."""
+{% endif %}
+{{ change_body(e) | trim("\n") }}
+
+
+{% endif %}
 {% if e.scoped %}
 async def update(
     session: AsyncSession,
@@ -199,30 +247,10 @@ async def update(
 {{ py.signature("async def update", ["session: AsyncSession", "record: " ~ e.name, "data: " ~ e.name ~ "Update"], " -> " ~ e.name ~ ":") }}
     """Change the fields that the request gives, validate the record, and return it."""
 {% endif %}
-{% if e.before_attrs %}
-    {{ e.before_code() }}
-{% endif %}
-{% if e.owner %}
-    values = data.model_dump(by_alias=False, exclude_unset=True)
-    if (owner := _owner(scope)) is not None and "{{ e.owner.fk_attr }}" in values:
-        values["{{ e.owner.fk_attr }}"] = owner
-    await _apply(session, record, values)
+{% if e.line_items %}
+    await change(session, record, data{{ ", scope" if e.scoped }})
 {% else %}
-    await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
-{% endif %}
-{% if e.workflows %}
-    check_workflows(record, before)
-{% endif %}
-{% if e.check_rules %}
-    await check_rules(session, record)
-{% endif %}
-    await validate(session, record, created=False)
-{% if e.scoped %}
-    await check_scope(session, record, scope)
-{% endif %}
-{% if e.update_events %}
-    await flush(session)
-    await on_changed(session, record, before)
+{{ change_body(e) | trim("\n") }}
 {% endif %}
     await commit(session)
     return await get(session, record.id)
@@ -239,6 +267,20 @@ async def delete(session: AsyncSession, record: {{ e.name }}, storage: Storage) 
 {% endif %}
     await commit(session)
     await delete_files(storage, files)
+{% elif e.line_items %}
+async def remove(session: AsyncSession, record: {{ e.name }}) -> None:
+    """Delete a record without a commit."""
+    await session.delete(record)
+{% if e.deleted_event %}
+    await flush(session)
+    await on_deleted(session, record)
+{% endif %}
+
+
+async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
+    """Delete a record."""
+    await remove(session, record)
+    await commit(session)
 {% else %}
 async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
     """Delete a record."""
@@ -249,6 +291,43 @@ async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
 {% endif %}
     await commit(session)
 {% endif %}
+{% for lines in e.lines %}
+{% set t = lines.target %}
+{% set target_repository = "" if t.name == e.name else t.snake ~ "_repository." %}
+
+
+{{ trace(lines.id) }}
+{{ py.signature("async def " ~ lines.function, ["session: AsyncSession", "record: " ~ e.name, "items: Sequence[" ~ lines.item_class ~ "]"], " -> None:") }}
+    """Replace the lines of `{{ lines.name }}` of a record with the items of a request (ADR 0035).
+
+    An item with an ID changes the given fields of that line, an item without
+    an ID adds a line, and the other lines go. The rules and the workflows of
+    the lines apply. An error of a line gives its index in the errors of the
+    response.
+    """
+    statement = select({{ t.name }}).where({{ t.name }}.{{ lines.link_attr }} == record.id)
+    current = {line.id: line for line in await session.scalars(statement)}
+    kept = {item.id for item in items if item.id is not None}
+    for line in current.values():
+        if line.id not in kept:
+            await {{ target_repository }}remove(session, line)
+    await flush(session)
+    for index, item in enumerate(items):
+        values = item.model_dump(by_alias=False, exclude={"id"}, exclude_unset=item.id is not None)
+        try:
+            if item.id is None:
+                values["{{ lines.link_attr }}"] = record.id
+                data = {{ t.name }}Create.model_validate(values)
+                await {{ target_repository }}add(session, data)
+            elif (line := current.get(item.id)) is not None:
+                changes = {{ t.name }}Update.model_validate(values)
+                await {{ target_repository }}change(session, line, changes)
+            else:
+                {{ py.problem(422, "No {entity} has the ID {id}.", 16, entity=t.name | tojson, id="item.id") }}
+            await flush(session)
+        except ProblemError as error:
+            raise error.at("body", "{{ lines.name }}", index) from error
+{% endfor %}
 {% if e.created_event %}
 {% set ev = e.created_event %}
 

@@ -245,6 +245,13 @@ and forms. A `custom` operation has `entity`, `description`, `params`
 `none`). Its logic is a generation gap. Use one only if the logic is
 not CRUD.
 
+For a record with lines, for example an invoice with invoice lines,
+give the create and the update operation `lines` with the names of the
+`one_to_many` relations: `create_invoice: { kind: create, entity:
+Invoice, lines: [lines] }`. The operation writes the record and its
+lines in one transaction. An explicit operation replaces the operation
+of the same name of `crud`.
+
 ## Pages and the UI
 
 - Give the app a start page with the path `/`.

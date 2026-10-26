@@ -50,7 +50,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
 from appgen.dsl.loader import load_definition
-from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
+from appgen.dsl.model import AppDefinition, Element, Entity, Field, Operation, Relation
 from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
 from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
@@ -263,8 +263,10 @@ def check_relations(definition: AppDefinition) -> Iterator[Diagnostic]:
 
 
 def check_operations(definition: AppDefinition) -> Iterator[Diagnostic]:
-    """Only custom operations have params and a return type."""
+    """Only custom operations have params and a return type. Only a create or an update
+    operation writes lines."""
     for operation in definition.operations.values():
+        yield from _check_lines(definition, operation)
         if operation.kind == "custom":
             continue
         for key in CUSTOM_ONLY_KEYS:
@@ -275,6 +277,56 @@ def check_operations(definition: AppDefinition) -> Iterator[Diagnostic]:
                     operation,
                     at=key,
                 )
+
+
+def _check_lines(definition: AppDefinition, operation: Operation) -> Iterator[Diagnostic]:
+    """The lines of an operation are `one_to_many` relations of its entity (ADR 0035)."""
+    if not operation.lines:
+        return
+    if operation.kind not in ("create", "update"):
+        yield _error(
+            "invalid-option",
+            "'lines' is only for a create or an update operation.",
+            operation,
+            at="lines",
+        )
+        return
+    entity = definition.entities.get(operation.entity)
+    if entity is None:
+        return
+    if len(set(operation.lines)) != len(operation.lines):
+        yield _error(
+            "duplicate-name", "The names in 'lines' must be unique.", operation, at="lines"
+        )
+    for name in dict.fromkeys(operation.lines):
+        relation = entity.relations.get(name)
+        if relation is None:
+            yield _unknown_member(
+                operation, "lines", "relation", operation.entity, name, entity.relations
+            )
+            continue
+        if relation.kind != "one_to_many":
+            yield _error(
+                "unsuitable-field",
+                f"The lines '{name}' need a one_to_many relation, but "
+                f"'{operation.entity}.{name}' is {relation.kind}.",
+                operation,
+                at="lines",
+                hint="The lines are the records of a one_to_many relation, for example "
+                "the lines of an invoice.",
+            )
+            continue
+        target = definition.entities.get(relation.target)
+        files = [f for f, field in target.fields.items() if field.is_file] if target else []
+        if files:
+            yield _error(
+                "unsuitable-field",
+                f"The lines '{name}' are records of '{relation.target}', which has the file "
+                f"field '{files[0]}'. The lines of an operation cannot have files.",
+                operation,
+                at="lines",
+                hint="Upload the files of each line with its own endpoint.",
+            )
 
 
 def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -527,7 +579,7 @@ def _check_total_filter(
 def _unknown_member(
     element: Element, at: str, what: str, entity: str, name: str, choices: Iterable[str]
 ) -> Diagnostic:
-    """Return the error of a total that names a relation or a field that does not exist."""
+    """Return the error of a reference to a relation or a field that does not exist."""
     matches = difflib.get_close_matches(name, list(choices), n=1)
     return _error(
         "unknown-reference",

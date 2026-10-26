@@ -1,6 +1,27 @@
 {{ trace_header(element_id) }}
 {% set op = py.operations[name] %}
 {% set e = py.entity(op.entity) %}
+{% macro create_with_lines(op, e, sarg) %}
+    record = await repository.add(session, data{{ sarg }})
+    # The lines refer to the new record.
+    await flush(session)
+{% for lines in op.lines %}
+    {{ trace(lines.id) }}
+    await repository.{{ lines.function }}(session, record, data.{{ lines.attr }})
+{% endfor %}
+{% if sarg %}
+    await repository.check_scope(session, record, scope)
+{% endif %}
+    await commit(session)
+    record = await repository.get(session, record.id)
+{% endmacro %}
+{% macro update_lines(op) %}
+{% for lines in op.lines %}
+    {{ trace(lines.id) }}
+    if data.{{ lines.attr }} is not None:
+        await repository.{{ lines.function }}(session, record, data.{{ lines.attr }})
+{% endfor %}
+{% endmacro %}
 """The operation `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}."""
 
 {% set owner = op.scope_action %}
@@ -9,10 +30,13 @@
 {% else %}
 {% set lines = [
     "from fastapi import APIRouter" ~ (", Depends" if owner),
-    "from app.core.db import SessionDep",
+    "from app.core.db import SessionDep" ~ (", commit, flush" if op.lines and op.kind == "create"),
     "from app.core.errors import problem_responses",
     "from app.features." ~ e.slice ~ " import repository",
 ] %}
+{% if op.lines %}
+{% set lines = lines + ["from pydantic import Field"] + op.line_imports() %}
+{% endif %}
 {% if op.kind != "create" %}
 {% set lines = lines + ["from uuid import UUID"] %}
 {% endif %}
@@ -24,7 +48,7 @@
 {% endif %}
 {% set schemas = {"create": [e.name ~ "Create", e.name ~ "Read"], "update": [e.name ~ "Read", e.name ~ "Update"], "read": [e.name ~ "Read"]}.get(op.kind) %}
 {% if schemas %}
-{% set lines = lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ (schemas | join(", "))] %}
+{% set lines = lines + [py.from_import("app.features." ~ e.slice ~ ".schemas", schemas + op.own_line_items)] %}
 {% endif %}
 {{ py.imports(lines) }}
 {% endif %}
@@ -34,6 +58,17 @@ router = APIRouter(prefix="{{ e.path }}")
 
 Scope = Annotated[RecordScope | None, Depends(scope_of("{{ owner }}"))]
 """The records that the request may use (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% if op.lines %}
+
+
+class {{ op.input_class }}({{ e.name }}{{ "Create" if op.kind == "create" else "Update" }}):
+    """The input of the operation: the fields of the record, and its lines (ADR 0035)."""
+
+{% for lines in op.lines %}
+    {{ trace(lines.id) }}
+    {{ lines.declaration(op.kind) }}
+{% endfor %}
 {% endif %}
 {% if op.kind == "list" %}
 
@@ -83,12 +118,16 @@ SORTABLE: dict[str, Any] = {}
 {% set hides = e.hides and owner %}
 {% if op.kind == "create" and owner %}
 async def {{ op.name }}(
-    data: {{ e.name }}Create,
+    data: {{ op.input_class }},
     session: SessionDep,
     scope: Scope,
 ) -> {{ e.name }}Read:
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
+{% if op.lines %}
+{{ create_with_lines(op, e, sarg) | trim("\n") }}
+{% else %}
     record = await repository.create(session, data{{ sarg }})
+{% endif %}
 {% if hides %}
     result = {{ e.name }}Read.model_validate(record)
     await repository.hide(session, [result], scope)
@@ -97,9 +136,13 @@ async def {{ op.name }}(
     return {{ e.name }}Read.model_validate(record)
 {% endif %}
 {% elif op.kind == "create" %}
-{{ py.signature("async def " ~ op.name, ["data: " ~ e.name ~ "Create", "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
+{{ py.signature("async def " ~ op.name, ["data: " ~ op.input_class, "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
+{% if op.lines %}
+{{ create_with_lines(op, e, "") | trim("\n") }}
+{% else %}
     record = await repository.create(session, data)
+{% endif %}
     return {{ e.name }}Read.model_validate(record)
 {% elif op.kind == "read" and owner %}
 async def {{ op.name }}(
@@ -124,12 +167,15 @@ async def {{ op.name }}(
 {% elif op.kind == "update" and owner %}
 async def {{ op.name }}(
     id: UUID,
-    data: {{ e.name }}Update,
+    data: {{ op.input_class }},
     session: SessionDep,
     scope: Scope,
 ) -> {{ e.name }}Read:
     """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id{{ sarg }})
+{% if op.lines %}
+{{ update_lines(op) | trim("\n") }}
+{% endif %}
     record = await repository.update(session, record, data{{ sarg }})
 {% if hides %}
     result = {{ e.name }}Read.model_validate(record)
@@ -139,9 +185,12 @@ async def {{ op.name }}(
     return {{ e.name }}Read.model_validate(record)
 {% endif %}
 {% elif op.kind == "update" %}
-{{ py.signature("async def " ~ op.name, ["id: UUID", "data: " ~ e.name ~ "Update", "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
+{{ py.signature("async def " ~ op.name, ["id: UUID", "data: " ~ op.input_class, "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
     """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
+{% if op.lines %}
+{{ update_lines(op) | trim("\n") }}
+{% endif %}
     record = await repository.update(session, record, data)
     return {{ e.name }}Read.model_validate(record)
 {% elif op.kind == "delete" and owner %}

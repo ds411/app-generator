@@ -65,6 +65,39 @@ class {{ e.name }}Update(InputModel):
     def _reject_empty_default(self) -> Self:
         return reject_empty_default(self, {{ e.required_translatable | map(attribute="attr") | map("tojson") | join(", ") }})
 {% endif %}
+{% for lines in e.line_items %}
+
+
+{{ trace(lines.id) }}
+class {{ lines.item_class }}(InputModel):
+    """A line of `{{ lines.name }}` of a record of the entity {{ lines.entity.name }} (ADR 0035).
+
+    An item with the ID of a line changes the given fields of that line. An item without an
+    ID is a new line.
+    """
+
+    id: UUID | None = Field(default=None, description="The ID of a line that stays.")
+{% for f in e.fields %}
+    {{ trace(f.id) }}
+    {{ f.declaration("create") }}
+{% if f.translatable %}
+    {{ trace(f.id) }}
+    {{ f.translations_declaration("create") }}
+{% endif %}
+{% endfor %}
+{% for r in lines.item_relations %}
+    {{ trace(r.id) }}
+{% for line in r.declarations("create") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% if e.required_translatable %}
+
+    @model_validator(mode="after")
+    def _reject_empty_default(self) -> Self:
+        return reject_empty_default(self, {{ e.required_translatable | map(attribute="attr") | map("tojson") | join(", ") }})
+{% endif %}
+{% endfor %}
 
 
 class {{ e.name }}Read(ReadModel):
