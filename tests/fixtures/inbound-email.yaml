@@ -1,0 +1,43 @@
+# Inbound emails of each mail service (ADR 0030): Postmark and SendGrid
+# with HTTP Basic authentication, and Mailgun with its signature. An email
+# makes a ticket, and a reply (In-Reply-To) counts on the ticket of the
+# email that it answers. The logic is in tests/fixtures/inbound-email/:
+# scripts/check-fastapi.sh and scripts/check-nextjs.sh copy it into the
+# apps, and send the emails (scripts/inbound_email_test.py).
+version: 0
+
+app:
+  name: helpdesk
+  title: Help desk
+
+entities:
+  Ticket:
+    crud: { views: [table] }
+    display_field: subject
+    fields:
+      subject: { type: string, required: true, max_length: 200 }
+      requester: { type: email, required: true }
+      message_id: { type: string, required: true, unique: true, max_length: 200 }
+      body: { type: text }
+      replies: { type: integer, required: true, default: 0, min: 0 }
+
+pages:
+  tickets: { path: /tickets, title: Tickets, content: { view: ticket_table } }
+
+webhooks:
+  postmark:
+    path: /webhooks/postmark
+    description: Postmark forwards an email to the support address.
+    format: email
+    provider: postmark
+    signature: { scheme: basic, secret_env: POSTMARK_INBOUND_CREDENTIALS }
+  mailgun:
+    path: /webhooks/mailgun
+    format: email
+    provider: mailgun
+    signature: { scheme: mailgun, secret_env: MAILGUN_SIGNING_KEY, tolerance_seconds: 600 }
+  sendgrid:
+    path: /webhooks/sendgrid
+    format: email
+    provider: sendgrid
+    signature: { scheme: basic, secret_env: SENDGRID_INBOUND_CREDENTIALS }

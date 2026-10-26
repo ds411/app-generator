@@ -2,7 +2,11 @@
 {{ trace_header(element_id) }}
 import "server-only";
 
+{% if w.email %}
+import { type InboundEmail, WebhookError } from "@/shared/webhooks";
+{% else %}
 import { WebhookError } from "@/shared/webhooks";
+{% endif %}
 {% if w.typed %}
 
 import type { {{ w.body_type }} } from "../model/event";
@@ -13,11 +17,20 @@ import type { {{ w.body_type }} } from "../model/event";
  * {{ w.description }}
  *
 {% endif %}
+{% if w.email %}
+ * The logic of the webhook `{{ w.name }}` (POST {{ w.path }}): an inbound email of
+ * {{ w.provider_title }}. The endpoint checked the signature, and calls the function one time
+ * for each `Message-ID`. `email.inReplyTo` is the `Message-ID` of the email that this
+ * email answers. Throw an error to refuse the email, for example a `WebhookError` with
+ * a status: then the mail service can deliver it again. The repositories in
+ * `@/entities/<entity>/server` read and change the data.
+{% else %}
  * The logic of the webhook `{{ w.name }}` (POST {{ w.path }}). The endpoint checked the
  * signature, and calls the function one time for each event ID. Throw an error to
  * refuse the event, for example a `WebhookError` with a status: then the sender can
  * deliver it again. The repositories in `@/entities/<entity>/server` read and change
  * the data.
+{% endif %}
  */
 export async function {{ w.handler }}(_event: {{ w.body_type }}, _headers: Headers): Promise<void> {
   // TODO(appgen): write the logic of the webhook {{ w.name }}.

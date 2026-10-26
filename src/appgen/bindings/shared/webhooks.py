@@ -64,3 +64,28 @@ def _set_path(data: dict[str, object], path: tuple[str, ...], value: object) -> 
             step = current[name] = dict[str, object]()
         current = cast(dict[str, object], step)
     current[path[-1]] = value
+
+
+def signature_text(scheme: str, header: str) -> str:
+    """Return the check of a signature scheme for the READMEs, in Markdown."""
+    match scheme:
+        case "stripe":
+            return "Stripe (`Stripe-Signature`)"
+        case "mailgun":
+            return "Mailgun (the fields `timestamp`, `token`, and `signature`)"
+        case "basic":
+            return "HTTP Basic (`Authorization`)"
+        case _:
+            return f"HMAC-SHA256 in `{header}`"
+
+
+def secret_comment(name: str, path: str, scheme: str) -> str:
+    """Return the comment of the secret variable of a webhook in `.env.example`."""
+    if scheme == "basic":
+        return (
+            f"The user name and the password of the webhook {name} (POST {path}), as "
+            "<user name>:<password>. The URL of the webhook at the mail service has them."
+        )
+    if scheme == "mailgun":
+        return f"The signing key of Mailgun for the webhook {name} (POST {path})."
+    return f"The secret of the signatures of the webhook {name} (POST {path})."

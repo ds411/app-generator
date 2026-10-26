@@ -447,8 +447,19 @@ again.
 | Webhook | Endpoint | Signature | Secret |
 | ------- | -------- | --------- | ------ |
 {% for w in py_webhooks.values() %}
-| `{{ w.name }}` | `POST {{ w.path }}` | {{ "Stripe (`Stripe-Signature`)" if w.scheme == "stripe" else "HMAC-SHA256 in `" ~ w.header ~ "`" }} | `{{ w.secret_env }}` |
+| `{{ w.name }}` | `POST {{ w.path }}` | {{ w.signature_text }} | `{{ w.secret_env }}` |
 {% endfor %}
+{% if py_webhooks.values() | selectattr("email") | list %}
+
+A webhook with the format `email` receives the inbound emails that a
+mail service forwards (Mailgun, Postmark, or SendGrid). The logic gets
+the email as `app.core.inbound_email.InboundEmail`: the sender, the receivers, the subject, the
+text, the `In-Reply-To` header, and the names and sizes of the
+attachments. The event ID is the `Message-ID` header. With HTTP Basic,
+the secret is `<user name>:<password>`, and the URL of the webhook at
+the mail service has them, for example
+`https://<user name>:<password>@example.com/webhooks/support`.
+{% endif %}
 
 Without its secret, an endpoint gives 500. The tests in `tests/webhooks/`
 sign the requests with a test secret, and replace the logic with a

@@ -71,7 +71,7 @@ from appgen.dsl.ui.checks import (
     check_ui_views,
 )
 from appgen.dsl.ui.fields import FieldPathError, resolve_path
-from appgen.dsl.webhooks import Webhook
+from appgen.dsl.webhooks import EMAIL_SCHEMES, Webhook
 
 type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 
@@ -1516,6 +1516,24 @@ def check_webhooks(definition: AppDefinition) -> Iterator[Diagnostic]:
                     webhook,
                     at="signature",
                 )
+        if webhook.email:
+            yield from _check_email_webhook(webhook)
+            continue
+        if webhook.provider is not None:
+            yield _error(
+                "invalid-option",
+                "The key 'provider' needs the format 'email'.",
+                webhook,
+                at="provider",
+                hint="Add 'format: email', or remove the key 'provider'.",
+            )
+        if webhook.signature.scheme == "mailgun":
+            yield _error(
+                "invalid-option",
+                "The scheme 'mailgun' needs the format 'email' with the provider 'mailgun'.",
+                webhook,
+                at="signature",
+            )
         event_id = webhook.event_id
         if (event_id.field is None) == (event_id.header is None):
             yield _error(
@@ -1525,6 +1543,41 @@ def check_webhooks(definition: AppDefinition) -> Iterator[Diagnostic]:
                 at="event_id",
             )
         yield from _check_webhook_body(webhook)
+
+
+def _check_email_webhook(webhook: Webhook) -> Iterator[Diagnostic]:
+    """An email webhook has a provider and a scheme of the provider. The body and the event ID
+    come from the email."""
+    provider = webhook.provider
+    if provider is None:
+        yield _error(
+            "missing-key",
+            "A webhook with the format 'email' needs the key 'provider'.",
+            webhook,
+            hint=f"Use one of: {', '.join(sorted(EMAIL_SCHEMES))}.",
+        )
+        return
+    schemes = EMAIL_SCHEMES[provider]
+    if webhook.signature.scheme not in schemes:
+        yield _error(
+            "invalid-option",
+            f"The mail service '{provider}' does not sign its requests with the scheme "
+            f"'{webhook.signature.scheme}'.",
+            webhook,
+            at="signature",
+            hint=f"Use the scheme {' or '.join(repr(s) for s in schemes)}.",
+        )
+    for key, why in (
+        ("body", "the body is the email"),
+        ("event_id", "the event ID is the 'Message-ID' header of the email"),
+    ):
+        if key in webhook.model_fields_set:
+            yield _error(
+                "invalid-option",
+                f"A webhook with the format 'email' has no key '{key}': {why}.",
+                webhook,
+                at=key,
+            )
 
 
 def _setting_envs(definition: AppDefinition) -> dict[str, str]:
@@ -1604,11 +1657,13 @@ def _entity_path(name: str, entity: Entity) -> str:
 
 
 def _check_webhook_signature(webhook: Webhook) -> Iterator[Diagnostic]:
-    """The signature has the keys of its scheme, and no key of the other scheme."""
+    """The signature has the keys of its scheme, and no key of the other schemes."""
     signature = webhook.signature
     given = signature.model_fields_set
     if signature.scheme == "hmac_sha256":
         needed, other = ("header",), ("tolerance_seconds",)
+    elif signature.scheme == "basic":
+        needed, other = (), ("header", "prefix", "encoding", "tolerance_seconds")
     else:
         needed, other = (), ("header", "prefix", "encoding")
     for key in needed:

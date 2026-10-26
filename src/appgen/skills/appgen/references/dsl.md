@@ -948,7 +948,9 @@ send events to, for example a payment service, a shipping service, or a
 chat service. Each webhook has a path, a signature, and an optional
 schema of the body. The FastAPI app checks the signature of each
 request, and calls the hand-written logic of the webhook one time for
-each event ([ADR 0028](https://github.com/ds411/app-generator/blob/main/docs/adr/0028-webhooks.md)).
+each event ([ADR 0028](https://github.com/ds411/app-generator/blob/main/docs/adr/0028-webhooks.md)). A webhook with
+`format: email` receives the inbound emails that a mail service
+forwards ([ADR 0030](https://github.com/ds411/app-generator/blob/main/docs/adr/0030-inbound-email.md)).
 
 ```yaml
 webhooks:
@@ -975,6 +977,12 @@ webhooks:
       encoding: base64
       secret_env: SHIPPING_WEBHOOK_SECRET
     event_id: { header: X-Shipping-Event }
+  support:
+    description: The mail service forwards an email to the support address.
+    path: /webhooks/support
+    format: email
+    provider: postmark
+    signature: { scheme: basic, secret_env: SUPPORT_INBOUND_CREDENTIALS }
 ```
 
 | Key           | Content                                                                   |
@@ -983,18 +991,20 @@ webhooks:
 | `signature`   | Required. The check of the signature (see below).                         |
 | `event_id`    | The location of the event ID: `field`, a property of the body (with `.` for a nested property, for example `message.id`), or `header`, a header. The default is `{ field: id }`. |
 | `body`        | The schema of the body: `document`, the path of an OpenAPI document from the folder of the definition, and `schema`, the name of a schema in `components.schemas`. Without `body`, the event is a JSON value. |
+| `format`      | `json` (the default): the body is a JSON event. `email`: the body is an inbound email of the mail service of `provider` (see [Inbound email](#inbound-email)). |
+| `provider`    | Only `format: email`, and required: `mailgun`, `postmark`, or `sendgrid`. |
 | `description` | Text.                                                                     |
 
 The keys of `signature`:
 
 | Key                 | Content                                                             |
 | ------------------- | ------------------------------------------------------------------- |
-| `scheme`            | Required. `hmac_sha256` or `stripe`.                                |
-| `secret_env`        | Required. The environment variable of the secret that the sender and the app share. |
+| `scheme`            | Required. `hmac_sha256`, `stripe`, `mailgun`, or `basic`.           |
+| `secret_env`        | Required. The environment variable of the secret that the sender and the app share. With `basic`, the secret is `<user name>:<password>`. |
 | `header`            | Only `hmac_sha256`, and required: the header with the signature, for example `X-Hub-Signature-256`. |
 | `prefix`            | Only `hmac_sha256`: a text before the signature, for example `sha256=`. The default is no prefix. |
 | `encoding`          | Only `hmac_sha256`: `hex` (the default) or `base64`.                |
-| `tolerance_seconds` | Only `stripe`: the maximum difference in seconds between the time of the signature and now, from 1 to 86400. The default is 300. |
+| `tolerance_seconds` | Only `stripe` and `mailgun`: the maximum difference in seconds between the time of the signature and now, from 1 to 86400. The default is 300. |
 
 - `hmac_sha256`: the header has the HMAC-SHA256 of the raw body with the
   secret, in hex or in base64, after the prefix. For example, GitHub
@@ -1004,6 +1014,15 @@ The keys of `signature`:
   The signature is the HMAC-SHA256 of `<time>.<body>` in hex. A time that
   is more than `tolerance_seconds` before or after now gives 401, so that
   a recorded request cannot come again later.
+- `mailgun`: only with `provider: mailgun`. The fields `timestamp`,
+  `token`, and `signature` of the form have the HMAC-SHA256 of
+  `<timestamp><token>` with the signing key of Mailgun, in hex. An old
+  time gives 401, as with `stripe`.
+- `basic`: the header `Authorization` has the user name and the
+  password of the secret (HTTP Basic authentication). A sender sends the
+  header when its URL of the webhook has them, for example
+  `https://<user name>:<password>@example.com/webhooks/support`. Use it
+  only with HTTPS.
 - The FastAPI app has the endpoint `POST <path>` for each webhook, in
   `app/webhooks/<webhook>/router.py`. The endpoint reads the raw body,
   and checks the signature with the secret. A wrong or missing signature
@@ -1048,6 +1067,38 @@ The keys of `signature`:
 - The document must be a local file, as for `apis`. The schema must be
   in the document, and the property of the event ID must be in the
   schema. The output manifest records the hash of each document.
+
+### Inbound email
+
+A webhook with `format: email` receives the emails that a mail service
+forwards to the app, for example the emails to a support address. The
+app reads the request of the mail service into one email, and calls the
+logic of the webhook one time for each `Message-ID` header.
+
+| Provider   | Request of the mail service                                   | Schemes            |
+| ---------- | ------------------------------------------------------------- | ------------------ |
+| `mailgun`  | A route with the action `forward`: a form with the fields `from`, `subject`, `body-plain`, `body-html`, `message-headers`, and the attachments as files. | `mailgun`, `basic` |
+| `postmark` | The inbound webhook: JSON with `FromFull`, `ToFull`, `CcFull`, `Subject`, `TextBody`, `HtmlBody`, `Headers`, and `Attachments`. | `basic`            |
+| `sendgrid` | The Inbound Parse webhook, not the raw MIME message: a form with the fields `from`, `to`, `cc`, `subject`, `text`, `html`, `headers`, and the attachments as files. | `basic`            |
+
+- The logic gets the email: the `Message-ID` (`message_id`, or
+  `messageId` in the Next.js app), the sender of the `From` header, the
+  receivers of `To` and `Cc` (each an address and an optional name), the
+  subject, the text, the HTML, the `In-Reply-To` header, and the
+  attachments. The FastAPI app gives the Pydantic model `InboundEmail`
+  of `app/core/inbound_email.py`, and the Next.js app the type
+  `InboundEmail` of `@/shared/webhooks`.
+- An attachment gives only its name, its media type, and its size. The
+  app does not keep the content of the files.
+- The event ID is the `Message-ID` header. An email without one gets the
+  SHA-256 hash of the body as its event ID. The answer and the repeated
+  emails are as for the other webhooks.
+- A wrong signature gives 401. A body without a sender gives 400. A
+  server without the secret gives 500.
+- A webhook with `format: email` needs `provider`, and its scheme must
+  be a scheme of the provider (`invalid-option`). It has no `body` and
+  no `event_id` (`invalid-option`). A webhook without `format: email`
+  has no `provider` and no scheme `mailgun` (`invalid-option`).
 
 ## ui
 
@@ -2099,7 +2150,8 @@ use in the app does not show.
   `The body of the webhook is not valid JSON.`,
   `The webhook has no event ID.`,
   `The body of the webhook does not agree with its schema.`,
-  `The logic of the webhook failed. Deliver the event again later.`.
+  `The logic of the webhook failed. Deliver the event again later.`,
+  `The body of the webhook is not a valid email.`.
 
 ### Messages of the FastAPI app
 
@@ -2180,7 +2232,8 @@ to translate one. The rules and the workflows give their own messages.
 - The webhooks: `The server has no secret for the webhook {name}.`,
   `The signature of the webhook is not valid.`,
   `The body of the webhook is not valid JSON.`,
-  `The webhook has no event ID.`.
+  `The webhook has no event ID.`,
+  `The body of the webhook is not a valid email.`.
 - The files of the file fields: `The file is larger than {size}.`,
   `The type {type} is not allowed. Use one of: {types}.`, and for a link
   that is not valid `The link is not valid, or has ended.`.

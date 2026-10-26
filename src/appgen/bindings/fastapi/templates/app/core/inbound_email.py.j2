@@ -1,0 +1,238 @@
+{% set emails = py_webhooks.values() | selectattr("email") | list %}
+{% set providers = emails | map(attribute="provider") | unique | sort | list %}
+{{ trace_header(*(emails | map(attribute="id"))) }}
+"""The inbound emails of the webhooks with the format `email` (ADR 0030).
+
+A mail service receives an email for the app, and forwards it as an
+HTTP request: Mailgun and SendGrid as a form, Postmark as JSON. The
+functions of this module read the request of each service into an
+`InboundEmail`. The event ID of an email is its `Message-ID` header, or
+the SHA-256 hash of the body for an email without one. The attachments
+give only their names, types, and sizes.
+"""
+
+{{ py.imports(
+    ["import hashlib", "from email.utils import getaddresses", "from typing import Any, cast",
+     "from pydantic import BaseModel", "from app.core.errors import ProblemError"]
+    + (["import json"] if "mailgun" in providers or "sendgrid" in providers else [])
+    + (["from email.parser import HeaderParser"] if "sendgrid" in providers else [])
+    + (["from fastapi import Request", "from starlette.datastructures import FormData, UploadFile"]
+       if "mailgun" in providers or "sendgrid" in providers else [])
+    + (["from app.core.i18n import t"] if py.translated else [])
+) }}
+
+
+class EmailAddress(BaseModel):
+    """An address of an email, with the name of the person if the email gives one."""
+
+    address: str
+    name: str | None = None
+
+
+class EmailAttachment(BaseModel):
+    """A file of an email: its name, its media type, and its size in bytes."""
+
+    name: str
+    content_type: str
+    size: int
+
+
+class InboundEmail(BaseModel):
+    """An email that a mail service forwards to the app."""
+
+    message_id: str | None
+    """The `Message-ID` header, for example `<abc@mail.example.com>`."""
+    sender: EmailAddress
+    """The address of the `From` header."""
+    to: list[EmailAddress]
+    cc: list[EmailAddress]
+    subject: str
+    text: str
+    """The text of the email, without HTML."""
+    html: str | None
+    in_reply_to: str | None
+    """The `In-Reply-To` header: the `Message-ID` of the email that this email answers."""
+    attachments: list[EmailAttachment]
+
+
+def email_event_id(email: InboundEmail, body: bytes) -> str:
+    """Return the event ID of an email: its `Message-ID`, else the SHA-256 hash of the body."""
+    return email.message_id or hashlib.sha256(body).hexdigest()
+
+
+def _not_an_email() -> ProblemError:
+    return ProblemError(400, {{ py.message("The body of the webhook is not a valid email.") }})
+
+
+def _text(value: object) -> str | None:
+    """Return a text value, or None for an empty value or another type."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _header(value: object) -> str | None:
+    """Return the value of a header without the spaces around it, or None."""
+    text = _text(value)
+    return text.strip() if text else None
+
+
+def _addresses(value: str | None) -> list[EmailAddress]:
+    """Return the addresses of a header, for example `Ada <ada@example.com>, bob@example.com`."""
+    pairs = getaddresses([value]) if value else []
+    return [
+        EmailAddress(address=address, name=name or None)
+        for name, address in pairs
+        if "@" in address
+    ]
+
+
+def _sender(*values: str | None) -> EmailAddress:
+    """Return the first address of the values. Give 400 if they have none."""
+    for value in values:
+        found = _addresses(value)
+        if found:
+            return found[0]
+    raise _not_an_email()
+{% if "mailgun" in providers or "sendgrid" in providers %}
+
+
+async def read_form(request: Request) -> FormData:
+    """Return the form of the body. A body that is not a form gives an empty form."""
+    return await request.form()
+
+
+def _files(form: FormData) -> list[EmailAttachment]:
+    """Return each file of the form as an attachment."""
+    return [
+        EmailAttachment(
+            name=value.filename or key,
+            content_type=value.content_type or "application/octet-stream",
+            size=value.size or 0,
+        )
+        for key, value in form.multi_items()
+        if isinstance(value, UploadFile)
+    ]
+{% endif %}
+{% if "mailgun" in providers %}
+
+
+def read_mailgun(form: FormData) -> InboundEmail:
+    """Read the form of a route of Mailgun with the action `forward`.
+
+    The field `message-headers` has all headers of the email, as a JSON
+    list of `[name, value]` pairs.
+    """
+    try:
+        pairs: Any = json.loads(_text(form.get("message-headers")) or "[]")
+    except ValueError:
+        raise _not_an_email() from None
+    headers: dict[str, str] = {}
+    for pair in cast(list[Any], pairs) if isinstance(pairs, list) else []:
+        if isinstance(pair, list) and len(cast(list[Any], pair)) == 2:
+            name, value = cast(list[Any], pair)
+            if isinstance(name, str) and isinstance(value, str):
+                headers.setdefault(name.lower(), value)
+
+    def header(name: str) -> str | None:
+        found = headers.get(name.lower()) or form.get(name) or form.get(name.lower())
+        return _header(found)
+
+    return InboundEmail(
+        message_id=header("Message-Id"),
+        sender=_sender(header("From"), _header(form.get("sender"))),
+        to=_addresses(header("To") or _header(form.get("recipient"))),
+        cc=_addresses(header("Cc")),
+        subject=_text(form.get("subject")) or "",
+        text=_text(form.get("body-plain")) or "",
+        html=_text(form.get("body-html")),
+        in_reply_to=header("In-Reply-To"),
+        attachments=_files(form),
+    )
+{% endif %}
+{% if "postmark" in providers %}
+
+
+def _postmark_addresses(value: object) -> list[EmailAddress]:
+    """Return the addresses of a `ToFull` or `CcFull` list of Postmark."""
+    items = cast(list[Any], value) if isinstance(value, list) else [value]
+    found: list[EmailAddress] = []
+    for item in items:
+        if isinstance(item, dict):
+            contact = cast(dict[str, Any], item)
+            address = _header(contact.get("Email"))
+            if address and "@" in address:
+                found.append(EmailAddress(address=address, name=_header(contact.get("Name"))))
+    return found
+
+
+def read_postmark(data: Any) -> InboundEmail:
+    """Read the JSON body of the inbound webhook of Postmark.
+
+    The list `Headers` has the headers of the email that the other keys do
+    not have, for example `Message-ID` and `In-Reply-To`.
+    """
+    if not isinstance(data, dict):
+        raise _not_an_email()
+    body = cast(dict[str, Any], data)
+    headers: dict[str, str] = {}
+    raw = body.get("Headers")
+    for item in cast(list[Any], raw) if isinstance(raw, list) else []:
+        if isinstance(item, dict):
+            entry = cast(dict[str, Any], item)
+            name, value = entry.get("Name"), entry.get("Value")
+            if isinstance(name, str) and isinstance(value, str):
+                headers.setdefault(name.lower(), value)
+    senders = _postmark_addresses(body.get("FromFull"))
+    attachments: list[EmailAttachment] = []
+    files = body.get("Attachments")
+    for item in cast(list[Any], files) if isinstance(files, list) else []:
+        if isinstance(item, dict):
+            entry = cast(dict[str, Any], item)
+            size = entry.get("ContentLength")
+            attachments.append(
+                EmailAttachment(
+                    name=_header(entry.get("Name")) or "attachment",
+                    content_type=_header(entry.get("ContentType")) or "application/octet-stream",
+                    size=size if isinstance(size, int) and not isinstance(size, bool) else 0,
+                )
+            )
+    return InboundEmail(
+        message_id=_header(headers.get("message-id")),
+        sender=senders[0] if senders else _sender(_header(body.get("From"))),
+        to=_postmark_addresses(body.get("ToFull")) or _addresses(_header(body.get("To"))),
+        cc=_postmark_addresses(body.get("CcFull")) or _addresses(_header(body.get("Cc"))),
+        subject=_text(body.get("Subject")) or "",
+        text=_text(body.get("TextBody")) or "",
+        html=_text(body.get("HtmlBody")),
+        in_reply_to=_header(headers.get("in-reply-to")),
+        attachments=attachments,
+    )
+{% endif %}
+{% if "sendgrid" in providers %}
+
+
+def read_sendgrid(form: FormData) -> InboundEmail:
+    """Read the form of the Inbound Parse webhook of SendGrid (not the raw MIME message).
+
+    The field `headers` has the header lines of the email, for example the
+    `Message-ID` and the `In-Reply-To` header.
+    """
+    headers = HeaderParser().parsestr(_text(form.get("headers")) or "")
+    try:
+        envelope: Any = json.loads(_text(form.get("envelope")) or "{}")
+    except ValueError:
+        raise _not_an_email() from None
+    envelope_from = (
+        cast(dict[str, Any], envelope).get("from") if isinstance(envelope, dict) else None
+    )
+    return InboundEmail(
+        message_id=_header(headers.get("Message-ID")),
+        sender=_sender(_header(form.get("from")), _header(envelope_from)),
+        to=_addresses(_header(form.get("to"))),
+        cc=_addresses(_header(form.get("cc"))),
+        subject=_text(form.get("subject")) or "",
+        text=_text(form.get("text")) or "",
+        html=_text(form.get("html")),
+        in_reply_to=_header(headers.get("In-Reply-To")),
+        attachments=_files(form),
+    )
+{% endif %}

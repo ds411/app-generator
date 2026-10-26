@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 
 from appgen.bindings.shared.integrations import TsType, ts_key, ts_types
+from appgen.bindings.shared.webhooks import secret_comment, signature_text
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.openapi import (
     ArraySchema,
@@ -24,7 +25,7 @@ from appgen.dsl.openapi import (
     Schema,
     UnionSchema,
 )
-from appgen.dsl.webhooks import Webhook
+from appgen.dsl.webhooks import EMAIL_PROVIDERS, Webhook
 from appgen.gen.naming import kebab, pascal
 
 _STRING_FORMATS = {"uuid": "z.uuid()", "email": "z.email()", "binary": "z.instanceof(Blob)"}
@@ -54,7 +55,7 @@ class TsWebhook:
     path: str
     description: str | None
     scheme: str
-    """`hmac_sha256` or `stripe`."""
+    """`hmac_sha256`, `stripe`, `mailgun`, or `basic`."""
     header: str
     """The header with the signature."""
     prefix: str
@@ -68,6 +69,28 @@ class TsWebhook:
     """The TypeScript type of the event: the type of the schema of the body, or `unknown`."""
     types: list[TsType] = field(default_factory=list[TsType])
     schemas: list[ZodConst] = field(default_factory=list[ZodConst])
+    provider: str | None = None
+    """The mail service of a webhook with `format: email` (ADR 0030), or None for JSON events."""
+
+    @property
+    def email(self) -> bool:
+        """True if the webhook receives the inbound emails of a mail service."""
+        return self.provider is not None
+
+    @property
+    def signature_text(self) -> str:
+        """The check of the signature, for the README."""
+        return signature_text(self.scheme, self.header)
+
+    @property
+    def secret_comment(self) -> str:
+        """The comment of the secret variable in `.env.example`."""
+        return secret_comment(self.name, self.path, self.scheme)
+
+    @property
+    def provider_title(self) -> str:
+        """The name of the mail service, for example `Postmark`."""
+        return EMAIL_PROVIDERS.get(self.provider or "", "")
 
     @property
     def route_file(self) -> str:
@@ -127,6 +150,10 @@ def _webhook(name: str, webhook: Webhook) -> TsWebhook:
         event_header=webhook.event_id.header,
         body_type="unknown",
     )
+    if webhook.email:
+        ts.provider = webhook.provider
+        ts.body_type = "InboundEmail"
+        return ts
     schema_name = webhook.body_schema
     schemas = webhook.spec.schemas
     if schema_name is not None and schemas:

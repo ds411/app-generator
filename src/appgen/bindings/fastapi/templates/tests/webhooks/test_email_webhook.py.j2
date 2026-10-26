@@ -1,0 +1,258 @@
+{{ trace_header(element_id) }}
+{% set w = py_webhooks[name] %}
+"""The tests of the webhook `{{ w.name }}`: POST {{ w.path }}, the inbound emails of {{ w.provider_title }}.
+
+The tests send an email in the format of {{ w.provider_title }}, with a test secret.
+The fixture `events` replaces the logic of `handler_ext.py` with a
+function that records the emails, so that the tests check the endpoint
+without the logic.
+"""
+
+{{ py.imports(
+    ["import json", "import re",
+     "from collections.abc import AsyncIterator, Mapping", "from typing import Any",
+     "import pytest", "from httpx import ASGITransport, AsyncClient",
+     "from sqlalchemy.ext.asyncio import AsyncSession",
+     "from app.core.config import Settings", "from app.core.inbound_email import InboundEmail",
+     "from app.main import create_app",
+     "from app.webhooks." ~ w.module ~ " import router as webhook",
+     "from tests.problems import assert_problem"]
+    + (["import base64"] if w.scheme == "basic" else [])
+    + (["import hashlib", "import hmac", "import time"] if w.scheme == "mailgun" else [])
+) }}
+
+pytestmark = pytest.mark.anyio
+
+PATH = {{ py.string(w.path) }}
+{% if w.scheme == "basic" %}
+SECRET = "appgen:test-secret"
+"""The user name and the password of the URL of the webhook."""
+{% else %}
+SECRET = "test-secret"
+"""The signing key of Mailgun."""
+TOLERANCE = {{ w.tolerance }}
+{% endif %}
+MESSAGE_ID = "<test-1@mail.example.com>"
+ANSWERED = "<test-0@mail.example.com>"
+SENDER = ("Ada Lovelace", "ada@example.com")
+RECEIVER = "support@example.com"
+SUBJECT = "The export does not work"
+TEXT = "The export button does nothing."
+ATTACHMENT = ("screen.png", b"\x89PNG\r\n", "image/png")
+{% if w.scheme == "basic" %}
+
+
+def credentials(secret: str = SECRET) -> dict[str, str]:
+    """Return the header that the mail service sends for a URL with a user name and a password."""
+    return {"Authorization": "Basic " + base64.b64encode(secret.encode()).decode()}
+{% else %}
+
+
+def signed(secret: str = SECRET, at: int | None = None) -> dict[str, str]:
+    """Return the fields of the signature of Mailgun, at a time in seconds."""
+    timestamp = str(int(time.time()) if at is None else at)
+    token = "t" * 50
+    signature = hmac.new(secret.encode(), (timestamp + token).encode(), hashlib.sha256)
+    return {"timestamp": timestamp, "token": token, "signature": signature.hexdigest()}
+{% endif %}
+
+
+def email(
+    message_id: str | None = MESSAGE_ID,
+    sender: str | None = "{} <{}>".format(*SENDER),
+    in_reply_to: str | None = ANSWERED,
+{% if w.scheme == "basic" %}
+    secret: str = SECRET,
+{% else %}
+    signature: Mapping[str, str] | None = None,
+{% endif %}
+) -> dict[str, Any]:
+    """Return the arguments of a POST of the mail service with an email."""
+{% if w.provider == "postmark" %}
+    headers: list[dict[str, str]] = []
+    if in_reply_to:
+        headers.append({"Name": "In-Reply-To", "Value": in_reply_to})
+    if message_id:
+        headers.append({"Name": "Message-ID", "Value": message_id})
+    data: dict[str, Any] = {
+        "From": sender or "",
+        "FromFull": {"Email": SENDER[1], "Name": SENDER[0]} if sender else None,
+        "To": RECEIVER,
+        "ToFull": [{"Email": RECEIVER, "Name": "", "MailboxHash": ""}],
+        "CcFull": [],
+        "Subject": SUBJECT,
+        "TextBody": TEXT,
+        "HtmlBody": f"<p>{TEXT}</p>",
+        "Headers": headers,
+        "Attachments": [
+            {
+                "Name": ATTACHMENT[0],
+                "Content": base64.b64encode(ATTACHMENT[1]).decode(),
+                "ContentType": ATTACHMENT[2],
+                "ContentLength": len(ATTACHMENT[1]),
+            }
+        ],
+    }
+    return {
+        "content": json.dumps(data).encode(),
+        "headers": {"Content-Type": "application/json", **credentials(secret)},
+    }
+{% elif w.provider == "mailgun" %}
+    headers = [["To", RECEIVER], ["Subject", SUBJECT]]
+    if in_reply_to:
+        headers.append(["In-Reply-To", in_reply_to])
+    if message_id:
+        headers.append(["Message-Id", message_id])
+    data = {
+        "recipient": RECEIVER,
+        "sender": SENDER[1] if sender else "",
+        "from": sender or "",
+        "subject": SUBJECT,
+        "body-plain": TEXT,
+        "body-html": f"<p>{TEXT}</p>",
+        "message-headers": json.dumps(headers),
+        "attachment-count": "1",
+    }
+{% if w.scheme == "basic" %}
+    return {
+        "data": data,
+        "files": {"attachment-1": ATTACHMENT},
+        "headers": credentials(secret),
+    }
+{% else %}
+    data |= signed() if signature is None else signature
+    return {"data": data, "files": {"attachment-1": ATTACHMENT}}
+{% endif %}
+{% else %}
+    lines = [f"To: {RECEIVER}", f"Subject: {SUBJECT}"]
+    if in_reply_to:
+        lines.append(f"In-Reply-To: {in_reply_to}")
+    if message_id:
+        lines.append(f"Message-ID: {message_id}")
+    data = {
+        "headers": "\n".join(lines) + "\n",
+        "from": sender or "",
+        "to": RECEIVER,
+        "subject": SUBJECT,
+        "text": TEXT,
+        "html": f"<p>{TEXT}</p>",
+        "envelope": json.dumps({"to": [RECEIVER], "from": SENDER[1] if sender else ""}),
+        "attachments": "1",
+        "attachment-info": json.dumps(
+            {"attachment1": {"filename": ATTACHMENT[0], "type": ATTACHMENT[2]}}
+        ),
+    }
+    return {
+        "data": data,
+        "files": {"attachment1": ATTACHMENT},
+        "headers": credentials(secret),
+    }
+{% endif %}
+
+
+@pytest.fixture
+async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """A client of the app with the test secret of the webhook."""
+    app = create_app(Settings(database_url=migrated_url, {{ w.secret_setting }}=SECRET))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    await app.state.engine.dispose()
+
+
+@pytest.fixture
+def events(monkeypatch: pytest.MonkeyPatch) -> list[InboundEmail]:
+    """The emails that reach the logic of the webhook. The test logic only records them."""
+    found: list[InboundEmail] = []
+
+    async def handle(
+        session: AsyncSession, event: InboundEmail, headers: Mapping[str, str]
+    ) -> None:
+        found.append(event)
+
+    monkeypatch.setattr(webhook, {{ py.string(w.handler) }}, handle)
+    return found
+
+
+async def test_the_logic_gets_the_email_one_time_for_each_message_id(
+    client: AsyncClient, events: list[InboundEmail]
+) -> None:
+    first = await client.post(PATH, **email())
+    again = await client.post(PATH, **email())
+
+    assert first.status_code == 200, first.text
+    assert first.json() == {"event_id": MESSAGE_ID, "repeated": False}
+    assert again.json() == {"event_id": MESSAGE_ID, "repeated": True}
+    assert len(events) == 1
+    received = events[0]
+    assert received.message_id == MESSAGE_ID
+    assert (received.sender.name, received.sender.address) == SENDER
+    assert [to.address for to in received.to] == [RECEIVER]
+    assert received.subject == SUBJECT
+    assert received.text == TEXT
+    assert received.in_reply_to == ANSWERED
+    assert [(a.name, a.content_type, a.size) for a in received.attachments] == [
+        (ATTACHMENT[0], ATTACHMENT[2], len(ATTACHMENT[1]))
+    ]
+
+
+async def test_an_email_without_a_message_id_gets_the_hash_of_the_body(
+    client: AsyncClient, events: list[InboundEmail]
+) -> None:
+    response = await client.post(PATH, **email(message_id=None))
+
+    assert response.status_code == 200, response.text
+    assert re.fullmatch(r"[0-9a-f]{64}", response.json()["event_id"])
+    assert events[0].message_id is None
+
+
+async def test_a_wrong_signature_gives_401(client: AsyncClient, events: list[InboundEmail]) -> None:
+{% if w.scheme == "basic" %}
+    missing = email()
+    del missing["headers"]["Authorization"]
+
+    wrong = await client.post(PATH, **email(secret="appgen:another-secret"))
+    without = await client.post(PATH, **missing)
+
+    for response in (wrong, without):
+        assert_problem(response, 401)
+{% else %}
+    old = int(time.time()) - TOLERANCE - 60
+    unsigned = email(signature={})
+
+    wrong = await client.post(PATH, **email(signature=signed("another-secret")))
+    late = await client.post(PATH, **email(signature=signed(at=old)))
+    without = await client.post(PATH, **unsigned)
+
+    for response in (wrong, late, without):
+        assert_problem(response, 401)
+{% endif %}
+    assert events == []
+
+
+async def test_an_email_without_a_sender_gives_400(
+    client: AsyncClient, events: list[InboundEmail]
+) -> None:
+    response = await client.post(PATH, **email(sender=None))
+
+    assert_problem(response, 400)
+    assert events == []
+
+
+async def test_the_webhook_gives_501_until_it_has_its_logic(client: AsyncClient) -> None:
+    # The stub in handler_ext.py raises NotImplementedError, and the API
+    # gives 501. With the logic of the webhook, it gives no server error.
+    response = await client.post(PATH, **email())
+
+    if response.status_code == 501:
+        assert_problem(response, 501)
+    else:
+        assert response.status_code < 500, response.text
+
+
+async def test_the_webhook_gives_500_without_a_secret(migrated_url: str) -> None:
+    app = create_app(Settings(database_url=migrated_url))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(PATH, **email())
+    await app.state.engine.dispose()
+
+    assert_problem(response, 500)

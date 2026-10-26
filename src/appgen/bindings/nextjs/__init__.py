@@ -443,6 +443,11 @@ BINDING = Binding(
             for module in ("index", "receive", "signature")
         ),
         Output(
+            template="src/shared/webhooks/email.ts.j2",
+            path="src/shared/webhooks/email.ts",
+            when="ts_webhooks.values() | selectattr('email') | list",
+        ),
+        Output(
             template="app/webhook/route.ts.j2",
             path="{{ ts_webhooks[name].route_file }}",
             for_each="webhook",
