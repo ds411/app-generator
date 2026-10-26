@@ -4,6 +4,7 @@
 import { expect, test } from "@playwright/test";
 
 import { expected, pathPattern } from "./expected";
+import { saveAndClose } from "./forms";
 import { firstRecordLink } from "./links";
 
 const detail = expected.pages.find((p) => p.name === "project_detail");
@@ -21,8 +22,9 @@ test("the breadcrumb shows the new name of a record after an edit", async ({ pag
   const name = `Edited project ${testInfo.project.name}`;
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
   const sheet = page.getByRole("dialog");
-  await sheet.getByRole("textbox", { name: "Name", exact: true }).fill(name);
-  await sheet.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(sheet).toBeHidden();
+  const input = sheet.getByRole("textbox", { name: "Name", exact: true });
+  await input.fill(name);
+  await expect(input).toHaveValue(name);
+  await saveAndClose(sheet);
   await expect(current).toHaveText(name);
 });
