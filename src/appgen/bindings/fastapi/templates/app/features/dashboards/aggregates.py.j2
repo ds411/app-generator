@@ -1,12 +1,12 @@
 {{ trace_header("app") }}
-"""The helpers of the dashboard endpoints: the numbers, the groups, the months, and today."""
+"""The helpers of the dashboard endpoints: the numbers, the groups, the intervals, and today."""
 
 import datetime as dt
 from collections.abc import Iterable, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Query
-from sqlalchemy import ColumnElement, func, literal_column
+from sqlalchemy import ColumnElement, Date, Integer, cast, extract, func, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -19,6 +19,26 @@ Today = Annotated[
         "zone of the user. The default is the date in UTC."
     ),
 ]
+
+
+WeekStart = Annotated[
+    int,
+    Query(
+        ge=0,
+        le=6,
+        description="The first day of a week of a chart that groups the dates by week: 0 is "
+        "Sunday, 1 is Monday. The default is Monday (ISO 8601).",
+    ),
+]
+
+type Interval = Literal["day", "week", "month", "year"]
+
+_FORMATS: dict[str, tuple[str, str]] = {
+    "day": ("YYYY-MM-DD", "%Y-%m-%d"),
+    "month": ("YYYY-MM", "%Y-%m"),
+    "year": ("YYYY", "%Y"),
+}
+"""The format of the key of each interval: for Postgres, and for SQLite."""
 
 
 def utc_today() -> dt.date:
@@ -41,16 +61,34 @@ def chart_values(rows: Iterable[Sequence[Any]]) -> ChartValues:
     return ChartValues(groups=groups)
 
 
-def month_of(
-    session: AsyncSession, column: InstrumentedAttribute[Any], *, utc: bool = False
+def interval_of(
+    session: AsyncSession,
+    column: InstrumentedAttribute[Any],
+    interval: Interval,
+    *,
+    utc: bool = False,
+    week_start: int = 1,
 ) -> ColumnElement[str]:
-    """Return the month of a date or a date-time column, as `YYYY-MM`.
+    """Return the interval of a date or a date-time column: the day as `YYYY-MM-DD`, the
+    first day of the week, the month as `YYYY-MM`, or the year as `YYYY`.
 
-    A date-time gives the month in UTC: Postgres keeps the time zone, and
-    SQLite stores the time in UTC. The formats are SQL literals, so that the
-    `GROUP BY` clause has the same expression as the `SELECT` clause.
+    A date-time gives the interval of its day in UTC: Postgres keeps the time
+    zone, and SQLite stores the time in UTC. A week starts on the day
+    `week_start` (0 is Sunday). The formats and the numbers are SQL literals,
+    so that the `GROUP BY` clause has the same expression as the `SELECT`
+    clause.
     """
+    # The days from the first day of the week are (weekday + shift) % 7.
+    shift = literal_column(str((7 - int(week_start)) % 7), Integer)
+    seven = literal_column("7", Integer)
     if session.get_bind().dialect.name == "postgresql":
         value = func.timezone(literal_column("'UTC'"), column) if utc else column
-        return func.to_char(value, literal_column("'YYYY-MM'"))
-    return func.strftime(literal_column("'%Y-%m'"), column)
+        if interval == "week":
+            weekday = cast(extract("dow", value), Integer)
+            start = cast(value, Date) - (weekday + shift) % seven
+            return func.to_char(start, literal_column("'YYYY-MM-DD'"))
+        return func.to_char(value, literal_column(f"'{_FORMATS[interval][0]}'"))
+    if interval == "week":
+        weekday = cast(func.strftime(literal_column("'%w'"), column), Integer)
+        return func.date(func.julianday(func.date(column)) - (weekday + shift) % seven)
+    return func.strftime(literal_column(f"'{_FORMATS[interval][1]}'"), column)

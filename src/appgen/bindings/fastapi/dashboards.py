@@ -5,7 +5,8 @@ Each `stat`, `chart`, and `list` widget of a dashboard gets an endpoint
 of a widget without the records. A stat gives its aggregate (`count`,
 `sum`, `avg`, `min`, or `max`), a chart gives the aggregate of each
 group that has records, and a list gives its first records in the order
-of the widget.
+of the widget. A chart of dates groups them by day, week, month, or
+year (`interval`): a week starts on the day `week_start` of the endpoint.
 
 The filter of a widget is a `WHERE` clause with the semantics of the
 browser: an empty value is not equal to a value, and passes no
@@ -115,8 +116,10 @@ class PyWidget:
     where: list[Expr] = field(default_factory=list[Expr])
     value: str = ""
     """The aggregate expression of a stat or a chart."""
-    key: str = ""
+    key: Expr = ""
     """The group key expression of a chart."""
+    week: bool = False
+    """True if a chart groups the dates by week: the endpoint takes `week_start`."""
     order: list[str] = field(default_factory=list[str])
     limit: int = 0
     test: WidgetTest | None = None
@@ -157,6 +160,8 @@ class PyWidget:
             params.append("scope: Scope")
         if self.today:
             params.append("today: Today = None")
+        if self.week:
+            params.append("week_start: WeekStart = 1")
         head = f"async def {self.operation_id}("
         tail = f") -> {self.returns}:"
         one_line = head + ", ".join(params) + tail
@@ -176,7 +181,7 @@ class PyWidget:
             lines += [f"value = {self.value}", f"statement = select(value).select_from({name})"]
         elif self.kind == "chart":
             lines += [
-                f"key = {self.key}",
+                render(self.key, 4, "key = "),
                 f"value = {self.value}",
                 f"statement = select(key, value).select_from({name}).group_by(key)",
             ]
@@ -275,10 +280,12 @@ class PyDashboard:
         if "day_start(" in code:
             lines.add("from app.core.pagination import day_start")
         helpers = {
-            n for n in ("chart_values", "month_of", "number", "utc_today") if f"{n}(" in code
+            n for n in ("chart_values", "interval_of", "number", "utc_today") if f"{n}(" in code
         }
         if any(w.today for w in self.widgets):
             helpers.add("Today")
+        if any(w.week for w in self.widgets):
+            helpers.add("WeekStart")
         if helpers:
             lines.add(from_import("app.features.dashboards.aggregates", helpers))
         schemas = {w.returns for w in self.widgets if w.kind != "list"}
@@ -392,7 +399,8 @@ def _widget(
         result.aggregate = widget.aggregate
         result.value = builder.aggregate(widget.aggregate, widget.field)
     if isinstance(widget, ChartWidget):
-        result.key = builder.group(widget.group_by)
+        result.key = builder.group(widget.group_by, widget.interval)
+        result.week = isinstance(result.key, Call) and widget.interval == "week"
     if isinstance(widget, ListWidget):
         assert definition.ui is not None
         view = definition.ui.views[widget.view]
@@ -613,15 +621,20 @@ class FilterBuilder:
             return f"func.coalesce(func.sum({column}), 0)"
         return f"func.{aggregate}({column})"
 
-    def group(self, path_text: str) -> str:
+    def group(self, path_text: str, interval: str = "month") -> Expr:
+        """Return the group key of a chart: the column, or the interval of a date column."""
         path = self.resolve(path_text)
         column = self.column(path)
         f = path.field
-        if f is not None and f.type == "date":
-            return f"month_of(session, {column})"
-        if f is not None and f.type == "datetime":
-            return f"month_of(session, {column}, utc=True)"
-        return column
+        if f is None or f.type not in ("date", "datetime"):
+            return column
+        args = ["session", column, f'"{interval}"']
+        if f.type == "datetime":
+            # A date-time is in the interval of its day in UTC.
+            args.append("utc=True")
+        if interval == "week":
+            args.append("week_start=week_start")
+        return Call("interval_of", tuple(args))
 
     def order(self, sort: Sort | None) -> list[str]:
         if sort is None:
@@ -851,8 +864,9 @@ class _Tests(FilterValues):
             keys = [value for _, value in members]
             codes = [f"{f.enum.name}.{name}" for name, _ in members]
         elif f.type in ("date", "datetime"):
-            days = [dt.date(2026, 1, 15), dt.date(2026, 2, 15)]
-            keys = [d.isoformat()[:7] for d in days]
+            # A Thursday and a Sunday of two years: two groups of each interval.
+            days = [dt.date(2025, 1, 16), dt.date(2026, 2, 15)]
+            keys = [_interval_key(d, source.interval) for d in days]
             make = _date_code if f.type == "date" else _datetime_code
             codes = [make(d) for d in days]
         else:
@@ -962,6 +976,13 @@ def _in_range(f: DslField, value: Decimal) -> bool:
     return (low is None or value >= Decimal(str(low))) and (
         high is None or value <= Decimal(str(high))
     )
+
+
+def _interval_key(day: dt.date, interval: str) -> str:
+    """Return the key of the interval of a day, as the endpoint gives it (weeks from Monday)."""
+    if interval == "week":
+        return (day - dt.timedelta(days=day.weekday())).isoformat()
+    return day.isoformat()[: {"day": 10, "month": 7, "year": 4}[interval]]
 
 
 def _date_code(day: dt.date) -> str:

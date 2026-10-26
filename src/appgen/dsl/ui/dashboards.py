@@ -83,6 +83,8 @@ class ChartWidget(WidgetBase):
     entity: EntityName
     group_by: FieldPath
     """An enum, date, or relation field."""
+    interval: Literal["day", "week", "month", "year"] = "month"
+    """The interval of each group of a date or a date-time field."""
     aggregate: Aggregate = "count"
     field: FieldPath | None = None
     filter: RecordFilter = pydantic.Field(default_factory=dict[str, JsonValue])

@@ -43,9 +43,11 @@ import { badges } from "@/shared/config/badges";
 {% endif %}
 {% set agg = [] %}
 {% if "chartGroups(" in code %}{% set agg = agg + ["chartGroups"] %}{% endif %}
+{% if "chartIntervals(" in code %}{% set agg = agg + ["chartIntervals"] %}{% endif %}
 {% if "recordGroups(" in code %}{% set agg = agg + ["recordGroups"] %}{% endif %}
 {% if "aggregate(" in code %}{% set agg = agg + ["aggregate"] %}{% endif %}
 {% if "groupRows(" in code %}{% set agg = agg + ["groupRows"] %}{% endif %}
+{% if "intervalRows(" in code %}{% set agg = agg + ["intervalRows"] %}{% endif %}
 {% if "matchesOp(" in code %}{% set agg = agg + ["matchesOp"] %}{% endif %}
 {% if "ChartDatum" in (functions | map(attribute="returns") | join(" ")) %}{% set agg = agg + ["type ChartDatum"] %}{% endif %}
 {% if agg %}
@@ -54,8 +56,10 @@ import { {{ agg | join(", ") }} } from "@/shared/lib/aggregate";
 {% if "compute." in code %}
 import { compute } from "@/shared/lib/compute";
 {% endif %}
-{% if "stat" in plan.uses or "formatValue(" in code %}
-import { formatValue } from "@/shared/lib/format";
+{% set weeks = served | selectattr("endpoint.week") | list if i18n else [] %}
+{% set fmt = (["firstWeekday"] if weeks else []) + (["formatValue"] if "stat" in plan.uses or "formatValue(" in code else []) %}
+{% if fmt %}
+import { {{ fmt | join(", ") }} } from "@/shared/lib/format";
 {% endif %}
 {% if "pageHref(" in code %}
 import { pageHref } from "@/shared/lib/pages";
@@ -123,7 +127,8 @@ type DashboardData = {
 async function load(): Promise<DashboardData> {
   const [{% for w in served %}{{ w.function }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
 {% for w in served %}
-{% set params = ", { today: today() }" if w.endpoint.today else "" %}
+{% set items = (["today: today()"] if w.endpoint.today else []) + (["week_start: String(firstWeekday())"] if w.endpoint.week and i18n else []) %}
+{% set params = (", { " ~ items | join(", ") ~ " }") if items else "" %}
 {% if w.kind == "stat" %}
     statValue({{ js(w.endpoint.path) }}{{ params }}),
 {% elif w.kind == "chart" %}

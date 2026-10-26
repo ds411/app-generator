@@ -123,8 +123,7 @@ def test_a_chart_widget_groups_the_records(example: ViewContext, details: ViewCo
     assert hours.value_label == "Estimate hours"
     other = {w.name: w for w in details.dashboard_plan("stats").widgets}
     assert other["by_month"].body[-1] == (
-        "return groupRows(rows, (row) => row.received?.slice(0, 7) ?? null, "
-        "(group) => group.length);"
+        'return intervalRows(rows, (row) => row.received, (group) => group.length, "month");'
     )
     assert other["by_month"].value_label == "Items"
     assert '{ key: "new", label: "New" }' in other["by_stage"].body[-1]

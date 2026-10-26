@@ -137,7 +137,7 @@ def test_a_field_path_joins_the_related_records(result: GenerationResult) -> Non
 def test_a_chart_groups_by_a_month_or_a_relation(result: GenerationResult) -> None:
     code = _file(result, "app/features/dashboards/board.py")
 
-    assert "    key = month_of(session, Item.updated_at, utc=True)\n" in code
+    assert '    key = interval_of(session, Item.updated_at, "month", utc=True)\n' in code
     assert "    key = Item.owner_id\n" in code
     assert "    value = func.coalesce(func.sum(Item.price), 0)\n" in code
     assert "statement = select(key, value).select_from(Item).group_by(key)" in code
@@ -173,7 +173,7 @@ def test_the_generated_tests_check_the_values_of_known_records(
     # A field path through relations has no generated value test.
     assert "test_board_team_items_computes_its_value" not in code
     assert "    expected = sorted([(str(parents[0].id), 1.0), (str(parents[1].id), 5.0)])\n" in code
-    assert '    {"key": "2026-01", "value": 1.0},\n' in code
+    assert '    {"key": "2025-01", "value": 1.0},\n' in code
     assert "    ids = [str(records[i].id) for i in (0, 1, 2)]\n" in code
 
 

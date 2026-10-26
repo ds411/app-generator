@@ -92,6 +92,8 @@ class WidgetPlan:
     """With the API client: the entity of the groups of a chart of a relation."""
     groups: str | None = None
     """The TypeScript of the known groups of a chart, in their order, or None."""
+    interval: str | None = None
+    """The interval of the groups of a chart of dates, for example `week`, or None."""
     store: str | None = None
     """With the API client: the store of the records of a list widget, for example `taskApi`."""
 
@@ -362,8 +364,15 @@ def _chart(
             f'({{ key: item.id, label: String(item.{display} ?? "") }}))'
         )
     elif group.type in ("date", "datetime"):
-        key = f"(row) => {group.expr}?.slice(0, 7) ?? null"
-        groups = None
+        # Each interval from the first to the last date, also without records.
+        result.interval = widget.interval
+        result.body.append(
+            f"return intervalRows(rows, (row) => {group.expr}, (group) => {total}, "
+            f'"{widget.interval}");'
+        )
+        _chart_labels(ctx, result, widget)
+        plan.uses.update({"chart", "dates"})
+        return
     else:
         # An enum: the definition check allows no other field type for a group.
         key = f"(row) => {group.expr} ?? null"
@@ -384,15 +393,20 @@ def _chart(
     if groups:
         args += f", {groups}"
     result.body.append(f"return groupRows({args});")
+    _chart_labels(ctx, result, widget)
+    plan.uses.add("chart")
+
+
+def _chart_labels(ctx: ViewContext, result: WidgetPlan, widget: ChartWidget) -> None:
+    """Set the kind of the chart, its data type, and the label of its values."""
     result.returns = "ChartDatum[]"
     result.chart = widget.chart
-    entity_def = ctx.definition.entities[entity]
+    entity_def = ctx.definition.entities[widget.entity]
     result.value_label = (
-        entity_def.plural_label or label(entity) + "s"
+        entity_def.plural_label or label(widget.entity) + "s"
         if widget.aggregate == "count"
-        else ctx.value(entity, widget.field or "").label
+        else ctx.value(widget.entity, widget.field or "").label
     )
-    plan.uses.add("chart")
 
 
 def _list(
@@ -470,6 +484,9 @@ def _server(
         entities.add(target)
         label = f'(item) => String(item.{ctx.display_field(target)} ?? "")'
         groups = f", recordGroups({data}, lookups.{camel(target)}, {label})"
+    if result.interval is not None:
+        result.body = [f'return chartIntervals({data}, "{result.interval}");']
+        return
     result.body = [f"return chartGroups({data}{groups});"]
 
 
