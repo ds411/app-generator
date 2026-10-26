@@ -14,16 +14,27 @@
 {% macro scope(kind) -%}
 await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "read") else "change") }})
 {%- endmacro %}
+{% set files = element.file_fields if definition.storage else {} %}
+{% set all_ops = kind_operations(definition, name) %}
+{# The upload of a file is a change of the record: the access of the update, else of the create (ADR 0027). #}
+{% set file_kind = "create" if "update" not in all_ops and "create" in all_ops else "update" %}
 "use server";
 
+{% if files %}
+import { type ActionResult, type ListQuery, type ListResult, NotFoundError, ValidationError } from "@/shared/api";
+{% else %}
 import type { ActionResult, ListQuery, ListResult } from "@/shared/api";
+{% endif %}
 import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
 {% if owned %}
 import { recordScope } from "@/shared/auth/access";
 {% endif %}
+{% if files %}
+import { deleteFiles, type FileRule, uploadFile } from "@/shared/storage";
+{% endif %}
 
 import { {{ var }}InputSchema, {{ var }}PatchSchema } from "../model/schema";
-import type { {{ type }}, {{ type }}Input } from "../model/types";
+import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
 import { {{ var }}Repository } from "./{{ name | kebab }}-repository";
 
 // The server actions of the data access of {{ type }}. Each action checks
@@ -113,3 +124,74 @@ export async function remove{{ type }}Action(id: string): Promise<ActionResult<n
     {{ opt("delete", true)[2:] }},
   );
 }
+{% if files %}
+
+// The rules of the file fields (ADR 0027): the largest file, in bytes, and
+// the media types. Empty: all types.
+const FILE_RULES: Record<{{ type }}FileField, FileRule> = {
+{% for field_name, field in files.items() %}
+  {{ field_name | camel }}: { maxSize: {{ field.size_limit }}, types: {{ ts_value(field.media_types) }} }, {{ trace(field.id) }}
+{% endfor %}
+};
+
+/** Return the rule of a file field. A browser can send any name. */
+function fileRule(field: string): FileRule {
+  if (!Object.hasOwn(FILE_RULES, field)) {
+    throw new ValidationError(`{{ type }} has no file field ${field}.`);
+  }
+  return FILE_RULES[field as {{ type }}FileField];
+}
+
+/**
+ * Upload the file of a file field: the form data has it in `file`. A new
+ * file replaces the old file, which the storage deletes after the change.
+ */
+export async function upload{{ type }}FileAction(
+  id: string,
+  field: {{ type }}FileField,
+  data: FormData,
+): Promise<ActionResult<{{ type }}>> {
+  return runAction(
+    async () => {
+      const recordId = idSchema.parse(id);
+      const rule = fileRule(field);
+{% if file_kind in owned %}
+      const scope = {{ scope(file_kind) }};
+      if (!(await {{ var }}Repository.exists(recordId, scope))) {
+{% else %}
+      if (!(await {{ var }}Repository.exists(recordId))) {
+{% endif %}
+        throw new NotFoundError({{ ts_value(name) }}, recordId);
+      }
+      const file = await uploadFile(data.get("file"), rule, `{{ nextjs.tables_by_entity[name].name }}/${recordId}/${field}`, field);
+      try {
+        const { record, before } = await {{ var }}Repository.setFile(recordId, field, file{{ ", scope" if file_kind in owned }});
+        await deleteFiles([before]);
+        return record;
+      } catch (error) {
+        await deleteFiles([file]);
+        throw error;
+      }
+    },
+    {{ opt(file_kind, true)[2:] }},
+  );
+}
+
+/** Delete the file of a file field. */
+export async function remove{{ type }}FileAction(id: string, field: {{ type }}FileField): Promise<ActionResult<{{ type }}>> {
+  return runAction(
+    async () => {
+      fileRule(field);
+{% if file_kind in owned %}
+      const scope = {{ scope(file_kind) }};
+      const { record, before } = await {{ var }}Repository.setFile(idSchema.parse(id), field, null, scope);
+{% else %}
+      const { record, before } = await {{ var }}Repository.setFile(idSchema.parse(id), field, null);
+{% endif %}
+      await deleteFiles([before]);
+      return record;
+    },
+    {{ opt(file_kind, true)[2:] }},
+  );
+}
+{% endif %}

@@ -22,6 +22,9 @@ resources:
 {% if nextjs.jobs %}
   - jobs.yaml
 {% endif %}
+{% if definition.storage and definition.storage.kind == "local" %}
+  - files-volume.yaml
+{% endif %}
 
 # Set the registry and the tag of the image that you push.
 images:

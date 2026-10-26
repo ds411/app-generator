@@ -363,6 +363,24 @@ these endpoints for each file field:
 - A seed record with a file gets the file in the storage when the seed
   adds the record.
 
+The Next.js app keeps the file of a record in a `jsonb` column too:
+
+- The server actions `upload<Entity>FileAction` and
+  `remove<Entity>FileAction` of each entity with file fields take the
+  name of the field, and the file in a form data. The data access
+  `<entity>Files` calls them (`upload(id, field, file)` and
+  `remove(id, field)`). They need the permission of the update operation
+  of the entity, else of its create operation, and the record rules of a
+  change apply.
+- A file that is larger than `max_size`, or a type that the field does
+  not allow, gives a validation error. `next.config.ts` allows server
+  action bodies of the largest file and 1 MB more.
+- A record gives the file as `name`, `size`, `type`, and `url`. The URL
+  is the route `/files/<entity>/<id>/<field>`, which checks the session
+  and the access rules of a read of the record. So no page path of a
+  definition with `storage` can start with `/files/`.
+- The delete of a record and the seed work as in the FastAPI app.
+
 ### Entity rules
 
 `rules` is a mapping from rule name to rule. A rule checks more than
@@ -2140,6 +2158,9 @@ use in the app does not show.
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.
+- The messages of an upload of a file (the server actions of the
+  Next.js app): `Select a file.`, `The file is larger than {size}.`,
+  `The type {type} is not allowed. Use one of: {types}.`.
 - The rate limit of the Next.js app:
   `Send not more than {limit} requests in each minute.`, and with the
   store in Redis

@@ -51,6 +51,7 @@ from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
 from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.storage import (
+    FILE_PATHS,
     FILE_TYPES,
     MAX_SEED_FILE_SIZE,
     S3_KEYS,
@@ -364,10 +365,22 @@ def _check_file_field(definition: AppDefinition, field: Field) -> Iterator[Diagn
 
 
 def check_storage(definition: AppDefinition) -> Iterator[Diagnostic]:
-    """The storage has only the keys of its kind, and names its own environment variables."""
+    """The storage has only the keys of its kind, and names its own environment variables.
+
+    The paths under `/files/` are the files of the Next.js app, so no page can use them.
+    """
     storage = definition.storage
     if storage is None:
         return
+    for page in definition.pages.values():
+        if page.path.startswith(FILE_PATHS):
+            yield _error(
+                "duplicate-name",
+                f"The paths under '{FILE_PATHS}' are the files of the apps.",
+                page,
+                at="path",
+                hint="Give the page another path.",
+            )
     if storage.kind == "local":
         for key in S3_KEYS:
             if key in storage.model_fields_set:

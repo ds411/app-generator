@@ -51,6 +51,24 @@ export interface EntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInp
   subscribe(listener: () => void): () => void;
 }
 
+{% if definition.storage %}
+/** A file of a record (ADR 0027): the name, the size in bytes, the media type, and the URL of the file. */
+export type FileValue = {
+  name: string;
+  size: number;
+  type: string;
+  url: string;
+};
+
+/** The upload and the delete of the files of the file fields of an entity (ADR 0027). */
+export interface FileApi<T extends EntityRecord, TField extends string> {
+  /** Upload the file of a field. A new file replaces the old file. Return the changed record. */
+  upload(id: string, field: TField, file: File): Promise<T>;
+  /** Delete the file of a field. Return the changed record. */
+  remove(id: string, field: TField): Promise<T>;
+}
+
+{% endif %}
 export class NotFoundError extends Error {
   readonly entity: string;
   readonly id: string;

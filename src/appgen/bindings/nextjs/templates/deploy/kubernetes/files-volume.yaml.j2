@@ -1,0 +1,14 @@
+{% set name = app.name ~ "-web" %}
+{{ trace_header(definition.storage.id) }}
+# The volume of the files of the file fields. All replicas of the app use
+# it, so it needs the access mode ReadWriteMany, for example a volume of
+# NFS or of a cloud file service. Set the storage class and the size.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ name }}-files
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 10Gi

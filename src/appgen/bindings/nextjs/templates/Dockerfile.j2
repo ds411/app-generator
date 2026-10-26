@@ -36,6 +36,10 @@ COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/drizzle ./drizzle
 COPY --from=build --chown=node:node /app/.next/migrate.mjs ./migrate.mjs
+{% if definition.storage %}
+# The folder of the files of the file fields: a volume keeps the files.
+RUN install -d -o node -g node /app/uploads
+{% endif %}
 USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -337,6 +337,48 @@ Without its secret, an endpoint gives 500. A `WebhookError` of
 `@/shared/webhooks` in the logic gives its status to the sender.
 
 {% endif %}
+{% if definition.storage %}
+{% set st = definition.storage %}
+## Files
+
+{% if st.kind == "s3" %}
+The app keeps the files of the file fields in an S3-compatible service:
+Amazon S3, Cloudflare R2, MinIO, and others. Set the bucket in
+`{{ st.bucket_env }}`, the region in `{{ st.region_env }}`, and for a service that is not
+Amazon S3 its URL in `{{ st.endpoint_env }}`. The keys are in `{{ st.access_key_env }}`
+and `{{ st.secret_key_env }}`; without them, the AWS SDK uses the AWS configuration
+of the machine, for example its role. Without a bucket, the app keeps the
+files in the folder of `{{ st.folder_env }}` (default `uploads`), for example on
+your machine.
+{% else %}
+The app keeps the files of the file fields in the folder of
+`{{ st.folder_env }}` (default `uploads`). The Docker image has the folder
+`/app/uploads`, and `compose.yaml` keeps it in a volume.
+{% endif %}
+
+{% for entity_name, entity in definition.entities.items() %}
+{% for field_name, field in entity.file_fields.items() %}
+- `{{ entity_name }}.{{ field_name }}`: at most {{ size_text(field.size_limit) }}{% if field.media_types %}, the types {% for t in field.media_types %}`{{ t }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}.
+{% endfor %}
+{% endfor %}
+
+The data access `<entity>Files` of each entity with file fields uploads
+a file (`upload(id, field, file)`) and deletes it (`remove(id, field)`)
+with the server actions of the entity. They need the permission of the
+update operation of the entity, else of its create operation. A new file
+replaces the old one. A file that is too large, or a type that the field
+does not allow, gives a `ValidationError`. The app takes the type from
+the first bytes of a PNG, JPEG, GIF, WebP, or PDF file, else from the
+browser. `next.config.ts` allows server action bodies of the largest file
+and 1 MB more.
+
+A record gives each file as `name`, `size`, `type`, and `url`. The URL
+is the route `/files/<entity>/<id>/<field>`, which checks the session
+and the access rules of the read of the record, as a read does. The
+delete of a record deletes its files. The files of the records that the
+database deletes with `on_delete: cascade` stay in the storage.
+
+{% endif %}
 ## Structure
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

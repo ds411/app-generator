@@ -1,0 +1,279 @@
+{% set st = definition.storage %}
+{% set s3 = st.kind == "s3" %}
+{{ trace_header(st.id) }}
+// The storage of the files of the file fields (ADR 0027).
+{% if s3 %}
+// The app keeps the files in the bucket of an S3-compatible service
+// ({{ st.bucket_env }}). Without a bucket, for example on the machine of a
+// developer, it keeps them in the folder of {{ st.folder_env }}.
+{% else %}
+// The app keeps the files in the folder of {{ st.folder_env }}.
+{% endif %}
+// A record keeps each file as a JSON value (`StoredFile`): the key of
+// the file in the storage, the name, the size, and the media type. The
+// key is new for each upload, so that a cache never shows an old file.
+// The seed imports this module too, so it runs outside Next.js.
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+{% if s3 %}
+import { DeleteObjectCommand, GetObjectCommand, NoSuchKey, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
+{% endif %}
+/** A file of a record in the database: the key in the storage, the name, the size in bytes, and the media type. */
+export type StoredFile = {
+  key: string;
+  name: string;
+  size: number;
+  type: string;
+};
+
+/** The largest file and the media types of a file field. */
+export type FileRule = {
+  /** The largest file, in bytes. */
+  maxSize: number;
+  /** The media types that the field allows, for example `image/*`. Empty: all types. */
+  types: readonly string[];
+};
+
+/** The media types that a browser shows in a tab. It downloads the other files. */
+export const INLINE_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "application/pdf",
+]);
+
+/** The content security policy of a file: a file cannot run scripts. */
+export const SANDBOX = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+// The first bytes of the media types that the app knows (and WebP, see
+// `mediaTypeOf`), as texts of one byte for each character.
+const SIGNATURES: [string, string][] = [
+  ["\x89PNG\r\n\x1a\n", "image/png"],
+  ["\xff\xd8\xff", "image/jpeg"],
+  ["GIF87a", "image/gif"],
+  ["GIF89a", "image/gif"],
+  ["%PDF-", "application/pdf"],
+];
+const KNOWN_TYPES: ReadonlySet<string> = new Set([...SIGNATURES.map(([, type]) => type), "image/webp"]);
+
+function startsWith(content: Uint8Array, signature: string, offset = 0): boolean {
+  return [...signature].every((char, index) => content[offset + index] === char.charCodeAt(0));
+}
+
+/** Return true if a rule allows a media type: the type, or its group, for example `image/*`. */
+export function allows(rule: FileRule, type: string): boolean {
+  const group = type.split("/")[0];
+  return rule.types.length === 0 || rule.types.some((item) => item === type || item === `${group}/*`);
+}
+
+/** Return a size as a short text with a unit, for example `5 MB` or `1.5 KB`. */
+export function sizeText(size: number): string {
+  const units: [string, number][] = [
+    ["GB", 1024 ** 3],
+    ["MB", 1024 ** 2],
+    ["KB", 1024],
+  ];
+  for (const [unit, factor] of units) {
+    if (size >= factor) {
+      return `${(size / factor).toFixed(1).replace(/\.0$/, "")} ${unit}`;
+    }
+  }
+  return `${size} B`;
+}
+
+/**
+ * Return the media type of a file. The first bytes give the type of the
+ * files that the app knows (PNG, JPEG, GIF, WebP, and PDF), else the client
+ * gives the type. A file that has the type of a known file, but not its
+ * first bytes, gets the type `application/octet-stream`.
+ */
+export function mediaTypeOf(content: Uint8Array, given?: string | null): string {
+  for (const [signature, type] of SIGNATURES) {
+    if (startsWith(content, signature)) {
+      return type;
+    }
+  }
+  if (startsWith(content, "RIFF") && startsWith(content, "WEBP", 8)) {
+    return "image/webp";
+  }
+  const type = (given ?? "").split(";")[0].trim().toLowerCase();
+  return !type || KNOWN_TYPES.has(type) ? "application/octet-stream" : type;
+}
+
+/** Return the name of an uploaded file without its folders and control characters. */
+export function fileName(name: string | null | undefined): string {
+  const base = (name ?? "").replaceAll("\\", "/").split("/").pop() ?? "";
+  const clean = [...base]
+    .filter((char) => char >= " " && char !== "\x7f")
+    .join("")
+    .trim();
+  return clean.slice(-200) || "file";
+}
+
+/** The place of the files{{ ": a folder, or a bucket of an S3-compatible service" if s3 else ": a folder of the server" }}. */
+export interface Storage {
+  /** Save a file with a key. */
+  save(key: string, content: Uint8Array, type: string): Promise<void>;
+  /** Return the content of a file, or null if no file has the key. */
+  read(key: string): Promise<Uint8Array<ArrayBuffer> | null>;
+  /** Delete a file. A key without a file is no error. */
+  delete(key: string): Promise<void>;
+}
+
+/** The files in a folder of the server: one file for each key. */
+export class FolderStorage implements Storage {
+  readonly folder: string;
+
+  constructor(folder: string) {
+    this.folder = path.resolve(folder);
+  }
+
+  async save(key: string, content: Uint8Array): Promise<void> {
+    const file = this.path(key);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, content);
+  }
+
+  async read(key: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    try {
+      return await readFile(this.path(key));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "EISDIR")) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    await rm(this.path(key), { force: true });
+  }
+
+  private path(key: string): string {
+    const file = path.resolve(this.folder, key);
+    if (!file.startsWith(this.folder + path.sep)) {
+      throw new Error(`The key '${key}' is not in the folder.`);
+    }
+    return file;
+  }
+}
+{% if s3 %}
+
+/** The files in a bucket of an S3-compatible service: one object for each key. */
+export class BucketStorage implements Storage {
+  readonly client: S3Client;
+  readonly bucket: string;
+
+  constructor(env: NodeJS.ProcessEnv = process.env) {
+    const endpoint = env.{{ st.endpoint_env }} || undefined;
+    const accessKeyId = env.{{ st.access_key_env }};
+    const secretAccessKey = env.{{ st.secret_key_env }};
+    this.bucket = env.{{ st.bucket_env }} ?? "";
+    this.client = new S3Client({
+      region: env.{{ st.region_env }} || undefined,
+      endpoint,
+      forcePathStyle: endpoint !== undefined,
+      // Without the keys, the AWS configuration of the machine gives them.
+      credentials: accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : undefined,
+      // Not all S3-compatible services accept the newer checksums.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+
+  async save(key: string, content: Uint8Array, type: string): Promise<void> {
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: content, ContentType: type }));
+  }
+
+  async read(key: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    try {
+      const response = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+      return response.Body ? new Uint8Array(await response.Body.transformToByteArray()) : null;
+    } catch (error) {
+      if (error instanceof NoSuchKey) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+}
+{% endif %}
+
+{% if s3 %}
+/** Return the storage of the environment variables: the bucket of {{ st.bucket_env }}, else the folder. */
+export function makeStorage(env: NodeJS.ProcessEnv = process.env): Storage {
+  if (env.{{ st.bucket_env }}) {
+    return new BucketStorage(env);
+  }
+  return new FolderStorage(env.{{ st.folder_env }} || "uploads");
+}
+{% else %}
+/** Return the storage of the environment variables: the folder of {{ st.folder_env }}. */
+export function makeStorage(env: NodeJS.ProcessEnv = process.env): Storage {
+  return new FolderStorage(env.{{ st.folder_env }} || "uploads");
+}
+{% endif %}
+
+let storage: Storage | undefined;
+
+/** Return the storage of the app. */
+export function getStorage(): Storage {
+  storage ??= makeStorage();
+  return storage;
+}
+
+/**
+ * Delete files after the commit of their change. A file that the storage
+ * cannot delete stays there: the error goes to the log, and the change of
+ * the record stays.
+ */
+export async function deleteFiles(
+  files: readonly (StoredFile | null | undefined)[],
+  target: Storage = getStorage(),
+): Promise<void> {
+  for (const file of files) {
+    if (!file) {
+      continue;
+    }
+    try {
+      await target.delete(file.key);
+    } catch (error) {
+      console.error(`The storage could not delete the file ${file.key}.`, error);
+    }
+  }
+}
+
+/**
+ * Return the response with a file, or 404 without it. A browser shows an
+ * image or a PDF file in a tab, and downloads the other files. A file
+ * cannot run scripts, and the browser keeps the media type of the app.
+ */
+export async function fileResponse(file: StoredFile | null, target: Storage = getStorage()): Promise<Response> {
+  const content = file ? await target.read(file.key) : null;
+  if (!file || content === null) {
+    return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain" } });
+  }
+  const disposition = INLINE_TYPES.has(file.type) ? "inline" : "attachment";
+  const name = encodeURIComponent(file.name).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  const headers: Record<string, string> = {
+    "Content-Type": file.type,
+    "Content-Disposition": `${disposition}; filename*=UTF-8''${name}`,
+    // A new upload gives a new URL. The browser keeps a file for 5 minutes,
+    // after that the app checks the access again.
+    "Cache-Control": "private, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (file.type !== "application/pdf") {
+    // A browser does not show a PDF file in a sandbox.
+    headers["Content-Security-Policy"] = SANDBOX;
+  }
+  return new Response(content, { headers });
+}

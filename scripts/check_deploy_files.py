@@ -68,14 +68,15 @@ EXAMPLES: dict[str, tuple[tuple[str, dict[str, str], dict[str, str]], ...]] = {
 }
 # The files of the file fields (ADR 0027) in an S3 bucket, and in a folder.
 FILES = "tests/fixtures/files.yaml"
-EXAMPLES["fastapi"] += (
-    (FILES, {fastapi.DEPLOY_KEY: "[kubernetes, knative]"}, {}),
-    (
-        FILES,
-        {fastapi.DEPLOY_KEY: "[kubernetes, knative]"},
-        {"  kind: s3\n  bucket_env: LIBRARY_BUCKET\n": "  kind: local\n"},
-    ),
-)
+for binding, model in (("fastapi", fastapi), ("nextjs", nextjs)):
+    EXAMPLES[binding] += (
+        (FILES, {model.DEPLOY_KEY: "[kubernetes, knative]"}, {}),
+        (
+            FILES,
+            {model.DEPLOY_KEY: "[kubernetes, knative]"},
+            {"  kind: s3\n  bucket_env: LIBRARY_BUCKET\n": "  kind: local\n"},
+        ),
+    )
 """The definitions of each binding, the keys that the script adds to their `app` section, and
 the texts that it replaces."""
 NEXTJS_SERVER_SETTINGS = {"HOSTNAME", "PORT"}
@@ -160,7 +161,8 @@ def settings(binding: str, files: dict[str, str]) -> set[str]:
     """Return the environment variables of the settings of the app."""
     if binding == "nextjs":
         code = "".join(c for path, c in files.items() if path.endswith((".ts", ".tsx")))
-        return set(re.findall(r"process\.env\.([A-Z_][A-Z0-9_]*)", code)) | NEXTJS_SERVER_SETTINGS
+        # `process.env.NAME`, or `env.NAME` of a function that takes the environment.
+        return set(re.findall(r"\benv\.([A-Z_][A-Z0-9_]*)", code)) | NEXTJS_SERVER_SETTINGS
     config = files["app/core/config.py"].split("class Settings", 1)[1]
     return {name.upper() for name in re.findall(r"(?m)^    (\w+): ", config)}
 

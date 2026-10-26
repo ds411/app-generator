@@ -20,7 +20,7 @@ import {
 
 /** The rules of the values that create a {{ type }}. */
 export const {{ var }}InputSchema = z.object({
-{% for m in all %}
+{% for m in all if m.input %}
   {{ m.key }}: {{ zod_schema(name, m) }}, {{ trace(m.element_id) }}
 {% endfor %}
 }) satisfies z.ZodType<{{ type }}Input>;

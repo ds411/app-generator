@@ -14,7 +14,6 @@ from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
-from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -114,8 +113,9 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
     The app gets the npm packages of the shadcn/ui components that it uses,
     with providers `jose` (ADR 0020), with the delivery by SMTP
-    `nodemailer`, and with the rate limit in Redis `@redis/client`
-    (ADR 0013).
+    `nodemailer`, with the rate limit in Redis `@redis/client`
+    (ADR 0013), and with the storage kind `s3` `@aws-sdk/client-s3`
+    (ADR 0027).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -129,6 +129,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.PROVIDER_PACKAGES
     if definition.auth is not None and definition.auth.second_factor is not None:
         dependencies |= versions.SECOND_FACTOR_PACKAGES
+    if definition.storage is not None and definition.storage.kind == "s3":
+        dependencies |= versions.S3_PACKAGES
     if uses_smtp(definition):
         dependencies |= versions.SMTP_PACKAGES
     if uses_redis(definition):
@@ -180,6 +182,21 @@ def uses_redis(definition: AppDefinition) -> bool:
     return definition.app.extensions.get(RATE_LIMIT_STORE_KEY) == "redis"
 
 
+UPLOAD_MARGIN = 1024 * 1024
+"""The bytes of a server action body for the rest of the form data of an upload."""
+
+
+def upload_limit(definition: AppDefinition) -> int | None:
+    """Return the largest body of a server action with a file, or None without file fields.
+
+    Next.js accepts server action bodies of 1 MB by default (ADR 0027).
+    """
+    sizes = [
+        f.size_limit for entity in definition.entities.values() for f in entity.file_fields.values()
+    ]
+    return max(sizes) + UPLOAD_MARGIN if sizes else None
+
+
 def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
     """Return the deployment targets in a fixed order (the key schema checks the names)."""
     value = definition.app.extensions.get(DEPLOY_KEY)
@@ -191,7 +208,6 @@ def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
-    reject_file_fields(definition, "nextjs")
     plan = ui_plan(definition)
     pages = {
         name: page_info(name, page, plan.pages[name].layout)
@@ -206,6 +222,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     by_entity = {table.entity: table for table in tables}
     rules = record_rules(definition)
     jobs = ts_jobs(definition, by_entity)
+    seed = seed_tables(definition, tables)
     return {
         "ts_apis": ts_apis(definition),
         "ts_webhooks": ts_webhooks(definition),
@@ -233,7 +250,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 for entity, r in rules.items()
                 if r.path and not r.direct
             },
-            "seed": seed_tables(definition, tables),
+            "seed": seed,
+            "seed_files": any(table.files for table in seed),
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
@@ -245,5 +263,6 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # that call the routes.
             "jobs": jobs,
             "cron_jobs": cron_jobs(f"{definition.app.name}-web", jobs),
+            "upload_limit": upload_limit(definition),
         },
     }

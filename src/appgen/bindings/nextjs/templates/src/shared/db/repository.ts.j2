@@ -1,5 +1,6 @@
 {{ trace_header("app") }}
 {% set translatable = i18n and i18n.translatable %}
+{% set storage = definition.storage %}
 import "server-only";
 
 import {
@@ -29,6 +30,9 @@ import { type PgColumn, type PgTable, PgTimestamp } from "drizzle-orm/pg-core";
 import {
   type EntityApi,
   type EntityRecord,
+{% if storage %}
+  type FileValue,
+{% endif %}
   type Filter,
   type ListQuery,
   type ListResult,
@@ -46,7 +50,10 @@ import { storeTranslations, translateRecord } from "@/shared/lib/i18n";
 {% if record_rules %}
 import type { RecordScope } from "@/shared/lib/permissions";
 {% endif %}
-{% if record_rules or translatable %}
+{% if storage %}
+import { deleteFiles, type StoredFile } from "@/shared/storage";
+{% endif %}
+{% if record_rules or translatable or storage %}
 
 {% endif %}
 import { type Database, getDb } from "./client";
@@ -154,6 +161,14 @@ export type RepositoryOptions<T> = {
    */
   belongsTo?: (user: string) => SQL;
 {% endif %}
+{% if storage %}
+  /**
+   * The file fields (ADR 0027): the key of each one in the record, and the
+   * URL of its files, with `{id}` for the ID of the record. The table keeps
+   * a `StoredFile`, and a record has a `FileValue` with the URL.
+   */
+  files?: Record<string, string>;
+{% endif %}
 };
 
 /** Return a value of a row as a number or a text that `compareValues` can order. */
@@ -202,6 +217,21 @@ function toColumnValue(column: Column, value: unknown): unknown {
 function toRecordValue(value: unknown): unknown {
   return value instanceof Date ? value.toISOString() : value;
 }
+{% if storage %}
+
+/**
+ * Return the file of a record for the browser: the name, the size, the
+ * type, and the URL (ADR 0027). The last part of the key is new for each
+ * upload, so the URL changes with the file.
+ */
+function toFileValue(file: StoredFile | null | undefined, url: string): FileValue | null {
+  if (!file) {
+    return null;
+  }
+  const version = file.key.slice(file.key.lastIndexOf("/") + 1);
+  return { name: file.name, size: file.size, type: file.type, url: `${url}?v=${encodeURIComponent(version)}` };
+}
+{% endif %}
 
 /**
  * The data access of one entity in the Postgres database, with the same
@@ -228,6 +258,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if record_rules %}
   private readonly belongsTo: ((user: string) => SQL) | undefined;
 {% endif %}
+{% if storage %}
+  private readonly files: Record<string, string>;
+{% endif %}
 
   constructor(options: RepositoryOptions<T>) {
     this.entity = options.entity;
@@ -239,6 +272,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.workflows = options.workflows ?? [];
 {% if translatable %}
     this.translatable = options.translatable ?? [];
+{% endif %}
+{% if storage %}
+    this.files = options.files ?? {};
 {% endif %}
 {% if record_rules %}
     const owner = options.owner === undefined ? undefined : this.columns[options.owner];
@@ -386,21 +422,80 @@ export class Repository<T extends EntityRecord, TInput extends object>
     });
   }
 
+{% if storage %}
+  /** Delete a record, and after it the files of its file fields (ADR 0027). */
+{% endif %}
 {% if record_rules %}
   async remove(id: string, scope: RecordScope | null = null): Promise<void> {
     const rows: Row[] = await getDb()
       .delete(this.table)
       .where(this.byId(id, scope))
-      .returning({ id: this.table.id });
+      .returning({{ "" if storage else "{ id: this.table.id }" }});
     this.found(rows, id);
-  }
 {% else %}
   async remove(id: string): Promise<void> {
     const rows: Row[] = await getDb()
       .delete(this.table)
       .where(eq(this.table.id, id))
-      .returning({ id: this.table.id });
+      .returning({{ "" if storage else "{ id: this.table.id }" }});
     this.found(rows, id);
+{% endif %}
+{% if storage %}
+    await deleteFiles(Object.keys(this.files).map((key) => rows[0]?.[key] as StoredFile | null));
+{% endif %}
+  }
+{% if storage %}
+
+  /**
+   * Return the stored file of a file field of a record, or null without a
+   * file (ADR 0027).{% if record_rules %} With a scope, only a record of the scope.{% endif %} A record that does
+   * not exist gives a NotFoundError.
+   */
+{% if record_rules %}
+  async storedFile(id: string, key: string, scope: RecordScope | null = null): Promise<StoredFile | null> {
+    const where = this.byId(id, scope);
+{% else %}
+  async storedFile(id: string, key: string): Promise<StoredFile | null> {
+    const where = eq(this.table.id, id);
+{% endif %}
+    if (!UUID.test(id) || !Object.hasOwn(this.files, key)) {
+      throw new NotFoundError(this.entity, id);
+    }
+    const rows: Row[] = await getDb().select().from(this.table).where(where).limit(1);
+    return (this.found(rows, id)[0]?.[key] as StoredFile | null | undefined) ?? null;
+  }
+
+  /**
+   * Set the file of a file field of a record, and return the record and the
+   * file before the change (ADR 0027).{% if record_rules %} With a scope, the record must be in the
+   * scope.{% endif %} Delete the file before the change after the commit.
+   */
+{% if record_rules %}
+  async setFile(
+    id: string,
+    key: string,
+    file: StoredFile | null,
+    scope: RecordScope | null = null,
+  ): Promise<{ record: T; before: StoredFile | null }> {
+    const where = this.byId(id, scope);
+{% else %}
+  async setFile(id: string, key: string, file: StoredFile | null): Promise<{ record: T; before: StoredFile | null }> {
+    const where = eq(this.table.id, id);
+{% endif %}
+    if (!Object.hasOwn(this.files, key)) {
+      throw new ValidationError(`${this.entity} has no file field ${key}.`);
+    }
+    return getDb().transaction(async (tx) => {
+      const rows: Row[] = await tx.select().from(this.table).where(where).limit(1).for("update");
+      const before = (this.found(rows, id)[0]?.[key] as StoredFile | null | undefined) ?? null;
+      const changed: Row[] = await tx
+        .update(this.table)
+        .set({ [key]: file })
+        .where(eq(this.table.id, id))
+        .returning();
+      const [record] = await this.toRecords(tx, changed);
+      return { record: record as T, before };
+    });
   }
 {% endif %}
 
@@ -667,6 +762,13 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const records = rows.map((row) =>
       Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toRecordValue(value)])),
     );
+{% endif %}
+{% if storage %}
+    for (const record of records) {
+      for (const [key, url] of Object.entries(this.files)) {
+        record[key] = toFileValue(record[key] as StoredFile | null, url.replace("{id}", String(record.id)));
+      }
+    }
 {% endif %}
     const ids = records.map((record) => String(record.id));
     for (const relation of this.inverseOne) {

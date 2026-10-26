@@ -5,6 +5,9 @@
 {% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
 export {
   {{ var }}Api,
+{% if element.file_fields and definition.storage %}
+  {{ var }}Files,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

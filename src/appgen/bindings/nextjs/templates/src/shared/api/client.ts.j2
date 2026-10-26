@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { type ActionResult, unwrap } from "./errors";
-import type { EntityApi, EntityRecord, ListQuery, ListResult } from "./types";
+import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}ListQuery, ListResult } from "./types";
 
 /** The server actions of the data access of one entity. */
 export type EntityActions<T extends EntityRecord, TInput, TPatch = Partial<TInput>> = {
@@ -69,3 +69,36 @@ export function createEntityApi<T extends EntityRecord, TInput, TPatch = Partial
     },
   };
 }
+{% if definition.storage %}
+
+/** The server actions of the files of the file fields of one entity (ADR 0027). */
+export type FileActions<T extends EntityRecord, TField extends string> = {
+  upload(id: string, field: TField, data: FormData): Promise<ActionResult<T>>;
+  remove(id: string, field: TField): Promise<ActionResult<T>>;
+};
+
+/**
+ * Return the data access of the files of an entity: it sends each file to
+ * the server action in a form data, and after each change it calls the
+ * listeners of the entity in this browser tab.
+ */
+export function createFileApi<T extends EntityRecord, TField extends string>(
+  entity: string,
+  actions: FileActions<T, TField>,
+): FileApi<T, TField> {
+  return {
+    async upload(id, field, file) {
+      const data = new FormData();
+      data.set("file", file);
+      const record = unwrap(await actions.upload(id, field, data));
+      notifyChange(entity);
+      return record;
+    },
+    async remove(id, field) {
+      const record = unwrap(await actions.remove(id, field));
+      notifyChange(entity);
+      return record;
+    },
+  };
+}
+{% endif %}

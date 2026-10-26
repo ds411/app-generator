@@ -14,10 +14,13 @@
 # appgen check, and the webhook test (scripts/webhook_test.py) on it, and
 # the same for tests/fixtures/inbound-email.yaml with its hand-written
 # logic and the inbound email test (scripts/inbound_email_test.py).
-# Last, generate tests/fixtures/jobs.yaml with the hand-written operations
+# Then generate tests/fixtures/jobs.yaml with the hand-written operations
 # of tests/fixtures/jobs-extensions/nextjs/, and run lint, type check,
 # appgen check, and the test of the routes of the jobs with a fixed clock
 # (scripts/jobs_test.py) on it.
+# Last, generate tests/fixtures/files.yaml (file fields, ADR 0027), and
+# run lint, type check, appgen check, and the files test
+# (scripts/files_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -54,14 +57,17 @@ email_definition=tests/fixtures/inbound-email.yaml
 email_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-email.XXXXXX")
 jobs_definition=tests/fixtures/jobs.yaml
 jobs_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-jobs.XXXXXX")
+# The app of the files fixture (ADR 0027), in a temporary folder.
+files_definition=tests/fixtures/files.yaml
+files_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-files.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out"' EXIT
 fi
 
 step() {
@@ -194,5 +200,22 @@ uv run --locked appgen check "$jobs_definition" "$jobs_out"
 
 step "jobs test"
 uv run --locked scripts/jobs_test.py --app "$jobs_out"
+
+step "generate $files_definition in $files_out"
+uv run --locked appgen generate "$files_definition" -b nextjs -o "$files_out" >/dev/null
+(
+    cd "$files_out"
+    step "pnpm install (files)"
+    pnpm install --silent
+    step "pnpm lint (files)"
+    pnpm --silent lint
+    step "pnpm typecheck (files)"
+    pnpm --silent typecheck
+)
+step "appgen check (files)"
+uv run --locked appgen check "$files_definition" "$files_out"
+
+step "files test"
+uv run --locked scripts/files_test.py "$files_definition" --app "$files_out"
 
 step "passed"

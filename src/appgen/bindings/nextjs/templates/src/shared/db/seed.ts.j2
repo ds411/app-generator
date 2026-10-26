@@ -3,12 +3,18 @@
 {% set any_record_links = nextjs.seed | selectattr("record_links") | list %}
 {% set generated = nextjs.seed | selectattr("rows") | list %}
 {% set password = definition.auth and definition.auth.password %}
+{% set files = nextjs.seed | selectattr("files") | list %}
 {% if any_links or any_record_links %}
 import { eq } from "drizzle-orm";
 
 {% endif %}
 {% if password %}
 import { hashPassword } from "@/shared/auth/password";
+{% endif %}
+{% if files %}
+import { getStorage, type Storage } from "@/shared/storage/storage";
+{% endif %}
+{% if password or files %}
 
 {% endif %}
 import type { Database } from "./connect";
@@ -24,6 +30,9 @@ import {
 {% endfor %}
 } from "./schema";
 import * as seed from "./seed-data";
+{% if files %}
+import * as seedFiles from "./seed-files";
+{% endif %}
 
 /**
  * Add the seed records to the database, and return the number of records
@@ -31,9 +40,15 @@ import * as seed from "./seed-data";
  * seed adds each one that does not exist, and changes no record that
  * exists. The generated records go in only if all tables are empty. The
  * seed inserts the tables in the order of their required foreign keys,
- * and sets the optional foreign keys after all inserts.
+ * and sets the optional foreign keys after all inserts.{% if files %} It saves the
+ * files of the new seed records in the storage (ADR 0027).{% endif %}
+
  */
+{% if files %}
+export async function seedDatabase(db: Database, storage: Storage = getStorage()): Promise<number> {
+{% else %}
 export async function seedDatabase(db: Database): Promise<number> {
+{% endif %}
 {% if generated %}
   const counts = await Promise.all([
 {% for seed in nextjs.seed %}
@@ -107,6 +122,14 @@ export async function seedDatabase(db: Database): Promise<number> {
 {% endfor %}
     }
 {% endif %}
+{% for seed in files %}
+    {{ trace(seed.seed_id) }}
+    for (const file of seedFiles.{{ seed.files_const }}) {
+      if ({{ seed.records_const | replace("Records", "Added") }}.has(file.recordId)) {
+        await storage.save(file.key, Buffer.from(file.content, "base64"), file.type);
+      }
+    }
+{% endfor %}
 {% if password %}
 {% set user_seed = nextjs.seed | selectattr("table.entity", "eq", definition.auth.user_entity) | first %}
     // With SEED_PASSWORD, each new seed user can sign in with this password.

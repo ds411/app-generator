@@ -45,6 +45,8 @@ S3_KEYS = ("bucket_env", "region_env", "endpoint_env", "access_key_env", "secret
 """The keys of the section `storage` that only the kind `s3` takes."""
 SECRET_KEYS = frozenset({"access_key_env", "secret_key_env"})
 """The keys of the variables that hold a secret."""
+FILE_PATHS = "/files/"
+"""The paths of the files in the Next.js app (`/files/<entity>/<id>/<field>`): no page path."""
 
 _SIZE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(B|KB|MB|GB)\s*$", re.IGNORECASE)
 _UNITS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}

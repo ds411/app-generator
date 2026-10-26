@@ -68,6 +68,13 @@ services:
       {{ p.client_secret_env }}: ${{ "{" }}{{ p.client_secret_env }}:-{{ "}" }}
 {% endfor %}
 {% endif %}
+{% if definition.storage %}
+      {{ trace(definition.storage.id) }}
+      {{ definition.storage.folder_env }}: /app/uploads
+{% for key, env in definition.storage.variables if key != "folder_env" %}
+      {{ env }}: ${{ "{" }}{{ env }}:-{{ "}" }}
+{% endfor %}
+{% endif %}
 {% for api in ts_apis.values() %}
       {{ trace(api.id) }}
       {{ api.url_env }}: ${{ "{" }}{{ api.url_env }}:-{{ api.base_url }}{{ "}" }}
@@ -80,6 +87,10 @@ services:
 {% endfor %}
     ports:
       - "3000:3000"
+{% if definition.storage %}
+    volumes:
+      - files:/app/uploads
+{% endif %}
     depends_on:
       db:
         condition: service_healthy
@@ -115,3 +126,6 @@ services:
 
 volumes:
   db-data:
+{% if definition.storage %}
+  files:
+{% endif %}

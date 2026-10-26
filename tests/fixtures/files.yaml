@@ -3,7 +3,8 @@
 # and the covers of the documents, the attachments of the notes, and
 # seed records with files. A member changes only the own documents, and
 # cannot change the notes, so only an admin uploads their attachments.
-# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition, and
+# scripts/check-nextjs.sh the Next.js app.
 version: 0
 
 app:
@@ -69,6 +70,25 @@ operations:
   read_note: { kind: read, entity: Note }
   create_note: { kind: create, entity: Note }
 
+pages:
+  documents: { path: /documents, title: Documents, content: { view: document_table } }
+  people: { path: /people, title: People, content: { view: person_table } }
+
+ui:
+  views:
+    document_table:
+      kind: table
+      entity: Document
+      columns:
+        title: {}
+        owner: {}
+    person_table:
+      kind: table
+      entity: Person
+      columns:
+        name: {}
+        email: {}
+
 seed:
   Person:
     records:
@@ -92,6 +112,7 @@ access:
     admin:
       label: Admin
       operations: ["*"]
+      pages: ["*"]
     member:
       label: Member
       operations:
@@ -104,5 +125,6 @@ access:
         - list_notes
         - read_note
         - create_note
+      pages: ["*"]
       records:
         Document: { owner: owner, operations: [change] }

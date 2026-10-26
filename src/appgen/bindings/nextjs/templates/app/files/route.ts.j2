@@ -1,0 +1,53 @@
+{% set type = name | pascal %}
+{% set var = name | camel %}
+{% set public = public_kinds(definition, name) %}
+{% set ops = kind_operations(definition, name) if definition.access else {} %}
+{% set rules = record_rules.get(name) %}
+{% set owned = rules and "read" not in public %}
+{% set auth = definition.auth and "read" not in public %}
+{% set operation = ops.get("read") if auth else none %}
+{{ trace_header(element_id) }}
+import { {{ var }}Repository } from "@/entities/{{ name | kebab }}/server";
+import { NotFoundError } from "@/shared/api";
+{% if operation or owned %}
+import { ForbiddenError{{ ", recordScope" if owned }}{{ ", requireOperation" if operation }} } from "@/shared/auth/access";
+{% endif %}
+{% if auth %}
+import { UnauthorizedError{{ ", requireUser" if not operation }} } from "@/shared/auth/session";
+{% endif %}
+import { fileResponse } from "@/shared/storage";
+
+// The files of the file fields of {{ type }} (ADR 0027):
+// /files/{{ name | kebab }}/<id>/<field>. The access rules of the read of the record
+// apply{{ ", so a user who may not read the record gets 404" if auth }}.
+const FIELDS: Record<string, string> = {
+{% for field_name, field in element.file_fields.items() %}
+  {{ ts_value(field_name | kebab) }}: {{ ts_value(field_name | camel) }}, {{ trace(field.id) }}
+{% endfor %}
+};
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string; field: string }> },
+): Promise<Response> {
+  const { id, field } = await context.params;
+  const key = Object.hasOwn(FIELDS, field) ? FIELDS[field] : undefined;
+  try {
+{% if operation %}
+    await requireOperation({{ ts_value(operation) }});
+{% elif auth %}
+    await requireUser();
+{% endif %}
+{% if owned %}
+    const scope = await recordScope({{ ts_value(name) }}, "read");
+    return await fileResponse(key ? await {{ var }}Repository.storedFile(id, key, scope) : null);
+{% else %}
+    return await fileResponse(key ? await {{ var }}Repository.storedFile(id, key) : null);
+{% endif %}
+  } catch (error) {
+    if (error instanceof NotFoundError{{ " || error instanceof UnauthorizedError" if auth }}{{ " || error instanceof ForbiddenError" if operation or owned }}) {
+      return fileResponse(null);
+    }
+    throw error;
+  }
+}

@@ -26,6 +26,8 @@ _TS_TYPES = {
     "decimal": "number",
     "boolean": "boolean",
     "json": "unknown",
+    "file": "FileValue",
+    "image": "FileValue",
 }
 
 
@@ -76,6 +78,11 @@ class Member:
     translations: Field | None = None
     """The translatable field whose values in each language the key has (ADR 0026)."""
 
+    @property
+    def input(self) -> bool:
+        """True if the create and the change take the key. A file has an upload (ADR 0027)."""
+        return self.field is None or not self.field.is_file
+
 
 TRANSLATIONS_TYPE = "Partial<Record<string, string | null>>"
 """The TypeScript type of the values of a translatable field, by language code."""
@@ -96,7 +103,9 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
     stores the other side. A translatable field has a second key after
     it, with its values in each language (ADR 0026): in a record, the
     field has the value of the selected language, and the second key the
-    values of all languages.
+    values of all languages. A file field has the name, the size, the
+    type, and the URL of its file (`FileValue`), but the create input
+    does not have it: the app uploads the file after the create (ADR 0027).
     """
     result: list[Member] = []
     for name, field in entity.stored_fields.items():
