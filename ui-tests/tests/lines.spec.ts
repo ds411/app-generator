@@ -7,6 +7,7 @@
 import { expect, type Locator, test } from "@playwright/test";
 
 import { expected, pathPattern } from "./expected";
+import { saveAndClose } from "./forms";
 import { firstRecordLink } from "./links";
 
 const detail = expected.pages.find((p) => p.name === "project_detail");
@@ -72,8 +73,7 @@ test("the edit form of a project adds three budget lines and saves them", async 
   await expect(editor.getByText("Enter a value.")).toHaveCount(0);
   await expect.poll(async () => amount(await plannedCost(editor).innerText())).toBeCloseTo(before + 2000, 2);
 
-  await sheet.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(sheet).toBeHidden();
+  await saveAndClose(sheet);
 
   // The form reads the lines of the project again: the new lines are there.
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
