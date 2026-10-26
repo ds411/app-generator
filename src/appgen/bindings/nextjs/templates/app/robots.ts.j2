@@ -1,0 +1,15 @@
+{{ trace_header("app") }}
+import type { MetadataRoute } from "next";
+
+import { siteUrl } from "@/shared/lib/site";
+
+// The URL of the sitemap depends on the host of the request.
+export const dynamic = "force-dynamic";
+
+/** The rules of the crawlers: all pages but the API, and the URL of the sitemap. */
+export default async function robots(): Promise<MetadataRoute.Robots> {
+  return {
+    rules: { userAgent: "*", allow: "/", disallow: "/api/" },
+    sitemap: `${await siteUrl()}/sitemap.xml`,
+  };
+}

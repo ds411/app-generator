@@ -5189,6 +5189,17 @@
           ],
           "default": null,
           "title": "Embed"
+        },
+        "meta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PageMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5274,6 +5285,40 @@
         }
       },
       "title": "PageContent",
+      "type": "object"
+    },
+    "PageMeta": {
+      "additionalProperties": false,
+      "description": "The metadata of a page for search engines and link previews.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        }
+      },
+      "title": "PageMeta",
       "type": "object"
     },
     "Pagination": {

@@ -28,7 +28,7 @@ from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
 from appgen.dsl.rules import EntityCompareRule
-from appgen.gen.naming import kebab, pascal
+from appgen.gen.naming import camel, kebab, pascal
 
 RATE_LIMIT_STORE_KEY = "x-nextjs-rate-limit-store"
 """The extension key of the app that selects the store of the rate limit: `memory` or `redis`."""
@@ -115,6 +115,70 @@ def page_info(name: str, page: Page, layout: str | None = None) -> PageInfo:
         params=params,
         group=EMBED_GROUP if page.embed else route_group(layout),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class SitemapPage:
+    """A public page with metadata in the sitemap: its path, or the path of each record."""
+
+    meta_id: str
+    """The element ID of the metadata of the page, for example `pages.home.meta`."""
+    url: str
+    """The path as the body of a JavaScript template literal after the base URL, with the keys
+    of `record` for the path parameters."""
+    entity: str | None = None
+    """The entity of a page of a record: the sitemap has the path of each record."""
+
+
+def sitemap_pages(definition: AppDefinition) -> list[SitemapPage]:
+    """Return the public pages with `meta`, for `sitemap.xml`.
+
+    A page with path parameters is in the sitemap if it has an entity, and
+    each parameter is the ID, a required field, or the key of a required
+    `many_to_one` relation of the entity: the sitemap has the path of each
+    record.
+    """
+    auth = definition.auth
+    found: list[SitemapPage] = []
+    for name, page in definition.pages.items():
+        if page.meta is None or (auth is not None and name not in auth.public_pages):
+            continue
+        _, params = route_dir(page.path)
+        if not params:
+            found.append(SitemapPage(page.meta.id, page.path))
+            continue
+        entity = definition.entities.get(page.entity or "")
+        keys = {param: _record_key(definition, page.entity or "", param) for param in params}
+        if entity is None or None in keys.values():
+            continue
+        url = page.path
+        for param, key in keys.items():
+            url = url.replace(f"{{{param}}}", f"${{encodeURIComponent(String(record.{key}))}}")
+        found.append(SitemapPage(page.meta.id, url, page.entity))
+    return found
+
+
+def _record_key(definition: AppDefinition, entity_name: str, param: str) -> str | None:
+    """Return the key of a record that gives a path parameter, or None.
+
+    The key is the ID, a required field, or the key of a required
+    `many_to_one` relation: each record has a value for it.
+    """
+    entity = definition.entities.get(entity_name)
+    if entity is None:
+        return None
+    field = entity.fields.get(param)
+    if param == "id" or (field is not None and field.required):
+        return camel(param)
+    relation = entity.relations.get(param.removesuffix("_id"))
+    if (
+        param.endswith("_id")
+        and relation is not None
+        and relation.kind == "many_to_one"
+        and relation.required
+    ):
+        return camel(param.removesuffix("_id")) + "Id"
+    return None
 
 
 def route_source(path: str) -> str:
@@ -311,5 +375,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # The change log (ADR 0040): one table for all entities, and the helpers.
             "history": has_history(definition),
             "frame_headers": frame_headers(definition),
+            # The public pages with metadata: `sitemap.xml` and `robots.txt`.
+            "sitemap": sitemap_pages(definition),
         },
     }

@@ -143,12 +143,17 @@ ui:
 pages:
   overview: { path: /, title: Overview, content: { dashboard: overview } }
   customers: { path: /customers, title: Customers, content: { view: customer_table } }
-  invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
+  invoices:
+    path: /invoices
+    title: Invoices
+    content: { view: invoice_table }
+    meta: { description: The invoices of the customers., image: /invoices.png }
   invoice_detail:
     path: "/invoices/{id}"
     title: Invoice
     entity: Invoice
     content: { view: invoice_detail }
+    meta: { description: $record.number }
   lines: { path: /lines, title: Lines, content: { view: line_table } }
   invoice_feed: { path: /feed, title: Invoice feed, content: { view: invoice_feed } }
   line_cards: { path: /line-cards, title: Line cards, content: { view: line_cards } }

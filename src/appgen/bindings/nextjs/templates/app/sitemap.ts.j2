@@ -1,0 +1,29 @@
+{{ trace_header("app") }}
+import type { MetadataRoute } from "next";
+
+{% for entity in nextjs.sitemap | map(attribute="entity") | select | unique | sort %}
+import { {{ entity | camel }}Repository } from "@/entities/{{ entity | kebab }}/server";
+{% endfor %}
+import { siteUrl } from "@/shared/lib/site";
+
+// The sitemap reads the records at each request.
+export const dynamic = "force-dynamic";
+
+/** The sitemap of the public pages with metadata: for a page of a record, the page of each record. */
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const base = await siteUrl();
+{% for page in nextjs.sitemap %}
+{% if page.entity %}
+  const {{ page.meta_id.split(".")[1] | camel }}Records = (await {{ page.entity | camel }}Repository.list()).items; {{ trace(page.meta_id) }}
+{% endif %}
+{% endfor %}
+  return [
+{% for page in nextjs.sitemap %}
+{% if page.entity %}
+    ...{{ page.meta_id.split(".")[1] | camel }}Records.map((record) => ({ url: `${base}{{ page.url }}` })),
+{% else %}
+    { url: `${base}{{ "" if page.url == "/" else page.url }}` }, {{ trace(page.meta_id) }}
+{% endif %}
+{% endfor %}
+  ];
+}

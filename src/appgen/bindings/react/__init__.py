@@ -316,6 +316,12 @@ BINDING = Binding(
             for_each="page",
         ),
         Output(
+            template="src/shared/lib/use-description.ts.j2",
+            path="src/shared/lib/use-description.ts",
+            when="definition.pages.values() | selectattr('meta') | map(attribute='meta')"
+            " | selectattr('description') | list",
+        ),
+        Output(
             template="src/features/operation/index.ts.j2",
             path="src/features/{{ name | kebab }}/index.ts",
             for_each="operation",
@@ -360,7 +366,8 @@ BINDING = Binding(
         *(rule for kind in _FUNCTION_GAPS for rule in _gap_rules("function", "ts", kind)),
     ),
     covers=frozenset(
-        {"app", "page", "entity", "field", "sequence", "relation", "operation", "param"}
+        {"app", "page", "page_meta", "entity", "field", "sequence", "relation", "operation"}
+        | {"param"}
         | {"theme", "tokens", "token_group", "token"}
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}

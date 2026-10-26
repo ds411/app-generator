@@ -26,8 +26,9 @@
 # type check, appgen check, and the test of the events
 # (scripts/events_test.py) on it.
 # Then generate tests/fixtures/invoices.yaml (the small DSL additions of
-# M33), and run lint, type check, appgen check, and the sequence test
-# (scripts/sequence_test.py) on it.
+# M33), and run lint, type check, appgen check, the sequence test
+# (scripts/sequence_test.py), and the test of the page metadata
+# (scripts/page_meta_test.py) on it.
 # Last, generate tests/fixtures/totals.yaml (totals of relations and the
 # compare rules over totals, ADR 0034), and run lint, type check, appgen
 # check, and the totals test (scripts/totals_test.py) on it.
@@ -271,6 +272,9 @@ uv run --locked appgen check "$invoices_definition" "$invoices_out"
 
 step "sequence test"
 uv run --locked scripts/sequence_test.py --app "$invoices_out"
+
+step "page metadata test"
+uv run --locked scripts/page_meta_test.py --app "$invoices_out"
 
 step "generate $totals_definition in $totals_out"
 uv run --locked appgen generate "$totals_definition" -b nextjs -o "$totals_out" >/dev/null

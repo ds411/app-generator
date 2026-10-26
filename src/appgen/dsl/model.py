@@ -242,6 +242,20 @@ class Operation(Element):
     with the record, in one transaction (ADR 0035)."""
 
 
+RECORD_PREFIX = "$record."
+"""The prefix of a value that is a field of the record of a page, for example `$record.summary`."""
+
+
+class PageMeta(Element):
+    """The metadata of a page for search engines and link previews."""
+
+    description: Text | None = None
+    """A text, or `$record.<field>` for a `string` or a `text` field of the record of the page."""
+    image: str | None = None
+    """The URL of an image (absolute, or a path of the app), or `$record.<field>` for an `image`
+    or a `url` field of the record of the page."""
+
+
 class Page(Element):
     """A screen of a front-end app."""
 
@@ -263,6 +277,8 @@ class Page(Element):
     """The origins of the websites that can show the page in a frame, for example
     `https://www.example.com`. Only a public page takes them. The page then shows without the
     app shell (ADR 0032)."""
+    meta: PageMeta | None = None
+    """The description and the image of the page for search engines and link previews."""
 
 
 class App(Element):

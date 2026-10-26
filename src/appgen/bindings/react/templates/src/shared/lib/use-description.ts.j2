@@ -1,0 +1,25 @@
+{{ trace_header("app") }}
+// The description of a page in the document. A browser app has no server
+// render: search engines that do not run JavaScript, and most previews of
+// links, read the description of index.html.
+import { useEffect } from "react";
+
+/** Set the description of the document while the page shows, and restore it after. */
+export function useDescription(description: string | null | undefined): void {
+  useEffect(() => {
+    if (!description) return;
+    let tag = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    const created = tag === null;
+    if (tag === null) {
+      tag = document.createElement("meta");
+      tag.name = "description";
+      document.head.append(tag);
+    }
+    const before = tag.content;
+    tag.content = description;
+    return () => {
+      if (created) tag.remove();
+      else tag.content = before;
+    };
+  }, [description]);
+}

@@ -1,0 +1,38 @@
+{{ trace_header("app") }}
+// The URL of the app and the metadata of the public pages: the sitemap,
+// robots.txt, and the previews of the links (Open Graph).
+import "server-only";
+
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+
+/** Return the URL of the app for the browsers: PUBLIC_URL, else the host of the request. */
+export async function siteUrl(): Promise<string> {
+  const url = process.env.PUBLIC_URL?.replace(/\/+$/, "");
+  if (url) return url;
+  const list = await headers();
+  const host = list.get("x-forwarded-host") ?? list.get("host") ?? "localhost:3000";
+  const protocol = list.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${protocol}://${host}`;
+}
+
+/** The metadata of a page: its title, and its description and image if any. */
+export type PageMeta = { title: string; description?: string | null; image?: string | null };
+
+/** Return the metadata of a page, with the preview of its links: an image path is relative to the app. */
+export async function pageMetadata({ title, description, image }: PageMeta): Promise<Metadata> {
+  const base = new URL(await siteUrl());
+  const images = image ? [new URL(image, base).toString()] : undefined;
+  return {
+    title,
+    metadataBase: base,
+    ...(description ? { description } : {}),
+    openGraph: { title, type: "website", ...(description ? { description } : {}), ...(images ? { images } : {}) },
+    twitter: {
+      card: images ? "summary_large_image" : "summary",
+      title,
+      ...(description ? { description } : {}),
+      ...(images ? { images } : {}),
+    },
+  };
+}
