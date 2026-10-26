@@ -204,10 +204,11 @@ done
 
 Each check reports no invalid traces and no uncovered elements. The
 stubs of the custom operations (and in the front ends, of the custom UI
-elements) are open gaps until a developer writes them: 8 for Next.js
-and React, 3 for FastAPI. The FastAPI
-app leaves out the pages and the UI by design, so its report lists the
-kinds `page` and `ui` as excluded. `tests/test_end_to_end.py` runs these
+elements) and the logic of the webhook are open gaps until a developer
+writes them: 11 for Next.js, 10 for React, and 5 for FastAPI. The
+FastAPI app leaves out the pages and the UI by design, so its report
+lists the kinds `page` and `ui` as excluded. The React app has no
+server, so it leaves out the webhooks. `tests/test_end_to_end.py` runs these
 steps with the CLI.
 
 `scripts/smoke_test.py` starts the apps in Docker, one at a time: the
@@ -632,6 +633,8 @@ vertical slice in `app/features/<slice>/`, with a SQLAlchemy model,
 Pydantic schemas, a repository, and one module for each operation. A
 custom operation has a generated endpoint and an extension file for its
 logic, and each entity has an extension file for its custom validation.
+Each webhook has an endpoint that checks the signature of the sender
+and records the ID of each event, and an extension file for its logic.
 Each operation has generated API tests that run against Postgres in a
 container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. `uv run python -m app.cli

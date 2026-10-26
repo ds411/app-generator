@@ -83,6 +83,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+import webhook_sender
 from mock_api import MockApi
 
 from appgen.bindings.shared.mock_data import mock_data
@@ -526,9 +527,32 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
     subprocess.run(command, cwd=UI_TESTS, env=env, check=True)
 
 
+def check_webhook(binding: str, definition: AppDefinition) -> None:
+    """Send the signed event of the webhook `commits`, and check that it adds one comment."""
+    base = f"http://localhost:{PORTS[binding]}"
+    email = "grace@example.com"
+    person = post(binding, base + "/people", {"name": "Grace Hook", "email": email})
+    project = post(
+        binding, base + "/projects", {"name": "Hooks", "key": "HOOK", "owner_id": person["id"]}
+    )
+    task = post(binding, base + "/tasks", {"title": "Hook task", "project_id": project["id"]})
+
+    def comments() -> int:
+        page = json.loads(get(f"{base}/comments?task_id={task['id']}").body)
+        return int(page["total"])
+
+    try:
+        webhook_sender.check_commits(
+            definition, base, str(task["id"]), email, comments, lambda m: log(binding, m)
+        )
+    except webhook_sender.WebhookError as error:
+        raise SmokeError(f"{binding}: {error}") from None
+
+
 def check(binding: str, definition: AppDefinition, ui: bool) -> None:
     if binding == "fastapi":
         check_api(binding, definition)
+        check_webhook(binding, definition)
     else:
         check_front_end(binding, definition)
         if ui:
@@ -564,7 +588,11 @@ def smoke_test(binding: str, app: Path | None, image: str | None, ui: bool = Fal
                 app,
                 image,
                 Path(temp),
-                {**mock.env("host.docker.internal"), **mock.credentials()},
+                {
+                    **mock.env("host.docker.internal"),
+                    **mock.credentials(),
+                    **webhook_sender.secrets(definition),
+                },
             ),
         ):
             check(binding, definition, ui)
@@ -578,7 +606,12 @@ def smoke_test_local(binding: str, app: Path, ui: bool = False) -> None:
     with (
         tempfile.TemporaryDirectory(prefix=f"appgen-smoke-{binding}.") as temp,
         MockApi(definition) as mock,
-        started_local(binding, app, Path(temp), {**mock.env(), **mock.credentials()}),
+        started_local(
+            binding,
+            app,
+            Path(temp),
+            {**mock.env(), **mock.credentials(), **webhook_sender.secrets(definition)},
+        ),
     ):
         check(binding, definition, ui)
         if binding == "fastapi":

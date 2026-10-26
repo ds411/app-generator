@@ -364,7 +364,10 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
     ),
     # The rules of the entities are rules of the back end. The React app has mock data.
-    excludes=frozenset({"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}),
+    # The React app has no server: the entity rules and the webhooks need one.
+    excludes=frozenset(
+        {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook"}
+    ),
     context=context,
     warnings=warnings,
     finish=finish,

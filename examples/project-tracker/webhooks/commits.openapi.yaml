@@ -1,0 +1,22 @@
+# The events of the code host of the project tracker example: a commit
+# that refers to a task. The webhook `commits` of app.yaml reads the
+# schema CommitEvent (ADR 0028).
+openapi: 3.1.0
+info:
+  title: Commit events of the code host
+  version: 1.0.0
+components:
+  schemas:
+    CommitEvent:
+      type: object
+      description: A commit that refers to a task.
+      required: [id, task_id, author_email, message]
+      properties:
+        id: { type: string, description: The ID of the event. }
+        task_id: { type: string, format: uuid, description: The task of the commit. }
+        author_email:
+          type: string
+          format: email
+          description: The email address of the author. A person of the app has it.
+        message: { type: string, description: The commit message. }
+        url: { type: string, format: uri, description: The page of the commit. }

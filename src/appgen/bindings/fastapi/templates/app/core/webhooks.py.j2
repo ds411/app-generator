@@ -1,0 +1,165 @@
+{{ trace_header(*(py_webhooks.values() | map(attribute="id"))) }}
+{% set schemes = py_webhooks.values() | map(attribute="scheme") | unique | list %}
+"""The checks of the webhooks: the signatures and the IDs of the events (ADR 0028).
+
+A webhook endpoint reads the raw body, checks its signature with the
+secret of the webhook, and keeps the ID of the event in the table
+`webhook_events`. The ID is unique for each webhook, so a repeated
+delivery of an event does not run the logic again. The row and the
+changes of the logic go into the same transaction: when the logic fails,
+the sender can deliver the event again.
+"""
+
+{{ py.imports(
+    ["import datetime as dt", "import hashlib", "import hmac", "import json",
+     "from typing import Any, cast", "from uuid import UUID, uuid4",
+     "from pydantic import BaseModel, TypeAdapter, ValidationError",
+     "from fastapi.exceptions import RequestValidationError",
+     "from sqlalchemy import DateTime, String, UniqueConstraint, func, select",
+     "from sqlalchemy.exc import IntegrityError",
+     "from sqlalchemy.ext.asyncio import AsyncSession",
+     "from sqlalchemy.orm import Mapped, mapped_column",
+     "from app.core.db import Base",
+     "from app.core.errors import ProblemError"]
+    + (["import base64"] if py_webhooks.values() | selectattr("encoding", "eq", "base64") | list else [])
+    + (["import time"] if "stripe" in schemes else [])
+    + (["from app.core.i18n import t"] if py.translated else [])
+) }}
+
+
+class WebhookEvent(Base):
+    """An event that a webhook received. Each webhook has each event ID one time."""
+
+    __tablename__ = "webhook_events"
+    __table_args__ = (
+        UniqueConstraint("webhook", "event_id", name="uq_webhook_events_webhook_event_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    webhook: Mapped[str] = mapped_column(String(100))
+    """The name of the webhook in the definition."""
+    event_id: Mapped[str] = mapped_column(String(200))
+    """The ID of the event that the sender gives, or its SHA-256 hash if it is longer."""
+    received_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class WebhookReceipt(BaseModel):
+    """The answer of a webhook endpoint."""
+
+    event_id: str
+    repeated: bool
+    """True if the webhook had the event already: the logic did not run again."""
+
+
+def require_secret(secret: str, name: str) -> bytes:
+    """Return the secret of a webhook. Give 500 if the server has no secret."""
+    if not secret:
+        {{ py.problem(500, "The server has no secret for the webhook {name}.", 8, name="name") }}
+    return secret.encode()
+
+
+def _invalid_signature() -> ProblemError:
+    return ProblemError(401, {{ py.message("The signature of the webhook is not valid.") }})
+{% if "hmac_sha256" in schemes %}
+
+
+def check_hmac_sha256(
+    secret: bytes, body: bytes, header: str | None, *, prefix: str, encoding: str
+) -> None:
+    """Check a header with the HMAC-SHA256 of the body. Give 401 if it is not correct."""
+    if header is None or not header.startswith(prefix):
+        raise _invalid_signature()
+    digest = hmac.new(secret, body, hashlib.sha256).digest()
+{% if py_webhooks.values() | selectattr("encoding", "eq", "base64") | list %}
+    expected = base64.b64encode(digest).decode() if encoding == "base64" else digest.hex()
+{% else %}
+    expected = digest.hex()
+{% endif %}
+    if not hmac.compare_digest(header.removeprefix(prefix).strip(), expected):
+        raise _invalid_signature()
+{% endif %}
+{% if "stripe" in schemes %}
+
+
+def check_stripe(
+    secret: bytes, body: bytes, header: str | None, *, tolerance: int, now: float | None = None
+) -> None:
+    """Check the header `Stripe-Signature`: `t=<time>,v1=<signature>`, with one or more `v1`.
+
+    The signature is the HMAC-SHA256 of `<time>.<body>`. A time that is
+    more than `tolerance` seconds before or after now gives 401, so that an
+    old request cannot come again.
+    """
+    parts = [item.split("=", 1) for item in (header or "").split(",") if "=" in item]
+    times = [value for key, value in parts if key.strip() == "t"]
+    signatures = [value.strip() for key, value in parts if key.strip() == "v1"]
+    if len(times) != 1 or not times[0].strip().isdigit() or not signatures:
+        raise _invalid_signature()
+    timestamp = int(times[0])
+    if abs((time.time() if now is None else now) - timestamp) > tolerance:
+        raise _invalid_signature()
+    signed = f"{timestamp}.".encode() + body
+    expected = hmac.new(secret, signed, hashlib.sha256).hexdigest()
+    if not any(hmac.compare_digest(signature, expected) for signature in signatures):
+        raise _invalid_signature()
+{% endif %}
+
+
+def read_json(body: bytes) -> Any:
+    """Return the JSON value of the body. Give 400 if the body is not JSON."""
+    try:
+        return json.loads(body)
+    except ValueError:
+        {{ py.problem(400, "The body of the webhook is not valid JSON.", 8, suffix=" from None") }}
+
+
+def read_event[T](data: Any, adapter: TypeAdapter[T]) -> T:
+    """Return the event in the type of the adapter. Give 422 if the body does not agree with
+    the schema of the webhook."""
+    try:
+        return adapter.validate_python(data)
+    except ValidationError as error:
+        raise RequestValidationError(
+            [{**item, "loc": ("body", *item["loc"])} for item in error.errors()]
+        ) from None
+
+
+def event_id_in_body(data: Any, path: tuple[str, ...]) -> str:
+    """Return the event ID at a path of properties of the body. Give 400 if it has none."""
+    value: Any = data
+    for name in path:
+        value = cast(dict[str, Any], value).get(name) if isinstance(value, dict) else None
+    if isinstance(value, bool) or not isinstance(value, str | int) or value == "":
+        {{ py.problem(400, "The webhook has no event ID.", 8) }}
+    return str(value)
+
+
+def event_id_in_header(value: str | None) -> str:
+    """Return the event ID of a header. Give 400 if the request has none."""
+    if not value or not value.strip():
+        {{ py.problem(400, "The webhook has no event ID.", 8) }}
+    return value.strip()
+
+
+async def record_event(session: AsyncSession, webhook: str, event_id: str) -> bool:
+    """Add the event to the open transaction, and return true.
+
+    Return false if the webhook has the event already, also when another
+    request adds it at the same time.
+    """
+    # A long ID is stored as its hash, so that it fits into the column.
+    key = event_id if len(event_id) <= 200 else hashlib.sha256(event_id.encode()).hexdigest()
+    query = select(WebhookEvent.id).where(
+        WebhookEvent.webhook == webhook, WebhookEvent.event_id == key
+    )
+    if await session.scalar(query) is not None:
+        return False
+    session.add(WebhookEvent(webhook=webhook, event_id=key))
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        return False
+    return True

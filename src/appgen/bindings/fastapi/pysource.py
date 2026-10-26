@@ -175,6 +175,7 @@ def import_block(lines: set[str]) -> str:
     stdlib = {"collections", "dataclasses", "datetime", "decimal", "enum", "itertools", "os"}
     stdlib |= {"typing", "uuid"}
     stdlib |= {"asyncio", "json", "pathlib", "re", "types", "urllib"}
+    stdlib |= {"base64", "copy", "hashlib", "hmac", "time"}
     groups: list[list[str]] = [[], [], []]
     for line in lines:
         module = line.split()[1]

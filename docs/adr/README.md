@@ -44,3 +44,4 @@ gives the rules.
 | 0025   | [Record rules with field conditions and owner paths](0025-record-rules.md) | Accepted |
 | 0026   | [Translations of the values of the records](0026-record-translations.md) | Accepted |
 | 0027   | [Files and images in the records](0027-files.md)                       | Accepted |
+| 0028   | [Signed webhooks](0028-webhooks.md)                                    | Accepted |

@@ -29,6 +29,7 @@ from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
 from appgen.dsl.ui.views import Format
+from appgen.dsl.webhooks import Webhook
 from appgen.dsl.workflows import Workflow
 
 DSL_VERSION = 0
@@ -221,6 +222,8 @@ class AppDefinition(Element):
     """The state machines of the enum fields of the entities."""
     apis: dict[MemberName, Api] = pydantic.Field(default_factory=dict[str, Api])
     """The third-party APIs that OpenAPI documents describe (ADR 0019)."""
+    webhooks: dict[MemberName, Webhook] = pydantic.Field(default_factory=dict[str, Webhook])
+    """The endpoints that other systems send signed events to (ADR 0028)."""
     seed: dict[EntityName, EntitySeed] = pydantic.Field(default_factory=dict[str, EntitySeed])
     """The seed records of the entities: the data that the apps start with (ADR 0021)."""
     storage: Storage | None = None

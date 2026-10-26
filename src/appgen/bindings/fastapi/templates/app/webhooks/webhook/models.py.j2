@@ -1,0 +1,18 @@
+{{ trace_header(element_id) }}
+{% set w = py_webhooks[name] %}
+"""The schema of the body of the webhook `{{ w.name }}`.
+
+The models keep the JSON names of the sender as aliases. They ignore the
+properties that the document does not give.
+"""
+
+{{ py.imports(w.model_imports()) }}
+{% for model in w.models %}
+{% if not loop.first or model.fields is not none %}
+
+{% endif %}
+
+{% for line in model.lines() %}
+{{ line }}
+{% endfor %}
+{% endfor %}

@@ -18,6 +18,10 @@ changes:
 - `app/extensions/routers_ext.py`: the routers of the endpoints that the
   definition does not describe. `app/main.py` includes each router of
   `ROUTERS` after the generated routers. By default, the list is empty.
+{% if py_webhooks %}
+- `app/webhooks/<webhook>/handler_ext.py`: the logic of a webhook. Until
+  you write it, the endpoint gives 501.
+{% endif %}
 
 When you write the code of an extension file, change `@trace:gap` to
 `@trace:manual` in its header.
@@ -314,6 +318,9 @@ the code of the feature.
 {% if py_apis %}
 | `app/integrations/<api>/` | The client and the models of a third-party API, and the endpoints of an exposed API. |
 {% endif %}
+{% if py_webhooks %}
+| `app/webhooks/<webhook>/` | The endpoint, the models of the body, and the logic of a webhook. |
+{% endif %}
 | `tests/`                | The tests, with one folder for each slice.           |
 
 A slice has these modules:
@@ -375,6 +382,30 @@ The endpoints need a signed-in user. The roles do not apply to them.
 | `{{ api.name }}` | `{{ api.prefix }}/...` in `app/integrations/{{ api.module }}/router.py` |
 {% endfor %}
 {% endif %}
+
+{% endif %}
+{% if py_webhooks %}
+## Webhooks
+
+Each webhook of the definition has a package in `app/webhooks/`: the
+endpoint (`router.py`), the Pydantic models of the schema of the body
+(`models.py`), and the logic (`handler_ext.py`). The endpoint checks the
+signature of the raw body with the secret, and gives 401 for a wrong
+signature. The table `webhook_events` keeps the ID of each event, so a
+repeated delivery gives `"repeated": true` and does not run the logic
+again. The row of the event and the changes of the logic are in one
+transaction: when the logic fails, the sender can deliver the event
+again.
+
+| Webhook | Endpoint | Signature | Secret |
+| ------- | -------- | --------- | ------ |
+{% for w in py_webhooks.values() %}
+| `{{ w.name }}` | `POST {{ w.path }}` | {{ "Stripe (`Stripe-Signature`)" if w.scheme == "stripe" else "HMAC-SHA256 in `" ~ w.header ~ "`" }} | `{{ w.secret_env }}` |
+{% endfor %}
+
+Without its secret, an endpoint gives 500. The tests in `tests/webhooks/`
+sign the requests with a test secret, and replace the logic with a
+function that records the events.
 
 {% endif %}
 ## Errors and pages

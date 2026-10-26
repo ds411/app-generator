@@ -476,11 +476,14 @@ def test_the_manifest_records_the_hash_of_each_document(tmp_path: Path) -> None:
     manifest = read_manifest(out)
     assert manifest is not None
     hashes = {name: api.openapi.hash for name, api in found.apis.items() if api.openapi}
+    commits = found.webhooks["commits"].openapi
+    assert commits is not None
     assert manifest.documents == {
         "apis/documents.openapi.yaml": hashes["documents"],
         "apis/exchange-rates.openapi.json": hashes["exchange_rates"],
         "apis/finance.openapi.yaml": hashes["finance"],
         "apis/public-holidays.openapi.yaml": hashes["holidays"],
+        "webhooks/commits.openapi.yaml": commits.hash,
     }
 
 

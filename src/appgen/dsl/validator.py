@@ -31,6 +31,7 @@ from appgen.dsl.auth import (
     SecondFactor,
     SignUp,
 )
+from appgen.dsl.crud import plural, snake_name
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.expressions import (
@@ -44,7 +45,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
-from appgen.dsl.openapi import SecurityScheme, query_value
+from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
 from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.storage import (
@@ -67,6 +68,7 @@ from appgen.dsl.ui.checks import (
     check_ui_views,
 )
 from appgen.dsl.ui.fields import FieldPathError, resolve_path
+from appgen.dsl.webhooks import Webhook
 
 type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 
@@ -84,6 +86,23 @@ INVERSE_KINDS = {
     "many_to_many": "many_to_many",
 }
 CUSTOM_ONLY_KEYS = ("params", "returns", "apis")
+RESERVED_WEBHOOK_PATHS = (
+    "/_next",
+    "/apis",
+    "/auth",
+    "/dashboards",
+    "/docs",
+    "/health",
+    "/openapi.json",
+    "/redoc",
+    FORGOT_PASSWORD_PATH,
+    RESET_PASSWORD_PATH,
+    SECOND_FACTOR_PATH,
+    SIGN_IN_PATH,
+    SIGN_UP_PATH,
+    VERIFY_EMAIL_PATH,
+)
+"""The paths of the apps under which a webhook cannot be: their own routes."""
 
 
 def validate_definition(definition: AppDefinition) -> list[Diagnostic]:
@@ -1312,6 +1331,190 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                 yield _missing(operation, "apis", "API", name, definition.apis)
 
 
+def check_webhooks(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """Each webhook has a free path, the keys of its signature, a secret variable, and a valid
+    schema of its body."""
+    envs = _setting_envs(definition)
+    paths: dict[str, Element] = {}
+    for webhook in definition.webhooks.values():
+        yield from _check_webhook_path(definition, webhook, paths)
+        yield from _check_webhook_signature(webhook)
+        env = webhook.signature.secret_env
+        if env in RESERVED_ENV_NAMES:
+            yield _error(
+                "reserved-name",
+                f"The apps use the environment variable '{env}' for their own settings.",
+                webhook,
+                at="signature",
+                hint="Use a name with the name of the webhook, for example 'PAYMENTS_SECRET'.",
+            )
+        elif env.startswith(PUBLIC_ENV_PREFIXES):
+            yield _error(
+                "reserved-name",
+                f"The front-end builds put the variable '{env}' into the code for the browser, "
+                "so it cannot keep a secret.",
+                webhook,
+                at="signature",
+                hint="Use a name without the prefix NEXT_PUBLIC_ or VITE_.",
+            )
+        else:
+            first = envs.setdefault(env, f"{webhook.id}.signature.secret_env")
+            if first != f"{webhook.id}.signature.secret_env":
+                yield _error(
+                    "duplicate-name",
+                    f"The environment variable '{env}' is also the variable of '{first}'.",
+                    webhook,
+                    at="signature",
+                )
+        event_id = webhook.event_id
+        if (event_id.field is None) == (event_id.header is None):
+            yield _error(
+                "invalid-option" if event_id.field else "missing-key",
+                "The event ID needs one of the keys 'field' and 'header'.",
+                webhook,
+                at="event_id",
+            )
+        yield from _check_webhook_body(webhook)
+
+
+def _setting_envs(definition: AppDefinition) -> dict[str, str]:
+    """Return the key of each environment variable of the APIs and the storage, by variable."""
+    envs: dict[str, str] = {}
+    for api in definition.apis.values():
+        envs.setdefault(api.base_url_env, f"{api.id}.base_url_env")
+        for key, env in api.security.variables if api.security is not None else ():
+            envs.setdefault(env, f"{api.id}.security.{key}")
+    if definition.storage is not None:
+        for key, env in definition.storage.variables:
+            envs.setdefault(env, f"{definition.storage.id}.{key}")
+    return envs
+
+
+def _check_webhook_path(
+    definition: AppDefinition, webhook: Webhook, paths: dict[str, Element]
+) -> Iterator[Diagnostic]:
+    """The path is not the path of another webhook, of a page, of an operation, or of a route
+    of the apps."""
+    path = webhook.path
+    first = paths.setdefault(path, webhook)
+    if first is not webhook:
+        yield _error(
+            "duplicate-path",
+            f"The path '{path}' is also the path of '{first.id}'.",
+            webhook,
+            at="path",
+        )
+        return
+    for page in definition.pages.values():
+        pattern = "^" + re.sub(r"\\\{[^/]+?\\\}", "[^/]+", re.escape(page.path)) + "$"
+        if re.match(pattern, path):
+            yield _error(
+                "duplicate-path",
+                f"The path '{path}' is a path of the page '{page.id}'.",
+                webhook,
+                at="path",
+                hint="Use a path with its own first segment, for example '/webhooks/...'.",
+            )
+            return
+    for name, entity in definition.entities.items():
+        if not any(op.entity == name for op in definition.operations.values()):
+            continue
+        prefix = _entity_path(name, entity)
+        if path == prefix or path.startswith(prefix + "/"):
+            yield _error(
+                "duplicate-path",
+                f"The path '{path}' is under the path '{prefix}' of the operations of the "
+                f"entity '{name}'.",
+                webhook,
+                at="path",
+                hint="Use a path with its own first segment, for example '/webhooks/...'.",
+            )
+            return
+    for reserved in RESERVED_WEBHOOK_PATHS:
+        if path == reserved or path.startswith(reserved + "/"):
+            yield _error(
+                "reserved-name",
+                f"The apps use the path '{reserved}' for their own routes.",
+                webhook,
+                at="path",
+                hint="Use a path with its own first segment, for example '/webhooks/...'.",
+            )
+            return
+
+
+def _entity_path(name: str, entity: Entity) -> str:
+    """Return the path of the operations of an entity in the FastAPI app (`x-fastapi-path`, else
+    the plural label or the plural of the name, in kebab case)."""
+    custom = entity.extensions.get("x-fastapi-path")
+    if isinstance(custom, str):
+        return custom
+    label = entity.plural_label
+    words = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") if label else ""
+    return "/" + (words or plural(snake_name(name))).replace("_", "-")
+
+
+def _check_webhook_signature(webhook: Webhook) -> Iterator[Diagnostic]:
+    """The signature has the keys of its scheme, and no key of the other scheme."""
+    signature = webhook.signature
+    given = signature.model_fields_set
+    if signature.scheme == "hmac_sha256":
+        needed, other = ("header",), ("tolerance_seconds",)
+    else:
+        needed, other = (), ("header", "prefix", "encoding")
+    for key in needed:
+        if getattr(signature, key) is None:
+            yield _error(
+                "missing-key",
+                f"The signature of the scheme '{signature.scheme}' needs the key '{key}'.",
+                webhook,
+                at="signature",
+            )
+    for key in other:
+        if key in given:
+            yield _error(
+                "invalid-option",
+                f"The key '{key}' does not suit the signature scheme '{signature.scheme}'.",
+                webhook,
+                at="signature",
+            )
+
+
+def _check_webhook_body(webhook: Webhook) -> Iterator[Diagnostic]:
+    """The document of the body is valid and has the schema, which has the event ID."""
+    body = webhook.body
+    if body is None:
+        return
+    document = webhook.openapi
+    if document is None:
+        yield _error(
+            "invalid-document",
+            f"The OpenAPI document '{body.document}' is not valid: {webhook.document_error}",
+            webhook,
+            at="body",
+        )
+        return
+    name = webhook.body_schema
+    if name is None:
+        yield _error(
+            "unknown-reference",
+            f"The document '{body.document}' has no schema '{body.schema_name}' in "
+            "'components.schemas'.",
+            webhook,
+            at="body",
+            hint=_did_you_mean(body.schema_name, document.schema_keys),
+        )
+        return
+    field = webhook.event_id.field
+    if field is not None and property_chain(Ref(name), field, webhook.spec) is None:
+        yield _error(
+            "unknown-reference",
+            f"The schema '{body.schema_name}' of the body has no property '{field}' for the "
+            "event ID.",
+            webhook,
+            at="event_id",
+        )
+
+
 def check_seed(definition: AppDefinition) -> Iterator[Diagnostic]:
     """The seed records give valid values, refer to records that exist, and keep the rules."""
     keys = {name: set(seed.records) for name, seed in definition.seed.items()}
@@ -1837,6 +2040,7 @@ CHECKS: list[Check] = [
     check_auth,
     check_access,
     check_apis,
+    check_webhooks,
     check_seed,
     check_ui_tokens,
     check_ui_views,

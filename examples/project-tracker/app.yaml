@@ -179,6 +179,22 @@ apis:
     expose: true
     operations: [getBudget]
 
+# Webhooks (ADR 0028): the requests that other systems send to the app.
+# The server apps check the signature, and run the logic one time for
+# each event ID.
+webhooks:
+  commits:
+    description: >-
+      The code host reports a commit that refers to a task. The app adds
+      the commit message to the task as a comment of the author.
+    path: /webhooks/commits
+    signature:
+      scheme: hmac_sha256
+      header: X-Signature-256
+      prefix: "sha256="
+      secret_env: COMMITS_WEBHOOK_SECRET
+    body: { document: webhooks/commits.openapi.yaml, schema: CommitEvent }
+
 pages:
   dashboard:
     path: /

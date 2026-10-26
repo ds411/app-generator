@@ -198,10 +198,13 @@ binding:
   list widgets of the dashboards for their endpoints: their traces do
   not count in its coverage. The React binding excludes the
   rules of the entities (`entity_compare_rule`, `entity_unique_rule`,
-  and `entity_overlap_rule`), because it has no back end.
+  and `entity_overlap_rule`) and the webhooks (`webhook`), because it
+  has no back end.
 - **Gaps**: all other kinds. The generator renders the `gap_rule` for
   each element, an extension file with a gap trace and a
   `TODO(appgen):` comment. Without a gap rule, the gaps are only listed.
+  For example, the Next.js binding does not cover the webhooks yet, so
+  each webhook gets the file `src/gaps/webhooks.<name>.ext.ts`.
 
 A binding must declare each kind that its templates render in
 `covers`, else the generator makes gap files for elements that the app
@@ -422,6 +425,17 @@ too. The Next.js app needs no such file: it finds a new route file by
 itself. The project tracker example adds a calendar feed of the due
 dates in this file, and a test that calls it
 (`examples/project-tracker/extensions/fastapi/`).
+
+The logic of a webhook ([ADR 0028](adr/0028-webhooks.md)) is a gap of
+the FastAPI app: `app/webhooks/<webhook>/handler_ext.py`. The generated
+endpoint in `router.py` checks the signature, reads the event, and
+records its ID before it calls the function, so the extension file has
+only the logic of the event. The project tracker example adds the
+commit message of a code host to a task as a comment in this file
+(`examples/project-tracker/extensions/fastapi/app/webhooks/commits/`).
+The smoke test signs and sends the event with
+`scripts/webhook_sender.py`, and checks that two deliveries of the same
+event add one comment.
 
 ### Schema changes of the FastAPI app
 

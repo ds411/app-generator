@@ -1,0 +1,42 @@
+# Webhooks of each kind (ADR 0028): the scheme `stripe` with the schema
+# of an OpenAPI document, and the scheme `hmac_sha256` with a Base64
+# signature, an event ID in a header, and a body of any JSON value.
+# scripts/check-fastapi.sh generates the FastAPI app, and runs its tests.
+version: 0
+
+app:
+  name: webhooks
+  title: Webhooks
+
+entities:
+  Order:
+    crud: true
+    display_field: reference
+    fields:
+      reference: { type: string, required: true, unique: true, max_length: 100 }
+      paid: { type: boolean, required: true, default: false }
+      amount: { type: integer }
+
+webhooks:
+  payments:
+    path: /webhooks/payments
+    description: The payment service reports a paid order.
+    signature: { scheme: stripe, secret_env: PAYMENTS_WEBHOOK_SECRET, tolerance_seconds: 600 }
+    body: { document: webhooks/payments.openapi.yaml, schema: Event }
+  shipping:
+    path: /webhooks/shipping/events
+    signature:
+      scheme: hmac_sha256
+      header: X-Shipping-Hmac
+      encoding: base64
+      secret_env: SHIPPING_WEBHOOK_SECRET
+    event_id: { header: X-Shipping-Event }
+  chat:
+    path: /webhooks/chat
+    description: A chat bot sends a message.
+    signature:
+      scheme: hmac_sha256
+      header: X-Chat-Signature
+      prefix: "sha256="
+      secret_env: CHAT_WEBHOOK_SECRET
+    event_id: { field: message.id }
