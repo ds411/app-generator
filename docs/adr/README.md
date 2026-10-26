@@ -48,3 +48,4 @@ gives the rules.
 | 0029   | [Jobs on a schedule and at the time of a date field](0029-jobs.md)    | Accepted |
 | 0030   | [Inbound email in webhooks](0030-inbound-email.md)                     | Accepted |
 | 0031   | [Events of the entities](0031-events.md)                               | Accepted |
+| 0032   | [Pages in frames of other websites](0032-pages-in-frames.md)           | Accepted |

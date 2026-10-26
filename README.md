@@ -376,8 +376,12 @@ routes. Each route renders a page slice of Feature-Sliced Design in
 `ui.layouts` with pages is a route group (`app/(app-shell)/`) whose
 `layout.tsx` renders the shared layout widget: the sidebar with the
 menus, the top bar with the breadcrumbs, the page search, and the color
-mode switch. Pages without a layout are in `app/(bare)/`, and
-`app/not-found.tsx` shows the 404 page in the default layout. The
+mode switch. Pages without a layout are in `app/(bare)/`, the pages
+that other websites show in a frame (`embed`) are in `app/(embed)/`
+without the app shell, and `app/not-found.tsx` shows the 404 page in the
+default layout. `next.config.ts` sends `Content-Security-Policy:
+frame-ancestors` with the origins of each page with `embed`, and
+`'self'` for the other pages. The
 actions of a page header are a widget in `src/widgets/page-actions`, and
 the actions of a top bar are a part of its layout widget (shared
 template `ui/widgets/actions/action-bar.tsx.j2`). An action of a page
@@ -535,7 +539,10 @@ Each layout of the definition is an app shell in `src/widgets/layouts`:
 a shadcn/ui sidebar with the menu, a top bar with the breadcrumbs, the
 page search (Ctrl+K), and the mode toggle, the content region, and a
 footer. The router puts each page in its layout (the page layout, else
-`ui.defaults.layout`), and unknown paths show a 404 page. The menu marks
+`ui.defaults.layout`), and unknown paths show a 404 page. A page with
+`embed` shows without the app shell, and the nginx configuration of the
+Docker image sends `Content-Security-Policy: frame-ancestors` with its
+origins, and `'self'` for the other pages. The menu marks
 the active route. The breadcrumbs come from the page paths, and a page of
 a record shows the display field of the record. The page actions and the
 top bar actions are widgets from the shared template

@@ -199,6 +199,10 @@ class Page(Element):
     """The label of the page in the breadcrumbs. The default is the menu label, else the title."""
     arrangement: PageArrangement | None = None
     """Layout hints: the order and the place of the title, the actions, and the content."""
+    embed: Annotated[list[Text], pydantic.Field(min_length=1)] | None = None
+    """The origins of the websites that can show the page in a frame, for example
+    `https://www.example.com`. Only a public page takes them. The page then shows without the
+    app shell (ADR 0032)."""
 
 
 class App(Element):

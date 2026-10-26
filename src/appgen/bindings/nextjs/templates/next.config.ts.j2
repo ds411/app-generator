@@ -1,6 +1,9 @@
 {{ trace_header("app") }}
 import type { NextConfig } from "next";
 
+/** The header that names the websites that can show a page in a frame. */
+const FRAME_HEADER = "Content-Security-Policy";
+
 const nextConfig: NextConfig = {
   // The Docker image builds the standalone server (see the Dockerfile).
   // `pnpm start` needs the default output.
@@ -19,6 +22,20 @@ const nextConfig: NextConfig = {
 {% endif %}
   },
 {% endif %}
+  // Other websites cannot show the pages in a frame (clickjacking).
+{% if nextjs.frame_headers %}
+  // A page with `embed` allows the origins of the app definition (ADR 0032):
+  // the last header of a path wins.
+{% endif %}
+  async headers() {
+    return [
+      { source: "/:path*", headers: [{ key: FRAME_HEADER, value: "frame-ancestors 'self'" }] },
+{% for id, source, ancestors in nextjs.frame_headers %}
+      {{ trace(id) }}
+      { source: {{ js(source) }}, headers: [{ key: FRAME_HEADER, value: {{ js("frame-ancestors " ~ ancestors) }} }] },
+{% endfor %}
+    ];
+  },
 };
 
 export default nextConfig;

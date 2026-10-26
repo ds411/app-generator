@@ -22,11 +22,14 @@ import { NotFoundPage } from "@/pages/not-found";
 {% if used_layouts %}
 import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{ ", " if not loop.last }}{% endfor %} } from "@/widgets/layouts";
 {% endif %}
-{% if use_root or definition.auth %}
+{% if use_root or definition.auth or ui_plan.embedded_pages %}
 
 {% endif %}
 {% if definition.auth %}
 import { {% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}{% if auth_pages.second_factor %}, SecondFactorRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %}{% if auth_pages.verify_email %}, VerifyEmailRoute{% endif %} } from "./auth/require-auth";
+{% endif %}
+{% if ui_plan.embedded_pages %}
+import { EmbedLayout } from "./layout/embed-layout";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
@@ -52,6 +55,17 @@ export const router = createBrowserRouter([
 {% endif %}
 {% if auth_pages.second_factor %}
   { path: "/second-factor", element: <SecondFactorRoute /> }, {{ trace(definition.auth.second_factor.id) }}
+{% endif %}
+{% if ui_plan.embedded_pages %}
+  {
+    // The pages that other websites show in a frame: without the app shell (ADR 0032).
+    element: <EmbedLayout />,
+    children: [
+{% for info in ui_plan.embedded_pages %}
+      { path: {{ route_path(info.page.path) | tojson }}, element: {{ page_element(info) }} }, {{ trace(info.page.id) }}
+{% endfor %}
+    ],
+  },
 {% endif %}
 {% for layout_name in used_layouts %}
   {

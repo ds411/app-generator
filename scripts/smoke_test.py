@@ -487,6 +487,7 @@ def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
                 "recordActions": [
                     str(a.label) for a in page.actions.values() if a.label and a.kind == "operation"
                 ],
+                "embed": list(page.embed or []),
             }
             for name, page in definition.pages.items()
         ],

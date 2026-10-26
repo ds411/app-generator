@@ -1,5 +1,19 @@
 # Serve the app. Unknown paths get index.html, so that the client routes
 # of React Router work after a reload.
+
+# Other websites cannot show the pages in a frame (clickjacking).
+{% if react.frame_rules %}
+# A page with `embed` allows the origins of the app definition (ADR 0032).
+# The map reads the URI of the request: an internal redirect to index.html
+# does not change it.
+{% endif %}
+map $request_uri $frame_ancestors {
+    default "'self'";
+{% for pattern, ancestors in react.frame_rules %}
+    "{{ pattern }}" "{{ ancestors }}";
+{% endfor %}
+}
+
 server {
     listen 8080;
     server_name _;
@@ -13,6 +27,7 @@ server {
     }
 
     location / {
+        add_header Content-Security-Policy "frame-ancestors $frame_ancestors" always;
         try_files $uri $uri/ /index.html;
     }
 }

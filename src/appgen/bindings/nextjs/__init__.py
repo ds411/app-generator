@@ -74,6 +74,11 @@ _APP_SHELL = (
         path="app/(bare)/layout.tsx",
         when="ui_plan.pages_of(none)",
     ),
+    Output(
+        template="app/group/embed-layout.tsx.j2",
+        path="app/(embed)/layout.tsx",
+        when="ui_plan.embedded_pages",
+    ),
     Output(template="app/not-found.tsx.j2", path="app/not-found.tsx"),
     Output(
         template="ui/widgets/navigation/menu.tsx.j2",
