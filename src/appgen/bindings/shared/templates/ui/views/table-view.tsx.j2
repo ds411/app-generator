@@ -78,6 +78,15 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
 {% if plan.filters %}
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
 {% endif %}
+{% if plan.scroll %}
+  const [sorting, setSorting] = useState<ServerPages["sorting"]>([]);
+  // The list scrolls: each page is one request, and the table keeps the loaded pages.
+  const query: Omit<ApiQuery, "page" | "pageSize"> = {
+    params: { ...params{% if plan.filters %}, ...filterParams(filters){% endif %} },
+    sort: sortKeys(sorting),
+  };
+  {{ m.scroll_resource(plan) }}
+{% else %}
   const [pages, setPages] = useState<ServerPages>({ page: 1, pageSize: PAGE_SIZE, sorting: [] });
   const query: ApiQuery = {
     params: { ...params{% if plan.filters %}, ...filterParams(filters){% endif %} },
@@ -86,6 +95,7 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
     pageSize: pages.pageSize,
   };
   {{ m.server_resource(plan) }}
+{% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}
 {{ m.runner(plan) }}
 {% endif %}
@@ -93,7 +103,9 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
 
   const updateFilters = (next: Filters) => {
     setFilters(next);
+{% if not plan.scroll %}
     setPages((value) => ({ ...value, page: 1 }));
+{% endif %}
   };
 {% endif %}
 
@@ -162,10 +174,16 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
           data={rows}
           pageSize={PAGE_SIZE}
           pageSizes={PAGE_SIZES}
-{% if plan.server %}
+{% if plan.server and plan.scroll %}
+          server={{ '{{' }} page: 1, pageSize: PAGE_SIZE, sorting, total, onChange: (next) => setSorting(next.sorting) {{ '}}' }}
+          scroll={{ '{{' }} loading: resource.loadingMore, onMore: resource.more {{ '}}' }}
+{% elif plan.server %}
           server={{ '{{' }} ...pages, total, onChange: setPages {{ '}}' }}
 {% elif plan.filters %}
           resetKey={JSON.stringify(filters)}
+{% endif %}
+{% if plan.scroll and not plan.server %}
+          scroll
 {% endif %}
 {% if view.selection %}
           selection

@@ -1,0 +1,54 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useEffect, useRef } from "react";
+
+import { Button } from "@/shared/ui/button";
+
+/**
+ * The end of a list that shows the next page there (`pagination.mode: scroll`):
+ * the count of the shown records, and a button for the next page. When the end
+ * of the list comes into view, it shows the next page without a click.
+ */
+export function ScrollMore({
+  count,
+  total,
+  loading = false,
+  onMore,
+}: {
+  /** The count of the shown records. */
+  count: number;
+  /** The count of all records of the list. */
+  total: number;
+  /** True while the next page loads. */
+  loading?: boolean;
+  onMore: () => void;
+}) {
+  const end = useRef<HTMLDivElement>(null);
+  const more = count < total;
+
+  useEffect(() => {
+    const element = end.current;
+    if (element === null || !more || loading || typeof IntersectionObserver === "undefined") return;
+    // The observer tells at once if the end is in view: a short page loads the next page too.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onMore();
+    }, { rootMargin: "200px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [more, loading, count, onMore]);
+
+  const first = total === 0 ? 0 : 1;
+  return (
+    <div ref={end} className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+      <p className="tabular-nums" aria-live="polite">
+        {{ jsx_format("{first}–{last} of {total}", first="first", last="count", total="total") }}
+      </p>
+      {more && (
+        <Button variant="outline" size="sm" disabled={loading} onClick={onMore}>
+          {loading ? {{ tr(js("Loading")) }} : {{ tr(js("Show more")) }}}
+        </Button>
+      )}
+    </div>
+  );
+}

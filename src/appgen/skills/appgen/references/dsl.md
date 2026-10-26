@@ -1703,7 +1703,7 @@ see [Views of API data](#views-of-api-data).
 | `columns`      | Required. A mapping from column name to column.                 |
 | `sort`         | `field` and `direction` (`asc` or `desc`).                      |
 | `filters`      | A mapping from filter name to filter.                           |
-| `pagination`   | `page_size` and `page_sizes`.                                   |
+| `pagination`   | `mode`, `page_size`, and `page_sizes`.                          |
 | `row_actions`  | Actions of each row.                                            |
 | `row_click`    | The row action that a click on a row runs.                      |
 | `selection`    | Boolean: check boxes on the rows.                               |
@@ -1722,6 +1722,15 @@ A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), or `date_range` (`field`). All
 filters take `label` and `default`.
 
+`pagination.mode` is `pages` (the default: page buttons) or `scroll`.
+A list with `scroll` shows `page_size` records, and shows the next page
+when the end of the list comes into view, or after a click on
+`Show more`. It keeps the shown records, and a new filter or sort shows
+the first page again. With `x-react-data: api`, each next page is one
+request of one page to the list endpoint, and a change of the records
+loads the shown pages again. `scroll` is for the tables and the card
+lists of entities, and does not take `page_sizes`.
+
 ```yaml
 ui:
   views:
@@ -1737,6 +1746,16 @@ ui:
       filters:
         search: { kind: search, fields: [title] }
         status: { kind: select, field: status, multiple: true }
+```
+
+```yaml
+# in: ui.views
+activity_feed:
+  kind: table
+  entity: Comment
+  columns: { author: { format: avatar }, body: {}, posted_at: { format: relative_time } }
+  sort: { field: posted_at, direction: desc }
+  pagination: { mode: scroll, page_size: 25 }
 ```
 
 **Card list** (`kind: cards`): `card` (`title`, `subtitle`, `badge`,

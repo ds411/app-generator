@@ -355,6 +355,8 @@ class ViewPlan:
     sort_desc: bool = False
     page_size: int = DEFAULT_PAGE_SIZE
     page_sizes: list[int] = field(default_factory=list[int])
+    scroll: bool = False
+    """True if the list shows the next page at its end (`pagination.mode: scroll`)."""
     states: States | None = None
     state_ids: list[str] = field(default_factory=list[str])
     """The element IDs of the states that the view shows, for the traces."""
@@ -760,6 +762,8 @@ class ViewContext:
         for name, kind in self.list_views.items():
             plan = self.view_plan(name)
             found.add(kind)
+            if plan.scroll:
+                found |= {"scroll", "scroll_pages"} if plan.server else {"scroll"}
             found |= plan.uses & values
             for f in plan.filters:
                 if f.source:
@@ -1035,6 +1039,7 @@ class ViewContext:
                 or DEFAULT_PAGE_SIZE
             )
             plan.page_sizes = sorted(set(pagination.page_sizes if pagination else []))
+            plan.scroll = pagination is not None and pagination.mode == "scroll"
         if isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
             plan.sort = self.value(view.entity, view.sort.field)
             plan.sort_desc = view.sort.direction == "desc"
@@ -1788,6 +1793,16 @@ def view_rules() -> tuple[Output, ...]:
                     "ui/data-table.tsx.j2",
                     "src/shared/ui/data-table.tsx",
                     "'table' in ui_views.features",
+                ),
+                (
+                    "ui/scroll-more.tsx.j2",
+                    "src/shared/ui/scroll-more.tsx",
+                    "'scroll' in ui_views.features",
+                ),
+                (
+                    "lib/use-scroll-pages.ts.j2",
+                    "src/shared/lib/use-scroll-pages.ts",
+                    "'scroll_pages' in ui_views.features",
                 ),
                 (
                     "ui/calendar-grid.tsx.j2",
