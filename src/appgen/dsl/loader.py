@@ -15,6 +15,7 @@ from appgen.dsl.ids import element_id, index_elements, walk_elements
 from appgen.dsl.model import DSL_VERSION, RESERVED_SECTIONS, AppDefinition, is_extension_key
 from appgen.dsl.seed import read_seed_files
 from appgen.dsl.source import DataPath, SourceMap, YamlDocument, read_yaml, read_yaml_file
+from appgen.dsl.storage import read_seed_files as read_seed_media
 
 _TYPE_MESSAGES = {
     "dict_type": "Expected a mapping.",
@@ -34,10 +35,11 @@ _STRING_ERRORS = frozenset({"string_type", "literal_error", "string_pattern_mism
 def load_definition(path: Path | str) -> AppDefinition:
     """Load an app definition file. Raise DefinitionError if it is not valid.
 
-    The loader reads the OpenAPI documents of the `apis` and the data files
-    of the `seed` from the folder of the file. The validator reports a
-    document that is not valid. A data file that is not valid is an error
-    of the loader.
+    The loader reads the OpenAPI documents of the `apis`, the data files
+    of the `seed`, and the files of the file fields of the seed records
+    from the folder of the file. The validator reports a document that is
+    not valid, and a file of a seed record that it cannot read. A data
+    file that is not valid is an error of the loader.
     """
     path = Path(path)
     return _load(read_yaml_file(path), path.parent)
@@ -99,6 +101,7 @@ def _load(document: YamlDocument, base_dir: Path) -> AppDefinition:
         api.read_document(base_dir)
     for name, seed in definition.seed.items():
         seed._file_hash = seed_hashes.get(name)  # pyright: ignore[reportPrivateUsage]
+    read_seed_media(definition, base_dir)
     return definition
 
 

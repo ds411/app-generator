@@ -39,7 +39,9 @@ a new gap with a new extension file. A new field needs a database
 migration in the FastAPI app (see [Database changes](#database-changes)).
 `translatable: true` on a field that exists also needs one: it adds the
 column `<field>_translations`, and the records keep their values in the
-default language.
+default language. A new `file` or `image` field needs the section
+`storage` too: `storage: { kind: local }` for a folder of the server, or
+`kind: s3` for an S3-compatible service.
 
 ## Rename an element
 

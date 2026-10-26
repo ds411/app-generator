@@ -45,8 +45,17 @@ from appgen.dsl.expressions import (
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
 from appgen.dsl.openapi import SecurityScheme, query_value
-from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
+from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
+from appgen.dsl.storage import (
+    FILE_TYPES,
+    MAX_SEED_FILE_SIZE,
+    S3_KEYS,
+    SECRET_KEYS,
+    TOP_LEVEL_TYPES,
+    format_size,
+    type_allows,
+)
 from appgen.dsl.translations import LOCALE, VALUE
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
@@ -260,6 +269,8 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                     at="translatable",
                     hint="Remove 'translatable'. The apps compute the value.",
                 )
+            if field.is_file:
+                yield from _check_file_field(definition, field)
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
@@ -268,6 +279,121 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
                     )
+            if param.is_file:
+                yield _error(
+                    "invalid-option",
+                    f"The type '{param.type}' is only for entity fields.",
+                    param,
+                    at="type",
+                    hint="Give the entity a file field, and let the operation read it.",
+                )
+
+
+def _check_file_field(definition: AppDefinition, field: Field) -> Iterator[Diagnostic]:
+    """A file field needs the section `storage`, and its media types suit its type."""
+    if definition.storage is None:
+        yield _error(
+            "invalid-option",
+            "A file field needs the section 'storage', where the apps keep the files.",
+            field,
+            at="type",
+            hint="Add for example 'storage: { kind: local }'.",
+        )
+    for key, hint in (
+        (
+            "required",
+            "The apps upload a file after they create the record. A form field can "
+            "require a file with 'rules: { required: ... }'.",
+        ),
+        ("unique", None),
+        ("default", None),
+    ):
+        if key in field.model_fields_set:
+            yield _error(
+                "invalid-option",
+                f"'{key}' is not an option of the type '{field.type}'.",
+                field,
+                at=key,
+                hint=hint,
+            )
+    types = field.types or []
+    if len(set(types)) != len(types):
+        yield _error("duplicate-name", "The media types must be unique.", field, at="types")
+    for media_type in types:
+        group = media_type.partition("/")[0]
+        if group not in TOP_LEVEL_TYPES:
+            groups = ", ".join(f"'{name}'" for name in sorted(TOP_LEVEL_TYPES))
+            yield _error(
+                "invalid-value",
+                f"'{media_type}' is not a media type of a file. The type starts with one of "
+                f"{groups}.",
+                field,
+                at="types",
+                hint=_did_you_mean(group, TOP_LEVEL_TYPES),
+            )
+        elif field.type == "image" and group != "image":
+            yield _error(
+                "invalid-value",
+                f"An 'image' field allows only image types, not '{media_type}'.",
+                field,
+                at="types",
+                hint="Use for example 'image/png' or 'image/*', or the type 'file'.",
+            )
+
+
+def check_storage(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The storage has only the keys of its kind, and names its own environment variables."""
+    storage = definition.storage
+    if storage is None:
+        return
+    if storage.kind == "local":
+        for key in S3_KEYS:
+            if key in storage.model_fields_set:
+                yield _error(
+                    "invalid-option",
+                    f"'{key}' is only for the storage kind 's3'.",
+                    storage,
+                    at=key,
+                    hint="Remove the key, or use 'kind: s3'.",
+                )
+    envs = {api.base_url_env: api.id for api in definition.apis.values()}
+    for api in definition.apis.values():
+        if api.security is not None:
+            envs |= {env: api.id for _, env in api.security.variables}
+    seen: dict[str, str] = {}
+    for key, env in storage.variables:
+        if env in RESERVED_ENV_NAMES:
+            yield _error(
+                "invalid-value",
+                f"The apps use the environment variable '{env}' for their own settings.",
+                storage,
+                at=key,
+                hint="Use another name.",
+            )
+        if key in SECRET_KEYS and env.startswith(PUBLIC_ENV_PREFIXES):
+            yield _error(
+                "invalid-value",
+                f"The front-end builds put the variable '{env}' into the code for the browser, "
+                "but it holds a secret.",
+                storage,
+                at=key,
+                hint="Use a name without the prefix NEXT_PUBLIC_ or VITE_.",
+            )
+        first = seen.setdefault(env, key)
+        if first != key:
+            yield _error(
+                "duplicate-name",
+                f"The environment variable '{env}' is also the variable of '{first}'.",
+                storage,
+                at=key,
+            )
+        elif env in envs:
+            yield _error(
+                "duplicate-name",
+                f"The environment variable '{env}' is also a variable of '{envs[env]}'.",
+                storage,
+                at=key,
+            )
 
 
 def check_computed(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -316,7 +442,14 @@ def _check_expression(
                 return
             member = target.member
             types = {"date", "datetime"} if date else NUMBER_TYPES
-            if not isinstance(member, Field) or member.type not in types:
+            if isinstance(member, Field) and member.is_file:
+                yield _error(
+                    "unsuitable-field",
+                    f"The path '{path}' gives a file field. A computed field cannot use a file.",
+                    field,
+                    at="computed",
+                )
+            elif not isinstance(member, Field) or member.type not in types:
                 what = "a date or a date-time" if date else "an 'integer' or a 'decimal' field"
                 yield _error(
                     "unsuitable-field",
@@ -416,6 +549,8 @@ def _rule_field(rule: Element, key: str, name: str, stored: dict[str, Field]) ->
     found = stored.get(name)
     if found is None:
         return _missing(rule, key, "field", name, stored)
+    if found.is_file:
+        return _file_in_rule(rule, key, name, found)
     return found
 
 
@@ -427,6 +562,18 @@ def _rule_members(
     for name in names:
         if name not in stored and name not in singles:
             yield _missing(rule, key, "field or relation", name, [*stored, *singles])
+        elif name in stored and stored[name].is_file:
+            yield _file_in_rule(rule, key, name, stored[name])
+
+
+def _file_in_rule(rule: Element, key: str, name: str, field: Field) -> Diagnostic:
+    return _error(
+        "unsuitable-field",
+        f"A rule cannot use the file field '{name}' (type '{field.type}').",
+        rule,
+        at=key,
+        hint="A rule compares values. Use another field.",
+    )
 
 
 def check_translations(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -1245,11 +1392,65 @@ def _check_seed_value(
             hint=f'Put the value in quotes: "{_show(value, quotes=False)}".' if quote else None,
         )
         return
+    if field.is_file:
+        yield from _check_seed_file(record, name, field)
+        return
     problem = _option_problem(field, normal)
     if problem is not None:
         yield _error(
             "invalid-value",
             f"The value {_show(normal)} of '{name}' is not valid: {problem}.",
+            record,
+            at=name,
+        )
+
+
+def _check_seed_file(record: SeedRecord, name: str, field: Field) -> Iterator[Diagnostic]:
+    """The file of a seed record exists, and suits the size and the types of its field."""
+    file = record.files.get(name)
+    if file is None:
+        return
+    if file.content is None:
+        yield _error(
+            "invalid-value",
+            file.error or f"Cannot read the file '{file.path}'.",
+            record,
+            at=name,
+            hint="Give the path of a file, from the folder of the definition.",
+        )
+        return
+    size = len(file.content)
+    if size > field.size_limit:
+        yield _error(
+            "invalid-value",
+            f"The file '{file.path}' has {format_size(size)}, but the field allows "
+            f"{format_size(field.size_limit)} or less.",
+            record,
+            at=name,
+        )
+    elif size > MAX_SEED_FILE_SIZE:
+        yield _error(
+            "invalid-value",
+            f"The file '{file.path}' has {format_size(size)}. A file of a seed record can have "
+            f"{format_size(MAX_SEED_FILE_SIZE)} or less, because the apps keep it in their code.",
+            record,
+            at=name,
+        )
+    media_type = file.media_type
+    if media_type is None:
+        yield _error(
+            "invalid-value",
+            f"The file '{file.path}' has an extension that does not give its media type.",
+            record,
+            at=name,
+            hint="Use for example a .png, .jpg, .webp, .pdf, or .txt file.",
+        )
+    elif not type_allows(field.media_types, media_type):
+        allowed = ", ".join(f"'{t}'" for t in dict.fromkeys(field.media_types))
+        yield _error(
+            "invalid-value",
+            f"The file '{file.path}' has the type '{media_type}', but the field allows only "
+            f"{allowed}.",
             record,
             at=name,
         )
@@ -1371,7 +1572,10 @@ def _check_seed_rules(entity: Entity, seed: EntitySeed) -> Iterator[Diagnostic]:
     for name, field in entity.stored_fields.items():
         if field.unique:
             yield from _check_seed_unique(records, values, [name], f"the field '{name}'", name)
+    files = entity.file_fields
     for rule_name, rule in entity.rules.items():
+        if any(name in files for name in _rule_names(rule)):
+            continue  # check_rules reports the file field.
         if isinstance(rule, EntityUniqueRule):
             names = ", ".join(f"'{n}'" for n in rule.fields)
             yield from _check_seed_unique(
@@ -1408,6 +1612,15 @@ def _check_seed_rules(entity: Entity, seed: EntitySeed) -> Iterator[Diagnostic]:
                         )
                         break
                 ranges.append((record, start, end, scope))
+
+
+def _rule_names(rule: EntityRule) -> list[str]:
+    """Return the names of the fields and relations of an entity rule."""
+    if isinstance(rule, EntityUniqueRule):
+        return list(rule.fields)
+    if isinstance(rule, EntityCompareRule):
+        return [rule.field, rule.other]
+    return [rule.start, rule.end, *rule.scope]
 
 
 def _check_seed_unique(
@@ -1616,6 +1829,7 @@ CHECKS: list[Check] = [
     check_relations,
     check_operations,
     check_fields,
+    check_storage,
     check_computed,
     check_rules,
     check_translations,
@@ -1646,6 +1860,8 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "values": {"enum"},
         "currency": NUMBER_TYPES,
         "translatable": {"string", "text"},
+        "max_size": FILE_TYPES,
+        "types": FILE_TYPES,
     }
     for key, types in allowed.items():
         if key in field.model_fields_set and field.type not in types:
@@ -1700,7 +1916,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
                 field,
                 at="pattern",
             )
-    if field.default is not None and not _default_fits(field):
+    if field.default is not None and not field.is_file and not _default_fits(field):
         yield _error(
             "invalid-value",
             f"The default {field.default!r} is not a valid '{field.type}' value.",
@@ -1748,6 +1964,8 @@ def _fits(field: Field, value: object) -> bool:
             return isinstance(value, str) and _parses(uuid.UUID, value)
         case "json":
             return True
+        case "file" | "image":
+            return False
 
 
 def _parses(parse: Callable[[str], object], value: str) -> bool:

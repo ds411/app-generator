@@ -236,7 +236,8 @@ def column_builder(name: str, spec: Field) -> tuple[str, tuple[str, ...], str | 
         case "enum":
             enum_const = "<enum>"
             code, imports = f'<enum>("{column}")', ()
-        case "json":
+        case "json" | "file" | "image":
+            # A file field keeps the key, the name, the size, and the type of its file (ADR 0027).
             code, imports = f'jsonb("{column}")', ("jsonb",)
     if spec.required:
         code += ".notNull()"

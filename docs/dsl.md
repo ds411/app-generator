@@ -24,6 +24,7 @@ valid.
 - [app](#app)
 - [entities](#entities)
 - [seed](#seed)
+- [storage](#storage)
 - [operations](#operations)
 - [pages](#pages)
 - [workflows](#workflows)
@@ -61,6 +62,7 @@ The file is YAML 1.1. The top level has these keys:
 | `ui`         | No       | The design tokens, layouts, menus, views, forms, and dashboards. |
 | `apis`       | No       | The third-party APIs that the app calls (OpenAPI documents).  |
 | `seed`       | No       | The records that the apps start with, for each entity.        |
+| `storage`    | No       | The place of the files of the `file` and `image` fields.      |
 
 A minimal definition:
 
@@ -133,6 +135,7 @@ ID ([traces.md](traces.md)).
 | API operation | `apis.holidays.operations.getPublicHolidays` |
 | Seed of an entity | `seed.Room`                            |
 | Seed record  | `seed.Room.records.a101`                   |
+| Storage      | `storage`                                  |
 | Token        | `ui.tokens.color.primary`                  |
 | View column  | `ui.views.task_table.columns.title`        |
 | Form field   | `ui.forms.new_task.fields.title`           |
@@ -211,6 +214,8 @@ entities:
 | `url`      | A URL.                               | `max_length`                          |
 | `enum`     | One value from a fixed list.         | `values` (required)                   |
 | `json`     | A JSON value.                        |                                       |
+| `file`     | One file, for example a PDF.         | `max_size`, `types`                   |
+| `image`    | One image, for example a photo.      | `max_size`, `types`                   |
 
 All fields also take `description`, `label`, `required` (default
 `false`), `unique` (default `false`), `default`, `format`, and
@@ -234,6 +239,8 @@ code that is not an ISO 4217 code.
 `translatable: true` gives a `string` or `text` field a value in each
 language of `translations` (see
 [Values in each language](#values-in-each-language)).
+
+The `file` and `image` fields hold a file (see [File fields](#file-fields)).
 
 ```yaml
 # in: entities.Project
@@ -290,6 +297,39 @@ Booking:
       format: currency
       computed: hours(starts_at, ends_at) * room.hourly_rate
 ```
+
+### File fields
+
+A `file` or an `image` field holds one file of a record, for example the
+screenshot of a task or the photo of a product
+([ADR 0027](adr/0027-files.md)). The apps keep the file in the place of
+the [storage](#storage) section, and the record keeps the name, the
+size, and the media type of the file. An `image` field is a `file` field
+that allows only images.
+
+| Option     | Content                                                                 |
+| ---------- | ----------------------------------------------------------------------- |
+| `max_size` | The largest file: a number of bytes, or a number with `B`, `KB`, `MB`, or `GB`, for example `5MB`. 1 KB is 1024 bytes. The default is `10MB`. |
+| `types`    | The media types that the field allows, for example `application/pdf`, or all types of a group, for example `image/*`. The default of a `file` field is all types, and of an `image` field `image/png`, `image/jpeg`, `image/gif`, and `image/webp`. |
+
+```yaml
+storage: { kind: local }
+entities:
+  Task:
+    fields:
+      screenshot: { type: image, max_size: 5MB }
+      report: { type: file, max_size: 20MB, types: [application/pdf, "text/*"] }
+```
+
+- A definition with a file field needs the section `storage`.
+- The apps upload a file after they create the record, so a file field
+  takes no `required`, `unique`, or `default`. A form can require a file
+  with the rule `required` of its form field.
+- A file field cannot be computed, and a computed field, an entity rule,
+  a sort, or a filter cannot use it. A param of an operation cannot be a
+  file.
+- For more files of one record, use a `one_to_many` relation to an
+  entity with a file field, for example `Attachment`.
 
 ### Entity rules
 
@@ -432,6 +472,14 @@ The values:
 | `date`                                     | An ISO 8601 date, for example `2026-01-05`.        |
 | `datetime`                                 | An ISO 8601 date-time, for example `2026-01-05T09:30:00Z`. A date-time without an offset is in UTC. |
 | `json`                                     | Any value.                                         |
+| `file`, `image`                            | The path of a local file, from the folder of the definition, for example `files/board.png`. |
+
+The file of a `file` or an `image` field must suit the `max_size` and
+the `types` of its field, and have 1 MB or less: the apps keep the seed
+files in their code. The extension of the file gives its media type:
+`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.svg`, `.pdf`,
+`.txt`, `.md`, `.csv`, `.json`, `.zip`, `.mp3`, `.mp4`, or `.webm`. The
+output manifest records the hash of each file.
 
 ### Data files
 
@@ -500,6 +548,34 @@ exists, that the records of an entity have different values in each
 `no_overlap` rules of the entity. An error in a value gives the line of
 the value. Put quotes around a text that YAML reads as a number or a
 boolean, for example `code: "101"`.
+
+## storage
+
+The optional `storage` section gives the place of the files of the
+`file` and `image` fields ([ADR 0027](adr/0027-files.md)). Each key that
+ends with `_env` names the environment variable of a setting of the apps.
+
+| Key              | Content                                                          |
+| ---------------- | ---------------------------------------------------------------- |
+| `kind`           | Required. `local` (a folder of the server) or `s3` (Amazon S3, or another service with the S3 API). |
+| `folder_env`     | The variable of the folder. Default: `STORAGE_FOLDER`.           |
+| `bucket_env`     | `s3` only. The variable of the bucket. Default: `STORAGE_BUCKET`. |
+| `region_env`     | `s3` only. The variable of the region. Default: `STORAGE_REGION`. |
+| `endpoint_env`   | `s3` only. The variable of the URL of a service with the S3 API, empty for Amazon S3. Default: `STORAGE_ENDPOINT`. |
+| `access_key_env` | `s3` only. The variable of the access key ID. Default: `STORAGE_ACCESS_KEY_ID`. |
+| `secret_key_env` | `s3` only. The variable of the secret access key. Default: `STORAGE_SECRET_ACCESS_KEY`. |
+
+```yaml
+storage:
+  kind: s3
+  bucket_env: FILES_BUCKET
+```
+
+With the kind `s3`, the apps keep the files in the folder while the
+variable of the bucket has no value, for example on the machine of a
+developer and in the tests. A variable cannot be a variable that the
+apps use for their own settings, or a variable of an API. The variables
+of the keys cannot start with `NEXT_PUBLIC_` or `VITE_`.
 
 ## operations
 

@@ -3053,6 +3053,39 @@
           "default": false,
           "title": "Translatable",
           "type": "boolean"
+        },
+        "max_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(B|KB|MB|GB)\\s*$",
+              "type": "string"
+            }
+          ],
+          "default": null,
+          "title": "Max Size"
+        },
+        "types": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z]+/([a-z0-9][a-z0-9.+-]*|\\*)$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Types"
         }
       },
       "required": [
@@ -3159,7 +3192,9 @@
         "email",
         "url",
         "enum",
-        "json"
+        "json",
+        "file",
+        "image"
       ],
       "type": "string"
     },
@@ -5669,6 +5704,54 @@
       "title": "States",
       "type": "object"
     },
+    "Storage": {
+      "additionalProperties": false,
+      "description": "The storage of the files of the file fields: a local folder, or an S3-compatible service.\n\nEach key that ends with `_env` names the environment variable of a\nsetting. With the kind `s3`, the apps use the local folder while the\nvariable of the bucket has no value, for example on the machine of a\ndeveloper and in the tests.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/StorageKind"
+        },
+        "folder_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_FOLDER"
+        },
+        "bucket_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_BUCKET"
+        },
+        "region_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_REGION"
+        },
+        "endpoint_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_ENDPOINT"
+        },
+        "access_key_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_ACCESS_KEY_ID"
+        },
+        "secret_key_env": {
+          "$ref": "#/$defs/EnvName",
+          "default": "STORAGE_SECRET_ACCESS_KEY"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Storage",
+      "type": "object"
+    },
+    "StorageKind": {
+      "enum": [
+        "local",
+        "s3"
+      ],
+      "type": "string"
+    },
     "TableView": {
       "additionalProperties": false,
       "description": "A table of records.",
@@ -6663,6 +6746,17 @@
       },
       "title": "Seed",
       "type": "object"
+    },
+    "storage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Storage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

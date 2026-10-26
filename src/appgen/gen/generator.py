@@ -6,6 +6,7 @@ from typing import Any, Literal
 import jinja2
 
 from appgen.dsl.model import AppDefinition
+from appgen.dsl.storage import seed_files
 from appgen.gen.binding import Binding, Output
 from appgen.gen.elements import DefinitionElement, iter_elements
 from appgen.gen.render import GenerationError, make_environment, normalize_content, normalize_path
@@ -52,7 +53,8 @@ class GenerationResult:
     """The text that the stubs of the extension files contain (`Binding.stub_markers`)."""
     documents: dict[str, str] = field(default_factory=dict[str, str])
     """The hash of each file that the definition reads, by its path in the definition: the OpenAPI
-    documents of the `apis` (ADR 0019) and the data files of the `seed` (ADR 0021)."""
+    documents of the `apis` (ADR 0019), the data files of the `seed` (ADR 0021), and the files of
+    the file fields of the seed records (ADR 0027)."""
     warnings: list[str] = field(default_factory=list[str])
     """The warnings of the binding (`Binding.warnings`)."""
 
@@ -118,6 +120,7 @@ def generate(definition: AppDefinition, binding: Binding) -> GenerationResult:
                 for seed in definition.seed.values()
                 if seed.file is not None and seed.file_hash is not None
             },
+            **{file.path: file.hash for file in seed_files(definition) if file.content is not None},
         },
         warnings=list(binding.warnings(definition)) if binding.warnings else [],
     )

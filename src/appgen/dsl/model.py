@@ -15,6 +15,15 @@ from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
+from appgen.dsl.storage import (
+    DEFAULT_IMAGE_TYPES,
+    DEFAULT_MAX_SIZE,
+    FILE_TYPES,
+    MEDIA_TYPE_PATTERN,
+    Storage,
+    size_input,
+    size_schema,
+)
 from appgen.dsl.translations import Translations
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.model import UI
@@ -44,6 +53,8 @@ type FieldType = Literal[
     "url",
     "enum",
     "json",
+    "file",
+    "image",
 ]
 type RelationKind = Literal["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 type OnDelete = Literal["restrict", "cascade", "set_null"]
@@ -79,6 +90,32 @@ class Field(Element):
     """An expression of other fields (see `appgen.dsl.expressions`). The apps compute the value."""
     translatable: bool = False
     """The records have a value of the field in each language of `translations` (ADR 0026)."""
+    max_size: Annotated[int, pydantic.Field(ge=1), BeforeValidator(size_input)] | None = (
+        pydantic.Field(default=None, json_schema_extra=size_schema)
+    )
+    """`file` and `image`: the largest file in bytes. A text can give a unit, for example `5MB`."""
+    types: list[Annotated[str, StringConstraints(pattern=MEDIA_TYPE_PATTERN)]] | None = None
+    """`file` and `image`: the media types that the field allows, for example `image/*`."""
+
+    @property
+    def is_file(self) -> bool:
+        """True for a field that holds a file: a `file` or an `image` field (ADR 0027)."""
+        return self.type in FILE_TYPES
+
+    @property
+    def size_limit(self) -> int:
+        """The largest file of a file field in bytes: `max_size`, else 10 MB."""
+        return self.max_size if self.max_size is not None else DEFAULT_MAX_SIZE
+
+    @property
+    def media_types(self) -> list[str]:
+        """The media types that a file field allows. An empty list allows all types.
+
+        An `image` field without `types` allows PNG, JPEG, GIF, and WebP images.
+        """
+        if self.types is not None:
+            return list(self.types)
+        return list(DEFAULT_IMAGE_TYPES) if self.type == "image" else []
 
 
 class Relation(Element):
@@ -118,6 +155,11 @@ class Entity(Element):
     def computed_fields(self) -> dict[str, Field]:
         """The computed fields, whose values come from other fields."""
         return {name: f for name, f in self.fields.items() if f.computed is not None}
+
+    @property
+    def file_fields(self) -> dict[str, Field]:
+        """The fields that hold a file: the `file` and the `image` fields (ADR 0027)."""
+        return {name: f for name, f in self.fields.items() if f.is_file}
 
 
 class Operation(Element):
@@ -181,6 +223,8 @@ class AppDefinition(Element):
     """The third-party APIs that OpenAPI documents describe (ADR 0019)."""
     seed: dict[EntityName, EntitySeed] = pydantic.Field(default_factory=dict[str, EntitySeed])
     """The seed records of the entities: the data that the apps start with (ADR 0021)."""
+    storage: Storage | None = None
+    """The storage of the files of the file fields (ADR 0027)."""
 
     _index: dict[str, Element] = PrivateAttr(default_factory=dict[str, Element])
 

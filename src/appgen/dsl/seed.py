@@ -39,6 +39,7 @@ from pydantic import ConfigDict, PrivateAttr, StringConstraints
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.element import Element, Text
 from appgen.dsl.source import DataPath, SourceMap, read_yaml
+from appgen.dsl.storage import SeedFile
 
 if TYPE_CHECKING:
     from appgen.dsl.model import Field, Relation
@@ -66,6 +67,16 @@ class SeedRecord(Element):
 
     model_config = ConfigDict(extra="allow")
     __pydantic_extra__: dict[str, Any] = pydantic.Field(init=False)  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    _files: dict[str, SeedFile] = PrivateAttr(default_factory=dict[str, SeedFile])
+
+    @property
+    def files(self) -> dict[str, SeedFile]:
+        """The file of each file field with a value, by field name (ADR 0027).
+
+        The loader reads the files from the folder of the definition.
+        """
+        return dict(self._files)
 
     @property
     def values(self) -> dict[str, Any]:
@@ -107,8 +118,9 @@ def normal_value(field: Field, value: object) -> Any:
 
     A date is `YYYY-MM-DD`. A date-time is in UTC, for example
     `2026-01-05T09:30:00Z`: a date-time without an offset is in UTC. A
-    UUID is in small letters. None stays None. The function does not
-    check the options of the field (`min`, `max_length`, and so on).
+    UUID is in small letters. A file is the path of a local file (ADR
+    0027). None stays None. The function does not check the options of
+    the field (`min`, `max_length`, and so on), or the file of a path.
     """
     if value is None:
         return None
@@ -161,6 +173,11 @@ def normal_value(field: Field, value: object) -> Any:
             except TypeError, ValueError:
                 raise ValueError("expected a JSON value") from None
             return value
+        case "file" | "image":
+            text = _string(value)
+            if not text.strip():
+                raise ValueError("expected the path of a file, for example 'files/logo.png'")
+            return text
 
 
 def format_datetime(moment: datetime.datetime) -> str:
@@ -558,7 +575,7 @@ def _cell_value(cell: str, member: tuple[str, str] | None) -> object:
                 return cast(object, json.loads(text))
             except ValueError:
                 raise ValueError("expected JSON text") from None
-        case "date" | "datetime" | "uuid" | "enum":
+        case "date" | "datetime" | "uuid" | "enum" | "file" | "image":
             return text
         case _:
             return cell
