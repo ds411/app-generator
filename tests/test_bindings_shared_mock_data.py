@@ -40,7 +40,9 @@ def test_the_values_suit_the_fields(definition: AppDefinition) -> None:
     data = mock_data(definition)
     for name, entity in definition.entities.items():
         assert len(data[name]) == DEFAULT_COUNT
-        for field_name, field in entity.fields.items():
+        # A computed field has no value in the records: the apps compute it.
+        assert not any(f in record for f in entity.computed_fields for record in data[name])
+        for field_name, field in entity.stored_fields.items():
             values = [record[field_name] for record in data[name]]
             present = [v for v in values if v is not None]
             if field.required or field.default is not None:

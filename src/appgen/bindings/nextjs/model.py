@@ -12,6 +12,7 @@ from typing import Any, cast
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
+from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
@@ -20,6 +21,7 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.theme import build_theme
+from appgen.bindings.shared.totals import total_keys
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
@@ -255,6 +257,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The keys of the totals in the records (ADR 0034), by entity.
+        "record_totals": {
+            name: total_keys(definition, name, api=False) for name in definition.entities
+        },
         **text_helpers(definition),
         "nextjs": {
             "default_layout": default_layout,
@@ -288,6 +294,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "upload_limit": upload_limit(definition),
             # The events (ADR 0031): the repositories run their operations.
             "events": has_events(definition),
+            # The totals of the related records (ADR 0034): the subqueries of the repositories.
+            "totals": repository_totals(definition, by_entity),
             "frame_headers": frame_headers(definition),
         },
     }

@@ -18,6 +18,7 @@
 {% set file_op = file_kinds.get("update") or file_kinds.get("create") %}
 {% set has_files = files and (file_paths if react.api else true) %}
 {% set file_guard = definition.access and file_op and file_op not in definition.auth.public_operations %}
+{% set totals = react.totals.get(name, []) %}
 {# With mock data, the store applies the record rules of the entity (ADR 0018, ADR 0025). #}
 {% set rule = record_rules.get(name) if not react.api else none %}
 {% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) else []) %}
@@ -128,7 +129,7 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% set seq = field.sequence %}
   { key: {{ ts_value(field_name | camel) }}, start: {{ seq.start }}{% if seq.prefix %}, prefix: {{ ts_value(seq.prefix) }}{% endif %}{% if field.type == "string" %}, width: {{ seq.width or 1 }}{% endif %} }, {{ trace(seq.id) }}
 {% endfor %}
-]){{ ".withEvents({" if events else ";" }}
+]){{ ".withEvents({" if events else (".withTotals([" if totals else ";") }}
 {% elif events %}
 ).withEvents({
 {% endif %}
@@ -167,9 +168,37 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% endfor %}
   ],
 {% endif %}
-});
+}){{ ".withTotals([" if totals else ";" }}
 {% elif not sequences %}
-);
+){{ ".withTotals([" if totals else ";" }}
+{% endif %}
+{% for t in totals %}
+  { {{ trace(t.ids[0], scope="begin") }}
+{% for id in t.ids[1:] %}
+    {{ trace(id) }}
+{% endfor %}
+    key: {{ ts_value(t.key) }},
+    fn: {{ ts_value(t.function) }},
+    target: {{ ts_value(t.target) }},
+{% if t.many_to_many %}
+    list: {{ ts_value(t.relation | camel) }},
+{% else %}
+    link: {{ ts_value((t.inverse | camel) ~ "Id") }},
+{% endif %}
+{% if t.number %}
+    field: {{ ts_value(t.number | camel) }},
+{% endif %}
+{% if t.filter %}
+    filter: [
+{% for key, op, operand in t.conditions() %}
+      [{{ ts_value(key) }}, {{ ts_value(op) }}, {{ ts_value(operand) }}],
+{% endfor %}
+    ],
+{% endif %}
+  }, {{ trace(t.ids[0], scope="end") }}
+{% endfor %}
+{% if totals %}
+]);
 {% endif %}
 {% endif %}
 {% if has_files %}

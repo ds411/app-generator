@@ -59,13 +59,99 @@ export class RecordRuleError extends Error {
   }
 }
 
+{% endif %}
+{% if record_rules or react.totals %}
+{% if record_rules and react.totals %}
+/** The records of each store by entity: an owner path and a total read the records of other entities. */
+{% elif record_rules %}
 /** The records of each store by entity: an owner path reads the records of other entities. */
+{% else %}
+/** The records of each store by entity: a total reads the records of another entity. */
+{% endif %}
 const recordsByEntity = new Map<string, () => readonly EntityRecord[]>();
 
 /** Return the IDs in the value of a relation: one ID, a list of IDs, or none. */
 function idsOf(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
   return typeof value === "string" ? [value] : [];
+}
+
+{% endif %}
+{% if react.totals %}
+/** An operator of the filter of a total. */
+export type TotalOp = "eq" | "ne" | "in" | "not_in" | "lt" | "lte" | "gt" | "gte";
+
+/**
+ * A total of the related records of a record (ADR 0034): a key of the
+ * records. The store reads the related records from the store of their
+ * entity, as the database of a back end does in a subquery.
+ */
+export type Total = {
+  /** The key of the total in the records, for example `sumLinesAmount`. */
+  key: string;
+  fn: "count" | "sum" | "avg" | "min" | "max";
+  /** The entity of the related records. */
+  target: string;
+  /** A `one_to_many` relation: the key of the ID of the record in the related records. */
+  link?: string;
+  /** A `many_to_many` relation: the key of the IDs of the related records in the record. */
+  list?: string;
+  /** The key of the number field of the related records. `count` has none. */
+  field?: string;
+  /** The conditions of the related records: a key, an operator, and a value. */
+  filter?: [string, TotalOp, unknown][];
+};
+
+/** The stores to notify after a change of the records of an entity: the stores with totals of them. */
+const dependents = new Map<string, Set<() => void>>();
+
+/** Return true if a value passes a condition of a filter, as the filters of the back ends do. */
+function passes(value: unknown, op: TotalOp, operand: unknown): boolean {
+  const actual = value ?? null;
+  switch (op) {
+    case "eq":
+      return actual === operand;
+    case "ne":
+      return actual !== operand;
+    case "in":
+      return Array.isArray(operand) && operand.includes(actual);
+    case "not_in":
+      return !Array.isArray(operand) || !operand.includes(actual);
+  }
+  if (actual === null || operand === null) return false;
+  const a = actual as number | string;
+  const b = operand as number | string;
+  switch (op) {
+    case "lt":
+      return a < b;
+    case "lte":
+      return a <= b;
+    case "gt":
+      return a > b;
+    case "gte":
+      return a >= b;
+  }
+}
+
+/** Return the total of the related records. The count and the sum of no records are 0, the others null. */
+function totalOf(total: Total, items: readonly Record<string, unknown>[]): number | null {
+  if (total.fn === "count") return items.length;
+  const numbers = items
+    .map((item) => item[total.field ?? ""])
+    .filter((value) => value !== null && value !== undefined)
+    .map(Number);
+  if (numbers.length === 0) return total.fn === "sum" ? 0 : null;
+  const sum = numbers.reduce((a, b) => a + b, 0);
+  switch (total.fn) {
+    case "sum":
+      return sum;
+    case "avg":
+      return sum / numbers.length;
+    case "min":
+      return Math.min(...numbers);
+    case "max":
+      return Math.max(...numbers);
+  }
 }
 
 {% endif %}
@@ -182,6 +268,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.sequences %}
   private sequences: readonly SequenceField[] = [];
 {% endif %}
+{% if react.totals %}
+  private totals: readonly Total[] = [];
+{% endif %}
 
   constructor(
     private readonly entity: string,
@@ -197,7 +286,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
   ) {
     this.records = data.map((record) => ({ ...record }));
-{% if record_rules %}
+{% if record_rules or react.totals %}
     recordsByEntity.set(entity, () => this.records);
 {% endif %}
   }
@@ -212,7 +301,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% else %}
     const result = applyQuery(this.records, query);
 {% endif %}
-{% if translatable %}
+{% if translatable or react.totals %}
     return { ...result, items: result.items.map((record) => this.show(record)) };
 {% else %}
     return result;
@@ -303,6 +392,23 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   /** Set the fields with a sequence: the store gives a new record the next number of each. */
   withSequences(sequences: readonly SequenceField[]): this {
     this.sequences = sequences;
+    return this;
+  }
+
+{% endif %}
+{% if react.totals %}
+  /**
+   * Set the totals of the related records (ADR 0034). The records of the
+   * store get a key for each total, and a change of the related records
+   * notifies the listeners of the store.
+   */
+  withTotals(totals: readonly Total[]): this {
+    this.totals = totals;
+    for (const target of new Set(totals.map((total) => total.target))) {
+      const stores = dependents.get(target) ?? new Set<() => void>();
+      stores.add(() => this.notifyListeners());
+      dependents.set(target, stores);
+    }
     return this;
   }
 
@@ -433,14 +539,43 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 {% endif %}
 
-{% if translatable %}
+{% if translatable and react.totals %}
+  /** Return a copy of a stored record in the selected language, with its totals. */
+  private show(record: T): T {
+    return { ...translateRecord(record, this.translatable), ...this.totalsOf(record) };
+  }
+{% elif translatable %}
   /** Return a copy of a stored record in the selected language. */
   private show(record: T): T {
     return translateRecord(record, this.translatable);
   }
+{% elif react.totals %}
+  /** Return a copy of a stored record with its totals. */
+  private show(record: T): T {
+    return { ...record, ...this.totalsOf(record) };
+  }
 {% else %}
   private show(record: T): T {
     return { ...record };
+  }
+{% endif %}
+{% if react.totals %}
+
+  /** Return the totals of a record: the related records of each total in the store of their entity. */
+  private totalsOf(record: T): Record<string, number | null> {
+    const values: Record<string, number | null> = {};
+    const own = record as Record<string, unknown>;
+    for (const total of this.totals) {
+      const ids = total.list === undefined ? undefined : idsOf(own[total.list]);
+      const items = (recordsByEntity.get(total.target)?.() ?? [])
+        .map((item) => item as Record<string, unknown>)
+        .filter((item) =>
+          ids === undefined ? item[total.link ?? ""] === record.id : ids.includes(String(item.id)),
+        )
+        .filter((item) => (total.filter ?? []).every(([key, op, operand]) => passes(item[key], op, operand)));
+      values[total.key] = totalOf(total, items);
+    }
+    return values;
   }
 {% endif %}
 
@@ -497,9 +632,25 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 
 {% endif %}
+{% if react.totals %}
+  /** Notify the listeners of the store, and of the stores with totals of its records. */
+  private notify(): void {
+    this.notifyListeners();
+    for (const notify of dependents.get(this.entity) ?? []) {
+      notify();
+    }
+  }
+
+  private notifyListeners(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+{% else %}
   private notify(): void {
     for (const listener of this.listeners) {
       listener();
     }
   }
+{% endif %}
 }

@@ -748,6 +748,41 @@ runs them. The UI test `ui-tests/tests/events.spec.ts` changes the
 status of a task of the project tracker in both front ends, and sees
 the completion time that the operation `record_completion` sets.
 
+### The totals of the Next.js app and of the React app
+
+The front ends compute the computed fields with a total of a relation,
+for example `sum(lines.amount)`, from the same data as the FastAPI app
+([ADR 0034](adr/0034-totals.md)).
+
+- The type of the records (`src/entities/<entity>/model/types.ts`) has
+  an optional key for each distinct total, for example
+  `sumLinesAmount`: the name of the attribute of the FastAPI model in
+  camel case. The views compute the field from the keys, with the
+  runtime of the computed fields (`src/shared/lib/compute.ts`).
+- The Next.js repository of the entity has the option `totals`: the
+  subquery of each key, made with `total` of
+  `src/shared/db/repository.ts`, with the conditions of the relation
+  and of the `filter` of the field. A `many_to_many` relation joins the
+  join table. `toRecords` reads the totals of the records in one query
+  of the table with the name `record`, so each list, read, create, and
+  update gives them.
+- The mock store of the React app has the same totals (`withTotals` in
+  `src/entities/<entity>/api/<entity>-api.ts`): the key, the function,
+  the related entity, the key of the link (`one_to_many`) or of the
+  list of IDs (`many_to_many`), the number field, and the conditions
+  of the filter. The store reads the records of the related entity, and
+  a change of them notifies the views of the records with the totals.
+- With the FastAPI app (`x-react-data: api`), the type has the key of
+  each computed field with totals instead, and the API client reads its
+  value from the API.
+- `scripts/totals_test.py` adds invoices, lines, posts, votes, and tags
+  of `tests/fixtures/totals.yaml` with PGlite, and checks each total of
+  the records that the Next.js repositories give. The UI test
+  `ui-tests/tests/totals.spec.ts` sees the count of the tasks of a
+  project of the project tracker (`task_count`) in the table of the
+  projects, in the detail view, and in the pagination of the tasks of
+  the project, in both front ends.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

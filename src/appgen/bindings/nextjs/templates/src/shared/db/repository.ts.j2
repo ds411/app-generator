@@ -25,7 +25,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import { type PgColumn, type PgTable, PgTimestamp } from "drizzle-orm/pg-core";
+import { {{ "alias, " if nextjs.totals }}type PgColumn, type PgTable, PgTimestamp } from "drizzle-orm/pg-core";
 
 import {
   type EntityApi,
@@ -109,6 +109,29 @@ export type Workflow = {
   message?: string;
 };
 
+{% if nextjs.totals %}
+/** A function of a total (ADR 0034). */
+export type TotalFunction = "count" | "sum" | "avg" | "min" | "max";
+
+/**
+ * Return the subquery of a total of the related records (ADR 0034): the
+ * function of `value` over the rows of `from` that pass the conditions. A
+ * `many_to_many` relation gives the table of the related records and the
+ * join table. The count and the sum of no rows are 0, and the others null.
+ */
+export function total(
+  fn: TotalFunction,
+  from: PgTable | PgTable[],
+  value: Column | null,
+  ...conditions: SQL[]
+): SQL<number | null> {
+  const result =
+    fn === "count" ? sql`count(*)` : fn === "sum" ? sql`coalesce(sum(${value}), 0)` : sql`${sql.raw(fn)}(${value})`;
+  const tables = sql.join(Array.isArray(from) ? from : [from], sql`, `);
+  return sql<number | null>`(select ${result} from ${tables} where ${and(...conditions)})`.mapWith(Number);
+}
+
+{% endif %}
 {% if nextjs.events %}
 /** The custom operation of an event (ADR 0031): it gets the record after the change. */
 export type EventOperation<T> = (record: T) => Promise<void>;
@@ -161,6 +184,13 @@ export type RepositoryOptions<T> = {
 {% if nextjs.events %}
   /** The events of the entity. An error of an operation rolls back the change. */
   events?: Events<T>;
+{% endif %}
+{% if nextjs.totals %}
+  /**
+   * The totals of the related records (ADR 0034): the subquery of each key
+   * of the records, of the table of the records with the name `record`.
+   */
+  totals?: (record: { id: PgColumn }) => Record<string, SQL<number | null>>;
 {% endif %}
 {% if translatable %}
   /**
@@ -285,6 +315,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.events %}
   private readonly events: Events<T>;
 {% endif %}
+{% if nextjs.totals %}
+  private readonly totals: RepositoryOptions<T>["totals"];
+{% endif %}
 {% if translatable %}
   private readonly translatable: string[];
 {% endif %}
@@ -305,6 +338,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.workflows = options.workflows ?? [];
 {% if nextjs.events %}
     this.events = options.events ?? {};
+{% endif %}
+{% if nextjs.totals %}
+    this.totals = options.totals;
 {% endif %}
 {% if translatable %}
     this.translatable = options.translatable ?? [];
@@ -919,6 +955,22 @@ export class Repository<T extends EntityRecord, TInput extends object>
         record[relation.key] = lists.get(String(record.id)) ?? [];
       }
     }
+{% if nextjs.totals %}
+    if (this.totals !== undefined && ids.length > 0) {
+      // The totals (ADR 0034). The query names the table `record`, so that the subquery
+      // of a relation of the entity to itself tells the record from its related records.
+      const record = alias(this.table, "record");
+      const id = getTableColumns(record).id as PgColumn;
+      const rows: Row[] = await db
+        .select({ id, ...this.totals({ id }) })
+        .from(record)
+        .where(inArray(id, ids));
+      const totals = new Map(rows.map((row) => [String(row.id), row]));
+      for (const item of records) {
+        Object.assign(item, totals.get(String(item.id)));
+      }
+    }
+{% endif %}
     return records as T[];
   }
 }

@@ -338,7 +338,7 @@ def ts_jobs(definition: AppDefinition, tables: dict[str, Table]) -> dict[str, Ts
                     for api in definition.operations[job.operation].apis
                     if definition.apis[api].user_flow
                 ]
-            builder = _FilterBuilder(definition, tables, job.id, result.filter)
+            builder = FilterBuilder(definition, tables, job.id, result.filter)
             conditions = [builder.filter(job.entity, path, c) for path, c in job.filter.items()]
             if conditions:
                 result.filter.code = (
@@ -415,13 +415,14 @@ class _Hop:
     relation: Relation
 
 
-class _FilterBuilder:
+class FilterBuilder:
     """Builds the Drizzle condition of the filter of a job, as the FastAPI app does.
 
     A path through a relation to one record is a subquery of the IDs of the
     related records. As with the outer join of the FastAPI app, a record
     without a related record passes a condition that passes a missing
-    value (`ne`, `not_in`, and `eq` with null).
+    value (`ne`, `not_in`, and `eq` with null). The totals (ADR 0034) use
+    it for the filters of their related records.
     """
 
     def __init__(

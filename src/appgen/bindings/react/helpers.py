@@ -20,6 +20,7 @@ from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
+from appgen.bindings.shared.totals import entity_totals, total_keys
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
 from appgen.bindings.shared.typescript import (
     Member,
@@ -145,6 +146,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     widgets = widget_endpoints(definition) if api else {}
     components = shadcn.used_components(definition, endpoints)
     third_party = ts_apis(definition)
+    entities = list(definition.entities)
     return {
         "api_entities": apis,
         # The browser cannot keep a secret or set a cookie for another site:
@@ -164,6 +166,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "record_rules": record_rules(definition),
+        # The keys of the totals in the records (ADR 0034), by entity.
+        "record_totals": {name: total_keys(definition, name, api=api) for name in entities},
         **text_helpers(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",
@@ -181,6 +185,11 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "sequences": not api
             and any(entity.sequence_fields for entity in definition.entities.values()),
             "frame_rules": frame_rules(definition),
+            # The totals of the related records (ADR 0034): the mock store computes them.
+            # With the FastAPI app, the FastAPI app computes them.
+            "totals": {}
+            if api
+            else {name: totals for name in entities if (totals := entity_totals(definition, name))},
         },
     }
 
