@@ -225,6 +225,16 @@ def upgrade() -> None:
         sa.UniqueConstraint("token_hash", name="uq_share_links_token_hash"),
     )
 {% endif %}
+{% if py.snapshots %}
+    op.create_table(
+        "stat_snapshots",
+        sa.Column("dashboard", sa.String(length=63), nullable=False),
+        sa.Column("widget", sa.String(length=63), nullable=False),
+        sa.Column("day", sa.Date(), nullable=False),
+        sa.Column("value", sa.Double(), nullable=True),
+        sa.PrimaryKeyConstraint("dashboard", "widget", "day", name="pk_stat_snapshots"),
+    )
+{% endif %}
 {% if py.jobs %}
     op.create_table(
         "job_runs",
@@ -250,6 +260,9 @@ def downgrade() -> None:
 {% endif %}
 {% if py.jobs %}
     op.drop_table("job_runs")
+{% endif %}
+{% if py.snapshots %}
+    op.drop_table("stat_snapshots")
 {% endif %}
 {% if py.notifications %}
     op.drop_index("ix_notices_user_id", table_name="notices")

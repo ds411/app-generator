@@ -899,6 +899,35 @@ definition in the route `POST /api/jobs/<job>`
   `tests/fixtures/jobs.yaml` with a fixed clock and PGlite, with the
   hand-written operations of `tests/fixtures/jobs-extensions/nextjs/`.
 
+### The daily snapshots of the stat widgets
+
+A stat widget with `snapshots: daily` gets the built-in job
+`stat_snapshots` ([ADR 0042](adr/0042-stat-snapshots.md)), with the
+machinery of the jobs of the definition: the table `job_runs`, the
+worker of the FastAPI app, and the routes, the CronJobs, and the service
+`jobs` of the Compose file of the Next.js app. The job runs at 00:00
+UTC, and stores the value of each stat in the table `stat_snapshots`
+(the same columns in both apps), as the value of the day of the run.
+
+- FastAPI: the module of the dashboard has a value function for each
+  stat with snapshots, for example `overview_rooms_value(session, day)`:
+  the endpoint of the stat and `app/jobs/stat_snapshots.py` call it.
+  `app/core/snapshots.py` has the model `StatSnapshot` and
+  `store_snapshot()`. The endpoint of a chart of snapshots gives the
+  stored values of its days up to `today`, as the groups of a chart.
+  `tests/jobs/test_stat_snapshots.py` runs the job on three days with a
+  fixed clock, and checks the rows and the charts.
+- Next.js: `src/app/jobs/stat-snapshots.ts` computes each stat with a
+  Drizzle query (the filter builder of the jobs), and
+  `app/api/jobs/stat_snapshots/route.ts` runs it. A chart of snapshots
+  reads its values with a server action of
+  `src/shared/api/snapshot-actions.ts`, with the permission of the list
+  operation of the entity of the stat. `scripts/jobs_test.py` runs the
+  job of `tests/fixtures/jobs.yaml` on three days.
+- React: with `x-react-data: api`, a chart of snapshots calls the
+  endpoint of the FastAPI app. The mock data has no stored values: the
+  chart shows the value of today, from the function of the stat.
+
 ### The events of the Next.js app and of the React app
 
 The repository of each entity in the Next.js app runs its `events` and

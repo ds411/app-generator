@@ -31,6 +31,7 @@ from appgen.bindings.fastapi.integrations import (
 )
 from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
+from appgen.bindings.fastapi.snapshots import PySnapshots, python_snapshots
 from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.me import PyMeTest, me_tests
 from appgen.bindings.fastapi.names import attribute, plural, singular
@@ -2489,6 +2490,8 @@ class PyApp:
     """The text search configuration of Postgres with `x-fastapi-search: fulltext`, else None."""
     jobs: dict[str, PyJob] = field(default_factory=dict[str, PyJob])
     """The jobs that the worker runs (ADR 0029), by name."""
+    snapshots: PySnapshots | None = None
+    """The stats with daily snapshots, their charts, and the built-in job (ADR 0042)."""
     storage: PyStorage | None = None
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
     user_label_attr: str | None = None
@@ -2892,6 +2895,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         entity.totals_test = totals_test(definition, entity)
     dashboards = python_dashboards(definition, entities)
     rule_tests = _rule_tests(definition, entities)
+    snapshots = python_snapshots(definition, entities, dashboards)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -2913,7 +2917,8 @@ def python_app(definition: AppDefinition) -> PyApp:
         access=definition.access is not None,
         auth=auth is not None,
         search_config=search_config,
-        jobs=_jobs(definition, entities, operations),
+        jobs=_jobs(definition, entities, operations, snapshots),
+        snapshots=snapshots,
         storage=_storage(definition, entities),
         user_label_attr=_user_label_attr(definition, entities),
         me_tests=me_tests(definition, entities, dashboards),
@@ -2922,17 +2927,24 @@ def python_app(definition: AppDefinition) -> PyApp:
 
 
 def _jobs(
-    definition: AppDefinition, entities: dict[str, PyEntity], operations: dict[str, PyOperation]
+    definition: AppDefinition,
+    entities: dict[str, PyEntity],
+    operations: dict[str, PyOperation],
+    snapshots: PySnapshots | None,
 ) -> dict[str, PyJob]:
-    """Return the jobs. Raise GenerationError if an entity has the table of the job runs."""
-    if definition.jobs:
+    """Return the jobs, with the built-in job of the snapshots (ADR 0042). Raise
+    GenerationError if an entity has the table of the job runs."""
+    if definition.jobs or snapshots is not None:
         for entity in entities.values():
             if entity.table == JOBS_TABLE:
                 raise GenerationError(
                     f"The entity '{entity.name}' has the table '{JOBS_TABLE}' of the runs of the "
                     "jobs. Give it another table with x-fastapi-table."
                 )
-    return python_jobs(definition, entities, operations)
+    jobs = python_jobs(definition, entities, operations)
+    if snapshots is not None:
+        jobs[snapshots.job.name] = snapshots.job
+    return jobs
 
 
 def _storage(definition: AppDefinition, entities: dict[str, PyEntity]) -> PyStorage | None:

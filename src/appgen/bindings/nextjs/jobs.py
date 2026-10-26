@@ -106,6 +106,8 @@ class TsJob:
     """False if the record can have no user: a run for it does nothing."""
     user_apis: list[str] = field(default_factory=list[str])
     """The APIs with the authorization code flow that the operation calls."""
+    builtin: bool = False
+    """True for the built-in job `stat_snapshots` (ADR 0042): its own module has the logic."""
 
     @property
     def module(self) -> str:
@@ -121,7 +123,7 @@ class TsJob:
     @property
     def gap(self) -> bool:
         """True for a job without an entity: its extension file has the logic."""
-        return self.entity is None
+        return self.entity is None and not self.builtin
 
     @property
     def ext_function(self) -> str:

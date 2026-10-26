@@ -545,6 +545,7 @@ class ViewContext:
         endpoints: Mapping[str, ListEndpoint] | None = None,
         api_server: bool = False,
         widgets: Mapping[str, WidgetEndpoint] | None = None,
+        snapshot_store: bool = False,
     ) -> None:
         """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
 
@@ -553,10 +554,13 @@ class ViewContext:
         of a page calls the operation of a view of API data (Next.js), else
         the view calls it in the browser. `widgets` gives the endpoint of each
         dashboard widget by element ID: the dashboards read their values.
+        With `snapshot_store`, a chart of snapshots reads the stored daily
+        values with a server action (Next.js, ADR 0042).
         """
         self.definition = definition
         self.with_forms = forms
         self.api_server = api_server
+        self.snapshot_store = snapshot_store
         self.endpoints: dict[str, ListEndpoint] = dict(endpoints or {})
         self.widgets: dict[str, WidgetEndpoint] = dict(widgets or {})
         ui = definition.ui
@@ -806,9 +810,10 @@ class ViewContext:
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
         `date_range`, `select`, `multi_select`, and `param` for the input of
         a param of a query), the value components
-        (`badge`, `avatar`, `formatted`), the charts (`chart`, and
-        `dates` for a chart of dates), the period of a dashboard
-        (`period`), and the manual order of a table or a board (`order`).
+        (`badge`, `avatar`, `formatted`), the charts (`chart`, `dates` for
+        a chart of dates, and `snapshots` for a chart of snapshots), the
+        period of a dashboard (`period`), and the manual order of a table or
+        a board (`order`).
         """
         found: set[str] = set()
         values = {"badge", "avatar", "formatted", "file"}
@@ -845,7 +850,7 @@ class ViewContext:
         for name in self.dashboards:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
-            found |= dashboard.uses & {"chart", "dates"}
+            found |= dashboard.uses & {"chart", "dates", "snapshots"}
             period = dashboard.dashboard.period
             if period is not None:
                 found |= {"period", "date_range"} if "custom" in period.ranges else {"period"}

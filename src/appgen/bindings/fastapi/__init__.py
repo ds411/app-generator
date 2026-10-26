@@ -314,6 +314,15 @@ BINDING = Binding(
             extension=True,
         ),
         Output(template="app/worker.py.j2", path="app/worker.py", when="py.jobs"),
+        # The daily snapshots of the stat widgets (ADR 0042): the table and the built-in job.
+        Output(
+            template="app/core/snapshots.py.j2", path="app/core/snapshots.py", when="py.snapshots"
+        ),
+        Output(
+            template="app/jobs/stat_snapshots.py.j2",
+            path="app/jobs/stat_snapshots.py",
+            when="py.snapshots",
+        ),
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
         Output(template="tests/test_migrations.py.j2", path="tests/test_migrations.py"),
@@ -529,6 +538,11 @@ BINDING = Binding(
             template="tests/jobs/test_job.py.j2",
             path="tests/jobs/test_{{ name }}.py",
             for_each="job",
+        ),
+        Output(
+            template="tests/jobs/test_stat_snapshots.py.j2",
+            path="tests/jobs/test_stat_snapshots.py",
+            when="py.snapshots",
         ),
         Output(
             template="tests/test_storage.py.j2", path="tests/test_storage.py", when="py.storage"

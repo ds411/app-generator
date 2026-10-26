@@ -158,7 +158,7 @@ in UTC.
 | Job | When | What |
 | --- | ---- | ---- |
 {% for job in py.jobs.values() %}
-| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
+| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
 {% endfor %}
 
 - A run is for one record (or for none) and one time. The table

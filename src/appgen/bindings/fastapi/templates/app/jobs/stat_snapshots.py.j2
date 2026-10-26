@@ -1,0 +1,43 @@
+{{ trace_header(*py.snapshots.ids) }}
+{% set s = py.snapshots %}
+{% set job = s.job %}
+"""The built-in job `{{ job.name }}` (ADR 0042): the daily values of the stat widgets.
+
+The job runs on the schedule `{{ job.schedule.expression }}` (UTC). Each run stores the
+value of each stat widget with `snapshots: daily` at the time of the run
+as the value of its day, in the transaction of the run. The charts of
+snapshots show the stored values. `app/worker.py` runs the job.
+"""
+
+{% set ns = namespace(lines=["import datetime as dt", "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker", "from app.core import jobs", "from app.core.config import Settings", "from app.core.snapshots import store_snapshot"]) %}
+{% for d in s.stats | map(attribute="dashboard") | unique(attribute="module") %}
+{% set ns.lines = ns.lines + [py.from_import("app.features.dashboards." ~ d.module, s.stats | selectattr("dashboard.module", "eq", d.module) | map(attribute="widget.value_function") | list)] %}
+{% endfor %}
+{{ py.imports(ns.lines) }}
+
+NAME = "{{ job.name }}"
+{{ job.schedule.code() }}
+"""The schedule of the job in UTC: `{{ job.schedule.expression }}`."""
+
+
+async def run(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    now: dt.datetime,
+    window: dt.timedelta,
+) -> int:
+    """Run the job for the last time of its schedule in the window, if it has not run."""
+    time = SCHEDULE.last(now, window)
+    if time is None:
+        return 0
+
+    async def action(session: AsyncSession, item: jobs.Due) -> None:
+        day = item.time.date()
+{% for stat in s.stats %}
+        {{ trace(stat.widget.id) }}
+{% for line in stat.store_lines() %}
+        {{ line }}
+{% endfor %}
+{% endfor %}
+
+    return await jobs.run_due(sessions, NAME, [jobs.Due(None, time)], action)

@@ -251,6 +251,27 @@ export function intervalRows<T>(
   return intervalData(values, interval, valueOf([]));
 }
 {% endraw %}
+{% if "snapshots" in ui_views.features %}
+{% raw %}
+
+/**
+ * Return the chart data of the daily values of a stat (ADR 0042): the days
+ * with a value of the `days` days up to `today`, in their order. A day
+ * without a value is not a point of the line.
+ */
+export function snapshotData(
+  values: readonly { key: string | null; value: number | null }[],
+  today: string,
+  days: number,
+): ChartDatum[] {
+  const first = addDays(today, 1 - days);
+  return values
+    .flatMap(({ key, value }) => (key === null || value === null || key < first || key > today ? [] : [{ key, value }]))
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(({ key, value }) => ({ key, label: intervalLabel(key, "day"), value }));
+}
+{% endraw %}
+{% endif %}
 {% endif %}
 {% if ui_views.widgets %}
 

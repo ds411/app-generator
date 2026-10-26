@@ -1042,7 +1042,7 @@ def check_ui_dashboards(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Give a widget 'period_field', a date field of its entity.",
                 )
         for widget in dashboard.widgets.values():
-            yield from _check_widget(definition, widget)
+            yield from _check_widget(definition, dashboard, widget)
             if not isinstance(widget, CustomWidget):
                 yield from _check_period_field(definition, dashboard, widget)
 
@@ -1107,16 +1107,33 @@ def _check_period_field(
         yield from _check_suits(widget, "period_field", "A period field", target, DATE_TYPES)
 
 
-def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnostic]:
+def _check_widget(
+    definition: AppDefinition, dashboard: Dashboard, widget: Widget
+) -> Iterator[Diagnostic]:
     match widget:
+        case ChartWidget() if widget.snapshots is not None:
+            yield from _check_snapshot_chart(dashboard, widget)
         case StatWidget() | ChartWidget():
-            if widget.entity not in definition.entities:
-                yield _missing(widget, "entity", "entity", widget.entity, definition.entities)
+            if isinstance(widget, ChartWidget) and (
+                widget.entity is None or widget.group_by is None
+            ):
+                yield _error(
+                    "missing-key",
+                    "A chart needs 'entity' and 'group_by', or the 'snapshots' of a stat widget.",
+                    widget,
+                    hint="Add the keys 'entity' and 'group_by'.",
+                )
                 return
-            yield from _check_aggregate(definition, widget)
-            yield from check_record_filter(definition, widget, widget.entity, widget.filter)
+            entity = widget.entity or ""
+            if entity not in definition.entities:
+                yield _missing(widget, "entity", "entity", entity, definition.entities)
+                return
+            yield from _check_aggregate(definition, widget, entity)
+            yield from check_record_filter(definition, widget, entity, widget.filter)
             if isinstance(widget, ChartWidget):
-                yield from _check_chart_group(definition, widget)
+                yield from _check_chart_group(definition, widget, entity, widget.group_by or "")
+            elif widget.snapshots is not None:
+                yield from _check_snapshot_stat(definition, widget, entity)
         case ListWidget():
             views = definition.ui.views if definition.ui else {}
             yield from _check_list_view(views, widget, "view", widget.view, None)
@@ -1129,8 +1146,65 @@ def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnos
             pass
 
 
+_SNAPSHOT_CHART_KEYS = ("entity", "group_by", "interval", "aggregate", "field", "filter", "badge")
+"""The keys of a chart of records, which a chart of snapshots does not take."""
+
+
+def _check_snapshot_chart(dashboard: Dashboard, widget: ChartWidget) -> Iterator[Diagnostic]:
+    """A chart of snapshots is a line chart of a stat widget of its dashboard (ADR 0042)."""
+    if widget.chart != "line":
+        yield _error(
+            "invalid-value",
+            f"A chart of snapshots is a line chart, not '{widget.chart}'.",
+            widget,
+            at="chart",
+            hint="Use 'chart: line'.",
+        )
+    for key in _SNAPSHOT_CHART_KEYS:
+        if key in widget.model_fields_set:
+            yield _error(
+                "invalid-option",
+                f"A chart of snapshots shows the values of its stat widget, so it takes no "
+                f"'{key}'.",
+                widget,
+                at=key,
+                hint=f"Remove the key '{key}'.",
+            )
+    name = widget.snapshots or ""
+    stat = dashboard.widgets.get(name)
+    if stat is None:
+        stats = [n for n, w in dashboard.widgets.items() if isinstance(w, StatWidget)]
+        yield _missing(widget, "snapshots", "stat widget", name, stats)
+    elif not isinstance(stat, StatWidget) or stat.snapshots is None:
+        yield _error(
+            "unknown-reference",
+            f"The widget '{name}' has no daily snapshots: only a stat widget with "
+            "'snapshots: daily' has them.",
+            widget,
+            at="snapshots",
+            hint=f"Add 'snapshots: daily' to the stat widget '{name}'.",
+        )
+
+
+def _check_snapshot_stat(
+    definition: AppDefinition, widget: StatWidget, entity: str
+) -> Iterator[Diagnostic]:
+    """A snapshot has the value of all records: the entity has no record rule (ADR 0042)."""
+    roles = definition.access.roles if definition.access else {}
+    ruled = sorted(name for name, role in roles.items() if entity in role.records)
+    if ruled:
+        yield _error(
+            "invalid-option",
+            f"The snapshots of a stat have the value of all records, but a record rule of the "
+            f"role '{ruled[0]}' limits the records of '{entity}'.",
+            widget,
+            at="snapshots",
+            hint="Remove 'snapshots', or show the stat of an entity without record rules.",
+        )
+
+
 def _check_aggregate(
-    definition: AppDefinition, widget: StatWidget | ChartWidget
+    definition: AppDefinition, widget: StatWidget | ChartWidget, entity: str
 ) -> Iterator[Diagnostic]:
     if widget.aggregate == "count":
         if widget.field is not None:
@@ -1150,7 +1224,7 @@ def _check_aggregate(
             hint="Add the key 'field'.",
         )
         return
-    target = yield from _resolve(definition, widget, "field", widget.entity, widget.field)
+    target = yield from _resolve(definition, widget, "field", entity, widget.field)
     if target is not None:
         what = f"The aggregate '{widget.aggregate}'"
         yield from _check_suits(widget, "field", what, target, NUMBER_TYPES)
@@ -1178,16 +1252,26 @@ def _check_one_currency(
     )
 
 
-def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterator[Diagnostic]:
-    target = yield from _resolve(definition, widget, "group_by", widget.entity, widget.group_by)
+def _check_chart_group(
+    definition: AppDefinition, widget: ChartWidget, entity: str, group_by: str
+) -> Iterator[Diagnostic]:
+    target = yield from _resolve(definition, widget, "group_by", entity, group_by)
     if target is None:
         return
     types = frozenset({"enum", *DATE_TYPES, *SINGLE_KINDS})
     yield from _check_suits(widget, "group_by", "A chart group", target, types)
+    if "days" in widget.model_fields_set:
+        yield _error(
+            "invalid-option",
+            "'days' is only for a chart of snapshots.",
+            widget,
+            at="days",
+            hint="Remove the key 'days'.",
+        )
     if "interval" in widget.model_fields_set and target.type not in DATE_TYPES:
         yield _error(
             "invalid-option",
-            f"'interval' is only for a chart group of a date, but '{widget.group_by}' has the "
+            f"'interval' is only for a chart group of a date, but '{group_by}' has the "
             f"type '{target.type}'.",
             widget,
             at="interval",

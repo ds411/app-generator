@@ -2463,8 +2463,8 @@ A dashboard has `title`, `description`, `grid`, `period`, and
 
 | Kind     | Keys                                                                      |
 | -------- | ------------------------------------------------------------------------- |
-| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`, `period_field`, `compare`. |
-| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, `period_field`. |
+| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`, `period_field`, `compare`, `snapshots`. |
+| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, `period_field`; or `snapshots` and `days`. |
 | `list`   | `view`, `filter`, `sort`, `limit`, `link`, `period_field`.               |
 | `custom` | A generation gap.                                                         |
 
@@ -2494,6 +2494,40 @@ tasks_by_week:
   entity: Task
   group_by: due_date
   interval: week
+```
+
+A stat widget with `snapshots: daily` has a value for each day
+([ADR 0042](https://github.com/ds411/app-generator/blob/main/docs/adr/0042-stat-snapshots.md)): the built-in job
+`stat_snapshots` of the FastAPI and the Next.js apps runs at 00:00 UTC,
+and stores the value of the stat at that time as the value of the day.
+`$today` in the filter is the day of the run. A line chart with
+`snapshots`, the name of a stat widget of the same dashboard with
+`snapshots: daily`, shows the stored values of the last `days` days (2
+to 366, 30 by default), for example the burndown of the open tasks. A
+day without a value is not a point of the line. A chart of snapshots
+takes no `entity`, `group_by`, `interval`, `aggregate`, `field`,
+`filter`, `badge`, or `period_field`, and its stat takes no
+`period_field` or `compare`. A snapshot has the value of all records,
+so the entity of the stat cannot have a record rule. The chart is
+empty until the first run of the job. The React app with mock data has
+no stored values: its chart shows the value of today. The Next.js app
+computes a snapshot in the database, so the field of the aggregate is a
+stored field of the entity of the stat. A job with the name
+`stat_snapshots`, or an entity with the table `stat_snapshots`, is a
+generation error.
+
+```yaml
+# in: ui.dashboards.overview.widgets
+open_tasks:
+  kind: stat
+  entity: Task
+  filter: { status: { ne: done } }
+  snapshots: daily
+burndown:
+  kind: chart
+  chart: line
+  snapshots: open_tasks
+  days: 14
 ```
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,

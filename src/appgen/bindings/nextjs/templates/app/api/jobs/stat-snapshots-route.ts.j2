@@ -1,0 +1,15 @@
+{{ trace_header(*nextjs.snapshots.ids) }}
+import { runStatSnapshots } from "@/app/jobs/stat-snapshots";
+import { handleJob } from "@/shared/lib/jobs";
+
+// Each call runs the job, so the build does not render the route.
+export const dynamic = "force-dynamic";
+
+/**
+ * Run the built-in job `stat_snapshots` (ADR 0042). A scheduler calls the
+ * route with the secret JOBS_SECRET, for example a CronJob of `deploy/`
+ * (README.md, section Jobs).
+ */
+export async function POST(request: Request) {
+  return handleJob(request, "stat_snapshots", runStatSnapshots);
+}

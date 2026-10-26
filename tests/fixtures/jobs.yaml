@@ -2,8 +2,10 @@
 # The kinds of jobs (ADR 0029): a job at the time of a date field with an
 # offset, a job at the time of a date-time field with a filter through a
 # relation (the generated tests cannot give its values), a job on a
-# schedule with `$today` whose operation calls an API, and a job without
-# an entity (a gap). scripts/check-fastapi.sh checks the FastAPI app of
+# schedule with `$today` whose operation calls an API, a job without an
+# entity (a gap), and the built-in job of the daily snapshots of two stat
+# widgets (ADR 0042): a sum with `$today`, and a count, with a line chart
+# of the last two days. scripts/check-fastapi.sh checks the FastAPI app of
 # this definition, and scripts/check-nextjs.sh the Next.js app, with the
 # hand-written operations of tests/fixtures/jobs-extensions/nextjs/.
 version: 0
@@ -52,6 +54,31 @@ operations:
 pages:
   invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
   customers: { path: /customers, title: Customers, content: { view: customer_table } }
+  billing: { path: /billing, title: Billing, content: { dashboard: billing } }
+
+ui:
+  dashboards:
+    billing:
+      title: Billing
+      widgets:
+        overdue_amount:
+          kind: stat
+          entity: Invoice
+          aggregate: sum
+          field: amount
+          filter: { due_on: { lt: $today }, paid: false }
+          snapshots: daily
+        open_invoices:
+          kind: stat
+          entity: Invoice
+          filter: { status: { in: [draft, sent] } }
+          snapshots: daily
+        overdue_per_day:
+          kind: chart
+          chart: line
+          snapshots: overdue_amount
+          days: 2
+          span: 2
 
 apis:
   exchange_rates:
