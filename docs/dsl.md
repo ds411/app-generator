@@ -764,6 +764,7 @@ function in the React app.
 | `params`      | `custom` only. A mapping from parameter name to a field (the field keys). |
 | `returns`     | `custom` only. An entity name, or `none` (the default).                  |
 | `apis`        | `custom` only. The names of the [apis](#apis) that the logic calls.       |
+| `lines`       | `create` and `update` only. The `one_to_many` relations whose records the operation writes with the record (see [Lines of a record](#lines-of-a-record)). |
 
 The logic of a `custom` operation is a **generation gap**: the binding
 generates the signature and the endpoint, and an extension file holds
@@ -782,6 +783,48 @@ operations:
       note: { type: text, max_length: 500 }
     returns: Task
 ```
+
+### Lines of a record
+
+A `create` or an `update` operation with `lines` writes the record and
+the records of its `one_to_many` relations in one transaction, for
+example an invoice and its lines ([ADR 0035](adr/0035-lines.md)). An
+explicit operation replaces the operation of the same name of the CRUD
+shorthand.
+
+```yaml
+entities:
+  Invoice:
+    crud: { views: [table, detail] }
+    fields:
+      number: { type: string, required: true }
+    relations:
+      lines: { kind: one_to_many, target: InvoiceLine, inverse: invoice }
+  InvoiceLine:
+    fields:
+      amount: { type: decimal, required: true, scale: 2 }
+    relations:
+      invoice: { kind: many_to_one, target: Invoice, required: true, inverse: lines }
+operations:
+  create_invoice: { kind: create, entity: Invoice, lines: [lines] }
+  update_invoice: { kind: update, entity: Invoice, lines: [lines] }
+```
+
+- The body of the FastAPI endpoint has a list for each relation of
+  `lines`, for example `"lines": [{"amount": "12.00"}]`. An item has
+  the fields and the relations of a new line, without the relation to
+  the record, and an optional `id`.
+- An update with the key replaces the lines: an item with the `id` of a
+  line changes the given fields of that line, an item without an `id`
+  is a new line, and the other lines go. Without the key, the lines
+  stay.
+- The rules, the workflows, and the events of the lines apply. An error
+  in a line stores nothing, and the error response gives the place of
+  the line in `errors`, for example `["body", "lines", 2]`.
+- The lines use the permission and the record rules of the operation.
+  The entity of the lines has no file fields.
+- The front ends do not send lines yet: their forms change the record,
+  and the lines stay.
 
 ## pages
 

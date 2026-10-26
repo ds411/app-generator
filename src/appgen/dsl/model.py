@@ -183,6 +183,9 @@ class Operation(Element):
     """An entity name, or `none`."""
     apis: list[MemberName] = pydantic.Field(default_factory=list[str])
     """The third-party APIs that the logic of a custom operation calls (ADR 0019)."""
+    lines: list[MemberName] = pydantic.Field(default_factory=list[str])
+    """A create or an update operation: the `one_to_many` relations whose records it writes
+    with the record, in one transaction (ADR 0035)."""
 
 
 class Page(Element):

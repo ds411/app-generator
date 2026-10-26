@@ -38,6 +38,24 @@ class Problem(BaseModel):
     errors: list[ProblemItem] | None = None
 
 
+{% if py.lines %}
+class ProblemError(Exception):
+    """An error that the API returns as problem details, with the places of its input errors."""
+
+    def __init__(
+        self, status: int, detail: str | None = None, errors: list[ProblemItem] | None = None
+    ) -> None:
+        super().__init__(detail or HTTPStatus(status).phrase)
+        self.status = status
+        self.detail = detail
+        self.errors = errors
+
+    def at(self, *loc: str | int) -> ProblemError:
+        """Return the error with the place of its input, for example a line of the body."""
+        message = self.detail or HTTPStatus(self.status).phrase
+        item = ProblemItem(loc=list(loc), msg=message, type="line")
+        return ProblemError(self.status, self.detail, [item])
+{% else %}
 class ProblemError(Exception):
     """An error that the API returns as problem details."""
 
@@ -45,6 +63,7 @@ class ProblemError(Exception):
         super().__init__(detail or HTTPStatus(status).phrase)
         self.status = status
         self.detail = detail
+{% endif %}
 
 
 def problem_response(
@@ -86,7 +105,11 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
 
 async def _problem_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, ProblemError)
+{% if py.lines %}
+    return problem_response(request, error.status, error.detail, error.errors)
+{% else %}
     return problem_response(request, error.status, error.detail)
+{% endif %}
 
 
 async def _http_error(request: Request, error: Exception) -> JSONResponse:

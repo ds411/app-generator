@@ -1,0 +1,157 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% macro sig(fn) %}
+{{ py.signature("async def " ~ fn, ["client: AsyncClient", "session: AsyncSession"], " -> None:") }}
+{% endmacro %}
+{% set url = e.path ~ op.path %}
+{% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
+"""The tests of the lines of the operation `{{ op.name }}` (ADR 0035): the record and its lines
+save together, or not at all."""
+
+{% set ns = namespace(lines=[
+    "from typing import Any",
+    "from uuid import UUID, uuid4",
+    "import pytest",
+    "from httpx import AsyncClient",
+    "from sqlalchemy import func, select" if op.kind == "create" else "from sqlalchemy import select",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from tests.problems import assert_problem",
+]) %}
+{% if op.kind == "create" %}
+{% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".models import " ~ e.name] %}
+{% endif %}
+{% set ns.factories = [e.snake ~ "_input"] if op.kind == "create" else ["make_" ~ e.snake] %}
+{% for ln in op.lines %}
+{% set ns.lines = ns.lines + ["from app.features." ~ ln.target.slice ~ ".models import " ~ ln.target.name] %}
+{% set ns.factories = ns.factories + [ln.target.snake ~ "_input"] + (["make_" ~ ln.target.snake] if op.kind == "update" else []) %}
+{% endfor %}
+{% set ns.lines = ns.lines + [py.from_import("tests.factories", ns.factories)] %}
+{{ py.imports(ns.lines) }}
+
+pytestmark = pytest.mark.anyio
+{% for ln in op.lines %}
+{% set t = ln.target %}
+{% set item = ln.name ~ "_item" %}
+
+
+async def {{ item }}(session: AsyncSession, **values: Any) -> dict[str, Any]:
+    """Return valid JSON input for a line of `{{ ln.name }}`: a {{ t.name }} without its record."""
+    payload = await {{ t.snake }}_input(session, {{ ln.link_attr }}=None, **values)
+    del payload["{{ ln.link_attr }}"]
+    return payload
+
+
+async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
+    """Return the IDs of the lines of `{{ ln.name }}` of a record in the database."""
+    statement = select({{ t.name }}.id).where({{ t.name }}.{{ ln.link_attr }} == id)
+    return list(await session.scalars(statement))
+{% if op.kind == "create" %}
+
+
+{{ trace(ln.id) }}
+{{ sig("test_" ~ op.name ~ "_stores_the_" ~ ln.name) }}    payload = await {{ e.snake }}_input(session)
+    payload["{{ ln.name }}"] = [await {{ item }}(session) for _ in range(3)]
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert response.status_code == 201, response.text
+    assert len(await _{{ ln.name }}_of(session, UUID(response.json()["id"]))) == 3
+
+
+{{ trace(ln.id) }}
+{{ sig("test_" ~ op.name ~ "_stores_nothing_for_an_error_in_a_line_of_" ~ ln.name) }}    payload = await {{ e.snake }}_input(session)
+    payload["{{ ln.name }}"] = [
+        await {{ item }}(session),
+        {**await {{ item }}(session), "id": str(uuid4())},
+    ]
+    records = await session.scalar(select(func.count()).select_from({{ e.name }}))
+    lines = await session.scalar(select(func.count()).select_from({{ t.name }}))
+    # End the read, so that the app can write (SQLite locks the database for a write).
+    await session.commit()
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 422)
+    assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
+    assert await session.scalar(select(func.count()).select_from({{ e.name }})) == records
+    assert await session.scalar(select(func.count()).select_from({{ t.name }})) == lines
+{% for w in t.workflows if w.other_state %}
+
+
+{{ trace(ln.id) }}
+{{ trace(w.id) }}
+{{ sig("test_" ~ op.name ~ "_checks_the_" ~ w.name ~ "_of_the_" ~ ln.name) }}    payload = await {{ e.snake }}_input(session)
+    payload["{{ ln.name }}"] = [
+        await {{ item }}(session),
+        await {{ item }}(session, {{ w.field }}="{{ w.other_state }}"),
+    ]
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 422)
+    assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
+{% endfor %}
+{% else %}
+
+
+{{ trace(ln.id) }}
+{{ sig("test_" ~ op.name ~ "_replaces_the_" ~ ln.name) }}    record = await make_{{ e.snake }}(session)
+    kept = await make_{{ t.snake }}(session, {{ ln.link_attr }}=str(record.id))
+    dropped = await make_{{ t.snake }}(session, {{ ln.link_attr }}=str(record.id))
+    items = [
+        {**await {{ item }}(session), "id": str(kept.id)},
+        await {{ item }}(session),
+    ]
+
+    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+
+    assert response.status_code == 200, response.text
+    ids = await _{{ ln.name }}_of(session, record.id)
+    assert len(ids) == 2
+    assert kept.id in ids
+    assert dropped.id not in ids
+
+
+{{ trace(ln.id) }}
+{{ sig("test_" ~ op.name ~ "_keeps_the_" ~ ln.name ~ "_without_" ~ ln.name) }}    record = await make_{{ e.snake }}(session)
+    line = await make_{{ t.snake }}(session, {{ ln.link_attr }}=str(record.id))
+
+    response = await client.patch({{ id_url }}, json={})
+
+    assert response.status_code == 200, response.text
+    assert await _{{ ln.name }}_of(session, record.id) == [line.id]
+
+
+{{ trace(ln.id) }}
+{{ sig("test_" ~ op.name ~ "_changes_nothing_for_an_error_in_a_line_of_" ~ ln.name) }}    record = await make_{{ e.snake }}(session)
+    line = await make_{{ t.snake }}(session, {{ ln.link_attr }}=str(record.id))
+    items = [
+        await {{ item }}(session),
+        {**await {{ item }}(session), "id": str(uuid4())},
+    ]
+
+    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+
+    assert_problem(response, 422)
+    assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
+    assert await _{{ ln.name }}_of(session, record.id) == [line.id]
+{% for w in t.workflows if w.other_state %}
+
+
+{{ trace(ln.id) }}
+{{ trace(w.id) }}
+{{ sig("test_" ~ op.name ~ "_checks_the_" ~ w.name ~ "_of_the_" ~ ln.name) }}    record = await make_{{ e.snake }}(session)
+    items = [
+        await {{ item }}(session),
+        await {{ item }}(session, {{ w.field }}="{{ w.other_state }}"),
+    ]
+
+    response = await client.patch({{ id_url }}, json={"{{ ln.name }}": items})
+
+    assert_problem(response, 422)
+    assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
+    assert await _{{ ln.name }}_of(session, record.id) == []
+{% endfor %}
+{% endif %}
+{% endfor %}
