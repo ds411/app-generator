@@ -1,7 +1,8 @@
 # yaml-language-server: $schema=../../schema/app.schema.json
 # Invoices: the small DSL additions of M33. An invoice gets the next
 # number of a sequence (`sequence`), and a line gets the next position.
-# The seed records get the numbers in their order. scripts/check-nextjs.sh,
+# The seed records get the numbers in their order. The amounts are in the
+# currency of the customer (`currency_field`). scripts/check-nextjs.sh,
 # scripts/check-react.sh, and scripts/check-fastapi.sh generate and check
 # the apps of this definition, and scripts/sequence_test.py creates
 # invoices in the Next.js app and in the mock store of the React app.
@@ -19,6 +20,7 @@ entities:
     crud: { views: [table], forms: [create] }
     fields:
       name: { type: string, required: true, max_length: 120 }
+      currency: { type: enum, values: [usd, eur, gbp], default: usd }
 
   Invoice:
     display_field: number
@@ -30,7 +32,13 @@ entities:
         unique: true
         sequence: { start: 1001, prefix: INV-, width: 4 }
       issued_on: { type: date, required: true }
-      total: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
+      total:
+        type: decimal
+        min: 0
+        precision: 12
+        scale: 2
+        format: currency
+        currency_field: customer.currency
     relations:
       customer: { kind: many_to_one, target: Customer, required: true }
       lines: { kind: one_to_many, target: Line, inverse: invoice }
@@ -41,7 +49,13 @@ entities:
     fields:
       position: { type: integer, sequence: {} }
       text: { type: string, required: true, max_length: 200 }
-      amount: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
+      amount:
+        type: decimal
+        min: 0
+        precision: 12
+        scale: 2
+        format: currency
+        currency_field: invoice.customer.currency
     relations:
       invoice: { kind: many_to_one, target: Invoice, required: true, inverse: lines }
 
@@ -49,14 +63,36 @@ seed:
   Customer:
     records:
       acme: { name: Acme Corporation }
-      globex: { name: Globex }
+      globex: { name: Globex, currency: eur }
   Invoice:
     records:
       first: { issued_on: 2026-01-15, total: 1200, customer: acme }
       second: { issued_on: 2026-02-01, total: 80.5, customer: globex }
     mock: 4
 
+ui:
+  dashboards:
+    overview:
+      title: Overview
+      widgets:
+        euro_total:
+          kind: stat
+          label: Invoices in euros
+          entity: Invoice
+          aggregate: sum
+          field: total
+          filter: { customer.currency: eur }
+        by_currency:
+          kind: chart
+          chart: bar
+          label: Totals by currency
+          entity: Invoice
+          group_by: customer.currency
+          aggregate: sum
+          field: total
+
 pages:
+  overview: { path: /, title: Overview, content: { dashboard: overview } }
   customers: { path: /customers, title: Customers, content: { view: customer_table } }
   invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
   invoice_detail:

@@ -32,7 +32,7 @@
 {%- elif f.widget == "textarea" %}
 <Textarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={values.{{ f.key }}} onChange={(event) => change({{ js(f.key) }}, event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
 {%- elif f.format %}
-<NumberInput id={{ id }} format={{ js(f.format) }}{% if f.currency %} currency={{ js(f.currency) }}{% endif %}{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
+<NumberInput id={{ id }} format={{ js(f.format) }}{% if f.currency_expr %} currency={ {{- f.currency_expr }}}{% elif f.currency %} currency={{ js(f.currency) }}{% endif %}{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "number" or f.kind == "number" %}
 <Input id={{ id }} type="number" inputMode="decimal"{{ placeholder }}{% if f.step %} step={ {{- f.step }}}{% endif %} value={values.{{ f.key }} ?? ""} onChange={(event) => change({{ js(f.key) }}, event.target.value === "" ? null : Number(event.target.value))} disabled={busy} aria-invalid={ {{- invalid }}} />
 {%- else %}

@@ -245,6 +245,18 @@ default is `USD`. The views, the forms, and the stat widgets of the
 dashboards use the currency of the field. `appgen validate` rejects a
 code that is not an ISO 4217 code.
 
+`currency_field` gives each record its own currency: the field path of
+a `string` or an `enum` field with the ISO 4217 code, for example
+`customer.currency` for the invoices of a customer. The values of an
+`enum` field are the codes in lower case, for example `[usd, eur]`. The
+views show each amount in the currency of its record, and load the
+related records of the path. A form uses the currency field of the form,
+the record that it edits, or the record of a relation field of the form
+(one relation). Else, and for a record without a code, the amount has
+the currency of `currency`. A `sum`, `avg`, `min`, or `max` of such a
+field in a dashboard widget needs one currency (see
+[dashboards](#dashboards)).
+
 `translatable: true` gives a `string` or `text` field a value in each
 language of `translations` (see
 [Values in each language](#values-in-each-language)).
@@ -269,6 +281,19 @@ fields:
     default: planned
   budget: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
   fee: { type: decimal, min: 0, format: currency, currency: EUR }
+```
+
+```yaml
+# in: entities
+Customer:
+  fields:
+    name: { type: string, required: true }
+    currency: { type: enum, values: [usd, eur, gbp], default: usd }
+Invoice:
+  fields:
+    total: { type: decimal, format: currency, currency_field: customer.currency }
+  relations:
+    customer: { kind: many_to_one, target: Customer, required: true }
 ```
 
 ### Computed fields
@@ -1894,6 +1919,12 @@ widget has `kind`, `label`, and `span`:
 
 The default `format` of a stat widget is the `format` of its field (for
 `sum`, `avg`, `min`, and `max`), else `number`.
+
+An aggregate of a field with `currency_field` adds amounts in the
+currency of each record. A stat widget needs a filter on one currency,
+for example `filter: { customer.currency: eur }`, and shows the sum in
+that currency. A chart widget needs the same filter, or a `group_by` of
+the currency field. `appgen validate` reports the other cases.
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are

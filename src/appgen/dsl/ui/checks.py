@@ -32,6 +32,8 @@ from appgen.dsl.ui.dashboards import (
     ListWidget,
     StatWidget,
     Widget,
+    currency_path,
+    single_value,
 )
 from appgen.dsl.ui.fields import (
     DATE_TYPES,
@@ -580,6 +582,28 @@ def _check_aggregate(
     if target is not None:
         what = f"The aggregate '{widget.aggregate}'"
         yield from _check_suits(widget, "field", what, target, NUMBER_TYPES)
+        if isinstance(target.member, Field) and target.member.currency_field is not None:
+            yield from _check_one_currency(widget, widget.field, target.member.currency_field)
+
+
+def _check_one_currency(
+    widget: StatWidget | ChartWidget, field: str, currency_field: str
+) -> Iterator[Diagnostic]:
+    """An aggregate of amounts in the currencies of their records needs one currency a group."""
+    path = currency_path(field, currency_field)
+    if single_value(widget.filter, path) is not None:
+        return
+    if isinstance(widget, ChartWidget) and widget.group_by == path:
+        return
+    group = " or a group_by of it" if isinstance(widget, ChartWidget) else ""
+    yield _error(
+        "unsuitable-field",
+        f"The field '{field}' has the currency of each record ('{currency_field}'). "
+        f"The aggregate '{widget.aggregate}' adds amounts in more than one currency.",
+        widget,
+        at="field",
+        hint=f"Add a filter on one currency, for example '{path}: EUR'{group}.",
+    )
 
 
 def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterator[Diagnostic]:

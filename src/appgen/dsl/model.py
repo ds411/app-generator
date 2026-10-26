@@ -28,7 +28,7 @@ from appgen.dsl.storage import (
     size_schema,
 )
 from appgen.dsl.translations import Translations
-from appgen.dsl.ui.common import Action
+from appgen.dsl.ui.common import Action, FieldPath
 from appgen.dsl.ui.dashboards import RecordFilter
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
@@ -113,6 +113,10 @@ class Field(Element):
     """The display format in all views. A view column can set another format."""
     currency: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")] | None = None
     """The ISO 4217 code of the currency of the `currency` format, for example `EUR`."""
+    currency_field: FieldPath | None = None
+    """Number fields: the path of a `string` or an `enum` field with the ISO 4217 code of
+    the currency of each record, for example `customer.currency`. `currency` is the
+    currency of a record without a code."""
     computed: Text | None = None
     """An expression of other fields (see `appgen.dsl.expressions`). The apps compute the value."""
     filter: RecordFilter | None = None

@@ -3142,6 +3142,17 @@
           "default": null,
           "title": "Currency"
         },
+        "currency_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "computed": {
           "anyOf": [
             {

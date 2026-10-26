@@ -340,9 +340,11 @@ def _check_lines(definition: AppDefinition, operation: Operation) -> Iterator[Di
 
 def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
     """The options of each field must fit its type."""
-    for entity in definition.entities.values():
+    for entity_name, entity in definition.entities.items():
         for field in entity.fields.values():
             yield from _check_field(field)
+            if field.currency_field is not None and field.type in NUMBER_TYPES:
+                yield from _check_currency_field(definition, entity_name, field)
             if field.translatable and definition.translations is None:
                 yield _error(
                     "invalid-option",
@@ -366,7 +368,14 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
-            for key in ("unique", "computed", "translatable", "filter", "sequence"):
+            for key in (
+                "unique",
+                "computed",
+                "translatable",
+                "filter",
+                "sequence",
+                "currency_field",
+            ):
                 if getattr(param, key):
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
@@ -379,6 +388,45 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                     at="type",
                     hint="Give the entity a file field, and let the operation read it.",
                 )
+
+
+def _check_currency_field(
+    definition: AppDefinition, entity: str, field: Field
+) -> Iterator[Diagnostic]:
+    """The currency of each record is a `string` or an `enum` field with ISO 4217 codes."""
+    path = field.currency_field
+    assert path is not None
+    try:
+        target = resolve_path(definition, entity, path)
+    except FieldPathError as error:
+        yield _error("unknown-reference", str(error), field, at="currency_field")
+        return
+    member = target.member
+    if (
+        not isinstance(member, Field)
+        or member.type not in ("string", "enum")
+        or member.translatable
+        or member.computed is not None
+    ):
+        yield _error(
+            "unsuitable-field",
+            f"The path '{path}' must give a 'string' or an 'enum' field with the ISO 4217 "
+            "code of the currency.",
+            field,
+            at="currency_field",
+            hint="Give the path of a field like 'currency' or 'customer.currency'.",
+        )
+        return
+    wrong = [value for value in member.values or [] if value.upper() not in CURRENCY_CODES]
+    if wrong:
+        yield _error(
+            "invalid-value",
+            f"The field '{target.entity}.{target.name}' gives the currency of '{field.id}', "
+            f"but its value '{wrong[0]}' is not an ISO 4217 code.",
+            field,
+            at="currency_field",
+            hint="Use the codes in lower case as the values, for example 'eur' and 'usd'.",
+        )
 
 
 def _check_sequence(field: Field, sequence: Sequence) -> Iterator[Diagnostic]:
@@ -2792,6 +2840,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "scale": {"decimal"},
         "values": {"enum"},
         "currency": NUMBER_TYPES,
+        "currency_field": NUMBER_TYPES,
         "translatable": {"string", "text"},
         "max_size": FILE_TYPES,
         "types": FILE_TYPES,

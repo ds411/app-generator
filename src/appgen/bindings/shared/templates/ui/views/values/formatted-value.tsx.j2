@@ -14,7 +14,7 @@ export function FormattedValue({
   value: unknown;
   format?: Format;
   /** The ISO 4217 code of the `currency` format. The default is `CURRENCY`. */
-  currency?: string;
+  currency?: string | null;
   className?: string;
 }) {
   if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
