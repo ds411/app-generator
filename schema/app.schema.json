@@ -4757,6 +4757,94 @@
       "title": "NavigateAction",
       "type": "object"
     },
+    "Notification": {
+      "additionalProperties": false,
+      "description": "The notices of a change of a record: who gets a notice, and its text (ADR 0041).\n\nThe change is an event of the entity (`created`, or `changed` with\n`fields`), or a transition of a workflow of the entity. Each user at\nthe end of a receiver path gets a notice, except the user that made\nthe change.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotificationEvent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "transition": {
+          "anyOf": [
+            {
+              "pattern": "^([a-z][a-z0-9_]*\\.)?[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transition"
+        },
+        "receivers": {
+          "items": {
+            "$ref": "#/$defs/ReceiverPath"
+          },
+          "minItems": 1,
+          "title": "Receivers",
+          "type": "array"
+        },
+        "text": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "entity",
+        "receivers",
+        "text"
+      ],
+      "title": "Notification",
+      "type": "object"
+    },
+    "NotificationEvent": {
+      "enum": [
+        "created",
+        "changed"
+      ],
+      "type": "string"
+    },
     "NumberRule": {
       "additionalProperties": false,
       "description": "A minimum or a maximum value.",
@@ -5379,6 +5467,10 @@
       ],
       "title": "Provider",
       "type": "object"
+    },
+    "ReceiverPath": {
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+      "type": "string"
     },
     "RecordAction": {
       "enum": [
@@ -7471,6 +7563,16 @@
         "$ref": "#/$defs/MemberName"
       },
       "title": "Jobs",
+      "type": "object"
+    },
+    "notifications": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Notification"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Notifications",
       "type": "object"
     }
   },

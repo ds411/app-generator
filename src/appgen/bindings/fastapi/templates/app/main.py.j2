@@ -30,6 +30,9 @@ from app.core.health import router as health_router
 from app.core.i18n import LanguageMiddleware
 {% endif %}
 from app.core.logging import RequestLogMiddleware, configure_logging
+{% if py.notifications %}
+from app.core.notices import router as notices_router
+{% endif %}
 {% if py.providers %}
 from app.core.providers import router as providers_router
 {% endif %}
@@ -180,6 +183,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% if py.storage %}
     {{ trace(py.storage.id) }}
     app.include_router(storage_router)
+{% endif %}
+{% for id in py.notification_ids %}
+    {{ trace(id) }}
+{% endfor %}
+{% if py.notifications %}
+    app.include_router(notices_router)
 {% endif %}
 {% for api in exposed %}
     {{ trace(api.id) }}

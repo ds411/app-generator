@@ -55,3 +55,4 @@ gives the rules.
 | 0037   | [Sequence numbers of the fields](0037-sequence-numbers.md)             | Accepted |
 | 0038   | [The period of a dashboard](0038-dashboard-period.md)                  | Accepted |
 | 0040   | [Change log of the records](0040-history.md)                           | Accepted |
+| 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |

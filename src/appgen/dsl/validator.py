@@ -61,6 +61,7 @@ from appgen.dsl.model import (
     Relation,
     Sequence,
 )
+from appgen.dsl.notifications import Notification
 from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
 from appgen.dsl.rules import (
     EntityCompareRule,
@@ -1256,6 +1257,160 @@ def check_history(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
 
 
+def check_notifications(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A notification has a change of its entity, receivers that are users, and known values.
+
+    The receivers are paths of relations to the user entity, so a
+    notification needs `auth` (ADR 0041).
+    """
+    auth = definition.auth
+    for notification in definition.notifications.values():
+        if auth is None:
+            yield _error(
+                "missing-key",
+                "A notification needs the section 'auth': its receivers are the users of the app.",
+                notification,
+                hint="Add the section 'auth' with the 'user_entity'.",
+            )
+        entity = definition.entities.get(notification.entity)
+        if entity is None:
+            yield _missing(
+                notification, "entity", "entity", notification.entity, definition.entities
+            )
+            continue
+        yield from _check_notification_change(definition, notification, entity)
+        receivers = notification.receivers
+        if len(set(receivers)) != len(receivers):
+            yield _error(
+                "duplicate-name",
+                "The paths in 'receivers' must be unique.",
+                notification,
+                at="receivers",
+            )
+        if auth is not None:
+            for path in receivers:
+                yield from _check_owner_path(
+                    definition,
+                    auth.user_entity,
+                    notification.entity,
+                    notification,
+                    path,
+                    at="receivers",
+                    what="receiver",
+                )
+        yield from _check_notification_text(notification, entity)
+
+
+def _check_notification_change(
+    definition: AppDefinition, notification: Notification, entity: Entity
+) -> Iterator[Diagnostic]:
+    """The notification has an event or a transition, and `fields` only with `changed`."""
+    name = notification.entity
+    if notification.event is not None and notification.transition is not None:
+        yield _error(
+            "invalid-option",
+            "A notification has 'event' or 'transition', not both.",
+            notification,
+            at="transition",
+        )
+    elif notification.event is None and notification.transition is None:
+        yield _error(
+            "missing-key",
+            "A notification needs 'event' or 'transition': the change that gives the notices.",
+            notification,
+            hint="Add for example 'event: changed'.",
+        )
+    if notification.fields is not None:
+        if notification.event != "changed":
+            yield _error(
+                "invalid-option",
+                "'fields' is only for the event 'changed'.",
+                notification,
+                at="fields",
+            )
+        elif len(set(notification.fields)) != len(notification.fields):
+            yield _error(
+                "duplicate-name", "The names in 'fields' must be unique.", notification, at="fields"
+            )
+        else:
+            for field_name in notification.fields:
+                yield from _check_notification_member(notification, entity, "fields", field_name)
+    parts = notification.transition_parts()
+    if parts is None:
+        return
+    workflow_name, transition = parts
+    workflows = {n: w for n, w in definition.workflows.items() if w.entity == name}
+    if workflow_name is not None and workflow_name not in workflows:
+        yield _error(
+            "unknown-reference",
+            f"The entity '{name}' has no workflow '{workflow_name}'.",
+            notification,
+            at="transition",
+            hint=_did_you_mean(workflow_name, workflows),
+        )
+        return
+    found = [
+        n
+        for n, w in workflows.items()
+        if transition in w.transitions and workflow_name in (None, n)
+    ]
+    if not found:
+        choices = [t for w in workflows.values() for t in w.transitions]
+        yield _error(
+            "unknown-reference",
+            f"The transition '{transition}' of a workflow of '{name}' does not exist.",
+            notification,
+            at="transition",
+            hint=_did_you_mean(transition, choices)
+            or (None if choices else f"Add a workflow of '{name}' with the transition."),
+        )
+    elif len(found) > 1:
+        yield _error(
+            "invalid-value",
+            f"The workflows {', '.join(repr(n) for n in found)} of '{name}' both have the "
+            f"transition '{transition}'.",
+            notification,
+            at="transition",
+            hint=f"Name the workflow, for example '{found[0]}.{transition}'.",
+        )
+
+
+def _check_notification_text(notification: Notification, entity: Entity) -> Iterator[Diagnostic]:
+    """Each name in braces of the text is a stored field or a `many_to_one` relation."""
+    for name in notification.values():
+        yield from _check_notification_member(notification, entity, "text", name)
+
+
+def _check_notification_member(
+    notification: Notification, entity: Entity, key: str, name: str
+) -> Iterator[Diagnostic]:
+    """A name of `fields` or of the text is a stored field, except a file, or a `many_to_one`."""
+    field = entity.fields.get(name)
+    relation = entity.relations.get(name)
+    what = "value in braces" if key == "text" else "field or relation"
+    if field is None and relation is None:
+        choices = [n for n, f in entity.stored_fields.items() if not f.is_file]
+        choices += [n for n, r in entity.relations.items() if r.kind == "many_to_one"]
+        yield _missing(notification, key, what, name, choices)
+    elif (field is not None and (field.computed is not None or field.is_file)) or (
+        relation is not None and relation.kind != "many_to_one"
+    ):
+        kind = (
+            f"the '{relation.kind}' relation"
+            if relation is not None
+            else "the computed field"
+            if field is not None and field.computed is not None
+            else "the file field"
+        )
+        yield _error(
+            "unsuitable-field",
+            f"The {what} '{name}' is {kind} '{notification.entity}.{name}'. A notification uses "
+            "the stored fields, except the files, and the 'many_to_one' relations.",
+            notification,
+            at=key,
+        )
+
+
 def _custom_operations(definition: AppDefinition, entity: str | None) -> list[str]:
     return [
         name
@@ -1769,9 +1924,20 @@ def _check_record_rule(
 
 
 def _check_owner_path(
-    definition: AppDefinition, users: str, name: str, rule: RecordRule, path: str
+    definition: AppDefinition,
+    users: str,
+    name: str,
+    element: Element,
+    path: str,
+    at: str = "owner",
+    what: str = "owner",
 ) -> Iterator[Diagnostic]:
-    """Each step is a many-to-one or a many-to-many relation. The last step goes to the users."""
+    """Each step is a many-to-one or a many-to-many relation. The last step goes to the users.
+
+    `at` is the key of the path in the element, and `what` names the path
+    in the messages: the owner of a record rule, or a receiver of a
+    notification (ADR 0041).
+    """
     current = name
     relation = None
     for step in path.split("."):
@@ -1784,37 +1950,37 @@ def _check_owner_path(
             if step in entity.fields:
                 yield _error(
                     "unsuitable-field",
-                    f"The step '{step}' of the owner is a field of '{current}', not a relation.",
-                    rule,
-                    at="owner",
+                    f"The step '{step}' of the {what} is a field of '{current}', not a relation.",
+                    element,
+                    at=at,
                 )
             else:
                 matches = difflib.get_close_matches(step, list(entity.relations), n=1)
                 yield _error(
                     "unknown-reference",
                     f"The relation '{step}' of '{current}' does not exist.",
-                    rule,
-                    at="owner",
+                    element,
+                    at=at,
                     hint=f"Did you mean '{matches[0]}'?" if matches else None,
                 )
             return
         if relation.kind not in OWNER_KINDS:
             yield _error(
                 "unsuitable-field",
-                f"Each step of the owner must be a many-to-one or a many-to-many relation, "
+                f"Each step of the {what} must be a many-to-one or a many-to-many relation, "
                 f"and '{current}.{step}' is a '{relation.kind}' relation.",
-                rule,
-                at="owner",
-                hint="A record gets its owner from the records that it refers to.",
+                element,
+                at=at,
+                hint=f"A record gets its {what} from the records that it refers to.",
             )
             return
         current = relation.target
     if relation is not None and relation.target != users:
         yield _error(
             "unsuitable-field",
-            f"The owner must end with a relation to the user entity '{users}'.",
-            rule,
-            at="owner",
+            f"The {what} '{path}' must end with a relation to the user entity '{users}'.",
+            element,
+            at=at,
         )
 
 
@@ -2927,6 +3093,7 @@ CHECKS: list[Check] = [
     check_jobs,
     check_events,
     check_history,
+    check_notifications,
     check_auth,
     check_access,
     check_apis,

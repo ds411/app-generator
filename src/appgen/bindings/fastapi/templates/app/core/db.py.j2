@@ -223,9 +223,10 @@ EVENT_KEY = "appgen.event"
 
 
 {% endif %}
-{% if py.history and definition.auth %}
+{% if py.user_key %}
 USER_KEY = "appgen.user"
-"""The key of `session.info` with the ID of the signed-in user, for the change log (ADR 0040)."""
+"""The key of `session.info` with the ID of the signed-in user: the change log (ADR 0040) and the
+notices (ADR 0041) name the user of a change."""
 
 
 {% endif %}

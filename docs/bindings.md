@@ -672,6 +672,44 @@ helpers of the log.
   a delete, the user of an entry, the page of the endpoint, and the
   restore.
 
+### The notices of the FastAPI app
+
+The FastAPI app keeps the notices of the `notifications` in the table
+`notices` ([ADR 0041](adr/0041-notifications.md)). `app/core/notifications.py`
+has the model `Notice`, the texts of the notifications (`TEXTS`), and
+the helpers that add the notices. `app/core/notices.py` has the
+endpoints. They are in another module, because `app/core/auth.py`
+imports the repository of the user entity, and that repository can
+import the helpers.
+
+- The repository of an entity with a notification has the function
+  `notify(session, record, before)`. `add` calls it after the change
+  log with `before=None`, and `update` (and `change`) with the values
+  before the change. A notification `changed` compares the attributes
+  of its constant `<NOTIFICATION>_FIELDS`, and a transition the state
+  of its workflow.
+- A receiver path with one many-to-one step is the foreign key of the
+  record. A longer path, or a many-to-many step, is a query for each
+  step (`path_users()`), after a flush of the changes of the
+  transaction.
+- `add_notices()` adds one notice for each user, except the user in
+  `session.info` (`USER_KEY`, see the change log above). The values of
+  the text are text: `text_value()` gives a time in UTC without the
+  seconds, and `record_text()` the display value of the record of a
+  relation.
+- `GET /notices`, `POST /notices/{id}/read`, and `POST /notices/read`
+  need a signed-in user, and use only the notices of the user. The
+  list gives the text with `t()` in the language of the request, and
+  the display value of the user of the change. `notice_text()` puts the
+  values into the translation after `t()`, so that a value can have any
+  name, also `text`.
+- The generated tests in `tests/features/<slice>/test_notifications.py`
+  make a user a receiver through the records of the first receiver
+  path, make the change, and check the notices, also without a notice
+  for the user of the change. `tests/test_notices.py` checks the
+  endpoints, and the text in another language when a language
+  translates the text of the first notification.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process

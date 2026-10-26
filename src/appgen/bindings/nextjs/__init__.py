@@ -588,6 +588,8 @@ BINDING = Binding(
         | {"storage"}
         | {"history"}
     ),
+    # The notices of the Next.js app follow with the bell of the top bar (#410).
+    excludes=frozenset({"notification"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

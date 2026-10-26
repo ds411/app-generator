@@ -228,6 +228,10 @@ of the entity in snake case, for example `bookings`.
   entries of the change log of an entity with `history` (ADR 0040). A
   custom operation that changes records with these functions adds the
   entries too. A change with SQL adds none.
+- The repository functions `add` and `update` add the notices of the
+  `notifications` (ADR 0041), except for the user of the change. A
+  custom operation that changes records with these functions gives the
+  notices too. A change with SQL gives none.
 - The factories of `tests/factories.py` (`make_<entity>(session, **values)`)
   give a value to each field, also to the optional fields, and the
   values change with each call. In a test of your logic, give each value

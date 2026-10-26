@@ -29,6 +29,7 @@ valid.
 - [pages](#pages)
 - [workflows](#workflows)
 - [jobs](#jobs)
+- [notifications](#notifications)
 - [apis](#apis)
 - [webhooks](#webhooks)
 - [ui](#ui)
@@ -67,6 +68,7 @@ The file is YAML 1.1. The top level has these keys:
 | `seed`       | No       | The records that the apps start with, for each entity.        |
 | `storage`    | No       | The place of the files of the `file` and `image` fields.      |
 | `jobs`       | No       | Work on a schedule, or at the time of a date field of each record. |
+| `notifications` | No    | The notices that users get when a record that concerns them changes. |
 
 A minimal definition:
 
@@ -1205,6 +1207,68 @@ with the secret `JOBS_SECRET`: a Kubernetes CronJob, Cloud Scheduler,
 or the service `jobs` of Compose
 ([bindings.md](bindings.md#the-jobs-of-the-nextjs-app)). Both apps have
 the same table `job_runs`. The React app (mock data) has no jobs.
+
+## notifications
+
+A notification gives users a notice when a record that concerns them
+is created or changed ([ADR 0041](adr/0041-notifications.md)). It names
+the change of a record, the users that get the notice (the receivers),
+and the text of the notice.
+
+```yaml
+# example: room-booking
+notifications:
+  booking_moved:
+    entity: Booking
+    event: changed
+    fields: [starts_at, ends_at, room]
+    receivers: [organizer]
+    text: The booking {title} in {room} has a new time.
+  booking_confirmed:
+    entity: Booking
+    transition: confirm
+    receivers: [organizer]
+    text: The booking {title} is confirmed.
+```
+
+| Key           | Required | Content                                                         |
+| ------------- | -------- | --------------------------------------------------------------- |
+| `entity`      | Yes      | The entity of the records.                                      |
+| `event`       | No       | `created` or `changed`: the change of a record that gives the notices. |
+| `fields`      | No       | Only for `changed`: the stored fields and the `many_to_one` relations that the notification watches. The default is all. |
+| `transition`  | No       | A transition of a workflow of the entity: `<transition>`, or `<workflow>.<transition>` when two workflows of the entity have a transition of the same name. |
+| `receivers`   | Yes      | The users that get the notices: paths of relations to the user entity. |
+| `text`        | Yes      | The text of a notice. A name in braces is a value of the record. |
+| `description` | No       | Text.                                                           |
+
+- A notification has `event` or `transition`, not both. A notification
+  `changed` gives the notices when an update gives one of `fields` a
+  new value. A transition gives them when an update changes the field
+  of the workflow from a state of `from` to the state `to`.
+- Each receiver is a relation, or a path of relations with dots, from
+  the entity to the user entity of `auth`, for example `assignee` or
+  `project.team.members`. Each step is a `many_to_one` or a
+  `many_to_many` relation, as in the owner of a record rule (see
+  [access](#access)). A notification needs `auth`.
+- Each user at the end of a receiver path gets one notice, except the
+  user that made the change. A change without a signed-in user, for
+  example in a job, gives a notice to all receivers.
+- A name in braces in `text` is a stored field of the entity, except a
+  file field, or a `many_to_one` relation: the display value of its
+  record. A translatable field gives the value of the default language.
+  The notice keeps the values from the time of the change.
+- `text` is a key of the [translations](#translations): the apps give
+  the text of a notice in the language of the user that reads it.
+- The data access functions of the apps add the notices in the
+  transaction of the change, after the [events](#events) and the
+  [change log](#history). A change outside these functions gives no
+  notice: SQL in a script, and the seed.
+- The FastAPI app keeps the notices in the table `notices`.
+  `GET /notices` gives the notices of the signed-in user, the newest
+  first (`unread=true`: only the unread notices), `POST
+  /notices/{id}/read` marks a notice read, and `POST /notices/read`
+  marks all notices of the user read. The Next.js and the React apps
+  have no notices yet.
 
 ## apis
 
@@ -2830,6 +2894,7 @@ to translate one. The rules and the workflows give their own messages.
   that is not valid `The link is not valid, or has ended.`.
 - The change log: `The record has no history entry with the ID {id}.`,
   `Only the entry of a change has old values to restore.`.
+- The notices: `You have no notice with the ID {id}.`.
 
 ## Extension keys
 
