@@ -28,6 +28,7 @@ from appgen.dsl.openapi import (
     UnionSchema,
 )
 from appgen.gen.naming import camel, constant, kebab, pascal
+from appgen.gen.render import GenerationError
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 # The modules of `src/shared/api/` that the apps have: the folder of an
@@ -340,6 +341,20 @@ def ts_features(apis: Mapping[str, TsApi]) -> frozenset[str]:
             if m.cookie_parameter:
                 found.add("cookie")
     return frozenset(found)
+
+
+def reject_user_flows(definition: AppDefinition, binding: str) -> None:
+    """Raise GenerationError if an API has the authorization code flow (ADR 0033).
+
+    A binding calls this function until it generates the connections of
+    the users to the APIs.
+    """
+    for api in definition.apis.values():
+        if api.user_flow:
+            raise GenerationError(
+                f"The binding '{binding}' does not generate the authorization code flow of "
+                f"OAuth 2.0 yet: '{api.id}'. The FastAPI binding generates it."
+            )
 
 
 def ts_apis(definition: AppDefinition) -> dict[str, TsApi]:

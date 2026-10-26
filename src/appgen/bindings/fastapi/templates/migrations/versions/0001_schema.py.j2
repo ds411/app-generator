@@ -108,6 +108,33 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("user_id", name="pk_credentials"),
     )
 {% endif %}
+{% if py_connections %}
+{% set u = py.entity(definition.auth.user_entity) %}
+    op.create_table(
+        "api_connections",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("api", sa.String(length=100), nullable=False),
+        sa.Column("access_token", sa.Text(), nullable=False),
+        sa.Column("refresh_token", sa.Text(), nullable=True),
+        sa.Column("expires_at", sa.BigInteger(), nullable=True),
+        sa.Column("scope", sa.Text(), nullable=False),
+        sa.Column(
+            "connected_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["{{ u.table }}.id"],
+            name="fk_api_connections_user_id_{{ u.table }}",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name="pk_api_connections"),
+        sa.UniqueConstraint("user_id", "api", name="uq_api_connections_user_id_api"),
+    )
+{% endif %}
 {% if py_webhooks %}
     op.create_table(
         "webhook_events",
@@ -157,6 +184,9 @@ def downgrade() -> None:
 {% endif %}
 {% if py_webhooks %}
     op.drop_table("webhook_events")
+{% endif %}
+{% if py_connections %}
+    op.drop_table("api_connections")
 {% endif %}
 {% if definition.auth and definition.auth.password %}
     op.drop_table("credentials")

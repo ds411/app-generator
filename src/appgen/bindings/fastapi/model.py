@@ -17,7 +17,12 @@ from typing import Any, cast
 
 from appgen.bindings.fastapi.dashboards import TEST_TODAY, PyDashboard, python_dashboards
 from appgen.bindings.fastapi.i18n import language_test
-from appgen.bindings.fastapi.integrations import mocks_imports, py_features, python_apis
+from appgen.bindings.fastapi.integrations import (
+    mocks_imports,
+    py_features,
+    python_apis,
+    python_connections,
+)
 from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.names import attribute, plural, singular
@@ -3099,6 +3104,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py_webhooks": python_webhooks(definition),
         "py_api_mocks_imports": mocks_imports(apis),
         "py_api_features": py_features(apis),
+        "py_connections": python_connections(apis),
         "i18n": plan,
         "i18n_test": language_test(plan) if plan is not None else None,
     }

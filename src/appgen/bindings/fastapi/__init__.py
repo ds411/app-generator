@@ -377,6 +377,16 @@ BINDING = Binding(
             for_each="api",
             when="py_apis[name].expose",
         ),
+        Output(
+            template="app/core/connections.py.j2",
+            path="app/core/connections.py",
+            when="py_connections",
+        ),
+        Output(
+            template="tests/test_connections.py.j2",
+            path="tests/test_connections.py",
+            when="py_connections",
+        ),
         Output(template="app/core/webhooks.py.j2", path="app/core/webhooks.py", when="py_webhooks"),
         Output(
             template="app/core/inbound_email.py.j2",

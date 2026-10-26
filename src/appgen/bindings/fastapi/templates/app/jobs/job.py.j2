@@ -67,6 +67,11 @@ async def run(
         if record is None:
             # The record is gone, or the filter does not select it any more.
             return
+{% for c in job.user_clients %}
+        if not await connected(session, {{ c.api | tojson }}, {{ c.user }}):
+            # The user has no connection to the API {{ c.api }}: the run has nothing to do.
+            return
+{% endfor %}
 {% set ns = namespace(indent=8) %}
 {% for c in job.clients %}
 {{ " " * ns.indent }}{{ py.call(c.param ~ " = ", c.client, c.args, ns.indent) }}

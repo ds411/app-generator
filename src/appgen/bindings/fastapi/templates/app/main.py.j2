@@ -20,6 +20,9 @@ from app.core.auth import router as auth_router
 from app.core.auth import router as auth_router
 {% endif %}
 from app.core.config import Settings
+{% if py_connections %}
+from app.core.connections import router as connections_router
+{% endif %}
 from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
 from app.core.health import router as health_router
@@ -159,6 +162,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% endfor %}
 {% if py.providers %}
     app.include_router(providers_router)
+{% endif %}
+{% for api in py_connections %}
+    {{ trace(api.id) }}
+{% endfor %}
+{% if py_connections %}
+    app.include_router(connections_router)
 {% endif %}
 {% if sf %}
     {{ trace(sf.id) }}

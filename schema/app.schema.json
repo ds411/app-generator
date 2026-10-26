@@ -661,6 +661,22 @@
           },
           "title": "Scopes",
           "type": "array"
+        },
+        "flow": {
+          "anyOf": [
+            {
+              "enum": [
+                "clientCredentials",
+                "authorizationCode"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flow"
         }
       },
       "required": [
@@ -3908,6 +3924,17 @@
         },
         "filter": {
           "$ref": "#/$defs/RecordFilter"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "Job",

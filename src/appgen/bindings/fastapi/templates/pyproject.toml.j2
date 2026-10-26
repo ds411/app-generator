@@ -12,6 +12,9 @@ dependencies = [
 {% if py.storage and py.storage.s3 %}
     "boto3>=1.43",
 {% endif %}
+{% if py_connections %}
+    "cryptography>=46",
+{% endif %}
     "fastapi[standard]>=0.161,<0.162",
 {% if py_apis or py.providers %}
     "httpx>=0.28",

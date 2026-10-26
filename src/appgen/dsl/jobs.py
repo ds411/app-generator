@@ -40,6 +40,10 @@ class Job(Element):
     """A custom operation of the entity, without required params."""
     filter: RecordFilter = pydantic.Field(default_factory=dict[str, JsonValue])
     """The records of the job: the filter syntax of the dashboards, with `$now`."""
+    user: MemberName | None = None
+    """A relation of the entity to the user entity of `auth`, or `id` for the user entity: the
+    clients of the APIs with the authorization code flow send the token of this user
+    (ADR 0033)."""
 
     def offset_delta(self) -> dt.timedelta:
         """Return the offset as a time span. Raise ValueError if it is not valid."""

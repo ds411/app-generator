@@ -1,0 +1,254 @@
+{{ trace_header(*(py_connections | map(attribute="id"))) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set api = py_connections[0] %}
+{% set path = "/auth/connections/" ~ api.connection_name %}
+"""The tests of the connections of the users to the APIs (ADR 0033).
+
+A mock token endpoint answers the grants of the flow. The tests sign in a
+user with a token, start a connection to the API `{{ api.name }}`, and finish it
+with a code. They check the PKCE verifier, the encrypted tokens in the
+table, and the refresh of an access token that ended.
+"""
+
+import base64
+import hashlib
+from collections.abc import AsyncIterator
+from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
+
+import httpx
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import make_token
+from app.core.config import Settings
+from app.core.connections import ApiConnection, NotConnectedError, UserToken, connection_client
+from app.core.db import make_engine, make_sessions
+from app.main import create_app
+from tests.factories import make_{{ u.snake }}
+from tests.integrations.mocks import mock_transport
+from tests.problems import assert_problem
+
+pytestmark = pytest.mark.anyio
+
+FRONT_END = "http://localhost:5173"
+API_URL = "https://api.example.com"
+PATH = "{{ path }}"
+"""The path of the connection to the API `{{ api.name }}`."""
+
+
+class TokenEndpoint:
+    """A mock token endpoint: it keeps the form of each grant, and gives new tokens."""
+
+    def __init__(self) -> None:
+        self.grants: list[dict[str, list[str]]] = []
+        self.status = 200
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.grants.append(parse_qs(request.content.decode()))
+        if self.status != 200:
+            return httpx.Response(self.status, json={"error": "invalid_grant"})
+        number = len(self.grants)
+        tokens = {
+            "access_token": f"access-{number}",
+            "refresh_token": f"refresh-{number}",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+        return httpx.Response(200, json=tokens)
+
+
+@pytest.fixture
+def endpoint() -> TokenEndpoint:
+    return TokenEndpoint()
+
+
+@pytest.fixture
+def settings(migrated_url: str) -> Settings:
+    """The settings of the app: a client ID and a client secret for each API."""
+    return Settings(
+        database_url=migrated_url,
+        auth_secret="test-secret",
+        cors_origins=[FRONT_END],
+        public_url=API_URL,
+{% for c in py_connections %}
+        {{ c.url_setting }}={{ c.test_url | tojson }},
+        {{ c.client_id_setting }}="client",
+        {{ c.secret_setting }}="secret",
+{% endfor %}
+    )
+
+
+@pytest.fixture
+async def app_client(settings: Settings, endpoint: TokenEndpoint) -> AsyncIterator[AsyncClient]:
+    """An HTTP client that calls the app, with the mock token endpoint."""
+    app = create_app(settings)
+
+    async def mock_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(endpoint.handle)) as client:
+            yield client
+
+    app.dependency_overrides[connection_client] = mock_client
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    await app.state.engine.dispose()
+
+
+async def _sign_in(session: AsyncSession) -> tuple[UUID, dict[str, str]]:
+    """Store a user, and return the user ID and the header with a token."""
+    user = await make_{{ u.snake }}(session)
+    return user.id, {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+
+
+async def _start(
+    app_client: AsyncClient, headers: dict[str, str], **body: str
+) -> dict[str, list[str]]:
+    """Start a connection, and return the query of the authorization URL."""
+    response = await app_client.post(PATH, json=body, headers=headers)
+    assert response.status_code == 200, response.text
+    url: str = response.json()["authorization_url"]
+    return parse_qs(urlsplit(url).query)
+
+
+async def test_a_user_connects_an_account(
+    app_client: AsyncClient, endpoint: TokenEndpoint, session: AsyncSession
+) -> None:
+    user_id, headers = await _sign_in(session)
+    query = await _start(app_client, headers)
+
+    params = {"code": "code-1", "state": query["state"][0]}
+    response = await app_client.get(f"{PATH}/callback", params=params)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["connected"] is True
+    assert query["client_id"] == ["client"]
+    assert query["redirect_uri"] == [f"{API_URL}{PATH}/callback"]
+    grant = endpoint.grants[0]
+    assert grant["grant_type"] == ["authorization_code"]
+    assert grant["code"] == ["code-1"]
+    assert grant["redirect_uri"] == query["redirect_uri"]
+    # The verifier of the grant gives the challenge of the authorization URL.
+    digest = hashlib.sha256(grant["code_verifier"][0].encode()).digest()
+    assert query["code_challenge"] == [base64.urlsafe_b64encode(digest).rstrip(b"=").decode()]
+    connection = await session.scalar(select(ApiConnection))
+    assert connection is not None
+    assert connection.user_id == user_id
+    # The table has the tokens encrypted.
+    assert "access-1" not in connection.access_token
+    assert connection.refresh_token is not None
+    assert "refresh-1" not in connection.refresh_token
+    listed = await app_client.get("/auth/connections", headers=headers)
+    assert listed.status_code == 200, listed.text
+    found = [c["connected"] for c in listed.json() if c["api"] == "{{ api.connection_name }}"]
+    assert found == [True]
+
+
+async def test_the_callback_sends_the_browser_back_to_return_to(
+    app_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await _sign_in(session)
+    query = await _start(app_client, headers, return_to=f"{FRONT_END}/connections")
+
+    params = {"code": "code-1", "state": query["state"][0]}
+    response = await app_client.get(f"{PATH}/callback", params=params)
+
+    assert response.status_code == 303, response.text
+    location = f"{FRONT_END}/connections#connected={{ api.connection_name }}"
+    assert response.headers["Location"] == location
+
+
+async def test_a_code_that_the_server_does_not_accept_gives_the_error_in_the_fragment(
+    app_client: AsyncClient, endpoint: TokenEndpoint, session: AsyncSession
+) -> None:
+    _, headers = await _sign_in(session)
+    query = await _start(app_client, headers, return_to=f"{FRONT_END}/connections")
+    endpoint.status = 400
+
+    params = {"code": "wrong", "state": query["state"][0]}
+    response = await app_client.get(f"{PATH}/callback", params=params)
+
+    assert response.status_code == 303, response.text
+    assert response.headers["Location"].startswith(f"{FRONT_END}/connections#error=")
+    assert await session.scalar(select(ApiConnection)) is None
+
+
+async def test_a_return_to_of_another_origin_gives_422(
+    app_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await _sign_in(session)
+
+    body = {"return_to": "https://other.example/connections"}
+    response = await app_client.post(PATH, json=body, headers=headers)
+
+    assert_problem(response, 422)
+
+
+async def test_a_state_that_is_not_valid_gives_400(app_client: AsyncClient) -> None:
+    params = {"code": "code-1", "state": "x.y"}
+    response = await app_client.get(f"{PATH}/callback", params=params)
+
+    assert_problem(response, 400)
+
+
+async def test_the_start_needs_a_signed_in_user(app_client: AsyncClient) -> None:
+    response = await app_client.post(PATH, json={})
+
+    assert_problem(response, 401)
+
+
+async def test_a_token_source_refreshes_an_access_token_that_ended(
+    app_client: AsyncClient, settings: Settings, session: AsyncSession
+) -> None:
+    user_id, headers = await _sign_in(session)
+    query = await _start(app_client, headers)
+    params = {"code": "code-1", "state": query["state"][0]}
+    callback = await app_client.get(f"{PATH}/callback", params=params)
+    assert callback.status_code == 200, callback.text
+    engine = make_engine(settings.database_url)
+    token = UserToken(settings, {{ api.name | tojson }}, make_sessions(engine), user_id)
+    tokens: list[httpx.Request] = []
+    transport = mock_transport({{ api.name | tojson }}, tokens=tokens)
+    async with httpx.AsyncClient(transport=transport, base_url={{ api.test_url | tojson }}) as http:
+        first = await token.get(http)
+        await session.execute(update(ApiConnection).values(expires_at=0))
+        await session.commit()
+        second = await token.get(http)
+    await engine.dispose()
+
+    assert first == "access-1"
+    assert second == "mock-token-1"
+    assert len(tokens) == 1
+    assert b"grant_type=refresh_token" in tokens[0].content
+    assert b"refresh_token=refresh-1" in tokens[0].content
+
+
+async def test_a_token_source_without_a_connection_raises_not_connected(
+    settings: Settings, session: AsyncSession
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    engine = make_engine(settings.database_url)
+    token = UserToken(settings, {{ api.name | tojson }}, make_sessions(engine), user.id)
+
+    async with httpx.AsyncClient(base_url={{ api.test_url | tojson }}) as http:
+        with pytest.raises(NotConnectedError) as error:
+            await token.get(http)
+    await engine.dispose()
+
+    assert error.value.status == 409
+
+
+async def test_a_user_deletes_a_connection(app_client: AsyncClient, session: AsyncSession) -> None:
+    _, headers = await _sign_in(session)
+    query = await _start(app_client, headers)
+    params = {"code": "code-1", "state": query["state"][0]}
+    callback = await app_client.get(f"{PATH}/callback", params=params)
+    assert callback.status_code == 200, callback.text
+
+    response = await app_client.delete(PATH, headers=headers)
+
+    assert response.status_code == 204, response.text
+    listed = await app_client.get("/auth/connections", headers=headers)
+    found = [c["connected"] for c in listed.json() if c["api"] == "{{ api.connection_name }}"]
+    assert found == [False]

@@ -1,5 +1,7 @@
 {{ trace_header("app") }}
 {% set oauth = "oauth2" in py_api_features %}
+{% set user = "user" in py_api_features %}
+{% set tokens = oauth or user %}
 """The HTTP client that the clients of the third-party APIs share.
 
 Each client in `app/integrations/<api>/client.py` sends its requests with
@@ -9,6 +11,10 @@ error status raises `ApiError`, and each request stops after a timeout.
 {% if oauth %}
 An API with OAuth 2.0 gets its access tokens with the client credentials
 flow (`ClientCredentials`).
+{% endif %}
+{% if user %}
+An API with the authorization code flow sends the access token of a user
+(`UserToken` in `app/core/connections.py`, ADR 0033).
 {% endif %}
 """
 
@@ -24,7 +30,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Self, TypedDict, Unpack, cast
+from typing import {{ "Protocol, " if tokens }}Self, TypedDict, Unpack, cast
 from urllib.parse import quote
 
 import httpx
@@ -89,13 +95,13 @@ class ApiClient:
         timeout: float = DEFAULT_TIMEOUT,
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
-{% if oauth %}
-        token: ClientCredentials | None = None,
+{% if tokens %}
+        token: TokenSource | None = None,
 {% endif %}
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._params = dict(params or {})
-{% if oauth %}
+{% if tokens %}
         self._token = token
 {% endif %}
         self._http = httpx.AsyncClient(
@@ -198,7 +204,7 @@ class ApiClient:
                 files=files,
             )
 
-{% if oauth %}
+{% if tokens %}
         if self._token is None:
             response = await send()
         else:
@@ -214,6 +220,44 @@ class ApiClient:
         if response.is_error:
             raise ApiError(self.api, response.status_code, response.text)
         return response
+{% if tokens %}
+
+
+class TokenSource(Protocol):
+    """A source of the access tokens of a client.
+
+{% if oauth %}
+    `ClientCredentials` gets the tokens of the app with the client credentials flow.
+{% endif %}
+{% if user %}
+    `UserToken` (`app/core/connections.py`) reads the tokens of a user.
+{% endif %}
+    """
+
+    async def get(self, http: httpx.AsyncClient) -> str:
+        """Return an access token. `http` is the HTTP client of the client of the API."""
+        ...
+
+    def reset(self, token: str) -> None:
+        """Forget a token that the API did not accept, so that `get` gets a new token."""
+        ...
+{% endif %}
+{% if user %}
+
+
+class StaticToken:
+    """A token source with one token that does not change, for example for the tests."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    async def get(self, http: httpx.AsyncClient) -> str:
+        """Return the token."""
+        return self.token
+
+    def reset(self, token: str) -> None:
+        """Keep the token: the source has no other token."""
+{% endif %}
 {% if oauth %}
 
 

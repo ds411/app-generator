@@ -32,10 +32,14 @@
 # of its worker at a fixed time. Then generate tests/fixtures/files.yaml
 # (file and image fields in an S3 bucket, and seed files), and check it
 # and run its tests; the test of the bucket uses the S3 mock of moto.
-# Last, generate tests/fixtures/inbound-email.yaml with its hand-written
+# Then generate tests/fixtures/inbound-email.yaml with its hand-written
 # logic (the inbound emails of each mail service), check it, run its
 # tests on Postgres and SQLite, and send it emails
-# (scripts/inbound_email_test.py).
+# (scripts/inbound_email_test.py). Last, generate
+# tests/fixtures/api-connections.yaml with its hand-written logic (an API
+# with the authorization code flow), check it, run its tests on Postgres
+# and SQLite, and connect a user at the mock OAuth server
+# (scripts/api_connection_test.py).
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -47,8 +51,8 @@
 # "<output folder>-account-security", "<output folder>-seed-data",
 # "<output folder>-record-rules", "<output folder>-webhooks",
 # "<output folder>-jobs", "<output folder>-files",
-# "<output folder>-inbound-email", and "<output folder>-rate-limit" (the
-# app of the rate limit check). The
+# "<output folder>-inbound-email", "<output folder>-api-connections", and
+# "<output folder>-rate-limit" (the app of the rate limit check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
@@ -72,6 +76,7 @@ webhooks_definition=tests/fixtures/webhooks.yaml
 jobs_definition=tests/fixtures/jobs.yaml
 files_definition=tests/fixtures/files.yaml
 email_definition=tests/fixtures/inbound-email.yaml
+connections_definition=tests/fixtures/api-connections.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -79,7 +84,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
@@ -90,6 +95,7 @@ webhooks_out="$out-webhooks"
 jobs_out="$out-jobs"
 files_out="$out-files"
 email_out="$out-inbound-email"
+connections_out="$out-api-connections"
 
 step() {
     echo "check-fastapi: $*"
@@ -315,5 +321,28 @@ rm -f test.db
 cd "$root"
 step "inbound email test"
 uv run --locked scripts/inbound_email_test.py fastapi "$email_definition" --app "$email_out"
+
+step "api connections: generate $connections_definition in $connections_out"
+rm -rf "$connections_out"
+mkdir -p "$connections_out"
+# The hand-written logic of the fixture: appgen keeps an extension file
+# that exists.
+cp -R tests/fixtures/api-connections/extensions/fastapi/. "$connections_out"/
+uv run --locked appgen generate "$connections_definition" -b fastapi -o "$connections_out" >/dev/null
+uv run --locked appgen check "$connections_definition" "$connections_out"
+cd "$connections_out"
+step "api connections: uv sync, ruff, pyright"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+step "api connections: pytest"
+uv run pytest -q
+step "api connections: pytest on SQLite"
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+cd "$root"
+step "api connection test"
+uv run --locked scripts/api_connection_test.py "$connections_definition" --app "$connections_out"
 
 step "passed"

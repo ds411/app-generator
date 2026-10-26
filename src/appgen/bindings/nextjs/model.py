@@ -18,7 +18,7 @@ from appgen.bindings.shared.auth import auth_pages, record_rules
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
-from appgen.bindings.shared.integrations import ts_apis
+from appgen.bindings.shared.integrations import reject_user_flows, ts_apis
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
@@ -228,6 +228,7 @@ def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
+    reject_user_flows(definition, "nextjs")
     plan = ui_plan(definition)
     pages = {
         name: page_info(name, page, plan.pages[name].layout)

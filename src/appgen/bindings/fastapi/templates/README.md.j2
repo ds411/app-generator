@@ -454,6 +454,34 @@ The endpoints need a signed-in user. The roles do not apply to them.
 | `{{ api.name }}` | `{{ api.prefix }}/...` in `app/integrations/{{ api.module }}/router.py` |
 {% endfor %}
 {% endif %}
+{% if py_connections %}
+
+### Connections of the users
+
+The clients of {% for api in py_connections %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} send the access token of a user: the
+authorization code flow of OAuth 2.0. A user connects an account of the service first
+(`app/core/connections.py`):
+
+1. `POST /auth/connections/<api>` with `{"return_to": "<page>"}` gives
+   the `authorization_url` for the signed-in user. Send the browser to
+   it. `return_to` is a page of a front end in `CORS_ORIGINS`.
+2. The user allows the access, and the service sends the browser back
+   to `GET /auth/connections/<api>/callback`. The app changes the code
+   for the tokens, and sends the browser to the page of `return_to` with
+   `#connected=<api>`, or with `#error=<message>`.
+3. `GET /auth/connections` lists the APIs and the connections of the
+   user. `DELETE /auth/connections/<api>` deletes a connection.
+
+Register `<PUBLIC_URL>/auth/connections/<api>/callback` as the redirect
+URI of the app at the service. The table `api_connections` keeps the
+tokens of each user, encrypted with a key from `AUTH_SECRET`: a new
+`AUTH_SECRET` ends the connections. The client gets a new access token
+with the refresh token when the token ends. An endpoint with the client
+gives 409 if the signed-in user has no connection. Other code, for
+example a job, gets a client with `<api>_client_for(settings, sessions,
+user_id)`. With SQLite, a job cannot get a new access token: use
+Postgres for the worker.
+{% endif %}
 
 {% endif %}
 {% if py_webhooks %}

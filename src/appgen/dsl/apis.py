@@ -7,7 +7,7 @@ not declare. The bindings generate a typed client from `Api.spec`.
 """
 
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 import pydantic
 from pydantic import BaseModel, BeforeValidator, ConfigDict, PrivateAttr, StringConstraints
@@ -71,6 +71,9 @@ class ApiSecurity(BaseModel):
     """OAuth 2.0: the environment variable that holds the client secret."""
     scopes: list[Text] = pydantic.Field(default_factory=list[Text])
     """OAuth 2.0: the scopes of the access token."""
+    flow: Literal["clientCredentials", "authorizationCode"] | None = None
+    """OAuth 2.0: the flow of the scheme. `authorizationCode` calls the API in the name of a
+    user (ADR 0033). The default is the client credentials flow if the scheme has it."""
 
     @property
     def secret_env(self) -> str | None:
@@ -171,6 +174,27 @@ class Api(Element):
             self._openapi = read_document(base_dir / self.document)
         except DocumentError as error:
             self._error = str(error)
+
+    @property
+    def oauth_flow(self) -> str | None:
+        """The OAuth 2.0 flow of the requests: `clientCredentials` or `authorizationCode`, or
+        None for another scheme. Without `flow`, the client credentials flow if the scheme has
+        it."""
+        security, document = self.security, self._openapi
+        scheme = document.security_schemes.get(security.scheme) if document and security else None
+        if security is None or scheme is None or scheme.type != "oauth2":
+            return None
+        if security.flow is not None:
+            return security.flow
+        if scheme.token_url is not None:
+            return "clientCredentials"
+        return "authorizationCode" if scheme.authorization_code is not None else None
+
+    @property
+    def user_flow(self) -> bool:
+        """True for OAuth 2.0 with the authorization code flow: the app calls the API with the
+        token of a user (ADR 0033)."""
+        return self.oauth_flow == "authorizationCode"
 
     @property
     def label(self) -> str:

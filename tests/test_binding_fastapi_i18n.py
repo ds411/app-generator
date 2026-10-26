@@ -271,6 +271,8 @@ def test_the_docs_list_the_messages_of_the_api() -> None:
     files_path = fixtures / "files.yaml"
     # The webhooks of the inbound emails (ADR 0030) have a message of their own.
     inbound = fixtures / "inbound-email.yaml"
+    # So do the connections of the users to the APIs (ADR 0033).
+    calendar = fixtures / "api-connections.yaml"
     languages = dedent(
         """\
         translations:
@@ -282,7 +284,8 @@ def test_the_docs_list_the_messages_of_the_api() -> None:
     )
     files = load_definition_text(files_path.read_text() + languages, str(files_path))
     email = load_definition_text(inbound.read_text() + languages, str(inbound))
-    definitions = (room_booking_in_two_languages(), security, files, email)
+    connections = load_definition_text(calendar.read_text() + languages, str(calendar))
+    definitions = (room_booking_in_two_languages(), security, files, email, connections)
     for definition in (load_definition(EXAMPLE), *definitions):
         texts |= api_texts(files_of(definition)) - definition_messages(definition)
     docs = (ROOT / "docs" / "dsl.md").read_text(encoding="utf-8")
