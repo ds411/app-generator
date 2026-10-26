@@ -411,6 +411,18 @@ but that belongs to the app after the first run. Give it a manual trace
 (`trace("app", scope="file", kind="manual")`), not a gap trace. The
 FastAPI binding writes its first migration in this way.
 
+The FastAPI app also has a place for endpoints that the definition does
+not describe, for example a collect endpoint for a tracking script or
+an LTI launch: `app/extensions/routers_ext.py`. Its list `ROUTERS` is
+empty at first, so the file is a hook with a manual trace to `app`, not
+a gap (as `validation_ext.py` is). `app/main.py` includes each router
+of the list after the generated routers, so the middleware of the app
+(the CORS, the rate limit, the log, and the language) applies to them
+too. The Next.js app needs no such file: it finds a new route file by
+itself. The project tracker example adds a calendar feed of the due
+dates in this file, and a test that calls it
+(`examples/project-tracker/extensions/fastapi/`).
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration

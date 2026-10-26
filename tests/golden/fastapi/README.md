@@ -12,6 +12,9 @@ changes:
   it, the endpoint gives 501.
 - `validation_ext.py`: the rules that the create and update operations
   check before they store a record. By default, it accepts all records.
+- `app/extensions/routers_ext.py`: the routers of the endpoints that the
+  definition does not describe. `app/main.py` includes each router of
+  `ROUTERS` after the generated routers. By default, the list is empty.
 
 When you write the code of an extension file, change `@trace:gap` to
 `@trace:manual` in its header.
@@ -144,6 +147,7 @@ the code of the feature.
 | Folder                  | Content                                              |
 | ----------------------- | ---------------------------------------------------- |
 | `app/main.py`           | The entry point. It adds the router of each slice.   |
+| `app/extensions/`       | The hand-written routers (`routers_ext.py`).         |
 | `app/models.py`         | Imports the models of all slices.                    |
 | `app/core/`             | Code that all slices share: settings, database, errors, pagination, health, and schema bases. |
 | `migrations/`           | The Alembic migrations.                              |

@@ -1,0 +1,36 @@
+{#
+  An optional hook, not a generation gap: the empty list is valid, and
+  the definition does not ask for it. Thus its trace is manual, as for
+  validation_ext.py.
+#}
+{{ trace_header("app", kind="manual") }}
+"""The hand-written routers of the app.
+
+`app/main.py` includes each router of `ROUTERS` after the generated
+routers, so the middleware of the app (the CORS, the rate limit, and the
+log{{ ", and the language" if i18n }}) applies to them too. Add a router here for an
+endpoint that the definition does not describe, for example a collect
+endpoint for a tracking script. appgen creates this file once and never
+changes it.
+
+Example:
+
+    from fastapi import APIRouter
+
+    from app.core.db import SessionDep
+
+    router = APIRouter(prefix="/extensions", tags=["extensions"])
+
+
+    @router.get("/ping")
+    async def ping(session: SessionDep) -> dict[str, str]:
+        return {"status": "ok"}
+
+
+    ROUTERS: list[APIRouter] = [router]
+"""
+
+from fastapi import APIRouter
+
+ROUTERS: list[APIRouter] = []
+"""The hand-written routers, in the order that the app includes them."""

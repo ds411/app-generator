@@ -40,6 +40,7 @@ from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 from app.core.second_factor import router as second_factor_router
 {% endif %}
 from app.core.seed import seed_database
+from app.extensions.routers_ext import ROUTERS
 {% set slices = py.entity_order() | map(attribute="slice") | list + (["dashboards"] if py.dashboards else []) %}
 {% for slice in slices | sort %}
 
@@ -159,6 +160,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% if py.dashboards %}
     app.include_router(dashboards_router)
 {% endif %}
+    # The hand-written routers come after the generated routers.
+    for router in ROUTERS:
+        app.include_router(router)
     return app
 
 

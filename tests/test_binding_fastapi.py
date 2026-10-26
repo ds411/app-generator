@@ -330,6 +330,22 @@ def test_each_entity_has_a_validation_extension_file(result: GenerationResult) -
     assert "    await validate(session, record, created=False)\n" in repository
 
 
+def test_the_app_includes_the_routers_of_the_extension_file(result: GenerationResult) -> None:
+    by_path = {f.path: f for f in result.files}
+    ext = by_path["app/extensions/routers_ext.py"]
+    assert ext.kind == "extension"
+    # A hook with a valid default, not a gap.
+    assert "# @trace:manual app file\n" in ext.content
+    assert "TODO(appgen)" not in ext.content
+    assert "\nROUTERS: list[APIRouter] = []\n" in ext.content
+    assert by_path["app/extensions/__init__.py"].kind == "generated"
+    main = by_path["app/main.py"].content
+    assert "from app.extensions.routers_ext import ROUTERS\n" in main
+    # After the generated routers, so the generated paths come first.
+    loop = main.index("    for router in ROUTERS:\n        app.include_router(router)\n")
+    assert loop > main.index("app.include_router(tasks_router)")
+
+
 def test_regeneration_keeps_the_code_in_the_extension_files(
     tmp_path: Path, definition: AppDefinition, result: GenerationResult, fastapi: Binding
 ) -> None:
