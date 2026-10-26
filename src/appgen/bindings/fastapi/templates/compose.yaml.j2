@@ -16,6 +16,16 @@
       SEED_PASSWORD: ${SEED_PASSWORD:-}
 {% endif %}
 {% endif %}
+{% if py.storage %}
+      {{ trace(py.storage.id) }}
+      {{ py.storage.variables["folder_env"] }}: /app/uploads
+{% if py.storage.s3 %}
+{% for key in ("bucket_env", "region_env", "endpoint_env", "access_key_env", "secret_key_env") %}
+      {{ py.storage.variables[key] }}: ${{ "{" }}{{ py.storage.variables[key] }}:-{{ "}" }}
+{% endfor %}
+{% endif %}
+      STORAGE_LINK_SECRET: ${STORAGE_LINK_SECRET:-}
+{% endif %}
 {% for api in py_apis.values() %}
       {{ trace(api.id) }}
       {{ api.url_env }}: ${{ "{" }}{{ api.url_env }}:-{{ api.base_url }}{{ "}" }}
@@ -68,6 +78,10 @@ services:
 {{ environment().rstrip() }}
     ports:
       - "8000:8000"
+{% if py.storage %}
+    volumes:
+      - files:/app/uploads
+{% endif %}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -78,6 +92,10 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
 {{ environment(worker=True).rstrip() }}
+{% if py.storage %}
+    volumes:
+      - files:/app/uploads
+{% endif %}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -91,3 +109,6 @@ services:
 
 volumes:
   db-data:
+{% if py.storage %}
+  files:
+{% endif %}

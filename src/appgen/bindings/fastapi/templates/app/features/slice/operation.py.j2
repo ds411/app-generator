@@ -16,6 +16,9 @@
 {% if op.kind != "create" %}
 {% set lines = lines + ["from uuid import UUID"] %}
 {% endif %}
+{% if op.kind == "delete" and e.files %}
+{% set lines = lines + ["from app.core.storage import StorageDep"] %}
+{% endif %}
 {% if owner %}
 {% set lines = lines + ["from typing import Annotated", "from app.core.access import RecordScope, scope_of"] %}
 {% endif %}
@@ -145,11 +148,19 @@ async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep)
 async def {{ op.name }}(
     id: UUID,
     session: SessionDep,
+{% if e.files %}
+    storage: StorageDep,
+{% endif %}
     scope: Scope,
 ) -> None:
     """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id{{ sarg }})
-    await repository.delete(session, record)
+    await repository.delete(session, record{{ ", storage" if e.files }})
+{% elif op.kind == "delete" and e.files %}
+{{ py.call("async def ", op.name, ["id: UUID", "session: SessionDep", "storage: StorageDep"], 0, " -> None:") }}
+    """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ", and then its files.") }}"""
+    record = await repository.get(session, id)
+    await repository.delete(session, record, storage)
 {% elif op.kind == "delete" %}
 async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
     """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""

@@ -1,7 +1,11 @@
 {{ trace_header("app") }}
 """Field types that the schemas of all slices share."""
 
+{% if py.storage %}
+from typing import Annotated, TypedDict
+{% else %}
 from typing import Annotated
+{% endif %}
 
 from pydantic import AfterValidator, AnyUrl
 
@@ -13,3 +17,19 @@ def _check_url(value: str) -> str:
 
 UrlStr = Annotated[str, AfterValidator(_check_url)]
 """A URL. The API checks it, and stores it as text without changes."""
+{% if py.storage %}
+
+
+{{ trace(py.storage.id) }}
+class StoredFile(TypedDict):
+    """The value of a file field in the database (ADR 0027), or None without a file."""
+
+    key: str
+    """The key of the file in the storage, for example `tasks/<id>/screenshot/<hex>`."""
+    name: str
+    """The name of the file, for example `screenshot.png`."""
+    size: int
+    """The size of the file, in bytes."""
+    type: str
+    """The media type, for example `image/png`."""
+{% endif %}

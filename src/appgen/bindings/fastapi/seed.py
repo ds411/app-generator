@@ -10,6 +10,7 @@ optional foreign keys are links: the seed sets them after it inserts
 all rows, so a cycle or a reference to the same table is no problem.
 """
 
+import base64
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 from appgen.bindings.fastapi.pysource import call, import_block, literal, string
 from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.dsl.model import AppDefinition
+from appgen.dsl.storage import SeedFile
 from appgen.gen.naming import constant
 
 if TYPE_CHECKING:
@@ -96,6 +98,28 @@ class PySeedTable:
 
 
 @dataclass(frozen=True, slots=True)
+class PySeedFile:
+    """The file of a file field of a seed record (ADR 0027), as Base64 text in the code."""
+
+    element_id: str
+    """The element of the record, for example `seed.Task.records.board`."""
+    key: str
+    """The key of the file in the storage, for example `tasks/<id>/screenshot/seed-<hash>`."""
+    type: str
+    content: str
+    """The content in Base64."""
+
+    _CHUNK = 76
+
+    def lines(self) -> list[str]:
+        """Return the lines of the content: Python strings that Python joins."""
+        return [
+            string(self.content[i : i + self._CHUNK])
+            for i in range(0, len(self.content), self._CHUNK)
+        ] or ['""']
+
+
+@dataclass(frozen=True, slots=True)
 class PySeedChange:
     """A seed record that the generated test changes or deletes before a second seed."""
 
@@ -119,6 +143,8 @@ class PySeed:
     """A seed record with a text field, which the test changes: the second seed keeps it."""
     remove: PySeedChange | None = None
     """A seed record that no record refers to, which the test deletes: the second seed adds it."""
+    files: list[PySeedFile] = field(default_factory=list[PySeedFile])
+    """The files of the file fields of the seed records (ADR 0027)."""
 
     @property
     def joins(self) -> list[PySeedJoin]:
@@ -147,6 +173,7 @@ def python_seed(definition: AppDefinition, py: PyApp) -> PySeed:
     seeds = seed_records(definition)
     uses: set[str] = set()
     tables: dict[str, PySeedTable] = {}
+    files: list[PySeedFile] = []
     for name, entity in py.entities.items():
         seed = definition.seed.get(name)
         keys = list(seed.records) if seed is not None else []
@@ -158,7 +185,15 @@ def python_seed(definition: AppDefinition, py: PyApp) -> PySeed:
         )
         fixed = len(seeds.get(name, []))
         for index, record in enumerate(data[name]):
-            row, link = _row(entity, record, uses)
+            stored: dict[str, dict[str, Any]] = {}
+            if index < fixed:
+                assert seed is not None
+                element_id = f"{seed.id}.records.{keys[index]}"
+                for file_name, seed_file in seed.records[keys[index]].files.items():
+                    py_file, value = _seed_file(element_id, entity, record, file_name, seed_file)
+                    files.append(py_file)
+                    stored[file_name] = value
+            row, link = _row(entity, record, uses, stored)
             if index < fixed:
                 assert seed is not None
                 table.records.append(PySeedRecord(f"{seed.id}.records.{keys[index]}", row))
@@ -199,7 +234,24 @@ def python_seed(definition: AppDefinition, py: PyApp) -> PySeed:
         user_table,
         change,
         remove,
+        files,
     )
+
+
+def _seed_file(
+    element_id: str, entity: PyEntity, record: dict[str, Any], name: str, seed_file: SeedFile
+) -> tuple[PySeedFile, dict[str, Any]]:
+    """Return the file of a file field of a seed record, and the value of its column.
+
+    The key has a part of the hash of the content, so that a changed file
+    gets a new key, as an upload does.
+    """
+    content = seed_file.content or b""
+    key = f"{entity.table}/{record['id']}/{name}/seed-{seed_file.hash.removeprefix('sha256:')[:12]}"
+    media_type = seed_file.media_type or "application/octet-stream"
+    value = {"key": key, "name": seed_file.name, "size": len(content), "type": media_type}
+    encoded = base64.b64encode(content).decode()
+    return PySeedFile(element_id, key, media_type, encoded), value
 
 
 _CHANGED = "Changed by the test"
@@ -238,13 +290,26 @@ def _test_records(
     return change, remove
 
 
-def _row(entity: PyEntity, record: dict[str, Any], uses: set[str]) -> tuple[str, str | None]:
-    """Return the row of a record and its link (the optional foreign keys), or None."""
+def _row(
+    entity: PyEntity,
+    record: dict[str, Any],
+    uses: set[str],
+    files: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, str | None]:
+    """Return the row of a record and its link (the optional foreign keys), or None.
+
+    `files` has the value of each file field of a seed record with a file.
+    """
     uses.add("UUID")
     row = [("id", _uuid(record["id"]))]
     link: list[tuple[str, str]] = []
     for py_field in entity.fields:
         row.append((py_field.name, _value(py_field, record.get(py_field.name), uses)))
+    for py_file in entity.files:
+        value = (files or {}).get(py_file.name)
+        prefix = f"{string(py_file.name)}: "
+        text = literal(value, prefix, _ROW_INDENT + 4, ",")
+        row.append((py_file.name, text.removeprefix(prefix).removesuffix(",")))
     for relation in entity.fk_relations:
         assert relation.fk is not None
         value = cast(str | None, record.get(relation.name))

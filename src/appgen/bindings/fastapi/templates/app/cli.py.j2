@@ -34,6 +34,9 @@ from app.core.db import {{ "commit, " if sf }}make_engine, make_sessions
 from app.core.second_factor import remove_second_factor
 {% endif %}
 from app.core.seed import seed_database
+{% if py.storage %}
+from app.core.storage import make_storage
+{% endif %}
 from app.models import configure_models
 
 {% if sf %}
@@ -56,8 +59,13 @@ async def _seed() -> int:
     engine = make_engine(settings.database_url)
     try:
         async with make_sessions(engine)() as session:
-{% if password %}
+{% if password and py.storage %}
+            storage = make_storage(settings)
+            added = await seed_database(session, settings.seed_password, storage=storage)
+{% elif password %}
             added = await seed_database(session, settings.seed_password)
+{% elif py.storage %}
+            added = await seed_database(session, storage=make_storage(settings))
 {% else %}
             added = await seed_database(session)
 {% endif %}

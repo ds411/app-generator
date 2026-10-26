@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 {% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
-{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -41,6 +41,9 @@ def upgrade() -> None:
 {% if f.translatable %}
         {{ f.translations_migration_column() }}
 {% endif %}
+{% endfor %}
+{% for f in e.files %}
+        {{ f.migration_column() }}
 {% endfor %}
 {% for r, column in e.fk_columns %}
         {{ column }}

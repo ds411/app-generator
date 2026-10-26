@@ -26,10 +26,12 @@
 # tests/fixtures/record-rules.yaml (the record rules with conditions and
 # owner paths), and check it and run its tests. Then generate
 # tests/fixtures/webhooks.yaml (the webhooks with each signature scheme),
-# and check it and run its tests on Postgres and SQLite. Last, generate
+# and check it and run its tests on Postgres and SQLite. Then generate
 # tests/fixtures/jobs.yaml (the kinds of jobs), check its code, run its
 # tests on SQLite and the tests of the jobs on Postgres, and run one pass
-# of its worker at a fixed time.
+# of its worker at a fixed time. Last, generate tests/fixtures/files.yaml
+# (file and image fields in an S3 bucket, and seed files), and check it
+# and run its tests; the test of the bucket uses the S3 mock of moto.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -40,7 +42,7 @@
 # "<output folder>-room-booking", "<output folder>-provider-sign-in",
 # "<output folder>-account-security", "<output folder>-seed-data",
 # "<output folder>-record-rules", "<output folder>-webhooks",
-# "<output folder>-jobs", and
+# "<output folder>-jobs", "<output folder>-files", and
 # "<output folder>-rate-limit" (the app of the rate limit check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
@@ -63,6 +65,7 @@ seed_definition=tests/fixtures/seed-data.yaml
 rules_definition=tests/fixtures/record-rules.yaml
 webhooks_definition=tests/fixtures/webhooks.yaml
 jobs_definition=tests/fixtures/jobs.yaml
+files_definition=tests/fixtures/files.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -70,7 +73,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-rate-limit"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
@@ -79,6 +82,7 @@ seed_out="$out-seed-data"
 rules_out="$out-record-rules"
 webhooks_out="$out-webhooks"
 jobs_out="$out-jobs"
+files_out="$out-files"
 
 step() {
     echo "check-fastapi: $*"
@@ -263,6 +267,23 @@ step "jobs: one pass of the worker at a fixed time"
 DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run alembic upgrade head >/dev/null 2>&1
 DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run python -m app.worker --once --now 2026-06-15T12:00:00Z
 rm -f worker.db
+cd "$root"
+
+step "generate $files_definition in $files_out"
+rm -rf "$files_out"
+uv run --locked appgen generate "$files_definition" -b fastapi -o "$files_out" >/dev/null
+uv run --locked appgen check "$files_definition" "$files_out"
+cd "$files_out"
+step "files: uv sync, ruff, pyright"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+step "files: pytest"
+uv run pytest -q
+step "files: pytest on SQLite"
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
 cd "$root"
 
 step "passed"

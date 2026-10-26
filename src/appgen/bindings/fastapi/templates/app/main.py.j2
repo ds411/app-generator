@@ -40,6 +40,10 @@ from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 from app.core.second_factor import router as second_factor_router
 {% endif %}
 from app.core.seed import seed_database
+{% if py.storage %}
+from app.core.storage import FileLinkMiddleware, make_links, make_storage
+from app.core.storage import router as storage_router
+{% endif %}
 from app.extensions.routers_ext import ROUTERS
 {% set slices = py.entity_order() | map(attribute="slice") | list + (["dashboards"] if py.dashboards else []) %}
 {% for slice in slices | sort %}
@@ -75,8 +79,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings: Settings = app.state.settings
     if settings.database_seed:
         async with app.state.sessions() as session:
-{% if definition.auth and definition.auth.password %}
+{% if definition.auth and definition.auth.password and py.storage %}
+            added = await seed_database(session, settings.seed_password, storage=app.state.storage)
+{% elif definition.auth and definition.auth.password %}
             added = await seed_database(session, settings.seed_password)
+{% elif py.storage %}
+            added = await seed_database(session, storage=app.state.storage)
 {% else %}
             added = await seed_database(session)
 {% endif %}
@@ -106,6 +114,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = make_engine(settings.database_url)
     app.state.sessions = make_sessions(app.state.engine)
+{% if py.storage %}
+    {{ trace(py.storage.id) }}
+    app.state.storage = make_storage(settings)
+{% endif %}
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -129,6 +141,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The language middleware runs before the rate limit, so a 429 has the language too.
     app.add_middleware(LanguageMiddleware)
 {% endif %}
+{% if py.storage %}
+    {{ trace(py.storage.id) }}
+    links = make_links(settings)
+    app.add_middleware(FileLinkMiddleware, links=links, public_url=settings.public_url)
+{% endif %}
     # The last middleware runs first, so the log has each response, also a 429.
     app.add_middleware(RequestLogMiddleware)
     add_problem_handlers(app)
@@ -151,6 +168,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     {{ trace(e.id) }}
     app.include_router({{ e.slice }}_router)
 {% endfor %}
+{% if py.storage %}
+    {{ trace(py.storage.id) }}
+    app.include_router(storage_router)
+{% endif %}
 {% for api in exposed %}
     {{ trace(api.id) }}
 {% if definition.auth %}

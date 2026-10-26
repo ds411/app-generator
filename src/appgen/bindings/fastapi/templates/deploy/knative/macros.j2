@@ -51,6 +51,29 @@
               value: ""
 {% endif %}
 {% endfor %}
+{% if py.storage %}
+{% set st = py.storage %}
+            {{ trace(st.id) }}
+{% if st.s3 %}
+            # The bucket of the files of the file fields.
+            - name: {{ st.variables["bucket_env"] }}
+              value: {{ app.name }}-files
+            - name: {{ st.variables["region_env"] }}
+              value: eu-central-1
+            # The URL of a service that is not Amazon S3. Empty: Amazon S3.
+            - name: {{ st.variables["endpoint_env"] }}
+              value: ""
+{% else %}
+            # The folder of the files of the file fields. The instances do not
+            # share it, and a new instance starts without the files: use the
+            # storage kind s3 for more than one instance.
+            - name: {{ st.variables["folder_env"] }}
+              value: /app/uploads
+{% endif %}
+            # The time that a link of a file works, in seconds.
+            - name: STORAGE_LINK_SECONDS
+              value: "3600"
+{% endif %}
 {% if py.providers %}
             # The URL of the API for the browsers: the providers send the users back to it.
             - name: PUBLIC_URL
@@ -91,6 +114,17 @@
                 secretKeyRef:
                   name: {{ app.name }}-smtp-password
                   key: latest
+{% endif %}
+{% if py.storage %}
+            {{ trace(py.storage.id) }}
+{% set secrets = ["STORAGE_LINK_SECRET"] + ([py.storage.variables["access_key_env"], py.storage.variables["secret_key_env"]] if py.storage.s3 else []) %}
+{% for name in secrets %}
+            - name: {{ name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ app.name }}-{{ name | lower | replace("_", "-") }}
+                  key: latest
+{% endfor %}
 {% endif %}
 {% for api in py_apis.values() if api.secret_env %}
             {{ trace(api.id) }}

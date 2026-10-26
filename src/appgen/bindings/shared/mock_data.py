@@ -18,6 +18,10 @@ A translatable field (ADR 0026) has a value in each other language of
 default language with the label of the language, for example
 "Write the release notes (Deutsch)".
 
+A file field (ADR 0027) has no value (None) in a generated record. A
+seed record has the path of its file, from the folder of the definition:
+each binding keeps the file in its own form.
+
 An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
 
@@ -40,6 +44,7 @@ from typing import Any, cast
 from appgen.dsl.model import AppDefinition, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.seed import link_keys, normal_value, record_id
+from appgen.dsl.storage import FILE_TYPES
 
 DEFAULT_COUNT = 12
 MOCK_COUNT_KEY = "x-mock-count"
@@ -135,6 +140,9 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
             for field_name, field in fields.items():
                 if field_name in derived:
                     record[field_name] = None  # Set after the source, in the same key order.
+                    continue
+                if field.type in FILE_TYPES:
+                    record[field_name] = None  # A generated record has no files.
                     continue
                 record[field_name] = _unique_value(
                     rng, entity, field_name, field, index, record, seen.get(field_name)

@@ -38,6 +38,10 @@ class {{ e.name }}(Record):
     {{ f.translations_column() }}
 {% endif %}
 {% endfor %}
+{% for f in e.files %}
+    {{ trace(f.id) }}
+    {{ f.column() }}
+{% endfor %}
 {% for r in e.relations %}
     {{ trace(r.id) }}
 {% for line in r.model_lines(e) %}

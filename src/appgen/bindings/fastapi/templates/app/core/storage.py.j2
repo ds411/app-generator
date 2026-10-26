@@ -1,0 +1,477 @@
+{{ trace_header(py.storage.id) }}
+{% set st = py.storage %}
+{% set folder = st.setting("folder_env") %}
+"""The storage of the files of the file fields (ADR 0027).
+
+{% if st.s3 %}
+The app keeps the files in the bucket of an S3-compatible service
+(`{{ st.variables["bucket_env"] }}`). Without a bucket, for example on the machine of a
+developer and in the tests, it keeps them in the folder of
+`{{ st.variables["folder_env"] }}`. A record keeps each file as a JSON value (`StoredFile`): the
+{% else %}
+The app keeps the files in the folder of `{{ st.variables["folder_env"] }}`. A record keeps
+each file as a JSON value (`StoredFile`): the
+{% endif %}
+key of the file in the storage, the name, the size, and the media type.
+The key is new for each upload, so that a cache never shows an old file.
+
+The read schemas give a signed link to each file (`/file-links/<token>`),
+which ends after `STORAGE_LINK_SECONDS`, so that an `<img src>` works
+without a sign-in. The app gives a link only with a read of its record,
+so the access rules of the read apply.
+"""
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import math
+import secrets
+import time
+from collections.abc import Iterable
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
+from typing import {{ "TYPE_CHECKING, " if st.s3 }}Annotated, Protocol, cast
+from urllib.parse import quote
+from uuid import uuid4
+
+import anyio
+{% if st.s3 %}
+import boto3
+from botocore.config import Config
+{% endif %}
+from fastapi import APIRouter, Depends, Request, UploadFile
+from fastapi.responses import Response
+from pydantic import BaseModel, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from app.core.config import Settings
+from app.core.db import Record, commit
+from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.core.types import StoredFile
+{% if st.s3 %}
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
+{% endif %}
+
+logger = logging.getLogger("app.storage")
+
+LINK_STEP = 300
+"""A link ends at a multiple of 5 minutes, so that the link of a file stays the same for 5
+minutes, and a browser can keep the file in its cache."""
+INLINE_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf"}
+)
+"""The media types that a browser shows in a tab. It downloads the other files."""
+SANDBOX = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+"""The content security policy of a file: a file cannot run scripts."""
+_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"%PDF-", "application/pdf"),
+)
+"""The first bytes of the media types that the app knows (and WebP, see `media_type_of`)."""
+_KNOWN_TYPES = frozenset({media_type for _, media_type in _SIGNATURES} | {"image/webp"})
+
+
+@dataclass(frozen=True, slots=True)
+class FileRule:
+    """The largest file and the media types of a file field."""
+
+    max_size: int
+    """The largest file, in bytes."""
+    types: tuple[str, ...] = ()
+    """The media types that the field allows, for example `image/*`. Empty: all types."""
+
+    def allows(self, media_type: str) -> bool:
+        """Return True if the field allows a media type."""
+        group = media_type.partition("/")[0]
+        return not self.types or any(item in (media_type, f"{group}/*") for item in self.types)
+
+
+def size_text(size: int) -> str:
+    """Return a size as a short text with a unit, for example `5 MB` or `1.5 KB`."""
+    for unit, factor in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+        if size >= factor:
+            return f"{size / factor:.1f}".removesuffix(".0") + f" {unit}"
+    return f"{size} B"
+
+
+def media_type_of(content: bytes, given: str | None) -> str:
+    """Return the media type of a file.
+
+    The first bytes give the type of the files that the app knows (PNG,
+    JPEG, GIF, WebP, and PDF), else the client gives the type. A file that
+    has the type of a known file, but not its first bytes, gets the type
+    `application/octet-stream`.
+    """
+    for signature, media_type in _SIGNATURES:
+        if content.startswith(signature):
+            return media_type
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    media_type = (given or "").partition(";")[0].strip().lower()
+    if not media_type or media_type in _KNOWN_TYPES:
+        return "application/octet-stream"
+    return media_type
+
+
+def file_name(name: str | None) -> str:
+    """Return the name of an uploaded file without its folders and control characters."""
+    base = PurePosixPath((name or "").replace("\\", "/")).name
+    clean = "".join(char for char in base if char.isprintable()).strip()
+    return clean[-200:] or "file"
+
+
+class Storage(Protocol):
+    """The place of the files{{ ": a folder, or a bucket of an S3-compatible service" if st.s3 else ": a folder of the server" }}."""
+
+    async def save(self, key: str, content: bytes, media_type: str) -> None:
+        """Save a file with a key."""
+        ...
+
+    async def read(self, key: str) -> bytes | None:
+        """Return the content of a file, or None if no file has the key."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Delete a file. A key without a file is no error."""
+        ...
+
+
+class FolderStorage:
+    """The files in a folder of the server: one file for each key."""
+
+    def __init__(self, folder: Path) -> None:
+        self.folder = folder.resolve()
+
+    def _path(self, key: str) -> anyio.Path:
+        path = (self.folder / key).resolve()
+        if not path.is_relative_to(self.folder):
+            raise ValueError(f"The key '{key}' is not in the folder.")
+        return anyio.Path(path)
+
+    async def save(self, key: str, content: bytes, media_type: str) -> None:
+        path = self._path(key)
+        await path.parent.mkdir(parents=True, exist_ok=True)
+        await path.write_bytes(content)
+
+    async def read(self, key: str) -> bytes | None:
+        try:
+            return await self._path(key).read_bytes()
+        except FileNotFoundError, IsADirectoryError:
+            return None
+
+    async def delete(self, key: str) -> None:
+        await self._path(key).unlink(missing_ok=True)
+{% if st.s3 %}
+
+
+class BucketStorage:
+    """The files in a bucket of an S3-compatible service: one object for each key.
+
+    The client of boto3 blocks, so each call runs in a worker thread.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        endpoint = settings.{{ st.setting("endpoint_env") }}
+        self.bucket = settings.{{ st.setting("bucket_env") }}
+        self.client: S3Client = boto3.client(
+            "s3",
+            region_name=settings.{{ st.setting("region_env") }} or None,
+            endpoint_url=endpoint or None,
+            aws_access_key_id=settings.{{ st.setting("access_key_env") }} or None,
+            aws_secret_access_key=settings.{{ st.setting("secret_key_env") }} or None,
+            config=Config(
+                s3={"addressing_style": "path" if endpoint else "auto"},
+                # Not all S3-compatible services accept the newer checksums.
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
+        )
+
+    async def save(self, key: str, content: bytes, media_type: str) -> None:
+        def put() -> None:
+            self.client.put_object(
+                Bucket=self.bucket, Key=key, Body=content, ContentType=media_type
+            )
+
+        await anyio.to_thread.run_sync(put)
+
+    async def read(self, key: str) -> bytes | None:
+        def get() -> bytes | None:
+            try:
+                response = self.client.get_object(Bucket=self.bucket, Key=key)
+            except self.client.exceptions.NoSuchKey:
+                return None
+            return response["Body"].read()
+
+        return await anyio.to_thread.run_sync(get)
+
+    async def delete(self, key: str) -> None:
+        def remove() -> None:
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+
+        await anyio.to_thread.run_sync(remove)
+{% endif %}
+
+
+def make_storage(settings: Settings) -> Storage:
+{% if st.s3 %}
+    """Return the storage of the settings: the bucket, else the folder."""
+    if settings.{{ st.setting("bucket_env") }}:
+        return BucketStorage(settings)
+{% else %}
+    """Return the storage of the settings: the folder."""
+{% endif %}
+    return FolderStorage(Path(settings.{{ folder }}))
+
+
+def get_storage(request: Request) -> Storage:
+    """Return the storage of the app."""
+    storage: Storage = request.app.state.storage
+    return storage
+
+
+StorageDep = Annotated[Storage, Depends(get_storage)]
+"""The type of an endpoint parameter that gets the storage of the app."""
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedFile:
+    """The file of a valid link."""
+
+    key: str
+    name: str
+    type: str
+    expires: int
+    """The end of the link, in seconds since 1970 (Unix time)."""
+
+    def headers(self) -> dict[str, str]:
+        """Return the headers of the response with the file.
+
+        A browser shows an image or a PDF file in a tab, and downloads the
+        other files. A file cannot run scripts, and the browser keeps the
+        media type of the app.
+        """
+        disposition = "inline" if self.type in INLINE_TYPES else "attachment"
+        headers = {
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(self.name)}",
+            "Cache-Control": f"private, max-age={max(0, self.expires - int(time.time()))}",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if self.type != "application/pdf":
+            # A browser does not show a PDF file in a sandbox.
+            headers["Content-Security-Policy"] = SANDBOX
+        return headers
+
+
+@dataclass(frozen=True, slots=True)
+class FileLinks:
+    """The signed links of the files: `<base URL>/file-links/<token>`.
+
+    The token holds the key, the name, the media type, and the end of the
+    link, and an HMAC-SHA256 signature with the secret key.
+    """
+
+    secret: bytes
+    seconds: int
+    """The time that a link works, in seconds. A link ends at the next multiple of 5 minutes."""
+    base_url: str = ""
+    """The URL of the app: `PUBLIC_URL`, else the URL of the request."""
+
+    def url(self, stored: StoredFile, now: float | None = None) -> str:
+        """Return the link of a file."""
+        moment = time.time() if now is None else now
+        expires = math.ceil((moment + self.seconds) / LINK_STEP) * LINK_STEP
+        data = [stored["key"], stored["name"], stored["type"], expires]
+        payload = _encode(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode())
+        return f"{self.base_url}/file-links/{payload}.{self._sign(payload)}"
+
+    def open(self, token: str, now: float | None = None) -> LinkedFile | None:
+        """Return the file of a token, or None if the token is not valid or has ended."""
+        payload, _, signature = token.partition(".")
+        if not hmac.compare_digest(signature.encode(), self._sign(payload).encode()):
+            return None
+        try:
+            key, name, media_type, expires = json.loads(_decode(payload))
+            found = LinkedFile(str(key), str(name), str(media_type), int(expires))
+        except ValueError, TypeError:
+            return None
+        return found if found.expires > (time.time() if now is None else now) else None
+
+    def _sign(self, payload: str) -> str:
+        return _encode(hmac.new(self.secret, payload.encode(), hashlib.sha256).digest())
+
+
+def _encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def make_links(settings: Settings) -> FileLinks:
+    """Return the links of the settings.
+
+    Without `STORAGE_LINK_SECRET`, each process has a random key: a link
+    works only in the process that gives it, until the process stops.
+    """
+    secret = settings.storage_link_secret.encode()
+    if not secret:
+        logger.warning("STORAGE_LINK_SECRET has no value: each process signs its own links.")
+        secret = secrets.token_bytes(32)
+    return FileLinks(secret, settings.storage_link_seconds)
+
+
+_links: ContextVar[FileLinks | None] = ContextVar("file_links", default=None)
+
+
+class FileLinkMiddleware:
+    """Give the links of the files of each request the URL of the app."""
+
+    def __init__(self, app: ASGIApp, links: FileLinks, public_url: str = "") -> None:
+        self.app = app
+        self.links = links
+        self.public_url = public_url.rstrip("/")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        base_url = self.public_url or str(Request(scope).base_url).rstrip("/")
+        token = _links.set(replace(self.links, base_url=base_url))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _links.reset(token)
+
+
+def file_url(stored: StoredFile) -> str:
+    """Return the link of a file for the request."""
+    links = _links.get()
+    if links is None:
+        raise RuntimeError("A link of a file needs a request through FileLinkMiddleware.")
+    return links.url(stored)
+
+
+def _stored_file(value: object) -> StoredFile | None:
+    """Return the value of a file field in the database, or None for another value."""
+    if isinstance(value, dict) and "key" in value:
+        return cast(StoredFile, value)
+    return None
+
+
+class FileRead(BaseModel):
+    """A file of a record, as the API returns it."""
+
+    name: str
+    """The name of the file, for example `screenshot.png`."""
+    size: int
+    """The size of the file, in bytes."""
+    type: str
+    """The media type, for example `image/png`."""
+    url: str
+    """A signed link to the file. It works without a sign-in, until it ends."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _link(cls, value: object) -> object:
+        """Give a stored file (`StoredFile`) its link."""
+        stored = _stored_file(value)
+        if stored is None:
+            return value
+        return {
+            "name": stored["name"],
+            "size": stored["size"],
+            "type": stored["type"],
+            "url": file_url(stored),
+        }
+
+
+async def upload(storage: Storage, file: UploadFile, rule: FileRule, folder: str) -> StoredFile:
+    """Check an uploaded file against the rule of its field, save it, and return its value.
+
+    A file that is larger than the rule allows gives a 413 error, and a
+    media type that the rule does not allow gives a 415 error. The key of
+    the file is new: `<folder>/<random hex>`.
+    """
+    content = await file.read(rule.max_size + 1)
+    if len(content) > rule.max_size:
+        {{ py.problem(413, "The file is larger than {size}.", 8, size="size_text(rule.max_size)") }}
+    media_type = media_type_of(content, file.content_type)
+    if not rule.allows(media_type):
+        types = ", ".join(rule.types)
+        {{ py.problem(415, "The type {type} is not allowed. Use one of: {types}.", 8, type="media_type", types="types") }}
+    key = f"{folder}/{uuid4().hex}"
+    await storage.save(key, content, media_type)
+    return StoredFile(key=key, name=file_name(file.filename), size=len(content), type=media_type)
+
+
+async def delete_files(storage: Storage, files: Iterable[StoredFile | None]) -> None:
+    """Delete the files that a commit removed from their records.
+
+    A delete that fails leaves the file in the storage, and writes a
+    warning to the log: the record does not name the file any more.
+    """
+    for stored in files:
+        if stored is None:
+            continue
+        try:
+            await storage.delete(stored["key"])
+        except Exception:
+            logger.warning("Cannot delete the file %s.", stored["key"], exc_info=True)
+
+
+async def replace_file(
+    session: AsyncSession,
+    storage: Storage,
+    record: Record,
+    attr: str,
+    stored: StoredFile | None,
+) -> None:
+    """Give a file field of a record a new file, or None, and commit. Then delete the old file.
+
+    If the commit fails, the app deletes the new file.
+    """
+    old: StoredFile | None = getattr(record, attr)
+    setattr(record, attr, stored)
+    try:
+        await commit(session)
+    except BaseException:
+        await delete_files(storage, [stored])
+        raise
+    await delete_files(storage, [old])
+
+
+router = APIRouter(tags=["Files"])
+
+
+@router.get(
+    "/file-links/{token}",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/octet-stream": {}}, "description": "The file."},
+        **problem_responses(404),
+    },
+    summary="Read file link",
+    operation_id="read_file_link",
+)
+async def read_file_link(token: str, storage: StorageDep) -> Response:
+    """Return a file by its signed link. The link works without a sign-in, until it ends."""
+    links = _links.get()
+    found = links.open(token) if links is not None else None
+    content = await storage.read(found.key) if found is not None else None
+    if found is None or content is None:
+        {{ py.problem(404, "The link is not valid, or has ended.", 8) }}
+    return Response(content, media_type=found.type, headers=found.headers())

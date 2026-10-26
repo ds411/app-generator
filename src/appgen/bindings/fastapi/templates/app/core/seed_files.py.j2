@@ -1,0 +1,41 @@
+{{ trace_header(py.storage.id) }}
+"""The files of the seed records (ADR 0027). `app/core/seed.py` saves them in the storage.
+
+The generated code holds no binary files, so each file is Base64 text.
+The seed saves the files of the seed records that it adds.
+"""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class SeedFile:
+    """A file of a seed record."""
+
+    key: str
+    """The key of the file in the storage: `<table>/<id>/<field>/seed-<hash>`."""
+    type: str
+    """The media type, for example `image/png`."""
+    content: str
+    """The content in Base64."""
+
+
+SEED_FILES: list[SeedFile] = [
+{% for f in py_seed.files %}
+    {{ trace(f.element_id) }}
+    SeedFile(
+        {{ py.string(f.key) }},
+        {{ py.string(f.type) }},
+{% set lines = f.lines() %}
+{% if lines | length == 1 %}
+        {{ lines[0] }},
+{% else %}
+        (
+{% for line in lines %}
+            {{ line }}
+{% endfor %}
+        ),
+{% endif %}
+    ),
+{% endfor %}
+]

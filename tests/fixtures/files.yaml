@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# File and image fields (ADR 0027): the avatars of the people, the scans
+# and the covers of the documents, the attachments of the notes, and
+# seed records with files. A member changes only the own documents, and
+# cannot change the notes, so only an admin uploads their attachments.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+version: 0
+
+app:
+  name: document-library
+  title: Document Library
+
+storage:
+  kind: s3
+  bucket_env: LIBRARY_BUCKET
+
+entities:
+  Person:
+    plural_label: People
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+      role: { type: enum, values: [admin, member], default: member }
+      avatar: { type: image, max_size: 1MB }
+    relations:
+      documents: { kind: one_to_many, target: Document, inverse: owner }
+
+  Document:
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      scan: { type: file, max_size: 5MB, types: [application/pdf, image/*] }
+      cover:
+        type: image
+        label: Cover image
+        description: The image of the document in the lists.
+    relations:
+      owner: { kind: many_to_one, target: Person, required: true, inverse: documents }
+      notes: { kind: one_to_many, target: Note, inverse: document }
+
+  Note:
+    display_field: text
+    fields:
+      text: { type: text, required: true }
+      attachment: { type: file }
+    relations:
+      document:
+        kind: many_to_one
+        target: Document
+        required: true
+        on_delete: cascade
+        inverse: notes
+        # The read schema of a note has the document, with its files.
+        x-fastapi-embed: true
+
+operations:
+  list_people: { kind: list, entity: Person }
+  read_person: { kind: read, entity: Person }
+  create_person: { kind: create, entity: Person }
+  update_person: { kind: update, entity: Person }
+  delete_person: { kind: delete, entity: Person }
+  list_documents: { kind: list, entity: Document }
+  read_document: { kind: read, entity: Document }
+  create_document: { kind: create, entity: Document }
+  update_document: { kind: update, entity: Document }
+  delete_document: { kind: delete, entity: Document }
+  list_notes: { kind: list, entity: Note }
+  read_note: { kind: read, entity: Note }
+  create_note: { kind: create, entity: Note }
+
+seed:
+  Person:
+    records:
+      ada: { name: Ada, email: ada@example.com, role: admin, avatar: files/ada.png }
+      ben: { name: Ben, email: ben@example.com }
+  Document:
+    records:
+      guide:
+        title: The guide
+        owner: ada
+        scan: files/guide.pdf
+        cover: files/cover.png
+
+auth:
+  user_entity: Person
+  username_field: email
+
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+    member:
+      label: Member
+      operations:
+        - list_people
+        - read_person
+        - list_documents
+        - read_document
+        - create_document
+        - update_document
+        - list_notes
+        - read_note
+        - create_note
+      records:
+        Document: { owner: owner, operations: [change] }

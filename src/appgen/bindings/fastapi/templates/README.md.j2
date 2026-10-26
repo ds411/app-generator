@@ -380,6 +380,9 @@ A slice has these modules:
 | `<operation>_gen.py` | The endpoint of a custom operation.                        |
 | `<operation>_ext.py` | The logic of a custom operation. Write it here.            |
 | `validation_ext.py` | The custom validation of the entity. Write it here.        |
+{% if py.file_slices %}
+| `files.py`          | The upload and the delete of the files of the file fields, if the entity has some. |
+{% endif %}
 
 {% if py_apis %}
 ## Third-party APIs
@@ -522,6 +525,51 @@ field, so the search, the sort, and the filters use it.
 
 {% endif %}
 {% endif %}
+{% if py.storage %}
+{% set st = py.storage %}
+## Files
+
+{% if st.s3 %}
+The app keeps the files of the file fields in an S3-compatible service:
+Amazon S3, Cloudflare R2, MinIO, and others. Set the bucket in
+`{{ st.variables["bucket_env"] }}`, and for a service that is not Amazon S3 its URL in
+`{{ st.variables["endpoint_env"] }}`. The keys are in `{{ st.variables["access_key_env"] }}` and
+`{{ st.variables["secret_key_env"] }}`; without them, boto3 uses the AWS configuration of
+the machine, for example its role. Without a bucket, the app keeps the
+files in the folder of `{{ st.variables["folder_env"] }}` (default `uploads`), for example
+on your machine and in the tests.
+{% else %}
+The app keeps the files of the file fields in the folder of
+`{{ st.variables["folder_env"] }}` (default `uploads`). The Docker image has the folder
+`/app/uploads`, and `compose.yaml` keeps it in a volume.
+{% endif %}
+
+{% for e in py.file_entities %}
+{% for f in e.files %}
+- `{{ e.name }}.{{ f.name }}`: at most {{ f.size_text }}{% if f.media_types %}, the types {% for t in f.media_types %}`{{ t }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}.
+{% endfor %}
+{% endfor %}
+
+`PUT <path>/{id}/<field>` uploads the file of a record, with a multipart
+body that has the file in the part `file`. A new file replaces the old
+one. `DELETE <path>/{id}/<field>` deletes the file. Both need the
+permission of the update operation of the entity, else of its create
+operation, and return the record. A file that is too large gives 413, and
+a type that the field does not allow gives 415. The app takes the type
+from the first bytes of a PNG, JPEG, GIF, WebP, or PDF file, else from
+the part.
+
+A read gives each file as `name`, `size`, `type`, and `url`. The URL is
+a signed link (`/file-links/<token>`) that works without a sign-in, so
+an `<img src>` shows an image, until it ends after `STORAGE_LINK_SECONDS`
+(default 3600). Set `STORAGE_LINK_SECRET` to a long random text, the same
+in all processes; without it, each process signs its own links. The
+links start with `PUBLIC_URL`, else with the URL of the request.
+
+The delete of a record deletes its files. The files of the records that
+the database deletes with `on_delete: cascade` stay in the storage.
+
+{% endif %}
 ## Endpoints
 
 | Operation | Method | Path |
@@ -530,7 +578,14 @@ field, so the search, the sort, and the filters use it.
 {% for op in e.operations %}
 | `{{ op.name }}` | {{ op.method | upper }} | `{{ e.path }}{{ op.path }}` |
 {% endfor %}
+{% for f in e.files if e.file_endpoints %}
+| `{{ f.upload_operation }}` | PUT | `{{ e.path }}{{ f.path }}` |
+| `{{ f.delete_operation }}` | DELETE | `{{ e.path }}{{ f.path }}` |
 {% endfor %}
+{% endfor %}
+{% if py.storage %}
+| `read_file_link` | GET | `/file-links/{token}` |
+{% endif %}
 
 ## Slices
 

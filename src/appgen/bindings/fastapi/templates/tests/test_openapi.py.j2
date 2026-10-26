@@ -19,6 +19,18 @@ ENDPOINTS = [
     ("get", "{{ d.path }}{{ w.path }}"),
 {% endfor %}
 {% endfor %}
+{% for e in py.file_slices %}
+{% for f in e.files %}
+    {{ trace(f.id) }}
+    ("put", "{{ e.path }}{{ f.path }}"),
+    {{ trace(f.id) }}
+    ("delete", "{{ e.path }}{{ f.path }}"),
+{% endfor %}
+{% endfor %}
+{% if py.storage %}
+    {{ trace(py.storage.id) }}
+    ("get", "/file-links/{token}"),
+{% endif %}
 ]
 SCHEMAS = [
 {% for schema, element_id in py.openapi_schemas %}
