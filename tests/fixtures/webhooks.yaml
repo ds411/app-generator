@@ -2,6 +2,8 @@
 # of an OpenAPI document, and the scheme `hmac_sha256` with a Base64
 # signature, an event ID in a header, and a body of any JSON value.
 # scripts/check-fastapi.sh generates the FastAPI app, and runs its tests.
+# scripts/check-nextjs.sh generates the Next.js app, and sends the events
+# to it (scripts/webhook_test.py).
 version: 0
 
 app:
@@ -10,12 +12,15 @@ app:
 
 entities:
   Order:
-    crud: true
+    crud: { views: [table] }
     display_field: reference
     fields:
       reference: { type: string, required: true, unique: true, max_length: 100 }
       paid: { type: boolean, required: true, default: false }
       amount: { type: integer }
+
+pages:
+  orders: { path: /orders, title: Orders, content: { view: order_table } }
 
 webhooks:
   payments:

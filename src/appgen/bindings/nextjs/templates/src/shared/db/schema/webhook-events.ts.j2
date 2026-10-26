@@ -1,0 +1,19 @@
+{{ trace_header(*(ts_webhooks.values() | map(attribute="id"))) }}
+import { pgTable, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
+
+/**
+ * The events that the webhooks received (ADR 0028). Each webhook has
+ * each event ID one time, so a repeated delivery does not run the logic
+ * of the webhook again. An ID longer than the column is stored as its
+ * SHA-256 hash.
+ */
+export const webhookEventsTable = pgTable(
+  "webhook_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    webhook: varchar("webhook", { length: 100 }).notNull(),
+    eventId: varchar("event_id", { length: 200 }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("uq_webhook_events_webhook_event_id").on(t.webhook, t.eventId)],
+);

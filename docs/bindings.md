@@ -203,8 +203,8 @@ binding:
 - **Gaps**: all other kinds. The generator renders the `gap_rule` for
   each element, an extension file with a gap trace and a
   `TODO(appgen):` comment. Without a gap rule, the gaps are only listed.
-  For example, the Next.js binding does not cover the webhooks yet, so
-  each webhook gets the file `src/gaps/webhooks.<name>.ext.ts`.
+  For example, a binding that does not cover the webhooks gives each
+  webhook the file `src/gaps/webhooks.<name>.ext.ts`.
 
 A binding must declare each kind that its templates render in
 `covers`, else the generator makes gap files for elements that the app
@@ -436,6 +436,17 @@ commit message of a code host to a task as a comment in this file
 The smoke test signs and sends the event with
 `scripts/webhook_sender.py`, and checks that two deliveries of the same
 event add one comment.
+
+In the Next.js app, the logic of a webhook is a gap too:
+`src/features/<webhook>-webhook/api/<webhook>-webhook.ext.ts`. The
+generated route handler `app/<path>/route.ts` calls the function
+`receive<Webhook>Webhook` of the slice (`<webhook>-webhook.gen.ts`),
+which checks the signature, reads the event with the zod schemas, and
+records its ID before it calls `handle<Webhook>` of the extension file.
+The project tracker example has the same logic for the commits
+(`examples/project-tracker/extensions/nextjs/src/features/commits-webhook/`).
+`scripts/webhook_test.py` sends signed events to each webhook of
+`tests/fixtures/webhooks.yaml`, with the stubs of the extension files.
 
 ### Schema changes of the FastAPI app
 

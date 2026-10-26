@@ -1,0 +1,14 @@
+{{ trace_header(*(ts_webhooks.values() | map(attribute="id"))) }}
+// The webhooks (ADR 0028): the checks of the signatures and of the
+// repeated events. Use it only on the server.
+import "server-only";
+
+export {
+  eventIdInBody,
+  eventIdInHeader,
+  receiveWebhook,
+  WebhookError,
+  type WebhookOptions,
+  type WebhookReceipt,
+} from "./receive";
+export { checkHmacSha256, checkStripe } from "./signature";

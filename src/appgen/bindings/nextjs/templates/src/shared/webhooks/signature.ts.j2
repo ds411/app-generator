@@ -1,0 +1,59 @@
+{{ trace_header(*(ts_webhooks.values() | map(attribute="id"))) }}
+import "server-only";
+
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+/** Return true if two texts are equal. The time does not depend on the first difference. */
+function equal(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Check a header with the HMAC-SHA256 of the body, after a prefix, in hex or Base64. */
+export function checkHmacSha256(
+  secret: Buffer,
+  body: Buffer,
+  header: string | null,
+  options: { prefix: string; encoding: "hex" | "base64" },
+): boolean {
+  if (header === null || !header.startsWith(options.prefix)) {
+    return false;
+  }
+  const expected = createHmac("sha256", secret).update(body).digest(options.encoding);
+  return equal(header.slice(options.prefix.length).trim(), expected);
+}
+
+/**
+ * Check the header `Stripe-Signature`: `t=<time>,v1=<signature>`, with one or more `v1`.
+ * The signature is the HMAC-SHA256 of `<time>.<body>`. A time that is more than
+ * `tolerance` seconds before or after now is not valid, so that an old request
+ * cannot come again.
+ */
+export function checkStripe(
+  secret: Buffer,
+  body: Buffer,
+  header: string | null,
+  options: { tolerance: number; now?: number },
+): boolean {
+  const parts = (header ?? "")
+    .split(",")
+    .filter((item) => item.includes("="))
+    .map((item) => {
+      const index = item.indexOf("=");
+      return { key: item.slice(0, index).trim(), value: item.slice(index + 1).trim() };
+    });
+  const times = parts.filter((part) => part.key === "t").map((part) => part.value);
+  const signatures = parts.filter((part) => part.key === "v1").map((part) => part.value);
+  const [time] = times;
+  if (times.length !== 1 || time === undefined || !/^\d+$/.test(time) || signatures.length === 0) {
+    return false;
+  }
+  const timestamp = Number(time);
+  const now = options.now ?? Date.now() / 1000;
+  if (Math.abs(now - timestamp) > options.tolerance) {
+    return false;
+  }
+  const expected = createHmac("sha256", secret).update(`${timestamp}.`).update(body).digest("hex");
+  return signatures.some((signature) => equal(signature, expected));
+}

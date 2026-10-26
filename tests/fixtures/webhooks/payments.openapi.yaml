@@ -15,7 +15,7 @@ components:
         type:
           type: string
           enum: [checkout.session.completed, invoice.paid]
-        created: { type: integer, description: The time of the event, in seconds. }
+        created: { type: integer, description: "The time of the event, in seconds." }
         data:
           type: object
           required: [object]

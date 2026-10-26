@@ -1,0 +1,7 @@
+{% set w = ts_webhooks[name] %}
+{{ trace_header(element_id) }}
+// The public API of the slice: the endpoint of the webhook `{{ w.name }}`.
+export { {{ w.receive }} } from "./api/{{ w.slice }}.gen";
+{% if w.typed %}
+export type { {{ w.body_type }} } from "./model/event";
+{% endif %}

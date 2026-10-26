@@ -14,6 +14,11 @@ do. Then it checks the app:
   server.
 - FastAPI: call the health check, and the list endpoint of each entity.
   Each list has the records of the seed.
+- Next.js and FastAPI: send signed events to the webhook `commits`
+  (`scripts/webhook_sender.py`). A wrong signature gives 401, a body
+  that does not agree with the schema gives 422, and an event that
+  comes two times runs the logic one time. In the FastAPI app, the
+  logic adds one comment to the task.
 
 With `--local`, the script runs the Next.js app or the FastAPI app on the
 machine, without Docker and without a Postgres server: the Next.js app
@@ -528,8 +533,23 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
 
 
 def check_webhook(binding: str, definition: AppDefinition) -> None:
-    """Send the signed event of the webhook `commits`, and check that it adds one comment."""
+    """Send the signed event of the webhook `commits`, and check that it adds one comment.
+
+    The Next.js app has no REST API: the event goes to a task and a person
+    of the seed records, and the check does not count the comments.
+    """
     base = f"http://localhost:{PORTS[binding]}"
+    if binding == "nextjs":
+        records = mock_data(definition)
+        task_id = str(records["Task"][0]["id"])
+        author = str(records["Person"][0]["email"])
+        try:
+            webhook_sender.check_commits(
+                definition, base, task_id, author, None, lambda m: log(binding, m)
+            )
+        except webhook_sender.WebhookError as error:
+            raise SmokeError(f"{binding}: {error}") from None
+        return
     email = "grace@example.com"
     person = post(binding, base + "/people", {"name": "Grace Hook", "email": email})
     project = post(
@@ -555,6 +575,8 @@ def check(binding: str, definition: AppDefinition, ui: bool) -> None:
         check_webhook(binding, definition)
     else:
         check_front_end(binding, definition)
+        if binding == "nextjs":
+            check_webhook(binding, definition)
         if ui:
             check_ui(binding, definition)
 

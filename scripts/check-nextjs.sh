@@ -7,9 +7,11 @@
 # smoke test runs the built app with PGlite (--local), without Docker.
 # Then check the rate limit that two processes share in Redis
 # (scripts/check_shared_rate_limit.py), and the deployment files of each
-# target against their schemas (scripts/check_deploy_files.py). Last,
+# target against their schemas (scripts/check_deploy_files.py). Then
 # generate tests/fixtures/seed-data.yaml, and run lint, type check,
-# appgen check, and the seed test (scripts/seed_test.py) on it.
+# appgen check, and the seed test (scripts/seed_test.py) on it. Last,
+# generate tests/fixtures/webhooks.yaml, and run lint, type check, build,
+# appgen check, and the webhook test (scripts/webhook_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -37,14 +39,17 @@ root=$(pwd)
 # The app of the seed data fixture (ADR 0021), in a temporary folder.
 seed_definition=tests/fixtures/seed-data.yaml
 seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-seed.XXXXXX")
+# The app of the webhooks fixture (ADR 0028), in a temporary folder.
+webhooks_definition=tests/fixtures/webhooks.yaml
+webhooks_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-webhooks.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out"' EXIT
 fi
 
 step() {
@@ -118,5 +123,24 @@ uv run --locked appgen check "$seed_definition" "$seed_out"
 
 step "seed test"
 uv run --locked scripts/seed_test.py "$seed_definition" --app "$seed_out"
+
+step "generate $webhooks_definition in $webhooks_out"
+uv run --locked appgen generate "$webhooks_definition" -b nextjs -o "$webhooks_out" >/dev/null
+(
+    cd "$webhooks_out"
+    step "pnpm install (webhooks)"
+    pnpm install --silent
+    step "pnpm lint (webhooks)"
+    pnpm --silent lint
+    step "pnpm typecheck (webhooks)"
+    pnpm --silent typecheck
+    step "pnpm build (webhooks)"
+    pnpm --silent build >/dev/null
+)
+step "appgen check (webhooks)"
+uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
+
+step "webhook test"
+uv run --locked scripts/webhook_test.py "$webhooks_definition" --app "$webhooks_out"
 
 step "passed"

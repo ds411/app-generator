@@ -43,8 +43,8 @@ CUSTOM_UI = {
     "ui.dashboards.overview.widgets.workload",
     "ui.dashboards.overview.widgets.holidays",
 }
-# The logic of each webhook is a gap of the FastAPI app. The Next.js
-# binding does not generate the webhooks yet, so each webhook is a gap.
+# The logic of each webhook is a gap of the back-end apps: the stub of its
+# extension file.
 WEBHOOKS = {"webhooks.commits"}
 # The React app has a client for the API with a secret, because the
 # FastAPI app exposes the API (`expose`): the API is not a gap.

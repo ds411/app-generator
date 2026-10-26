@@ -1,0 +1,171 @@
+{{ trace_header(*(ts_webhooks.values() | map(attribute="id"))) }}
+import "server-only";
+
+import { createHash } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import type { z } from "zod";
+
+import { ValidationError } from "@/shared/api/errors";
+import { NotFoundError } from "@/shared/api/types";
+import { getDb, webhookEventsTable } from "@/shared/db";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+
+/**
+ * An error of the logic of a webhook that refuses the event with a status,
+ * for example 422 for an event that the app cannot use. The sender can
+ * deliver the event again later.
+ */
+export class WebhookError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "WebhookError";
+    this.status = status;
+  }
+}
+
+/** What a webhook endpoint needs: the secret, the checks, and the logic. */
+export type WebhookOptions<T> = {
+  /** The name of the webhook in the definition. */
+  name: string;
+  /** The secret of the signatures, from the environment. */
+  secret: string | undefined;
+  /** Return true if the signature of the raw body is correct. */
+  check: (secret: Buffer, body: Buffer, headers: Headers) => boolean;
+  /** Return the ID of the event, or undefined if the request has none. */
+  eventId: (data: unknown, headers: Headers) => string | undefined;
+  /** The schema of the body. Without it, the event is the JSON value. */
+  schema?: z.ZodType<T>;
+  /** The logic of the webhook (the extension file). */
+  handle: (event: T, headers: Headers) => Promise<void>;
+};
+
+/** The answer of a webhook endpoint: `repeated` is true if the logic did not run again. */
+export type WebhookReceipt = { event_id: string; repeated: boolean };
+
+/** Return an error answer in the format of the problem details (RFC 9457). */
+function problem(status: number, detail: string, extra: Record<string, unknown> = {}): Response {
+  return Response.json(
+    { type: "about:blank", status, detail, ...extra },
+    { status, headers: { "Content-Type": "application/problem+json" } },
+  );
+}
+
+/** Return the event ID at a path of properties of the body, or undefined. */
+export function eventIdInBody(data: unknown, path: string[]): string | undefined {
+  let value = data;
+  for (const name of path) {
+    value =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)[name]
+        : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** Return the event ID of a header, or undefined if the request has none. */
+export function eventIdInHeader(value: string | null): string | undefined {
+  const id = value?.trim();
+  return id ? id : undefined;
+}
+
+/** The key of an event in the table: the ID, or its SHA-256 hash if the ID is longer than the column. */
+function eventKey(eventId: string): string {
+  return eventId.length <= 200 ? eventId : createHash("sha256").update(eventId).digest("hex");
+}
+
+/** Add the event to the table, and return true. Return false if the webhook has the event already. */
+async function recordEvent(webhook: string, key: string): Promise<boolean> {
+  const rows = await getDb()
+    .insert(webhookEventsTable)
+    .values({ webhook, eventId: key })
+    .onConflictDoNothing()
+    .returning({ id: webhookEventsTable.id });
+  return rows.length > 0;
+}
+
+/** Remove an event from the table, so that the sender can deliver it again. */
+async function forgetEvent(webhook: string, key: string): Promise<void> {
+  await getDb()
+    .delete(webhookEventsTable)
+    .where(and(eq(webhookEventsTable.webhook, webhook), eq(webhookEventsTable.eventId, key)));
+}
+
+/**
+ * Receive a request of a webhook. Check the signature of the raw body
+ * (401 if it is not correct), read the event ID (400 without one) and
+ * the event (422 if it does not agree with the schema), and call the
+ * logic one time for each event ID. A repeated event gives the receipt
+ * with `repeated: true`, and the logic does not run.
+ *
+ * The app adds the event ID before it calls the logic. When the logic
+ * fails, the app removes the ID again, so the sender can deliver the
+ * event again. A second delivery of the event while the logic runs gets
+ * `repeated: true`.
+ */
+export async function receiveWebhook<T>(request: Request, options: WebhookOptions<T>): Promise<Response> {
+{% if i18n %}
+  return inRequestLanguage(() => receive(request, options));
+}
+
+async function receive<T>(request: Request, options: WebhookOptions<T>): Promise<Response> {
+{% endif %}
+  if (!options.secret) {
+    console.error(`The server has no secret for the webhook ${options.name}.`);
+    return problem(500, {{ js_format("The server has no secret for the webhook {name}.", name="options.name") }});
+  }
+  const body = Buffer.from(await request.arrayBuffer());
+  const headers = request.headers;
+  if (!options.check(Buffer.from(options.secret), body, headers)) {
+    return problem(401, {{ tr(text("The signature of the webhook is not valid.")) }});
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(body.toString("utf8"));
+  } catch {
+    return problem(400, {{ tr(text("The body of the webhook is not valid JSON.")) }});
+  }
+  const eventId = options.eventId(data, headers);
+  if (eventId === undefined) {
+    return problem(400, {{ tr(text("The webhook has no event ID.")) }});
+  }
+  let event = data as T;
+  if (options.schema) {
+    const parsed = options.schema.safeParse(data);
+    if (!parsed.success) {
+      const errors = parsed.error.issues.map((issue) => ({
+        path: issue.path.map(String),
+        message: issue.message,
+      }));
+      return problem(422, {{ tr(text("The body of the webhook does not agree with its schema.")) }}, { errors });
+    }
+    event = parsed.data;
+  }
+  const key = eventKey(eventId);
+  if (!(await recordEvent(options.name, key))) {
+    return Response.json({ event_id: eventId, repeated: true } satisfies WebhookReceipt);
+  }
+  try {
+    await options.handle(event, headers);
+  } catch (error) {
+    await forgetEvent(options.name, key);
+    if (error instanceof WebhookError) {
+      return problem(error.status, error.message);
+    }
+    if (error instanceof NotFoundError) {
+      return problem(404, error.message);
+    }
+    if (error instanceof ValidationError) {
+      return problem(422, error.message);
+    }
+    console.error(`The logic of the webhook ${options.name} failed:`, error);
+    return problem(500, {{ tr(text("The logic of the webhook failed. Deliver the event again later.")) }});
+  }
+  return Response.json({ event_id: eventId, repeated: false } satisfies WebhookReceipt);
+}

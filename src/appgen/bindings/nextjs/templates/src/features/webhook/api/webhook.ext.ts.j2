@@ -1,0 +1,26 @@
+{% set w = ts_webhooks[name] %}
+{{ trace_header(element_id) }}
+import "server-only";
+
+import { WebhookError } from "@/shared/webhooks";
+{% if w.typed %}
+
+import type { {{ w.body_type }} } from "../model/event";
+{% endif %}
+
+/**
+{% if w.description %}
+ * {{ w.description }}
+ *
+{% endif %}
+ * The logic of the webhook `{{ w.name }}` (POST {{ w.path }}). The endpoint checked the
+ * signature, and calls the function one time for each event ID. Throw an error to
+ * refuse the event, for example a `WebhookError` with a status: then the sender can
+ * deliver it again. The repositories in `@/entities/<entity>/server` read and change
+ * the data.
+ */
+export async function {{ w.handler }}(_event: {{ w.body_type }}, _headers: Headers): Promise<void> {
+  // TODO(appgen): write the logic of the webhook {{ w.name }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+  throw new WebhookError(501, "Not implemented yet: {{ element_id }}");
+}

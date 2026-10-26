@@ -243,6 +243,31 @@ const client = {{ (ts_apis.values() | first).factory }}();
 ```
 
 {% endif %}
+{% if ts_webhooks %}
+## Webhooks
+
+Each webhook of the definition has a route handler `app/<path>/route.ts`
+and a feature slice in `src/features/<webhook>-webhook/`: the function
+that receives the request (`api/<webhook>-webhook.gen.ts`), the logic
+(`api/<webhook>-webhook.ext.ts`), and the types and zod schemas of the
+schema of the body (`model/event.ts`). The endpoint checks the
+signature of the raw body with the secret, and gives 401 for a wrong
+signature. The table `webhook_events` keeps the ID of each event, so a
+repeated delivery gives `"repeated": true` and does not run the logic
+again. The app adds the row before the logic runs: when the logic
+throws, the app removes the row, and the sender can deliver the event
+again. The changes that the logic made before the error stay.
+
+| Webhook | Endpoint | Signature | Secret |
+| ------- | -------- | --------- | ------ |
+{% for w in ts_webhooks.values() %}
+| `{{ w.name }}` | `POST {{ w.path }}` | {{ "Stripe (`Stripe-Signature`)" if w.scheme == "stripe" else "HMAC-SHA256 in `" ~ w.header ~ "`" }} | `{{ w.secret_env }}` |
+{% endfor %}
+
+Without its secret, an endpoint gives 500. A `WebhookError` of
+`@/shared/webhooks` in the logic gives its status to the sender.
+
+{% endif %}
 ## Structure
 
 The code follows [Feature-Sliced Design](https://feature-sliced.design).

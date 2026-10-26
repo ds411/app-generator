@@ -10,6 +10,7 @@ from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
+from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
 from appgen.bindings.shared.files import reject_file_fields
@@ -205,6 +206,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     rules = record_rules(definition)
     return {
         "ts_apis": ts_apis(definition),
+        "ts_webhooks": ts_webhooks(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
