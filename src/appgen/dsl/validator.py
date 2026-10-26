@@ -19,6 +19,7 @@ from typing import Any, cast
 from appgen.dsl.access import ALL, RecordRule
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
+    CONNECTIONS_PATH,
     FORGOT_PASSWORD_PATH,
     PROVIDER_PATHS,
     RESET_PASSWORD_PATH,
@@ -105,6 +106,7 @@ RESERVED_WEBHOOK_PATHS = (
     "/redoc",
     FORGOT_PASSWORD_PATH,
     RESET_PASSWORD_PATH,
+    CONNECTIONS_PATH,
     SECOND_FACTOR_PATH,
     SIGN_IN_PATH,
     SIGN_UP_PATH,
@@ -1144,8 +1146,19 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
         reserved[VERIFY_EMAIL_PATH] = "email verification"
     if auth.second_factor is not None:
         reserved[SECOND_FACTOR_PATH] = "second factor"
+    connections = any(api.user_flow for api in definition.apis.values())
+    if connections:
+        reserved[CONNECTIONS_PATH] = "connections"
     for page in definition.pages.values():
-        if page.path in reserved:
+        if connections and page.path.startswith(CONNECTIONS_PATH + "/"):
+            yield _error(
+                "duplicate-name",
+                f"The paths under '{CONNECTIONS_PATH}/' are the connections of the apps.",
+                page,
+                at="path",
+                hint="Give the page another path.",
+            )
+        elif page.path in reserved:
             yield _error(
                 "duplicate-name",
                 f"The path '{page.path}' is the {reserved[page.path]} page of the apps.",

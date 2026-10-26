@@ -1,0 +1,48 @@
+{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+"use server";
+
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+{% endif %}
+import { type ConnectionState, deleteConnection, isConnectionName, listConnections } from "./connections";
+import { sessionUserId } from "./session";
+
+// The server actions of the page of the connections (ADR 0033). The start
+// of a connection is a route handler: the browser goes to the
+// authorization server.
+
+/** A value, or the message of the error. */
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+{% if i18n %}
+/** Return a failed result with a message in the language of the request. */
+async function failed<T>(message: () => string): Promise<Result<T>> {
+  return { ok: false, message: await inRequestLanguage(message) };
+}
+{% else %}
+/** Return a failed result with a message. */
+function failed<T>(message: () => string): Result<T> {
+  return { ok: false, message: message() };
+}
+{% endif %}
+
+/** List the APIs with the authorization code flow, with the connections of the signed-in user. */
+export async function listConnectionsAction(): Promise<Result<ConnectionState[]>> {
+  const userId = await sessionUserId();
+  if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
+{% if i18n %}
+  return { ok: true, value: await inRequestLanguage(() => listConnections(userId)) };
+{% else %}
+  return { ok: true, value: await listConnections(userId) };
+{% endif %}
+}
+
+/** Delete the connection of the signed-in user to an API, and its tokens. */
+export async function deleteConnectionAction(api: string): Promise<Result<null>> {
+  const userId = await sessionUserId();
+  if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
+  if (!isConnectionName(api)) return failed(() => {{ tr(js("The connection failed.")) }});
+  await deleteConnection(api, userId);
+  return { ok: true, value: null };
+}

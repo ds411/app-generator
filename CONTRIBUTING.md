@@ -313,8 +313,12 @@ git config core.hooksPath .githooks
   It also builds `tests/fixtures/record-rules.yaml`, and checks its
   rules with conditions and owner paths. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
-  in through the flow of the FastAPI app. It needs uv and pnpm, but not
-  Docker. Update its approved screenshots with
+  in through the flow of the FastAPI app. Then it builds
+  `tests/fixtures/api-connections.yaml` with React, Next.js, and
+  react-api, connects an account of the calendar API at the mock OAuth
+  server of `scripts/mock_api.py`, syncs a calendar, and disconnects
+  the account on the page `/connections` (`scripts/connection_ui_test.py`).
+  It needs uv and pnpm, but not Docker. Update its approved screenshots with
   `APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-auth-ui.sh`.
 - Each check script ends with the smoke test of its app
   (`scripts/smoke_test.py`): it starts the Docker image that the script

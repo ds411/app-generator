@@ -199,6 +199,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/bindings/fastapi/*' 'src/appgen/bindings/shared/*' 'examples/room-booking/*' \
     'scripts/check-auth-ui.sh' 'scripts/auth_ui_test.py' 'scripts/mock_oidc.py' 'scripts/mock_smtp.py' \
     'scripts/smoke_test.py' 'ui-tests/*' \
+    'tests/fixtures/api-connections*' 'scripts/connection_ui_test.py' 'scripts/mock_api.py' \
     'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps auth-ui"
 fi

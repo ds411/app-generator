@@ -300,6 +300,30 @@ import { {{ (ts_apis.values() | first).factory }} } from "@/shared/api/{{ (ts_ap
 const client = {{ (ts_apis.values() | first).factory }}();
 ```
 
+{% if ts_connections %}
+### Connections of the users
+
+The clients of {% for api in ts_connections %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} send the access token of a user: the
+authorization code flow of OAuth 2.0. A signed-in user connects an account of the service on the page
+`/connections` (`src/shared/auth/connections.ts`):
+
+1. `/connections/<api>/start` sends the browser to the authorization
+   URL of the service, with a signed cookie for the flow.
+2. The user allows the access, and the service sends the browser back
+   to `/connections/<api>/callback`. The app changes the code for the
+   tokens, and sends the browser to `/connections`.
+
+Register `<PUBLIC_URL>/connections/<api>/callback` as the redirect URI
+of the app at the service, and set `PUBLIC_URL` to the URL of the app
+for the browsers. The table `api_connections` keeps the tokens of each
+user, encrypted with a key from `AUTH_SECRET`: a new `AUTH_SECRET` ends
+the connections. The client gets a new access token with the refresh
+token when the token ends. `{{ (ts_connections | first).factory }}()` uses the signed-in
+user, and a server action gives an error result if the user has no
+connection. Other code gets a client with
+`{{ (ts_connections | first).client_for }}(userId)`.
+
+{% endif %}
 {% endif %}
 {% if ts_webhooks %}
 ## Webhooks

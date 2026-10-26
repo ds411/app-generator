@@ -1,0 +1,60 @@
+{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
+
+import {
+  ConnectionError,
+  connectionFlowCookie,
+  connectionFlowPath,
+  connectionsPage,
+  finishConnection,
+  isConnectionName,
+  readConnectionFlow,
+} from "@/shared/auth/connections";
+import { sessionUserId } from "@/shared/auth/session";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+
+/**
+ * The authorization server sends the browser back here (ADR 0033). Change
+ * the code for the tokens of the signed-in user, keep them, and open the
+ * page of the connections. A failed connection shows its message on the
+ * page.
+ */
+export async function GET(request: NextRequest, { params }: RouteContext<"/connections/[api]/callback">) {
+  const { api } = await params;
+  if (!isConnectionName(api)) notFound();
+  const store = await cookies();
+  const flow = readConnectionFlow(api, store.get(connectionFlowCookie(api))?.value ?? "");
+  store.delete({ name: connectionFlowCookie(api), path: connectionFlowPath(api) });
+  const userId = await sessionUserId();
+{% if i18n %}
+  const target = await inRequestLanguage(async () => {
+    try {
+      if (flow === null) {
+        throw new ConnectionError({{ tr(js("The state of the callback is not correct. Connect the account again.")) }});
+      }
+      await finishConnection(api, flow, request.nextUrl.searchParams, userId);
+      return connectionsPage({ connected: api });
+    } catch (error) {
+      console.error(error);
+      return connectionsPage({ error });
+    }
+  });
+{% else %}
+  let target: string;
+  try {
+    if (flow === null) {
+      throw new ConnectionError({{ tr(js("The state of the callback is not correct. Connect the account again.")) }});
+    }
+    await finishConnection(api, flow, request.nextUrl.searchParams, userId);
+    target = connectionsPage({ connected: api });
+  } catch (error) {
+    console.error(error);
+    target = connectionsPage({ error });
+  }
+{% endif %}
+  redirect(target);
+}

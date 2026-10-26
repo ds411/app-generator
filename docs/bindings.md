@@ -472,6 +472,17 @@ that counts the events of the calendar of a user.
 server of `scripts/mock_api.py`, and checks the calls of the operation,
 of the job, and the refresh of a token.
 
+The Next.js app has the same table and token source in
+`src/shared/auth/connections.ts`. The extension file of a custom
+operation calls `<api>Client()`, which uses the signed-in user, and a
+job runs the operation in the name of the user of the record. The
+routes `/connections/<api>/start` and `/connections/<api>/callback` run
+the flow. The front ends show the page `/connections` with
+`ConnectionsPage` of `src/features/connections/`, and a link to it in
+the layout. `scripts/connection_ui_test.py` connects, syncs, and
+disconnects an account on this page with React, Next.js, and React with
+the FastAPI app.
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration

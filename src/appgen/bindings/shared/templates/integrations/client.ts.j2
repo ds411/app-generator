@@ -9,6 +9,8 @@ import "server-only";
 
 {% endif %}
 {% set oauth = server and api.credential == "oauth2" %}
+{# The authorization code flow: the client sends the token of a user (ADR 0033). #}
+{% set user = server and api.user %}
 {% if endpoint %}
 import { API_URL, apiFetch } from "@/shared/api/http";
 {% endif %}
@@ -21,6 +23,9 @@ import {
 } from "@/shared/api/third-party";
 {% else %}
 import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
+{% endif %}
+{% if user %}
+import { UserToken } from "@/shared/auth/connections";
 {% endif %}
 {% set types = api.used_types() %}
 {% if mock or types %}
@@ -71,6 +76,12 @@ export class {{ api.client }} {
             fetch: options.fetch,
           })
         : undefined,
+      timeoutMs: options.timeoutMs,
+      fetch: options.fetch,
+    });
+{% elif user %}
+    this.http = new HttpClient({{ api.name | tojson }}, options.baseUrl ?? {{ api.base_url_const }}, {
+      token: options.token,
       timeoutMs: options.timeoutMs,
       fetch: options.fetch,
     });
@@ -126,6 +137,26 @@ export class {{ api.client }} {
 {% endfor %}
 }
 
+{% if user %}
+/**
+ * Return a client with the base URL of the environment (`{{ api.url_env }}`)
+ * that calls the API with the access token of the signed-in user (ADR 0033).
+ * Without a connection of the user to the API, a call throws a
+ * `NotConnectedError`: the user connects an account on the page
+ * `/connections`.
+ */
+export function {{ api.factory }}(): {{ api.client }} {
+  return {{ api.client_for }}(null);
+}
+
+/** Return a client that calls the API with the access token of a user, or of the signed-in user for `null`. */
+export function {{ api.client_for }}(userId: string | null): {{ api.client }} {
+  return new {{ api.client }}({
+    baseUrl: process.env.{{ api.url_env }} || undefined,
+    token: new UserToken({{ api.name | tojson }}, userId),
+  });
+}
+{% else %}
 /**
 {% if server and oauth %}
  * Return a client with the settings of the environment: the base URL in
@@ -165,3 +196,4 @@ export function {{ api.factory }}(): {{ api.client }} {
 {% endif %}
   });
 }
+{% endif %}

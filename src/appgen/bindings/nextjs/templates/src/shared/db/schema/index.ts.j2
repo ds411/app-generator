@@ -6,6 +6,13 @@ export * from "./{{ table.module }}"; {{ trace(table.element_id) }}
 {% if definition.auth and definition.auth.password %}
 export * from "./credentials"; {{ trace(definition.auth.id) }}
 {% endif %}
+{% if ts_connections %}
+// The tokens of the users for the APIs (ADR 0033).
+export * from "./api-connections";
+{% for api in ts_connections %}
+{{ trace(api.id) }}
+{% endfor %}
+{% endif %}
 {% if nextjs.jobs %}
 // The runs of the jobs (ADR 0029).
 export * from "./job-runs";

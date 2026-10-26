@@ -73,8 +73,27 @@ one token of the app for all requests.
   signed-in user. Without a connection, the endpoint gives 409. A job
   names the user of each record in `user`. A run for a record whose user
   has no connection does nothing.
-- The Next.js binding rejects the flow until it generates the
-  connections, and the front ends get a page for the connections later.
+- The Next.js app has the same table, the same encryption, and the same
+  token source in `src/shared/auth/connections.ts`. The browser of the
+  signed-in user goes to `/connections/<api>/start`, which sends it to
+  the authorization URL. The state, the PKCE verifier, the user, and the
+  end of the time of the flow are in an HTTP-only cookie for the path
+  `/connections/<api>`, signed with `AUTH_SECRET`. The Next.js app has
+  the session cookie, so the start can be a link.
+  `/connections/<api>/callback` changes the code for the tokens, and
+  sends the browser to `/connections` with `#connected=<api>` or
+  `#error=...`. A server action that calls the API without a connection
+  gives an error result with a message. A job runs the operation for
+  each record in the name of its user (`asUser`).
+- The front ends have the page `/connections` for the signed-in users,
+  and a link to it in the layout. The page lists the APIs with the flow,
+  and connects or disconnects each account. It shows the result of the
+  callback from the fragment of the URL, and removes the fragment. The
+  React app with `x-react-data: api` uses the routes of the FastAPI app,
+  with `return_to` set to its page. The React app with mock data keeps
+  the connections in `sessionStorage`, and sends no requests. A page of
+  the definition cannot have the path `/connections`, or a path under
+  `/connections/`, when an API has the flow.
 
 ## Consequences
 
@@ -82,14 +101,21 @@ one token of the app for all requests.
 - The tokens of the users are useless without `AUTH_SECRET`. A new
   `AUTH_SECRET` ends the sessions and the connections: the users connect
   their accounts again.
-- The source keeps the new tokens in a session of its own, so a failed
+- The source keeps the new tokens in a session of its own (in the
+  Next.js app, outside the transaction of the job), so a failed
   operation does not lose a new refresh token. With SQLite (local runs),
   a run of a job holds the lock of the database: a refresh of a token in
   the run waits for the lock, and fails after the timeout of SQLite. The
   worker in production uses Postgres.
-- The callback trusts the user in the signed `state`, not a cookie. A
-  person who gets the authorization URL of another user in the 10
-  minutes can connect an account of their own to that user. The URL
-  goes only to the browser of the user.
+- The callback of the FastAPI app trusts the user in the signed
+  `state`, not a cookie. A person who gets the authorization URL of
+  another user in the 10 minutes can connect an account of their own to
+  that user. The URL goes only to the browser of the user. The callback
+  of the Next.js app also compares the user of the flow cookie with the
+  signed-in user.
+- The OAuth app of the service must allow the URL of the callback. The
+  Next.js app builds it from `PUBLIC_URL` (in production, the variable
+  is necessary). The FastAPI app uses `PUBLIC_URL`, else the URL of the
+  request.
 - The app does not revoke the tokens at the service when a user
   deletes a connection: OpenAPI has no field for the revocation URL.

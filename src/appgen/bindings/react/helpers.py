@@ -17,7 +17,7 @@ from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rule
 from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
-from appgen.bindings.shared.integrations import ts_apis
+from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
@@ -154,6 +154,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ts_server_apis": {
             name: a for name, a in third_party.items() if not a.browser and not a.exposed
         },
+        # The page of the connections calls the routes of the FastAPI app (ADR 0033).
+        "ts_connections": ts_connections(third_party) if definition.auth else [],
         "mock": mock_records(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
