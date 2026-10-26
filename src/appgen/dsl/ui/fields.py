@@ -105,6 +105,7 @@ WIDGET_TYPES: dict[str, frozenset[str] | None] = {
     "datetime": frozenset({"datetime"}),
     "relation": frozenset({*SINGLE_KINDS, "many_to_many"}),
     "file": FILE_TYPES,
+    "lines": frozenset({"one_to_many"}),
     "custom": None,
 }
 """The field types and relation kinds that each form widget suits. None: all."""

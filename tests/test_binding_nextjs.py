@@ -320,8 +320,12 @@ def test_each_entity_has_a_repository_and_server_actions(result: GenerationResul
     assert "projectRepository.list(parseListQuery<Project>(query))" in actions
     api = files["src/entities/project/api/project-api.ts"]
     assert 'createEntityApi("Project", {' in api
-    assert "export function createProject(input: ProjectInput): Promise<Project> {" in api
-    assert "// @trace operations.create_project" in api
+    # The operations with lines are in their feature slices (ADR 0035).
+    assert "export function createProject(" not in api
+    assert "export function deleteProject(id: string): Promise<void> {" in api
+    assert "// @trace operations.delete_project" in api
+    create = files["src/features/create-project/api/create-project-api.ts"]
+    assert "export async function createProject(" in create
     task_api = files["src/entities/task/api/task-api.ts"]
     assert "export function listTasksOfProject(" in task_api
     assert files["src/entities/project/server.ts"].endswith(
@@ -557,9 +561,9 @@ def test_each_form_is_a_feature_that_calls_the_server_actions(result: Generation
     form = files["src/features/new-project-form/ui/new-project-form.tsx"]
     assert "projectInputSchema.pick(" in form
     assert '"Enter a name."' in form
-    assert "const found = submitErrors(error);" in form
+    assert 'const found = submitErrors(error, ["budgetLines"]);' in form
     assert (
-        "export function submitErrors(error: unknown): FormErrors {"
+        "export function submitErrors(error: unknown, lines: readonly string[] = []): FormErrors {"
         in files["src/shared/lib/form.ts"]
     )
     assert "src/shared/ui/form-widgets/relation-select.tsx" in files

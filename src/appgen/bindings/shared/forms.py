@@ -21,9 +21,12 @@ from typing import Any, Literal
 from appgen.bindings.shared.auth import record_rules
 from appgen.bindings.shared.gaps import form_values, gap_spec
 from appgen.bindings.shared.i18n import LanguagePlan, i18n_plan, text_js
+from appgen.bindings.shared.lines import LineItem, line_item, lines_operations
+from appgen.bindings.shared.totals import TsTotal, entity_totals
 from appgen.bindings.shared.typescript import Member, members, translations_key
 from appgen.bindings.shared.ui import css_class_var, js
-from appgen.bindings.shared.views import definition_display, label
+from appgen.bindings.shared.views import ViewContext, definition_display, label
+from appgen.dsl.expressions import expression_paths, expression_totals, parse_expression
 from appgen.dsl.model import AppDefinition, Field, Operation
 from appgen.dsl.storage import format_size
 from appgen.dsl.ui.common import Grid
@@ -33,7 +36,7 @@ from appgen.gen.binding import Output
 from appgen.gen.naming import camel, kebab, pascal, snake
 
 type ValueKind = Literal[
-    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json", "file"
+    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json", "file", "lines"
 ]
 
 _KINDS: dict[str, ValueKind] = {
@@ -139,6 +142,66 @@ class FieldPlan:
     """For a translatable field: the TypeScript input of the values of all languages."""
     file_rule: str | None = None
     """For a file field: the TypeScript rule of the files, `{ maxSize, types }`."""
+    lines: LinesPlan | None = None
+    """For a lines editor (ADR 0035): its rows and columns."""
+    prefix: str = ""
+    """For a column of a lines editor: the start of the names of its constants, `lines_`."""
+
+    @property
+    def options_const(self) -> str:
+        """Return the constant with the options of an enum field, for example `STATUS_OPTIONS`."""
+        return f"{self.prefix}{snake(self.key)}_options".upper()
+
+
+@dataclass(slots=True)
+class LinesPlan:
+    """A lines editor (ADR 0035): a row for each record of a `one_to_many` relation.
+
+    The values of the form keep the rows. A row has a key for React, the
+    ID of a line of the record, the line of the record, and the value of
+    each column. The input of the operation gets the items of the rows.
+    """
+
+    item: LineItem
+    columns: list[FieldPlan]
+    """The fields of a line, one column each. Their `to_input` reads the row `line`."""
+
+    @property
+    def row_type(self) -> str:
+        """Return the TypeScript type of a row, for example `LinesRow`."""
+        return f"{pascal(self.item.relation)}Row"
+
+    @property
+    def record_type(self) -> str:
+        """Return the TypeScript type of a line of the record, for example `InvoiceLine`."""
+        return pascal(self.item.target)
+
+
+@dataclass(frozen=True, slots=True)
+class LinesTotalPlan:
+    """A total of the lines of the form, a key of the record of the preview (ADR 0034)."""
+
+    key: str
+    """The key in the record, for example `sumLinesAmount`."""
+    code: str
+    """The TypeScript value of the total, of `values`."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewPlan:
+    """A computed field with a total of the lines, which the form shows before the save."""
+
+    element_id: str
+    label: str
+    text: str
+    """The TypeScript text of the value, of the record `preview`."""
+    lines: list[str]
+    """The keys of the lines editors with the lines of its totals."""
+
+    @property
+    def editor(self) -> str:
+        """Return the key of the lines editor that shows the field: the first of `lines`."""
+        return self.lines[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +266,31 @@ class FormPlan:
     """True if a default reads a path parameter of the page."""
     widgets: set[str] = field(default_factory=set[str])
     """The widgets that the form uses."""
+    lines_type: str | None = None
+    """For an operation with lines (ADR 0035): the TypeScript type of its lines."""
+    totals: list[LinesTotalPlan] = field(default_factory=list[LinesTotalPlan])
+    """The totals of the lines of the form, for the preview."""
+    previews: list[PreviewPlan] = field(default_factory=list[PreviewPlan])
+    """The computed fields with totals of the lines that the form shows before the save."""
+
+    @property
+    def lines(self) -> list[FieldPlan]:
+        """Return the lines editors of the form (ADR 0035)."""
+        return [f for f in self.fields if f.lines is not None]
+
+    @property
+    def widget_fields(self) -> list[FieldPlan]:
+        """Return the fields with a widget: the fields of the form and the columns of the lines."""
+        return [
+            column
+            for f in self.fields
+            for column in (f.lines.columns if f.lines is not None else [f])
+        ]
+
+    @property
+    def loads_lines(self) -> bool:
+        """Return True if the form edits a record with lines: it reads the lines first."""
+        return self.kind == "update" and bool(self.lines)
 
     @property
     def files(self) -> list[FieldPlan]:
@@ -311,12 +399,22 @@ class FormContext:
     @property
     def relations(self) -> bool:
         """Return True if a form has a relation field."""
-        return any(f.target for name in self.names for f in self.plan(name).fields)
+        return any(f.target for name in self.names for f in self.plan(name).widget_fields)
 
     @property
     def files(self) -> bool:
         """Return True if a form has a file field."""
         return any(self.plan(name).files for name in self.names)
+
+    @property
+    def lines(self) -> bool:
+        """Return True if a form has a lines editor (ADR 0035)."""
+        return any(self.plan(name).lines for name in self.names)
+
+    @property
+    def previews(self) -> bool:
+        """Return True if a form shows totals of its lines before the save (ADR 0034)."""
+        return any(self.plan(name).totals for name in self.names)
 
 
 def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPlan:
@@ -334,11 +432,16 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         default = form.defaults.get(field_name)
         if isinstance(default, str) and default.startswith("$route."):
             route_params = True
-        if params is not None and field_name in params:
+        if params is None and form_field.widget == "lines":
+            plan = _lines_field(definition, entity, field_name, form_field, operation, server)
+        elif params is not None and field_name in params:
             plan = _param_field(field_name, form_field, params[field_name])
         else:
             plan = _member_field(definition, entity, field_name, form_field, by_name[field_name])
-        plan.initial = _initial(plan, default, operation.kind == "update", by_name.get(field_name))
+        if plan.lines is None:
+            plan.initial = _initial(
+                plan, default, operation.kind == "update", by_name.get(field_name)
+            )
         _rules(plan, form_field)
         if plan.widget == "custom":
             spec = gap_spec(definition, form_field.id, "form_field")
@@ -399,14 +502,40 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
             if operation.kind == "create"
             else f"{op}(record.id, input)"
         )
-    sources = sorted({f.target for f in fields if f.source and f.target})
+    lines_fields = {f.name: f for f in fields if f.lines is not None}
+    previews = _previews(definition, entity, lines_fields)
+    totals = [
+        LinesTotalPlan(total.key, _lines_total(total, lines_fields[total.relation]))
+        for total in entity_totals(definition, entity)
+        if previews and total.relation in lines_fields
+    ]
+    preview_keys = {key for preview in previews for key in preview.lines}
+    lines_type = None
+    if operation.lines and operation.kind in ("create", "update"):
+        # The function of an operation with lines is in its feature slice (ADR 0035).
+        lines_type = lines_operations(definition)[form.operation].type
+        entity_names.remove(camel(form.operation))
+        names = [camel(form.operation)]
+        if lines_fields:
+            names.append(f"type {lines_type}")
+            call = call.removesuffix(")") + ", lines)"
+        imports.append(
+            f'import {{ {", ".join(names)} }} from "@/features/{kebab(form.operation)}";'
+        )
+    widget_fields = [c for f in fields for c in (f.lines.columns if f.lines else [f])]
+    sources = sorted({f.target for f in widget_fields if f.source and f.target})
+    line_names = _line_imports(fields, operation.kind == "update", preview_keys)
     if entity in sources:
         entity_names.append(f"{camel(entity)}Options")
+    entity_names += line_names.pop(entity, [])
+    if previews:
+        entity_names.append(f"{camel(entity)}Defaults")
     imports.insert(0, f'import {{ {", ".join(entity_names)} }} from "@/entities/{kebab_entity}";')
+    targets = sorted({t for t in sources if t != entity} | set(line_names))
     imports[1:1] = [
-        f'import {{ {camel(target)}Options }} from "@/entities/{kebab(target)}";'
-        for target in sources
-        if target != entity
+        f"import {{ {', '.join(_target_names(t, sources, line_names))} }} "
+        f'from "@/entities/{kebab(t)}";'
+        for t in targets
     ]
     for rule in rules:
         if rule.gap_name:
@@ -414,7 +543,7 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
     for f in fields:
         if f.gap_name:
             imports.append(f'import {{ {f.gap_name} }} from "{f.gap_module}";')
-    lookups = sorted({f.target for f in fields if f.target and not f.source})
+    lookups = sorted({f.target for f in widget_fields if f.target and not f.source})
     host = next(
         (
             p_name
@@ -446,8 +575,11 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         navigate=_navigate(definition, form, entity, operation),
         rule_values=form_values(definition, name)[0],
         route_params=route_params,
-        widgets={f.widget for f in fields}
-        | ({"number_format"} if any(f.format for f in fields) else set()),
+        widgets={f.widget for f in [*fields, *widget_fields]}
+        | ({"number_format"} if any(f.format for f in widget_fields) else set()),
+        lines_type=lines_type,
+        totals=totals,
+        previews=previews,
     )
 
 
@@ -483,6 +615,105 @@ def _currency_exprs(
             code = f'{related}.get(values.{source.key} ?? "")?.{camel(tail)}'
         if code is not None:
             plan.currency_expr = f"{code} ?? {js(plan.currency)}" if plan.currency else code
+
+
+def _line_imports(
+    fields: list[FieldPlan], update: bool, preview_keys: set[str]
+) -> dict[str, list[str]]:
+    """Return the names that the lines editors import from the slice of each entity of lines."""
+    names: dict[str, list[str]] = {}
+    for f in fields:
+        if f.lines is None:
+            continue
+        item = f.lines.item
+        found = names.setdefault(item.target, [])
+        found.append(item.schema)
+        if f.key in preview_keys:
+            found.append(f"{camel(item.target)}Defaults")
+        if update:
+            found += [f"type {f.lines.record_type}", item.list_function]
+    return {target: list(dict.fromkeys(found)) for target, found in names.items()}
+
+
+def _target_names(target: str, sources: list[str], line_names: dict[str, list[str]]) -> list[str]:
+    """Return the names that a form imports from the slice of another entity."""
+    names = [f"{camel(target)}Options"] if target in sources else []
+    return names + line_names.get(target, [])
+
+
+def _lines_field(
+    definition: AppDefinition,
+    entity: str,
+    name: str,
+    form_field: FormField,
+    operation: Operation,
+    server: bool,
+) -> FieldPlan:
+    """Return the plan of a lines editor (ADR 0035): a column for each field of the lines."""
+    item = line_item(definition, entity, name)
+    relation = definition.entities[entity].relations[name]
+    by_name = {m.name: m for m in members(item.target, definition.entities[item.target])}
+    columns: list[FieldPlan] = []
+    for column_name in form_field.fields or []:
+        member = by_name[column_name]
+        column = _member_field(definition, item.target, column_name, FormField(), member)
+        column.element_id = member.element_id
+        column.prefix = f"{snake(name)}_"
+        column.initial = _initial(column, None, False, member)
+        column.to_input = column.to_input.replace("values.", "line.")
+        if server and column.target is not None:
+            column.source = f"{camel(column.target)}Options"
+            column.options = None
+            column.widget = "relation"
+        columns.append(column)
+    plan = FieldPlan(
+        name=name,
+        key=item.key,
+        element_id=form_field.id,
+        widget="lines",
+        label=form_field.label or relation.label or label(name),
+        kind="lines",
+        value_type=f"{pascal(name)}Row[]",
+        empty="[]",
+        required_message="Add a line.",
+        lines=LinesPlan(item, columns),
+    )
+    update = operation.kind == "update"
+    plan.initial = f"lines?.{item.key}.map({item.key}Row) ?? []" if update else "[]"
+    _widget_options(plan, form_field)
+    return plan
+
+
+def _lines_total(total: TsTotal, lines: FieldPlan) -> str:
+    """Return the TypeScript value of a total of the rows of a lines editor (ADR 0034)."""
+    conditions = ", ".join(f"[{js(k)}, {js(op)}, {js(v)}]" for k, op, v in total.conditions())
+    number = js(camel(total.number)) if total.number else "null"
+    rows = f"{lines.key}Records(values.{lines.key})"
+    extra = f", [{conditions}]" if conditions else ""
+    return f"linesTotal({js(total.function)}, {rows}, {number}{extra})"
+
+
+def _previews(
+    definition: AppDefinition, entity: str, lines: dict[str, FieldPlan]
+) -> list[PreviewPlan]:
+    """Return the computed fields with totals of the lines editors, for the preview.
+
+    A field that reads a related record (a path with a `.`) is not in the
+    preview: the form has no related records.
+    """
+    views = ViewContext(definition)
+    found: list[PreviewPlan] = []
+    for name, member in definition.entities[entity].fields.items():
+        if member.computed is None:
+            continue
+        expression = parse_expression(member.computed)
+        relations = [t.relation for t in expression_totals(expression) if t.relation in lines]
+        if not relations or any("." in path for path in expression_paths(expression)):
+            continue
+        value = views.value(entity, name, row="preview")
+        keys = list(dict.fromkeys(lines[relation].key for relation in relations))
+        found.append(PreviewPlan(member.id, member.label or label(name), value.text_expr, keys))
+    return found
 
 
 def sign_up_plan(definition: AppDefinition) -> SignUpPlan | None:
@@ -722,10 +953,10 @@ def _translations(definition: AppDefinition, plan: FieldPlan, update: bool) -> N
 
 def _input_keys(fields: list[FieldPlan]) -> list[str]:
     """Return the keys of the input of the fields: a translatable field has two keys, and a file
-    field none."""
+    field and a lines editor none."""
     keys: list[str] = []
     for f in fields:
-        if f.kind == "file":
+        if f.kind in ("file", "lines"):
             continue
         keys.append(f.key)
         if f.translations_key:
@@ -896,6 +1127,12 @@ def form_rules() -> tuple[Output, ...]:
         ),
         Output(
             template="ui/forms/lib/form.ts.j2", path="src/shared/lib/form.ts", when="ui_forms.used"
+        ),
+        # The totals of the lines of a form compute the preview of a field (ADR 0034).
+        Output(
+            template="ui/views/lib/compute.ts.j2",
+            path="src/shared/lib/compute.ts",
+            when="ui_forms.previews and not ui_views.computed",
         ),
         *(
             Output(

@@ -116,13 +116,22 @@ def _explicit(text: str) -> str:
     """Return the project tracker with explicit operations in the order of the expansion."""
     definition = load_definition_text(text)
     lines = [
-        f"  {name}: {{ kind: {op.kind}, entity: {op.entity} }}\n"
+        f"  {name}: {{ kind: {op.kind}, entity: {op.entity}{_lines(op.lines)} }}\n"
         for name, op in definition.operations.items()
         if op.kind != "custom"
     ]
+    for name, op in definition.operations.items():
+        # An explicit operation of the definition moves to its place in the expansion.
+        if op.kind != "custom":
+            text = re.sub(rf"\n  {name}: \{{[^\n]*\}}", "", text)
     text = re.sub(r"\n    crud: [^\n]*", "", text)
     assert "crud" not in text
     return text.replace("\noperations:\n", "\noperations:\n" + "".join(lines), 1)
+
+
+def _lines(names: list[str]) -> str:
+    """Return the key `lines` of an operation with lines (ADR 0035), else nothing."""
+    return f", lines: [{', '.join(names)}]" if names else ""
 
 
 @pytest.mark.parametrize("binding", ["react", "fastapi"])

@@ -947,8 +947,11 @@ operations:
   the line in `errors`, for example `["body", "lines", 2]`.
 - The lines use the permission and the record rules of the operation.
   The entity of the lines has no file fields.
-- The front ends do not send lines yet: their forms change the record,
-  and the lines stay.
+- The front ends send the lines in the same request: the Next.js server
+  action writes the record and the lines in one database transaction,
+  the React app with mock data in one transaction of its mock stores,
+  and the React app with the FastAPI app sends them to the endpoint. A
+  form edits the lines with the widget `lines` (see [forms](#forms)).
 
 ## pages
 
@@ -1885,8 +1888,35 @@ A form field has `widget`, `label`, `placeholder`, `help`, `span`,
 `max_length`, `pattern`, `min`, `max`, each with `value` and
 `message`). The widgets are `text`, `textarea`, `number`, `select`,
 `radio`, `checkbox`, `switch`, `date`, `datetime`, `relation`, `file`
-(for a `file` or an `image` field), and `custom` (a generation gap).
-The default widget comes from the field type.
+(for a `file` or an `image` field), `lines` (for a `one_to_many`
+relation), and `custom` (a generation gap). The default widget comes
+from the field type.
+
+The widget `lines` is a lines editor ([ADR 0035](https://github.com/ds411/app-generator/blob/main/docs/adr/0035-lines.md)):
+a table with a row for each record of the relation, and a column for
+each name in `fields`, a field or a single relation of the lines. The
+operation of the form must write the relation (`lines` of the
+operation), and each required field of the lines needs a column. The
+editor adds, changes, and removes rows, and checks each row with the
+rules of the lines. Below the rows, the form shows the computed fields
+of the record with totals of the lines, before the save. An update form
+reads the lines of the record first. With the FastAPI app, the entity
+of the lines needs a `list` operation.
+
+```yaml
+operations:
+  create_project: { kind: create, entity: Project, lines: [budget_lines] }
+ui:
+  forms:
+    plan_project:
+      entity: Project
+      operation: create_project
+      fields:
+        name: {}
+        key: {}
+        owner: {}
+        budget_lines: { widget: lines, fields: [item, amount] }
+```
 
 ```yaml
 ui:
@@ -2525,6 +2555,9 @@ use in the app does not show.
 - The file widget of the forms: `Drop a file here, or`, `Select a file`,
   `Select another file`, `Remove the file`,
   `Types: {types}. Largest file: {size}.`, `Largest file: {size}.`.
+- The lines editor of the forms (ADR 0035): `Add a line`, `No lines yet.`,
+  `{field}, line {number}`, `Remove line {number}`,
+  `Line {number}: {message}`, `The lines did not load.`.
 - The messages of the form fields: `Enter a value.`, `Select a value.`,
   `Enter a whole number.`, `Enter a valid email address.`,
   `Enter a valid URL.`, `Use the correct format.`,

@@ -58,6 +58,33 @@ record rules of the entity of the lines do not apply to them. The lines
 of an operation cannot have file fields, because a file comes in its
 own request after the record exists.
 
+The front ends send the lines in the same way. An operation with lines
+gets a feature slice `src/features/<operation>`, and its function takes
+the lines as a second argument, for example
+`createInvoice(input, { lines: [...] })`. The slice of the entity of the
+lines has the item type and its zod schema, for example
+`InvoiceLinesItem` and `invoiceLinesItemSchema`:
+
+- Next.js: the server action checks the items, and writes the record and
+  each line through the repositories in one database transaction
+  (`inTransaction`). An error in a line rolls back all, and its issues
+  have the place of the line, for example `lines.2.amount`.
+- React with mock data: the function writes in a transaction of the mock
+  stores. An error restores the records of all stores.
+- React with the FastAPI app: the function sends the items in the body
+  of the request.
+
+A form field of a relation of lines takes `widget: lines`, a lines
+editor, and `fields`: the fields and the single relations of the lines,
+one column each. The operation of the form must write these lines, and
+each required field of the lines needs a column. The editor adds,
+changes, and removes rows, and checks each row with the rules of the
+lines. Below the rows, the form shows the computed fields of the record
+with totals of these lines (ADR 0034), as the record will have them
+after the save. An update form reads the lines of the record first,
+with the list of the entity of the lines (with the FastAPI app, its
+`list` operation).
+
 ## Consequences
 
 - A client writes a record and its lines in one request, and a broken
@@ -69,5 +96,7 @@ own request after the record exists.
 - The entity of the lines gets `change` and `remove` in its repository,
   and the record gets one `write_<relation>` function for each relation
   of lines.
-- The front ends do not send lines yet. Their forms edit the fields of
-  the record, and the lines stay.
+- A form edits a record and its lines, and saves them in one request.
+  The form shows the totals of the lines before the save.
+- A form without a lines editor keeps the lines of an update: its
+  function sends no lines.

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from appgen.bindings.shared.integrations import ts_features
+from appgen.bindings.shared.lines import line_items, lines_operations
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.gen.naming import camel, pascal, words
 
@@ -299,6 +300,8 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "translations_key": translations_key,
     "operations_of": operations_of,
     "inverse_lists": inverse_lists,
+    "line_items": line_items,
+    "lines_operations": lines_operations,
     "param_type": param_type,
     "zod_schema": zod_schema,
     "param_schema": param_schema,

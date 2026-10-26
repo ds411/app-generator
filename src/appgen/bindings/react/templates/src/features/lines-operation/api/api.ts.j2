@@ -1,0 +1,78 @@
+{% set op = lines_ops[name] %}
+{% set fn = name | camel %}
+{% set entity = element.entity %}
+{% set type = entity | pascal %}
+{% set var = entity | camel %}
+{% set guarded = definition.access and name not in definition.auth.public_operations %}
+{{ trace_header(element_id) }}
+{% for target in [entity] + op.targets | reject("eq", entity) | list %}
+{% set ns = namespace(names=[(target | camel) ~ "Api"]) %}
+{% for item in op.items if item.target == target %}{% set ns.names = ns.names + ["type " ~ item.type] %}{% endfor %}
+{% set names = ns.names + (["type " ~ type, "type " ~ type ~ "Input"] if target == entity else []) %}
+import { {{ names | join(", ") }} } from "@/entities/{{ target | kebab }}";
+{% endfor %}
+{% if not react.api %}
+import { inTransaction } from "@/shared/api";
+import { writeLines } from "@/shared/api/lines";
+{% endif %}
+{% if guarded %}
+import { requireOperation } from "@/shared/auth";
+{% endif %}
+
+{% if op.kind == "create" %}
+/** The lines of the operation {{ name }} (ADR 0035): the new lines of each relation. */
+{% else %}
+/** The lines of the operation {{ name }} (ADR 0035): all lines of each relation. Without a key, its lines stay. */
+{% endif %}
+export type {{ op.type }} = {
+{% for item in op.items %}
+  {{ item.key }}?: {{ item.type }}[]; {{ trace(item.element_id) }}
+{% endfor %}
+};
+
+{% if element.description %}
+/** {{ element.description }} */
+{% elif react.api %}
+/** The operation {{ name }}: the FastAPI app writes the record and its lines in one transaction. */
+{% else %}
+/** The operation {{ name }}: the record and its lines. An error of a line stores nothing. */
+{% endif %}
+{% if op.kind == "create" %}
+export async function {{ fn }}(input: {{ type }}Input, lines: {{ op.type }} = {}): Promise<{{ type }}> {
+{% else %}
+export async function {{ fn }}(id: string, patch: Partial<{{ type }}Input>, lines: {{ op.type }} = {}): Promise<{{ type }}> {
+{% endif %}
+{% if guarded %}
+  requireOperation({{ name | tojson }}); {{ trace(definition.access.id) }}
+{% endif %}
+{% if react.api %}
+  // The body has the record and a list of the lines of each relation.
+  const more = {
+{% for item in op.items %}
+    {{ item.relation }}: lines.{{ item.key }}?.map((item) => {{ item.target | camel }}Api.json(item)), {{ trace(item.element_id) }}
+{% endfor %}
+  };
+{% if op.kind == "create" %}
+  const record = await {{ var }}Api.create(input, more);
+{% else %}
+  const record = await {{ var }}Api.update(id, patch, more);
+{% endif %}
+{% for target in op.targets if target != entity %}
+  {{ target | camel }}Api.changed();
+{% endfor %}
+  return record;
+{% else %}
+  return inTransaction(async () => {
+{% if op.kind == "create" %}
+    const record = await {{ var }}Api.create(input);
+{% else %}
+    const record = await {{ var }}Api.update(id, patch);
+{% endif %}
+{% for item in op.items %}
+    await writeLines({{ item.target | camel }}Api, {{ ts_value(item.target) }}, {{ ts_value(item.link) }}, record.id, lines.{{ item.key }}, {{ ts_value(item.key) }}); {{ trace(item.element_id) }}
+{% endfor %}
+    // The record with the totals of its new lines.
+    return {{ var }}Api.get(record.id);
+  });
+{% endif %}
+}

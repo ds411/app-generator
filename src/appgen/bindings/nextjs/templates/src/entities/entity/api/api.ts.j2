@@ -1,7 +1,8 @@
 {{ trace_header(element_id) }}
 {% set type = name | pascal %}
 {% set var = name | camel %}
-{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | list %}
+{# An operation with lines (ADR 0035) is in its own feature slice. #}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | rejectattr("1.lines") | list %}
 {% set lists = inverse_lists(definition, name) %}
 {% set files = element.file_fields if definition.storage else {} %}
 {% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) %}

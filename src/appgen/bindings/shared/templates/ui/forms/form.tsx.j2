@@ -4,7 +4,7 @@
 {% set c = plan.component %}
 {% set title = form.title or label(name) %}
 {% set ns = namespace(lines=[]) %}
-{% for f in plan.fields %}
+{% for f in plan.widget_fields %}
 {% if f.widget != "custom" and f.kind == "many" %}{% set ns.lines = ns.lines + ["RelationMultiSelect"] %}
 {% elif f.kind == "one" and f.widget not in ("select", "radio", "custom") %}{% set ns.lines = ns.lines + ["RelationSelect"] %}
 {% endif %}
@@ -14,9 +14,14 @@
 {% set uses_record = plan.needs_record or plan.kind == "update" %}
 {% set on_success = form.on_success %}
 {% set close = on_success.close if on_success else true %}
+{% set editors = plan.lines %}
+{% set preview_text = plan.previews | map(attribute="text") | join(" ") %}
 {{ trace_header(element_id) }}
 "use client";
 
+{% if editors %}
+import { PlusIcon, Trash2Icon } from "lucide-react";
+{% endif %}
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 
@@ -36,8 +41,15 @@ import type { FileValue } from "@/shared/api";
 import { useAccess } from "@/shared/lib/access";
 import { {{ "fixedValue, " if plan.fixed }}type RecordScope } from "@/shared/lib/permissions";
 {% endif %}
+{% if "compute." in preview_text %}
+import { compute } from "@/shared/lib/compute";
+{% endif %}
+{% if "formatValue(" in preview_text %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
 {% set form_lib = ["type FormErrors", "schemaErrors", "submitErrors"] %}
 {% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
+{% if plan.totals %}{% set form_lib = form_lib[:1] + ["linesTotal"] + form_lib[1:] %}{% endif %}
 import { {{ form_lib | join(", ") }} } from "@/shared/lib/form";
 {% if plan.navigate and "pageHref" in plan.navigate %}
 import { pageHref } from "@/shared/lib/pages";
@@ -45,7 +57,7 @@ import { pageHref } from "@/shared/lib/pages";
 {% if plan.navigate %}
 import { useNavigate } from "@/shared/lib/router";
 {% endif %}
-{% if plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
+{% if plan.lookups or (plan.host_page and uses_record and plan.record_param) or plan.loads_lines %}
 import { useResource } from "@/shared/lib/use-resource";
 {% endif %}
 import { Button } from "@/shared/ui/button";
@@ -57,9 +69,9 @@ import { Dialog, DialogContent, {% if form.description %}DialogDescription, {% e
 {% endif %}
 {% set field_names = ["Field", "FieldError", "FieldLabel"] %}
 {% if plan.fields | selectattr("help") | list %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}
-{% if plan.sections %}{% set field_names = field_names + ["FieldLegend", "FieldSet"] %}{% if plan.sections | selectattr("description") | list and "FieldDescription" not in field_names %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}{% endif %}
+{% if plan.sections or editors %}{% set field_names = field_names + ["FieldLegend", "FieldSet"] %}{% if plan.sections | selectattr("description") | list and "FieldDescription" not in field_names %}{% set field_names = field_names + ["FieldDescription"] %}{% endif %}{% endif %}
 import { {{ field_names | sort | join(", ") }} } from "@/shared/ui/field";
-{% if plan.fields | selectattr("widget", "in", ["text", "number"]) | rejectattr("format") | list or plan.fields | selectattr("languages") | rejectattr("widget", "eq", "textarea") | list %}
+{% if plan.widget_fields | selectattr("widget", "in", ["text", "number"]) | rejectattr("format") | list or plan.fields | selectattr("languages") | rejectattr("widget", "eq", "textarea") | list %}
 import { Input } from "@/shared/ui/input";
 {% endif %}
 {% if form.mode == "sheet" %}
@@ -87,12 +99,25 @@ import { NumberInput } from "@/shared/ui/form-widgets/number-input";
 {% if "radio" in widgets %}
 import { OptionRadio } from "@/shared/ui/form-widgets/option-radio";
 {% endif %}
-{% if plan.fields | selectattr("widget", "eq", "select") | rejectattr("kind", "eq", "many") | list %}
+{% if plan.widget_fields | selectattr("widget", "eq", "select") | rejectattr("kind", "eq", "many") | list %}
 import { OptionSelect } from "@/shared/ui/form-widgets/option-select";
 {% endif %}
 {% if relation_names %}
 import { {{ relation_names | join(", ") }} } from "@/shared/ui/form-widgets/relation-select";
 {% endif %}
+{% for f in editors %}
+
+/** A row of the lines editor {{ f.label }} (ADR 0035): a line of the record, or a new line. */
+type {{ f.lines.row_type }} = {
+  /** The key of the row in the list. */
+  key: string;
+  /** The ID of the line of the record. A new line has no ID. */
+  id?: string;
+{% for c in f.lines.columns %}
+  {{ c.key }}: {{ c.value_type }};
+{% endfor %}
+};
+{% endfor %}
 
 /** The values of the widgets of the form. */
 type Values = {
@@ -105,9 +130,9 @@ type Values = {
 };
 
 type RouteParams = Readonly<Record<string, string | undefined>>;
-{% for f in plan.fields if f.options and not f.target %}
+{% for f in plan.widget_fields if f.options and not f.target %}
 
-const {{ f.key | snake | upper }}_OPTIONS = {{ f.options }};
+const {{ f.options_const }} = {{ f.options }};
 {% endfor %}
 {% for f in plan.files %}
 
@@ -141,6 +166,65 @@ function subscribeLookups(listener: () => void): () => void {
   return () => stops.forEach((stop) => stop());
 }
 {% endif %}
+{% if plan.loads_lines %}
+
+/** The lines of the record, one list for each lines editor. */
+type Lines = {
+{% for f in editors %}
+  {{ f.key }}: {{ f.lines.record_type }}[];
+{% endfor %}
+};
+
+/** Read the lines of the record. Without a record, there are no lines. */
+async function loadLines(id: string | undefined): Promise<Lines> {
+  if (id === undefined) return { {% for f in editors %}{{ f.key }}: []{{ ", " if not loop.last }}{% endfor %} };
+  const [{% for f in editors %}{{ f.key }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% for f in editors %}
+    {{ f.lines.item.list_function }}(id, { pageSize: 1000 }),
+{% endfor %}
+  ]);
+  return { {% for f in editors %}{{ f.key }}: {{ f.key }}.items{{ ", " if not loop.last }}{% endfor %} };
+}
+{% endif %}
+{% if editors %}
+
+// A new row has no ID, so it gets a key of its own.
+let rowCount = 0;
+{% endif %}
+{% for f in editors %}
+{% set p = f.key | pascal %}
+{% set row = f.lines.row_type %}
+
+/** Return a new row of the lines editor {{ f.label }}, with the defaults of the fields. */
+function new{{ p }}Row(): {{ row }} {
+  rowCount += 1;
+  return { key: `new-${rowCount}`{% for c in f.lines.columns %}, {{ c.key }}: {{ c.initial }}{% endfor %} };
+}
+{% if plan.loads_lines %}
+
+/** Return the row of a line of the record. */
+function {{ f.key }}Row(line: {{ f.lines.record_type }}): {{ row }} {
+  return { key: line.id, id: line.id{% for c in f.lines.columns %}, {{ c.key }}: {{ 'String(line.' ~ c.key ~ ' ?? "")' if c.kind == "text" else "line." ~ c.key ~ " ?? " ~ c.empty }}{% endfor %} };
+}
+{% endif %}
+
+/** Return the item of a row in the input of the operation: a row with an ID changes that line. */
+function {{ f.key }}Item(line: {{ row }}) {
+  return {
+    ...(line.id === undefined ? {} : { id: line.id }),
+{% for c in f.lines.columns %}
+    {{ c.key }}: {{ c.to_input }},
+{% endfor %}
+  };
+}
+{% if f.key in plan.previews | map(attribute="lines") | sum(start=[]) %}
+
+/** Return the lines of the rows for the totals: the defaults of the fields, and the values of each row. */
+function {{ f.key }}Records(rows: readonly {{ row }}[]): Record<string, unknown>[] {
+  return rows.map((line) => ({ ...{{ f.lines.item.target | camel }}Defaults, ...{{ f.key }}Item(line) }));
+}
+{% endif %}
+{% endfor %}
 
 {% set initial_code = plan.fields | map(attribute="initial") | join(" ") %}
 {% if plan.scoped %}
@@ -149,10 +233,10 @@ function subscribeLookups(listener: () => void): () => void {
  * of the fields. A user of a record rule is the owner, and the fields get
  * the values that the rule allows.
  */
-function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, scope: RecordScope | null): Values {
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, scope: RecordScope | null{{ ", lines: Lines | undefined" if plan.loads_lines }}): Values {
 {% else %}
 /** The first values: the record, the defaults of the form, or the defaults of the fields. */
-function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined): Values {
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined{{ ", lines: Lines | undefined" if plan.loads_lines }}): Values {
 {% endif %}
   return {
 {% for f in plan.fields %}
@@ -172,10 +256,10 @@ function initialValues({{ "record" if "record" in initial_code else "_record" }}
   };
 }
 
-/** The input of the operation: an empty value is null, or no value.{{ " The files are not in the input." if plan.files }} */
+/** The input of the operation: an empty value is null, or no value.{{ " The files are not in the input." if plan.files }}{{ " The lines are not in the input." if editors }} */
 function toInput(values: Values) {
   return {
-{% for f in plan.fields if f.kind != "file" %}
+{% for f in plan.fields if f.kind not in ("file", "lines") %}
     {{ f.key }}: {{ f.to_input }},
 {% if f.languages %}
     {{ f.translations_key }}: {{ f.translations_input }},
@@ -186,15 +270,20 @@ function toInput(values: Values) {
 
 const SCHEMA = {{ plan.schema }};
 
+{% if editors %}
+/** Check the values with the rules of the fields, of the lines, and of the form, and return the input and the lines. */
+function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; lines?: {{ plan.lines_type }}; errors: FormErrors } {
+{% else %}
 /** Check the values with the rules of the fields and of the form, and return the input. */
 function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; errors: FormErrors } {
+{% endif %}
   const errors: FormErrors = {};
 {% for f in plan.fields %}
 {% if f.required and f.kind != "boolean" %}
 {% if f.kind in ("text", "json") %}
   if (values.{{ f.key }}.trim() === "") errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
 
-{% elif f.kind == "many" %}
+{% elif f.kind in ("many", "lines") %}
   if (values.{{ f.key }}.length === 0) errors.{{ f.key }} ??= {{ tr(js(f.required_message)) }};{% if f.required_id %} {{ trace(f.required_id) }}{% endif %}
 
 {% else %}
@@ -208,6 +297,24 @@ function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; er
 {% for check in f.checks %}
   if ({{ check.condition }}) errors.{{ f.key }} ??= {{ tr(js(check.message)) }}; {{ trace(check.element_id) }}
 {% endfor %}
+{% endfor %}
+{% for f in editors %}
+  const {{ f.key }} = values.{{ f.key }}.flatMap((line, index) => {
+{% for c in f.lines.columns if c.required and c.kind != "boolean" %}
+{% set at = "errors[`" ~ f.key ~ ".${index}." ~ c.key ~ "`]" %}
+{% if c.kind in ("text", "json") %}
+    if (line.{{ c.key }}.trim() === "") {{ at }} ??= {{ tr(js(c.required_message)) }};
+{% elif c.kind == "many" %}
+    if (line.{{ c.key }}.length === 0) {{ at }} ??= {{ tr(js(c.required_message)) }};
+{% else %}
+    if (line.{{ c.key }} === null) {{ at }} ??= {{ tr(js(c.required_message)) }};
+{% endif %}
+{% endfor %}
+    const parsed = {{ f.lines.item.schema }}.safeParse({{ f.key }}Item(line));
+    if (parsed.success) return [parsed.data];
+    schemaErrors(parsed.error, errors, `{{ f.key }}.${index}`);
+    return [];
+  });
 {% endfor %}
   const result = SCHEMA.safeParse(toInput(values));
   if (!result.success) schemaErrors(result.error, errors);
@@ -229,7 +336,7 @@ function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; er
 {% if plan.rules | selectattr("gap_name") | list %}
   if (Object.keys(errors).length > 0) return { errors };
 {% endif %}
-  return { input: result.data, errors };
+  return { input: result.data, {{ "lines: { " ~ (editors | map(attribute="key") | join(", ")) ~ " }, " if editors }}errors };
 }
 
 {% if plan.files %}
@@ -258,12 +365,40 @@ export type {{ c }}Props = {
   onCancel?: () => void;
 };
 
+{% set lines_arg = ", lines" if plan.loads_lines else "" %}
 {% if form.description %}
 /** {{ title }}: {{ form.description }} */
 {% else %}
 /** The form {{ title }}. */
 {% endif %}
+{% if plan.loads_lines %}
+export function {{ c }}(props: {{ c }}Props) {
+  // The form edits the lines of the record, so it reads them first (ADR 0035).
+  const id = props.record?.id;
+  const lines = useResource(`{{ name }}_form_lines:${id ?? ""}`, () => loadLines(id));
+  if (lines.status === "loading") {
+    return (
+      <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <Spinner />
+        {{ jsx_text("Loading") }}
+      </div>
+    );
+  }
+  if (lines.status === "error") {
+    return (
+      <p role="alert" className="py-8 text-sm text-destructive">
+        {{ jsx_text("The lines did not load.") }}
+      </p>
+    );
+  }
+  return <{{ c }}Body {...props} lines={lines.data} />;
+}
+
+/** The fields of the form {{ title }}, with the lines of the record. */
+function {{ c }}Body({ {{ "record, " if uses_record }}routeParams, onSuccess, onCancel, lines }: {{ c }}Props & { lines: Lines }) {
+{% else %}
 export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess, onCancel }: {{ c }}Props) {
+{% endif %}
 {% if plan.navigate %}
   const navigate = useNavigate();
 {% endif %}
@@ -276,7 +411,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
   // and the values that the rule sets (ADR 0018, ADR 0025).
   const scope = useAccess().scopeOf({{ js(plan.entity) }});
 {% endif %}
-  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}));
+  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}));
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -286,11 +421,34 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
     setValues(next);
     if (submitted) setErrors(validate(next).errors);
   };
+{% for f in editors %}
+{% set p = f.key | pascal %}
+{% set row = f.lines.row_type %}
+
+  const change{{ p }}Row = <K extends keyof {{ row }}>(index: number, key: K, value: {{ row }}[K]) =>
+    change({{ js(f.key) }}, values.{{ f.key }}.map((line, at) => (at === index ? { ...line, [key]: value } : line)));
+  const add{{ p }}Row = () => change({{ js(f.key) }}, [...values.{{ f.key }}, new{{ p }}Row()]);
+  const remove{{ p }}Row = (index: number) => change({{ js(f.key) }}, values.{{ f.key }}.filter((_, at) => at !== index));
+{% endfor %}
+{% if plan.previews %}
+
+  // The record as the form saves it, with the totals of its lines (ADR 0034).
+  const preview = {
+    ...{{ plan.entity | camel }}Defaults,
+{% if plan.kind == "update" %}
+    ...record,
+{% endif %}
+    ...toInput(values),
+{% for total in plan.totals %}
+    {{ total.key }}: {{ total.code }},
+{% endfor %}
+  };
+{% endif %}
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitted(true);
-    const { input, errors: found } = validate(values);
+    const { input, {{ "lines, " if editors }}errors: found } = validate(values);
     setErrors(found);
 {% if plan.needs_record %}
     if (!input || !record) return;
@@ -316,7 +474,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       toast.success({{ tr(js("Saved.")) }});
 {% endif %}
 {% if not close %}
-      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}));
+      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}));
       setSubmitted(false);
 {% endif %}
       onSuccess?.();
@@ -324,7 +482,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       navigate({{ plan.navigate }});
 {% endif %}
     } catch (error) {
-      const found = submitErrors(error);
+      const found = submitErrors(error{{ ", [" ~ (editors | map(attribute="key") | map("tojson") | join(", ")) ~ "]" if editors }});
       setErrors(found);
       toast.error(found._form);
     } finally {
@@ -352,11 +510,11 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% for f in section.fields %}
 {% if f.owner or f.fixed %}
           {{ "{" }}{{ "!scope?.owner" if f.owner else "fixedValue(scope, " ~ js(f.key) ~ ") === undefined" }} && (
-            {{ fm.field(f, 12, name) | trim }}
+            {{ fm.field(f, 12, name, plan.previews) | trim }}
           )}
 
 {% else %}
-{{ fm.field(f, 10, name) }}
+{{ fm.field(f, 10, name, plan.previews) }}
 {% endif %}
 {% for language in f.languages %}
 {{ fm.translation(f, language, 10, name) }}
@@ -370,11 +528,11 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% for f in plan.loose %}
 {% if f.owner or f.fixed %}
         {{ "{" }}{{ "!scope?.owner" if f.owner else "fixedValue(scope, " ~ js(f.key) ~ ") === undefined" }} && (
-          {{ fm.field(f, 10, name) | trim }}
+          {{ fm.field(f, 10, name, plan.previews) | trim }}
         )}
 
 {% else %}
-{{ fm.field(f, 8, name) }}
+{{ fm.field(f, 8, name, plan.previews) }}
 {% endif %}
 {% for language in f.languages %}
 {{ fm.translation(f, language, 8, name) }}

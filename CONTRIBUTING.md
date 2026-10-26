@@ -288,10 +288,12 @@ git config core.hooksPath .githooks
   `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. Then it generates
   `tests/fixtures/seed-data.yaml`, and runs lint, type check, and
-  `appgen check` on it. Last, it does the same for
+  `appgen check` on it. Then it does the same for
   `tests/fixtures/invoices.yaml`, and runs the sequence test of the mock
-  store (`scripts/sequence_test.py --binding react`). It needs pnpm and
-  Docker. Run it by hand with `scripts/check-react.sh [output folder]`.
+  store (`scripts/sequence_test.py --binding react`). Last, it does the
+  same for `tests/fixtures/totals.yaml` (the totals and the lines
+  editors). It needs pnpm and Docker. Run it by hand with
+  `scripts/check-react.sh [output folder]`.
 - When a push changes the generator core, a front-end binding, or the
   shared binding code, the hook also runs
   `scripts/check-translations.sh`. The script generates the project

@@ -11,7 +11,7 @@ from typing import cast
 
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
-from appgen.dsl.model import AppDefinition, Field, Page
+from appgen.dsl.model import AppDefinition, Field, Operation, Page, Relation
 from appgen.dsl.openapi import accepts, object_properties, property_chain, query_value
 from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.api_data import api_data
@@ -150,6 +150,7 @@ def _check_form(definition: AppDefinition, form: Form) -> Iterator[Diagnostic]:
         target = yield from _form_target(definition, form, params, field, name)
         if target is not None:
             yield from _check_form_field(field, target)
+            yield from _check_lines_field(definition, form, operation, field, target)
     yield from _check_form_sections(form)
     for rule in form.rules.values():
         if isinstance(rule, CompareRule):
@@ -214,7 +215,9 @@ def _check_form_field(field: FormField, target: FieldTarget) -> Iterator[Diagnos
             "missing-widget",
             f"The field '{target.entity}.{target.name}' ({shown}) has no default widget.",
             field,
-            hint="Set 'widget: custom' and write the widget by hand.",
+            hint="Set 'widget: lines' with 'fields', or 'widget: custom'."
+            if shown == "one_to_many"
+            else "Set 'widget: custom' and write the widget by hand.",
         )
         return
     yield from _check_suits(field, "widget", f"The widget '{widget}'", target, WIDGET_TYPES[widget])
@@ -229,6 +232,95 @@ def _check_form_field(field: FormField, target: FieldTarget) -> Iterator[Diagnos
     ):
         if getattr(field.rules, key) is not None:
             yield from _check_suits(field.rules, key, f"The rule '{key}'", target, types)
+
+
+def _check_lines_field(
+    definition: AppDefinition,
+    form: Form,
+    operation: Operation | None,
+    field: FormField,
+    target: FieldTarget,
+) -> Iterator[Diagnostic]:
+    """A lines editor edits the records of a `one_to_many` relation that the operation writes.
+
+    Each column is a field or a single relation of the related entity
+    that a new line can take (ADR 0035).
+    """
+    if field.widget != "lines":
+        if field.fields is not None:
+            yield _error(
+                "unsuitable-field", "'fields' is only for the widget 'lines'.", field, at="fields"
+            )
+        return
+    relation = target.member
+    if not isinstance(relation, Relation) or relation.kind != "one_to_many":
+        return
+    if field.fields is None:
+        yield _error(
+            "missing-key",
+            "The widget 'lines' needs 'fields': the fields of the lines, one column each.",
+            field,
+        )
+        return
+    if operation is not None and target.name not in operation.lines:
+        yield _error(
+            "unsuitable-operation",
+            f"The operation '{form.operation}' does not write the lines '{target.name}', so the "
+            "form cannot send them.",
+            field,
+            at="widget",
+            hint=f"Add '{target.name}' to 'lines' of the operation '{form.operation}'."
+            if operation.kind in ("create", "update")
+            else "Use a create or an update operation.",
+        )
+    if len(set(field.fields)) != len(field.fields):
+        yield _error("duplicate-name", "The names in 'fields' must be unique.", field, at="fields")
+    entity = definition.entities[relation.target]
+    for name in dict.fromkeys(field.fields):
+        column = yield from _resolve(definition, field, "fields", relation.target, name)
+        if column is not None:
+            yield from _check_lines_column(field, relation, name, column)
+    columns = set(field.fields)
+    for name, member in [*entity.fields.items(), *entity.relations.items()]:
+        if isinstance(member, Field):
+            needed = member.required and member.default is None and member.computed is None
+        else:
+            needed = member.required and member.kind in SINGLE_KINDS and name != relation.inverse
+        if needed and name not in columns:
+            yield _error(
+                "invalid-value",
+                f"The lines editor of '{target.name}' has no column for the required "
+                f"{'field' if isinstance(member, Field) else 'relation'} "
+                f"'{relation.target}.{name}', so a new line has no value for it.",
+                field,
+                at="fields",
+                hint=f"Add '{name}' to 'fields'.",
+            )
+
+
+def _check_lines_column(
+    field: FormField, relation: Relation, name: str, column: FieldTarget
+) -> Iterator[Diagnostic]:
+    """A column of a lines editor needs a default widget, and a value that the line stores."""
+    member = column.member
+    problem = None
+    if member is None:
+        problem = "is not a field or a relation of the lines"
+    elif name == relation.inverse:
+        problem = "is the relation to the record, which the form sets"
+    elif isinstance(member, Field) and member.computed is not None:
+        problem = "is computed"
+    elif isinstance(member, Field) and member.translatable:
+        problem = "is translatable, and a column edits one language only"
+    elif column.relation_kind not in (None, *SINGLE_KINDS) or default_widget(column) is None:
+        problem = f"({column.relation_kind or column.type}) has no widget in a lines editor"
+    if problem is not None:
+        yield _error(
+            "unsuitable-field",
+            f"The column '{name}' of the lines '{relation.target}' {problem}.",
+            field,
+            at="fields",
+        )
 
 
 def _check_form_sections(form: Form) -> Iterator[Diagnostic]:

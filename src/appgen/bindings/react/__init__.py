@@ -24,6 +24,7 @@ _PAGE = "src/pages/{{ name | kebab }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _GAP = "{{ gap_spec(definition, element_id, element_kind).base }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_LINES_OP = "element.lines and element.kind in ('create', 'update')"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 
 # The generation gaps (ADR 0005): a generated file and an extension file
@@ -319,6 +320,24 @@ BINDING = Binding(
             path="src/features/{{ name | kebab }}/index.ts",
             for_each="operation",
             when=_CUSTOM_OP,
+        ),
+        # An operation with lines (ADR 0035): the function writes the record and its lines.
+        Output(
+            template="src/features/lines-operation/index.ts.j2",
+            path="src/features/{{ name | kebab }}/index.ts",
+            for_each="operation",
+            when=_LINES_OP,
+        ),
+        Output(
+            template="src/features/lines-operation/api/api.ts.j2",
+            path="src/features/{{ name | kebab }}/api/{{ name | kebab }}-api.ts",
+            for_each="operation",
+            when=_LINES_OP,
+        ),
+        Output(
+            template="src/shared/api/lines.ts.j2",
+            path="src/shared/api/lines.ts",
+            when="lines_ops and not react.api",
         ),
         Output(
             template="src/features/operation/operation.gen.ts.j2",

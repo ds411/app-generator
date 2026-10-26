@@ -18,6 +18,7 @@ from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
+from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import entity_totals, total_keys
@@ -168,6 +169,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "record_rules": record_rules(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
         "record_totals": {name: total_keys(definition, name, api=api) for name in entities},
+        # The create and the update operations with lines (ADR 0035), by name.
+        "lines_ops": lines_operations(definition),
         **text_helpers(definition),
         "react": {
             "default_mode": theme.default_mode if theme is not None else "system",

@@ -183,6 +183,33 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     return this.fromJson(await this.request("GET", id, undefined, "", this.translations()));
   }
 
+{% if lines_ops %}
+  /** Create a record. `more` adds keys to the JSON body, for example the lines of the record (ADR 0035). */
+  async create(input: TInput, more: Record<string, unknown> = {}): Promise<T> {
+    const body = { ...this.toJson(input), ...more };
+    const record = this.fromJson(await this.request("POST", null, body, "", this.translations()));
+    this.notify();
+    return record;
+  }
+
+  /** Change a record. `more` adds keys to the JSON body, for example the lines of the record (ADR 0035). */
+  async update(id: string, patch: Partial<TInput>, more: Record<string, unknown> = {}): Promise<T> {
+    const body = { ...this.toJson(patch), ...more };
+    const record = this.fromJson(await this.request("PATCH", id, body, "", this.translations()));
+    this.notify();
+    return record;
+  }
+
+  /** Return the JSON object of values in the names of the API, for example a line of a record. */
+  json(values: object): Record<string, unknown> {
+    return this.toJson(values);
+  }
+
+  /** Tell the views that the records changed, for example after a change of the lines of a record. */
+  changed(): void {
+    this.notify();
+  }
+{% else %}
   async create(input: TInput): Promise<T> {
     const record = this.fromJson(await this.request("POST", null, this.toJson(input), "", this.translations()));
     this.notify();
@@ -194,6 +221,7 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     this.notify();
     return record;
   }
+{% endif %}
 
   async remove(id: string): Promise<void> {
     await this.request("DELETE", id);

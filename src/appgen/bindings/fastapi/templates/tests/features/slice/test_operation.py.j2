@@ -4,6 +4,10 @@
 {% macro sig(fn, args) %}
 {{ py.signature("async def " ~ fn, args, " -> None:") }}
 {% endmacro %}
+{#- A request of the test client, on one line if it fits. #}
+{% macro request(method, args) -%}
+{{ py.call("response = await ", "client." ~ method, args) }}
+{%- endmacro %}
 {% set url = e.path ~ op.path %}
 {% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
 {% set missing_url = 'f"' ~ (url | replace("{id}", "{uuid4()}")) ~ '"' %}
@@ -71,7 +75,7 @@ pytestmark = pytest.mark.anyio
 
 {{ sig("test_" ~ op.name ~ "_stores_a_record", "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session)
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert response.status_code == 201, response.text
     record = await repository.get(session, UUID(response.json()["id"]))
@@ -88,7 +92,7 @@ pytestmark = pytest.mark.anyio
     payload["unknown_field"] = 1
 {% endif %}
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert_problem(response, 422)
 {% for r in e.fk_relations %}
@@ -97,7 +101,7 @@ pytestmark = pytest.mark.anyio
 {{ trace(r.id) }}
 {{ sig("test_" ~ op.name ~ "_rejects_a_missing_" ~ (r.attr | trim("_")), "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session, {{ r.fk_attr }}=str(uuid4()))
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert_problem(response, 422)
 {% endfor %}
@@ -130,9 +134,16 @@ pytestmark = pytest.mark.anyio
 
 
 {{ sig("test_" ~ op.name ~ "_rejects_a_duplicate_value", "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session)
-    assert (await client.post("{{ url }}", json=payload)).status_code == 201
+{% set first = 'await client.post("' ~ url ~ '", json=payload)' %}
+{% if ("    assert (" ~ first ~ ").status_code == 201") | length <= 100 %}
+    assert ({{ first }}).status_code == 201
+{% else %}
+    assert (
+        {{ first }}
+    ).status_code == 201
+{% endif %}
 
-    response = await client.post("{{ url }}", json=payload)
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
 
     assert_problem(response, 409)
 {% endif %}
@@ -141,18 +152,18 @@ pytestmark = pytest.mark.anyio
 
 {{ sig("test_" ~ op.name ~ "_returns_the_record", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
 
-    response = await client.get({{ id_url }})
+    {{ request("get", [id_url]) }}
 
     assert response.status_code == 200, response.text
     assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
 
 
-{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.get({{ missing_url }})
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    {{ request("get", [missing_url]) }}
 
     assert_problem(response, 404)
 
 
-{{ sig("test_" ~ op.name ~ "_rejects_an_id_that_is_not_valid", "client: AsyncClient") }}    response = await client.get("{{ url | replace('{id}', 'not-an-id') }}")
+{{ sig("test_" ~ op.name ~ "_rejects_an_id_that_is_not_valid", "client: AsyncClient") }}    {{ request("get", ['"' ~ (url | replace('{id}', 'not-an-id')) ~ '"']) }}
 
     assert_problem(response, 422)
 {% elif op.kind == "update" %}
@@ -165,7 +176,7 @@ pytestmark = pytest.mark.anyio
     changes: dict[str, Any] = {}
 {% endif %}
 
-    response = await client.patch({{ id_url }}, json=changes)
+    {{ request("patch", [id_url, "json=changes"]) }}
 
     assert response.status_code == 200, response.text
 {% if exact %}
@@ -175,7 +186,7 @@ pytestmark = pytest.mark.anyio
     assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
 
 
-{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.patch({{ missing_url }}, json={})
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    {{ request("patch", [missing_url, "json={}"]) }}
 
     assert_problem(response, 404)
 
@@ -183,9 +194,9 @@ pytestmark = pytest.mark.anyio
 {{ sig("test_" ~ op.name ~ "_rejects_input_that_is_not_valid", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
 
 {% if e.not_null %}
-    response = await client.patch({{ id_url }}, json={"{{ e.not_null[0] }}": None})
+    {{ request("patch", [id_url, 'json={"' ~ e.not_null[0] ~ '": None}']) }}
 {% else %}
-    response = await client.patch({{ id_url }}, json={"unknown_field": 1})
+    {{ request("patch", [id_url, 'json={"unknown_field": 1}']) }}
 {% endif %}
 
     assert_problem(response, 422)
@@ -194,13 +205,13 @@ pytestmark = pytest.mark.anyio
 
 {{ sig("test_" ~ op.name ~ "_deletes_the_record", "client: AsyncClient, session: AsyncSession") }}    record = await make_{{ e.snake }}(session)
 
-    response = await client.delete({{ id_url }})
+    {{ request("delete", [id_url]) }}
 
     assert response.status_code == 204, response.text
     assert await session.scalar(select({{ e.name }}.id).where({{ e.name }}.id == record.id)) is None
 
 
-{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    response = await client.delete({{ missing_url }})
+{{ sig("test_" ~ op.name ~ "_gives_404_for_a_missing_record", "client: AsyncClient") }}    {{ request("delete", [missing_url]) }}
 
     assert_problem(response, 404)
 {% elif op.kind == "list" %}
@@ -208,21 +219,21 @@ pytestmark = pytest.mark.anyio
 
 {{ sig("test_" ~ op.name ~ "_returns_a_page_of_records", "client: AsyncClient, session: AsyncSession") }}    records = [await make_{{ e.snake }}(session), await make_{{ e.snake }}(session)]
 
-    response = await client.get("{{ url }}", params={"limit": 1})
+    {{ request("get", ['"' ~ url ~ '"', 'params={"limit": 1}']) }}
 
     assert response.status_code == 200, response.text
     assert response.json()["total"] == 2
     assert len(response.json()["items"]) == 1
-    response = await client.get("{{ url }}", params={"offset": 1})
+    {{ request("get", ['"' ~ url ~ '"', 'params={"offset": 1}']) }}
     assert len(response.json()["items"]) == 1
-    response = await client.get("{{ url }}")
+    {{ request("get", ['"' ~ url ~ '"']) }}
     assert {item["id"] for item in response.json()["items"]} == {str(r.id) for r in records}
 {% if e.sortable %}
 
 
 {{ sig("test_" ~ op.name ~ "_sorts_the_records", "client: AsyncClient, session: AsyncSession") }}    records = [await make_{{ e.snake }}(session), await make_{{ e.snake }}(session)]
 
-    response = await client.get("{{ url }}", params={"sort": "-{{ e.sortable[0].name }}"})
+    {{ request("get", ['"' ~ url ~ '"', 'params={"sort": "-' ~ e.sortable[0].name ~ '"}']) }}
 
     assert response.status_code == 200, response.text
     assert {item["id"] for item in response.json()["items"]} == {str(r.id) for r in records}
@@ -235,7 +246,7 @@ pytestmark = pytest.mark.anyio
     await make_{{ e.snake }}(session)
     value = {{ e.name }}Read.model_validate(record).model_dump(mode="json")["{{ filter.name }}"]
 
-    response = await client.get("{{ url }}", params={"{{ filter.name }}": value})
+    {{ request("get", ['"' ~ url ~ '"', 'params={"' ~ filter.name ~ '": value}']) }}
 
     assert response.status_code == 200, response.text
     items = response.json()["items"]
@@ -244,12 +255,12 @@ pytestmark = pytest.mark.anyio
 {% endif %}
 
 
-{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_sort_field", "client: AsyncClient") }}    response = await client.get("{{ url }}", params={"sort": "unknown_field"})
+{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_sort_field", "client: AsyncClient") }}    {{ request("get", ['"' ~ url ~ '"', 'params={"sort": "unknown_field"}']) }}
 
     assert_problem(response, 422)
 
 
-{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_parameter", "client: AsyncClient") }}    response = await client.get("{{ url }}", params={"unknown_field": 1})
+{{ sig("test_" ~ op.name ~ "_rejects_an_unknown_parameter", "client: AsyncClient") }}    {{ request("get", ['"' ~ url ~ '"', 'params={"unknown_field": 1}']) }}
 
     assert_problem(response, 422)
 {% else %}
@@ -267,10 +278,10 @@ pytestmark = pytest.mark.anyio
 {% endfor %}
     }
 
-    response = await client.post({{ id_url }}, json=params)
+    {{ request("post", [id_url, "json=params"]) }}
 {% else %}
 
-    response = await client.post({{ id_url }})
+    {{ request("post", [id_url]) }}
 {% endif %}
 
     if response.status_code == 501:
@@ -287,9 +298,9 @@ pytestmark = pytest.mark.anyio
 {% endfor %}
     }
 
-    response = await client.post({{ missing_url }}, json=params)
+    {{ request("post", [missing_url, "json=params"]) }}
 {% else %}
-    response = await client.post({{ missing_url }})
+    {{ request("post", [missing_url]) }}
 {% endif %}
 
     assert_problem(response, 404)
@@ -297,9 +308,9 @@ pytestmark = pytest.mark.anyio
 
 
 {{ sig("test_" ~ op.name ~ "_rejects_params_that_are_not_valid", "client: AsyncClient") }}{% if required_params %}
-    response = await client.post({{ missing_url }}, json={})
+    {{ request("post", [missing_url, "json={}"]) }}
 {% else %}
-    response = await client.post({{ missing_url }}, json={"unknown_field": 1})
+    {{ request("post", [missing_url, 'json={"unknown_field": 1}']) }}
 {% endif %}
 
     assert_problem(response, 422)

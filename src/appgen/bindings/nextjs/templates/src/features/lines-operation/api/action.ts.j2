@@ -1,0 +1,92 @@
+{% set op = lines_ops[name] %}
+{% set fn = name | camel %}
+{% set entity = element.entity %}
+{% set type = entity | pascal %}
+{% set var = entity | camel %}
+{% set public = definition.auth and name in definition.auth.public_operations %}
+{# A record rule (ADR 0018, ADR 0025) applies to an operation that is not public. #}
+{% set rules = record_rules.get(entity) if not public else none %}
+{% set owner_key = rules.path[0].key if rules and rules.direct else none %}
+{{ trace_header(element_id) }}
+"use server";
+
+import { z } from "zod";
+
+{% for target in [entity] + op.targets | reject("eq", entity) | list %}
+{% set names = (op.items | selectattr("target", "eq", target) | map(attribute="schema") | list) + ([var ~ ("Input" if op.kind == "create" else "Patch") ~ "Schema", "type " ~ type, "type " ~ type ~ "Input"] if target == entity else []) %}
+import { {{ names | join(", ") }} } from "@/entities/{{ target | kebab }}";
+import { {{ target | camel }}Repository } from "@/entities/{{ target | kebab }}/server";
+{% endfor %}
+import type { ActionResult } from "@/shared/api";
+import { writeLines } from "@/shared/api/lines";
+import { {{ "idSchema, " if op.kind == "update" }}runAction } from "@/shared/api/server";
+{% if rules %}
+import { recordScope } from "@/shared/auth/access";
+{% endif %}
+import { inTransaction } from "@/shared/db";
+
+import type { {{ op.type }} } from "./{{ name | kebab }}-api";
+
+/** The rules of the lines of the operation {{ name }}. */
+const LINES_SCHEMA = z.object({
+{% for item in op.items %}
+  {{ item.key }}: z.array({{ item.schema }}).optional(), {{ trace(item.element_id) }}
+{% endfor %}
+});
+
+/**
+ * The server action of the operation {{ name }} (ADR 0035): it writes the
+ * record and its lines in one transaction. An error of a line stores
+ * nothing, and its issues give the place of the line, for example
+ * `{{ op.items[0].key }}.2` for the third line.{% if rules %} A user of a record rule uses only the records of
+ * the rule.{% endif %}
+
+ */
+{% if op.kind == "create" %}
+export async function {{ fn }}Action(input: {{ type }}Input, lines: {{ op.type }} = {}): Promise<ActionResult<{{ type }}>> {
+{% else %}
+export async function {{ fn }}Action(
+  id: string,
+  patch: Partial<{{ type }}Input>,
+  lines: {{ op.type }} = {},
+): Promise<ActionResult<{{ type }}>> {
+{% endif %}
+  return runAction(
+    async () => {
+{% if rules %}
+{% for rule_id in rules.element_ids %}
+      {{ trace(rule_id) }}
+{% endfor %}
+      const scope = await recordScope({{ ts_value(entity) }}, "change");
+{% endif %}
+{% if op.kind == "create" %}
+{% if owner_key %}
+      const values = {{ var }}InputSchema.parse(scope?.owner ? { ...input, {{ owner_key }}: scope.user } : input);
+{% else %}
+      const values = {{ var }}InputSchema.parse(input);
+{% endif %}
+{% else %}
+      const recordId = idSchema.parse(id);
+{% if owner_key %}
+      const values = {{ var }}PatchSchema.parse(scope?.owner ? { ...patch, {{ owner_key }}: scope.user } : patch);
+{% else %}
+      const values = {{ var }}PatchSchema.parse(patch);
+{% endif %}
+{% endif %}
+      const items = LINES_SCHEMA.parse(lines);
+      return inTransaction(async () => {
+{% if op.kind == "create" %}
+        const record = await {{ var }}Repository.create(values{{ ", { scope }" if rules }});
+{% else %}
+        const record = await {{ var }}Repository.update(recordId, values{{ ", scope" if rules }});
+{% endif %}
+{% for item in op.items %}
+        await writeLines({{ item.target | camel }}Repository, {{ ts_value(item.target) }}, {{ ts_value(item.link) }}, record.id, items.{{ item.key }}, {{ ts_value(item.key) }}); {{ trace(item.element_id) }}
+{% endfor %}
+        // The record with the totals of its new lines.
+        return {{ var }}Repository.get(record.id);
+      });
+    },
+    { changes: true{% if public %}, public: true{% elif definition.access %}, operation: {{ name | tojson }}{% endif %} },
+  );
+}

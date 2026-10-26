@@ -3671,6 +3671,22 @@
           "default": null,
           "title": "Step"
         },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
         "rules": {
           "anyOf": [
             {
@@ -7167,6 +7183,7 @@
         "datetime",
         "relation",
         "file",
+        "lines",
         "custom"
       ],
       "type": "string"

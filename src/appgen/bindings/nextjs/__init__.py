@@ -28,6 +28,7 @@ _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_LINES_OP = "element.lines and element.kind in ('create', 'update')"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 _WEBHOOK = "src/features/{{ ts_webhooks[name].slice }}"
 _DEPLOY_TARGET = Literal["kubernetes", "knative"]
@@ -470,6 +471,23 @@ BINDING = Binding(
                 ("api/operation.gen.ts", "api/{{ name | kebab }}.gen.ts"),
                 ("api/operation.ext.ts", "api/{{ name | kebab }}.ext.ts"),
             )
+        ),
+        # An operation with lines (ADR 0035): the server action writes the lines.
+        *(
+            Output(
+                template=f"src/features/lines-operation/{template}.j2",
+                path=f"{_OPERATION}/{path}",
+                for_each="operation",
+                when=_LINES_OP,
+            )
+            for template, path in (
+                ("index.ts", "index.ts"),
+                ("api/api.ts", "api/{{ name | kebab }}-api.ts"),
+                ("api/action.ts", "api/{{ name | kebab }}-action.ts"),
+            )
+        ),
+        Output(
+            template="src/shared/api/lines.ts.j2", path="src/shared/api/lines.ts", when="lines_ops"
         ),
         Output(
             template="integrations/third-party.ts.j2",
