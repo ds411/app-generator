@@ -1,0 +1,72 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useRef, useState } from "react";
+
+import type { ListResult } from "@/shared/api";
+import { type Loaded, useResource } from "@/shared/lib/use-resource";
+
+/** A loaded page: the records of the page, and the related records of its records. */
+type LoadedPage<T, L> = readonly [ListResult<T>, L];
+
+/** The records of the loaded pages, the count of all records, and the related records. */
+export type ScrollData<T, L> = readonly [{ items: T[]; total: number; pages: number }, L];
+
+/**
+ * Load the pages of a list one at a time (`pagination.mode: scroll`). `more`
+ * loads the next page with one request, and keeps the records of the loaded
+ * pages. A new key (another filter or sort) loads the first page again, and a
+ * change of the records loads the shown pages again.
+ */
+export function useScrollPages<T extends { id: string }, L extends Readonly<Record<string, ReadonlyMap<string, unknown>>>>(
+  key: string,
+  loadPage: (page: number) => Promise<LoadedPage<T, L>>,
+  subscribe?: (listener: () => void) => () => void,
+): Loaded<ScrollData<T, L>> & { more: () => void; loadingMore: boolean } {
+  const [count, setCount] = useState(1);
+  const [lastKey, setLastKey] = useState(key);
+  if (lastKey !== key) {
+    setLastKey(key);
+    setCount(1);
+  }
+  const loaded = useRef<{ key: string; pages: LoadedPage<T, L>[] }>({ key, pages: [] });
+  const resource = useResource(
+    JSON.stringify([key, count]),
+    async () => {
+      const known = loaded.current.key === key ? loaded.current.pages : [];
+      // The next page is one request. A change of the records loads all shown pages again.
+      const pages = known.length === count - 1 ? [...known] : [];
+      for (let page = pages.length + 1; page <= count; page++) pages.push(await loadPage(page));
+      loaded.current = { key, pages };
+      return combine(pages);
+    },
+    subscribe,
+    { keep: true },
+  );
+  if (resource.status !== "success") return { ...resource, more: () => {}, loadingMore: false };
+  const [{ items, total, pages }] = resource.data;
+  const loadingMore = pages < count;
+  const more = () => {
+    if (!loadingMore && items.length < total) setCount(pages + 1);
+  };
+  return { ...resource, more, loadingMore };
+}
+
+/** Join the loaded pages. A record that a change moved to the next page shows one time. */
+function combine<T extends { id: string }, L>(pages: LoadedPage<T, L>[]): ScrollData<T, L> {
+  const seen = new Set<string>();
+  const items: T[] = [];
+  const related: Record<string, Map<string, unknown>> = {};
+  for (const [page, lookups] of pages) {
+    for (const item of page.items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+    for (const [name, records] of Object.entries(lookups as Record<string, ReadonlyMap<string, unknown>>)) {
+      related[name] = new Map([...(related[name] ?? []), ...records]);
+    }
+  }
+  const total = pages.at(-1)?.[0].total ?? 0;
+  return [{ items, total, pages: pages.length }, related as L];
+}

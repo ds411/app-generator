@@ -7,7 +7,8 @@
 {% if ns.icons %}
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
-{% set react_names = react + (["useState"] if shape not in ("table", "calendar") or plan.filters or plan.forms or plan.server else []) %}
+{% set server_cards = shape == "cards" and plan.server and plan.scroll %}
+{% set react_names = react + (["useState"] if (shape not in ("table", "calendar") and not server_cards) or plan.filters or plan.forms or (plan.server and not server_cards) else []) %}
 {% if react_names %}
 import { {{ react_names | unique | sort | join(", ") }} } from "react";
 {% endif %}
@@ -44,7 +45,7 @@ import { pageHref } from "@/shared/lib/pages";
 {% if plan.lookups and not plan.server %}{% set query = query + ["byId"] %}{% endif %}
 {% if plan.needs("matchesSearch") %}{% set query = query + ["matchesSearch"] %}{% endif %}
 {% if plan.needs("inDateRange") %}{% set query = query + ["inDateRange"] %}{% endif %}
-{% if shape == "cards" %}{% set query = query + (["pageCount"] if plan.server else ["pageCount", "pageOf"]) %}{% endif %}
+{% if shape == "cards" and not plan.scroll %}{% set query = query + (["pageCount"] if plan.server else ["pageCount", "pageOf"]) %}{% endif %}
 {% if plan.filters | selectattr("kind", "eq", "date_range") | list %}{% set query = query + ["type DateRange"] %}{% endif %}
 {% if plan.filters | selectattr("options") | list %}{% set query = query + ["type Option"] %}{% endif %}
 {% if query %}
@@ -53,7 +54,11 @@ import { {{ query | join(", ") }} } from "@/shared/lib/query";
 {% if "link" in plan.uses %}
 import { Link } from "@/shared/lib/router";
 {% endif %}
+{% if plan.server and plan.scroll %}
+import { useScrollPages } from "@/shared/lib/use-scroll-pages";
+{% else %}
 import { useResource } from "@/shared/lib/use-resource";
+{% endif %}
 {% set actions = [] %}
 {% if plan.actions or plan.bulk_actions %}{% set actions = actions + ["ActionButton"] %}{% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}{% set actions = actions + ["type ActionSpec"] %}{% endif %}
@@ -211,6 +216,17 @@ const resource = useResource(
     },
     subscribe,
     { keep: true },
+  );
+{%- endmacro %}
+
+{% macro scroll_resource(plan) -%}
+const resource = useScrollPages(
+    JSON.stringify(query),
+    async (page) => {
+      const result = await {{ plan.var }}Api.page({ ...query, page, pageSize: PAGE_SIZE });
+      return [result, await loadLookups(result.items)] as const;
+    },
+    subscribe,
   );
 {%- endmacro %}
 

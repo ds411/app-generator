@@ -19,6 +19,9 @@ import { type CSSProperties, type ReactNode, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { ListPagination } from "@/shared/ui/list-pagination";
+{% if "scroll" in ui_views.features %}
+import { ScrollMore } from "@/shared/ui/scroll-more";
+{% endif %}
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
 import { cn } from "@/shared/lib/utils";
 
@@ -43,7 +46,9 @@ export type ServerPages = {
  * A table of records with sorting, pages, and selection: the data table of
  * shadcn/ui on TanStack Table. The view filters the records first. With
  * `server`, `data` is one page, and the view loads the page and the sort
- * that `server.onChange` gives.
+ * that `server.onChange` gives.{% if "scroll" in ui_views.features %} With `scroll`, the table shows the next
+ * page at its end, and keeps the shown rows. With `server` and `scroll`,
+ * `data` is the loaded pages, and `scroll.onMore` loads the next page.{% endif %}
  */
 export function DataTable<T extends { id: string }>({
   columns,
@@ -57,6 +62,9 @@ export function DataTable<T extends { id: string }>({
   rowActions,
   onRowClick,
   server,
+{% if "scroll" in ui_views.features %}
+  scroll,
+{% endif %}
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -73,6 +81,10 @@ export function DataTable<T extends { id: string }>({
   onRowClick?: (record: T) => void;
   /** The pages and the sort on the server, with the count of all records. */
   server?: ServerPages & { total: number; onChange: (pages: ServerPages) => void };
+{% if "scroll" in ui_views.features %}
+  /** Show the next page at the end (`pagination.mode: scroll`). The server loads it with `onMore`. */
+  scroll?: true | { loading: boolean; onMore: () => void };
+{% endif %}
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -80,7 +92,12 @@ export function DataTable<T extends { id: string }>({
   const [lastKey, setLastKey] = useState(resetKey);
   if (lastKey !== resetKey) {
     setLastKey(resetKey);
+{% if "scroll" in ui_views.features %}
+    // A list that scrolls shows its first page again.
+    setPagination((value) => ({ pageIndex: 0, pageSize: scroll ? pageSize : value.pageSize }));
+{% else %}
     setPagination((value) => ({ ...value, pageIndex: 0 }));
+{% endif %}
   }
 
   const allColumns: ColumnDef<T>[] = [
@@ -122,9 +139,17 @@ export function DataTable<T extends { id: string }>({
       : []),
   ];
 
+{% if "scroll" in ui_views.features %}
+  // The loaded pages of the server are one page of the table.
+  const serverPage = server && scroll
+    ? { pageIndex: 0, pageSize: Math.max(data.length, 1) }
+    : server && { pageIndex: server.page - 1, pageSize: server.pageSize };
+  const state = server && serverPage ? { sorting: server.sorting, pagination: serverPage } : { sorting, pagination };
+{% else %}
   const state = server
     ? { sorting: server.sorting, pagination: { pageIndex: server.page - 1, pageSize: server.pageSize } }
     : { sorting, pagination };
+{% endif %}
   const table = useReactTable({
     data,
     columns: allColumns,
@@ -219,6 +244,16 @@ export function DataTable<T extends { id: string }>({
           </TableBody>
         </Table>
       </div>
+{% if "scroll" in ui_views.features %}
+      {scroll ? (
+        <ScrollMore
+          count={rows.length}
+          total={server?.total ?? data.length}
+          loading={scroll !== true && scroll.loading}
+          onMore={scroll === true ? () => setPagination((value) => ({ pageIndex: 0, pageSize: value.pageSize + pageSize })) : scroll.onMore}
+        />
+      ) : (
+{% endif %}
       <ListPagination
         page={state.pagination.pageIndex + 1}
         pageCount={Math.max(1, table.getPageCount())}
@@ -228,6 +263,9 @@ export function DataTable<T extends { id: string }>({
         onPageChange={(page) => table.setPageIndex(page - 1)}
         onPageSizeChange={(size) => table.setPagination({ pageIndex: 0, pageSize: size })}
       />
+{% if "scroll" in ui_views.features %}
+      )}
+{% endif %}
     </div>
   );
 }

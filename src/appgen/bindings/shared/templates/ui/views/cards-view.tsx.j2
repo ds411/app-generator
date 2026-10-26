@@ -4,7 +4,7 @@
 {{ trace_header(element_id) }}
 "use client";
 
-{% set ui_lines = [m.card_imports(plan), 'import { ListPagination } from "@/shared/ui/list-pagination";'] %}
+{% set ui_lines = [m.card_imports(plan), 'import { ScrollMore } from "@/shared/ui/scroll-more";' if plan.scroll else 'import { ListPagination } from "@/shared/ui/list-pagination";'] %}
 {{ m.imports(plan, "cards", react=(["type ReactNode"] if plan.row_actions else []), ui=ui_lines) }}
 
 {{ m.data(plan) }}
@@ -18,7 +18,9 @@ const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
 {% else %}
 const PAGE_SIZE = {{ plan.page_size }};
 {% endif %}
+{% if not plan.scroll %}
 const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+{% endif %}
 
 {{ m.record_card(plan) }}
 
@@ -40,6 +42,14 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
 {% if plan.filters %}
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
 {% endif %}
+{% if plan.scroll %}
+  // The list scrolls: each page is one request, and the list keeps the loaded pages.
+  const query: Omit<ApiQuery, "page" | "pageSize"> = {
+    params: { ...params{% if plan.filters %}, ...filterParams(filters){% endif %} },
+    sort: VIEW_SORT,
+  };
+  {{ m.scroll_resource(plan) }}
+{% else %}
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const query: ApiQuery = {
@@ -49,14 +59,20 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
     pageSize,
   };
   {{ m.server_resource(plan) }}
+{% endif %}
 {% else %}
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
 {% if plan.filters %}
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
 {% endif %}
+{% if plan.scroll %}
+  // The list scrolls: the count of the shown cards grows by a page at its end.
+  const [shown, setShown] = useState(PAGE_SIZE);
+{% else %}
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
+{% endif %}
 {% endif %}
 {% if plan.actions or plan.row_actions %}
 {{ m.runner(plan) }}
@@ -65,7 +81,11 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 
   const updateFilters = (next: Filters) => {
     setFilters(next);
+{% if plan.scroll and not plan.server %}
+    setShown(PAGE_SIZE);
+{% elif not plan.scroll %}
     setPage(1);
+{% endif %}
   };
 {% endif %}
 
@@ -89,7 +109,8 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% elif not plan.server %}
   const rows = sortRecords(all, lookups);
 {% endif %}
-{% if plan.server %}
+{% if plan.scroll %}
+{% elif plan.server %}
   const pages = pageCount(total, pageSize);
   if (page > pages) {
     // The last page has no records after a change: show the new last page.
@@ -131,7 +152,11 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% else %}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
 {% endif %}
+{% if plan.scroll %}
+            {{ "{" }}{{ "rows" if plan.server else "rows.slice(0, shown)" }}.map((row) => (
+{% else %}
             {{ "{" }}{{ "rows" if plan.server else "pageOf(rows, current, pageSize)" }}.map((row) => (
+{% endif %}
               <RecordCard
                 key={row.id}
                 row={row}
@@ -144,6 +169,15 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
               />
             ))}
           </div>
+{% if plan.scroll and plan.server %}
+          <ScrollMore count={rows.length} total={total} loading={resource.loadingMore} onMore={resource.more} />
+{% elif plan.scroll %}
+          <ScrollMore
+            count={Math.min(shown, rows.length)}
+            total={rows.length}
+            onMore={() => setShown((value) => value + PAGE_SIZE)}
+          />
+{% else %}
           <ListPagination
             page={ {{- "page" if plan.server else "current" -}} }
             pageCount={pages}
@@ -156,6 +190,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
               setPage(1);
             }}
           />
+{% endif %}
         </>
       )}
 {% if plan.actions or plan.row_actions %}

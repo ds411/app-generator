@@ -5119,6 +5119,15 @@
         "^x-": {}
       },
       "properties": {
+        "mode": {
+          "default": "pages",
+          "enum": [
+            "pages",
+            "scroll"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
         "page_size": {
           "anyOf": [
             {

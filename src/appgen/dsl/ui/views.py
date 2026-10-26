@@ -92,6 +92,9 @@ class Sort(Element):
 class Pagination(Element):
     """The pages of a list."""
 
+    mode: Literal["pages", "scroll"] = "pages"
+    """`pages` shows page buttons. `scroll` shows the next page at the end of the list, and
+    keeps the loaded records (tables and card lists of entities)."""
     page_size: Annotated[int, pydantic.Field(ge=1)] | None = None
     """The default comes from `ui.defaults.page_size`."""
     page_sizes: list[Annotated[int, pydantic.Field(ge=1)]] = pydantic.Field(

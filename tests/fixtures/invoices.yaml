@@ -2,10 +2,12 @@
 # Invoices: the small DSL additions of M33. An invoice gets the next
 # number of a sequence (`sequence`), and a line gets the next position.
 # The seed records get the numbers in their order. The amounts are in the
-# currency of the customer (`currency_field`). scripts/check-nextjs.sh,
-# scripts/check-react.sh, and scripts/check-fastapi.sh generate and check
-# the apps of this definition, and scripts/sequence_test.py creates
-# invoices in the Next.js app and in the mock store of the React app.
+# currency of the customer (`currency_field`). The invoice feed and the
+# line cards show the next page at their end (`pagination.mode: scroll`).
+# scripts/check-nextjs.sh, scripts/check-react.sh, and
+# scripts/check-fastapi.sh generate and check the apps of this
+# definition, and scripts/sequence_test.py creates invoices in the
+# Next.js app and in the mock store of the React app.
 # The invoices keep a change log (ADR 0040), with the numbers.
 version: 0
 
@@ -71,6 +73,22 @@ seed:
     mock: 4
 
 ui:
+  views:
+    invoice_feed:
+      kind: table
+      entity: Invoice
+      title: Invoice feed
+      columns: { number: {}, issued_on: {}, total: {}, customer: {} }
+      sort: { field: number, direction: desc }
+      pagination: { mode: scroll, page_size: 4 }
+    line_cards:
+      kind: cards
+      entity: Line
+      title: Line cards
+      card: { title: text, fields: [amount, position] }
+      filters:
+        search: { kind: search, fields: [text] }
+      pagination: { mode: scroll, page_size: 5 }
   dashboards:
     overview:
       title: Overview
@@ -101,3 +119,5 @@ pages:
     entity: Invoice
     content: { view: invoice_detail }
   lines: { path: /lines, title: Lines, content: { view: line_table } }
+  invoice_feed: { path: /feed, title: Invoice feed, content: { view: invoice_feed } }
+  line_cards: { path: /line-cards, title: Line cards, content: { view: line_cards } }

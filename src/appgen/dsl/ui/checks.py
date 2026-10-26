@@ -70,6 +70,8 @@ from appgen.dsl.ui.views import (
     DateRangeFilter,
     DetailView,
     Filter,
+    ListViewBase,
+    Pagination,
     SearchFilter,
     SelectFilter,
     TableView,
@@ -117,6 +119,33 @@ def check_ui_views(definition: AppDefinition) -> Iterator[Diagnostic]:
         yield from _check_badge_set(definition, badge)
     for view in definition.ui.views.values():
         yield from _check_view(definition, view)
+        if isinstance(view, ListViewBase | ApiListViewBase) and view.pagination is not None:
+            yield from _check_pagination(view, view.pagination)
+
+
+def _check_pagination(
+    view: ListViewBase | ApiListViewBase, pagination: Pagination
+) -> Iterator[Diagnostic]:
+    """A list that scrolls is a table or a card list of an entity, without page sizes."""
+    if pagination.mode != "scroll":
+        return
+    if isinstance(view, ApiListViewBase):
+        yield _error(
+            "invalid-option",
+            "The mode 'scroll' is for the tables and the card lists of entities.",
+            pagination,
+            at="mode",
+            hint="Remove 'mode', or use 'mode: pages'.",
+        )
+    elif pagination.page_sizes:
+        yield _error(
+            "invalid-option",
+            "'page_sizes' is not for the mode 'scroll': the list loads 'page_size' records "
+            "at a time.",
+            pagination,
+            at="page_sizes",
+            hint="Remove 'page_sizes'.",
+        )
 
 
 def check_ui_forms(definition: AppDefinition) -> Iterator[Diagnostic]:
