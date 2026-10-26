@@ -22,6 +22,11 @@ A file field (ADR 0027) has no value (None) in a generated record. A
 seed record has the path of its file, from the folder of the definition:
 each binding keeps the file in its own form.
 
+A field with `sequence` has the numbers of the sequence in the order of
+the records, from `start`, also in the seed records. The seeds of the
+Next.js and the FastAPI apps leave the field out: the database gives the
+numbers in the same order.
+
 An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
 
@@ -144,6 +149,9 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
                 if field.type in FILE_TYPES:
                     record[field_name] = None  # A generated record has no files.
                     continue
+                if field.sequence is not None:
+                    record[field_name] = None  # Set after all records, in their order.
+                    continue
                 record[field_name] = _unique_value(
                     rng, entity, field_name, field, index, record, seen.get(field_name)
                 )
@@ -183,8 +191,18 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
                         record[relation_name] = [targets[i] for i in sorted(chosen)]
             records.append(record)
         _fit_rules(entity, records, fixed)
+        for field_name, field in entity.sequence_fields.items():
+            for position, record in enumerate(records):
+                record[field_name] = sequence_value(field, position)
         data[name] = records
     return data
+
+
+def sequence_value(field: Field, position: int) -> str | int:
+    """Return the value of a field with `sequence` for the record at a position, from 0."""
+    assert field.sequence is not None
+    number = field.sequence.start + position
+    return field.sequence.text(number) if field.type == "string" else number
 
 
 def seed_records(definition: AppDefinition) -> dict[str, list[Record]]:

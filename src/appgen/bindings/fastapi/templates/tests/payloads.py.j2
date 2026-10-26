@@ -9,7 +9,7 @@ from typing import Any
 def {{ e.snake }}_payload(n: int = 0, **values: Any) -> dict[str, Any]:
     """Return valid input to create a record of the entity {{ e.name }}."""
     return {
-{% for f in e.fields %}
+{% for f in e.input_fields %}
         "{{ f.name }}": {{ f.sample }},
 {% endfor %}
 {% for r in e.fk_relations %}

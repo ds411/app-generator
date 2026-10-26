@@ -16,7 +16,7 @@ from uuid import UUID
 {% endif %}
 import pytest
 {% if change %}
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import {{ "delete, " if remove }}func, select, update
 {% else %}
 from sqlalchemy import func, select
 {% endif %}

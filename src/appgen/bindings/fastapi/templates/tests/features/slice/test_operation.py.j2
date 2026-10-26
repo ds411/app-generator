@@ -7,7 +7,7 @@
 {% set url = e.path ~ op.path %}
 {% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
 {% set missing_url = 'f"' ~ (url | replace("{id}", "{uuid4()}")) ~ '"' %}
-{% set required = e.fields | selectattr("required") | rejectattr("has_default") | list %}
+{% set required = e.input_fields | selectattr("required") | rejectattr("has_default") | list %}
 {% set exact = e.exact_fields %}
 {% set exact_filters = e.filters | selectattr("exact") | list %}
 {% set filter = exact_filters[0] if exact_filters else none %}
@@ -96,6 +96,31 @@ pytestmark = pytest.mark.anyio
 
 {{ trace(r.id) }}
 {{ sig("test_" ~ op.name ~ "_rejects_a_missing_" ~ (r.attr | trim("_")), "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session, {{ r.fk_attr }}=str(uuid4()))
+
+    response = await client.post("{{ url }}", json=payload)
+
+    assert_problem(response, 422)
+{% endfor %}
+{% for f in e.fields if f.sequence %}
+{% set seq = f.sequence %}
+
+
+{{ trace(seq.id) }}
+{{ sig("test_" ~ op.name ~ "_gives_the_next_" ~ (f.attr | trim("_")), "client: AsyncClient, session: AsyncSession") }}    first = await client.post("{{ url }}", json=await {{ e.snake }}_input(session))
+    second = await client.post("{{ url }}", json=await {{ e.snake }}_input(session))
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+{% if seq.width is none %}
+    assert second.json()["{{ f.name }}"] == first.json()["{{ f.name }}"] + 1
+{% else %}
+    number = int(first.json()["{{ f.name }}"]{{ ('.removeprefix(' ~ (seq.prefix | tojson) ~ ')') if seq.prefix }})
+    assert second.json()["{{ f.name }}"] == f"{{ seq.prefix or "" }}{number + 1:0{{ seq.width }}d}"
+{% endif %}
+
+
+{{ trace(seq.id) }}
+{{ sig("test_" ~ op.name ~ "_rejects_a_value_of_" ~ (f.attr | trim("_")), "client: AsyncClient, session: AsyncSession") }}    payload = await {{ e.snake }}_input(session, {{ f.name }}={{ '"' ~ seq.prefix ~ '1"' if seq.prefix else "1" }})
 
     response = await client.post("{{ url }}", json=payload)
 

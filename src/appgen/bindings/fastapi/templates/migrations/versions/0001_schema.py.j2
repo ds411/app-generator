@@ -32,6 +32,14 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Create the tables, then the foreign keys, so that the order of the tables is free."""
+{% if py.sequences %}
+    if op.get_bind().dialect.name == "postgresql":
+        # The sequences of the numbers of the new records. SQLite has none: the app
+        # takes the largest number plus one.
+{% for seq in py.sequences %}
+        op.execute(sa.schema.CreateSequence(sa.Sequence("{{ seq.name }}", start={{ seq.start }})))
+{% endfor %}
+{% endif %}
 {% for e in py.entity_order() %}
     op.create_table(
         "{{ e.table }}",
@@ -202,3 +210,9 @@ def downgrade() -> None:
 {% for e in py.entity_order() | reverse %}
     op.drop_table("{{ e.table }}")
 {% endfor %}
+{% if py.sequences %}
+    if op.get_bind().dialect.name == "postgresql":
+{% for seq in py.sequences %}
+        op.execute(sa.schema.DropSequence(sa.Sequence("{{ seq.name }}")))
+{% endfor %}
+{% endif %}

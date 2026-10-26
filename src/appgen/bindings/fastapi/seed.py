@@ -279,7 +279,10 @@ def _test_records(
         texts = [
             n
             for n, spec in entity.stored_fields.items()
-            if spec.type in ("string", "text") and not spec.unique and spec.pattern is None
+            if spec.type in ("string", "text")
+            and not spec.unique
+            and spec.pattern is None
+            and spec.sequence is None
         ]
         for record in records:
             if change is None and texts:
@@ -303,7 +306,8 @@ def _row(
     uses.add("UUID")
     row = [("id", _uuid(record["id"]))]
     link: list[tuple[str, str]] = []
-    for py_field in entity.fields:
+    # The database gives the values of the fields with a sequence.
+    for py_field in entity.input_fields:
         row.append((py_field.name, _value(py_field, record.get(py_field.name), uses)))
     for py_file in entity.files:
         value = (files or {}).get(py_file.name)

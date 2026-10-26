@@ -14,6 +14,11 @@
 {% endfor %}
 )
 {% endfor %}
+{% for seq in e.sequences %}
+
+{{ trace(seq.id) }}
+{{ seq.declaration() }}
+{% endfor %}
 
 
 {{ trace(e.id) }}
@@ -28,6 +33,13 @@ class {{ e.name }}(Record):
         {{ r.unique_constraint("") }},
 {% endfor %}
     )
+{% endif %}
+{% if e.sequences %}
+
+    @declared_attr.directive
+    def __mapper_args__(cls) -> dict[str, Any]:
+        """The insert returns the numbers of the sequences, so that the record has them."""
+        return {"eager_defaults": True}
 {% endif %}
 
 {% for f in e.fields %}

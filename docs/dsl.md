@@ -248,6 +248,9 @@ language of `translations` (see
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
 
+`sequence` gives a `string` or an `integer` field the next number of a
+sequence (see [Sequence numbers](#sequence-numbers)).
+
 ```yaml
 # in: entities.Project
 fields:
@@ -348,6 +351,52 @@ Booking:
       scale: 2
       format: currency
       computed: hours(starts_at, ends_at) * room.hourly_rate
+```
+
+### Sequence numbers
+
+A field with `sequence` gets the next number of a sequence when the app
+creates a record, for example the number `INV-1001` of an invoice. Each
+field with `sequence` has its own sequence. The forms do not show the
+field, and the create and the change do not take a value of it.
+
+| Option   | Meaning                                                    | Default |
+| -------- | ---------------------------------------------------------- | ------- |
+| `start`  | The first number, from 1.                                  | `1`     |
+| `prefix` | The text before the number: letters, digits, and `._/#-`. Only for a `string` field. | none |
+| `width`  | The smallest number of digits: zeros go before a shorter number. Only for a `string` field. | none |
+
+A field with `sequence` is a `string` or an `integer` field. It cannot
+have `required`, `default`, `computed`, `translatable`, or the rules of
+a value (`pattern`, `min_length`, `max_length`, `min`, `max`): the
+record always has a value, and the database gives it. `unique: true`
+lets the database reject a second record with the same number, for
+example after a manual change of a number in the database. A seed
+record does not give a value of the field: the seed records get the
+numbers in their order, from `start`.
+
+The apps take the numbers as follows:
+
+- The Next.js app and the FastAPI app on PostgreSQL take the number
+  from a database sequence. A database sequence does not go back: a
+  create that fails after it takes a number (for example because of a
+  rule of the record) skips that number. The numbers are in order, but
+  there can be holes.
+- The FastAPI app on SQLite (the tests and the local development) has
+  no sequences: it takes the largest number of the table plus one.
+- The React app without an API gives the numbers in order to the mock
+  records, and the mock store gives the next number to a new record.
+
+```yaml
+# in: entities
+Invoice:
+  display_field: number
+  fields:
+    number:
+      type: string
+      unique: true
+      sequence: { start: 1001, prefix: INV-, width: 4 }
+    issued_on: { type: date, required: true }
 ```
 
 ### File fields
@@ -615,7 +664,8 @@ seed:
   one side, or on both sides with the same partner.
 - A field that the record does not give gets its default, or no value.
   A required field without a default, and a required relation, need a
-  value. A computed field takes no value.
+  value. A computed field and a field with `sequence` take no value: the
+  records get the numbers of the sequence in their order.
 - Without a seed, an entity has generated mock records: 12, or the
   number of the extension key `x-mock-count`. With a seed, the entity has
   its seed records and `mock` generated records. A generated record can

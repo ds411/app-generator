@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 {% if password %}
 from app.core.auth import Credential, hash_password
 {% endif %}
-from app.core.db import Base
+from app.core.db import Base{{ ", NextNumber" if py.sequences }}
 from app.core.seed_data import JOINS, TABLES, Row
 {% if py_seed.files %}
 from app.core.seed_files import SEED_FILES
@@ -131,6 +131,17 @@ async def _insert_new(session: AsyncSession, table: Table, rows: list[Row]) -> s
     """Insert the rows with a new ID, and return their IDs."""
     if not rows:
         return set()
+{% if py.sequences %}
+    if any(isinstance(getattr(column.default, "arg", None), NextNumber) for column in table.c):
+        # The next number of a sequence: SQLite needs one insert for each row.
+        ids: set[UUID] = set()
+        for row in rows:
+            result = await session.execute(
+                _insert_or_skip(session, table).returning(table.c.id), row
+            )
+            ids.update(result.scalars())
+        return ids
+{% endif %}
     result = await session.execute(_insert_or_skip(session, table).returning(table.c.id), rows)
     return set(result.scalars())
 

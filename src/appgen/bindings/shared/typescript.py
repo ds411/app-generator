@@ -79,9 +79,18 @@ class Member:
     """The translatable field whose values in each language the key has (ADR 0026)."""
 
     @property
+    def is_file(self) -> bool:
+        """True for the key of a file field (ADR 0027)."""
+        return self.field is not None and self.field.is_file
+
+    @property
     def input(self) -> bool:
-        """True if the create and the change take the key. A file has an upload (ADR 0027)."""
-        return self.field is None or not self.field.is_file
+        """True if the create and the change take the key.
+
+        A file has an upload (ADR 0027), and the database gives the value of
+        a field with a sequence.
+        """
+        return self.field is None or not (self.field.is_file or self.field.sequence is not None)
 
 
 TRANSLATIONS_TYPE = "Partial<Record<string, string | null>>"
@@ -106,6 +115,8 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
     values of all languages. A file field has the name, the size, the
     type, and the URL of its file (`FileValue`), but the create input
     does not have it: the app uploads the file after the create (ADR 0027).
+    A field with a sequence always has a value, and the inputs do not
+    have it: the database gives the next number of the sequence.
     """
     result: list[Member] = []
     for name, field in entity.stored_fields.items():
@@ -117,7 +128,10 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
                 key=camel(name),
                 element_id=field.id,
                 ts_type=ts_type,
-                nullable=not field.required and not has_default and field.type != "boolean",
+                nullable=not field.required
+                and not has_default
+                and field.type != "boolean"
+                and field.sequence is None,
                 input_required=field.required and not has_default,
                 default=field.default
                 if has_default

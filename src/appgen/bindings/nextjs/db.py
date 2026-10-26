@@ -19,6 +19,7 @@ from appgen.bindings.shared.auth import PathStep
 from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.bindings.shared.typescript import translations_key
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.model import Sequence as FieldSequence
 from appgen.dsl.rules import EntityUniqueRule
 from appgen.dsl.storage import SeedFile
 from appgen.gen.naming import camel, snake
@@ -56,6 +57,18 @@ class UniqueRule:
     def columns(self) -> str:
         """The columns of the constraint, of the table callback `t`, for example `t.a, t.b`."""
         return ", ".join(f"t.{key}" for key in self.keys)
+
+
+@dataclass(frozen=True, slots=True)
+class SequenceDef:
+    """The Postgres sequence of a field with `sequence`: the numbers of the new records."""
+
+    const: str
+    """The TypeScript name, for example `invoiceNumberSequence`."""
+    name: str
+    """The Postgres name, for example `invoice_number_seq`."""
+    start: int
+    element_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +180,18 @@ class Table:
     """The `one_to_one` relations whose foreign key is on the target, for the data access."""
     unique_rules: list[UniqueRule] = field(default_factory=list[UniqueRule])
     """The unique rules of the entity: unique constraints over more than one column."""
+    sequences: list[SequenceDef] = field(default_factory=list[SequenceDef])
+    """The sequences of the fields with `sequence`."""
+
+    @property
+    def orm_imports(self) -> list[str]:
+        """The names to import from `drizzle-orm`, sorted."""
+        names: list[str] = []
+        if self.relations or self.join_tables:
+            names.append("relations")
+        if self.sequences:
+            names.append("sql")
+        return names
 
     @property
     def pg_imports(self) -> list[str]:
@@ -175,6 +200,8 @@ class Table:
         names.update(i for c in self.columns for i in c.imports)
         if self.enums:
             names.add("pgEnum")
+        if self.sequences:
+            names.add("pgSequence")
         if self.join_tables:
             names.add("primaryKey")
         if self.unique_rules:
@@ -208,10 +235,54 @@ def module_name(entity: str) -> str:
     return snake(entity).replace("_", "-")
 
 
-def column_builder(name: str, spec: Field) -> tuple[str, tuple[str, ...], str | None]:
+def sequence_name(table: str, name: str) -> str:
+    """Return the Postgres name of the sequence of a field, for example `invoice_number_seq`."""
+    return f"{table}_{snake(name)}_seq"
+
+
+def next_number_sql(sequence: FieldSequence, name: str, text: bool) -> str:
+    """Return the SQL of the next number of a sequence, as the value of an integer or a text.
+
+    `to_char` writes the zeros on the left of a text, and keeps all digits of a
+    number that is longer than `width`.
+    """
+    number = f"nextval('{name}')"
+    if not text:
+        return number
+    width = sequence.width or 1
+    digits = f"to_char({number}, 'FM{'9' * (_BIGINT_DIGITS - width)}{'0' * width}')"
+    return f"('{sequence.prefix}' || {digits})" if sequence.prefix else digits
+
+
+_BIGINT_DIGITS = 19
+"""The digits of the largest value of a Postgres `bigint`, and thus of a sequence."""
+
+
+def _sequence_column(
+    column: str, spec: Field, sequence: FieldSequence, name: str
+) -> tuple[str, tuple[str, ...]]:
+    """Return the Drizzle builder of a field with `sequence`: the database gives its value."""
+    text = spec.type == "string"
+    code, imports = (
+        (f'text("{column}")', ("text",))
+        if text
+        else (f'bigint("{column}", {{ mode: "number" }})', ("bigint",))
+    )
+    code += ".notNull()"
+    if spec.unique:
+        code += ".unique()"
+    code += f".default(sql`{next_number_sql(sequence, name, text)}`)"
+    return code, imports
+
+
+def column_builder(
+    name: str, spec: Field, table: str = ""
+) -> tuple[str, tuple[str, ...], str | None]:
     """Return the Drizzle builder of a field, its imports, and the enum const if any."""
     column = snake(name)
     enum_const: str | None = None
+    if spec.sequence is not None:
+        return (*_sequence_column(column, spec, spec.sequence, sequence_name(table, name)), None)
     match spec.type:
         case "string" | "email" | "url":
             if spec.max_length:
@@ -272,7 +343,17 @@ def build_tables(definition: AppDefinition) -> list[Table]:
             name=snake(entity_name),
         )
         for field_name, spec in entity.stored_fields.items():
-            code, imports, enum_const = column_builder(field_name, spec)
+            if spec.sequence is not None:
+                table.sequences.append(
+                    SequenceDef(
+                        f"{camel(entity_name)}{camel(field_name)[:1].upper()}"
+                        f"{camel(field_name)[1:]}Sequence",
+                        sequence_name(table.name, field_name),
+                        spec.sequence.start,
+                        spec.sequence.id,
+                    )
+                )
+            code, imports, enum_const = column_builder(field_name, spec, table.name)
             if enum_const is not None:
                 const = f"{camel(entity_name)}{field_name[0].upper()}{camel(field_name)[1:]}Enum"
                 table.enums.append(
@@ -663,6 +744,8 @@ class _SeedRows:
         row = [("id", json.dumps(record["id"]))]
         link: list[tuple[str, str]] = []
         for field_name, spec in entity.stored_fields.items():
+            if spec.sequence is not None:
+                continue  # The database gives the next number of the sequence.
             if spec.is_file:
                 value = (files or {}).get(field_name)
                 row.append((camel(field_name), _ts_object_of(value) if value else "null"))

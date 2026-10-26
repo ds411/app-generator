@@ -50,7 +50,16 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
 from appgen.dsl.loader import load_definition
-from appgen.dsl.model import AppDefinition, Element, Entity, Field, Operation, Relation
+from appgen.dsl.model import (
+    SEQUENCE_TYPES,
+    AppDefinition,
+    Element,
+    Entity,
+    Field,
+    Operation,
+    Relation,
+    Sequence,
+)
 from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
 from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
@@ -352,10 +361,12 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
             if field.is_file:
                 yield from _check_file_field(definition, field)
+            if field.sequence is not None:
+                yield from _check_sequence(field, field.sequence)
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
-            for key in ("unique", "computed", "translatable", "filter"):
+            for key in ("unique", "computed", "translatable", "filter", "sequence"):
                 if getattr(param, key):
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
@@ -368,6 +379,50 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                     at="type",
                     hint="Give the entity a file field, and let the operation read it.",
                 )
+
+
+def _check_sequence(field: Field, sequence: Sequence) -> Iterator[Diagnostic]:
+    """A sequence is for a `string` or an `integer` field, without a value from elsewhere."""
+    if field.type not in SEQUENCE_TYPES:
+        yield _error(
+            "invalid-option",
+            f"'sequence' is not an option of the type '{field.type}'. "
+            "It is for 'integer', 'string'.",
+            field,
+            at="sequence",
+        )
+        return
+    for key in ("prefix", "width"):
+        if key in sequence.model_fields_set and field.type != "string":
+            yield _error(
+                "invalid-option",
+                f"'{key}' is only for the sequence of a 'string' field.",
+                sequence,
+                at=key,
+            )
+    for key in _NOT_WITH_SEQUENCE:
+        if key in field.model_fields_set:
+            yield _error(
+                "invalid-option",
+                f"'{key}' is not an option of a sequence field.",
+                field,
+                at=key,
+                hint="The database gives the value: the next number of the sequence.",
+            )
+
+
+_NOT_WITH_SEQUENCE = (
+    "required",
+    "default",
+    "computed",
+    "translatable",
+    "pattern",
+    "min_length",
+    "max_length",
+    "min",
+    "max",
+)
+"""The keys of a field that a sequence field does not take: it always has a value."""
 
 
 def _check_file_field(definition: AppDefinition, field: Field) -> Iterator[Diagnostic]:
@@ -1251,6 +1306,13 @@ def _check_sign_up(
                 at="fields",
                 hint="A new user gets the role 'default_role'." if name == role_field else None,
             )
+        elif found.sequence is not None:
+            yield _error(
+                "unsuitable-field",
+                f"The sign-up cannot ask for the field '{name}': the database gives its value.",
+                sign_up,
+                at="fields",
+            )
         elif found.type == "json":
             yield _error(
                 "unsuitable-field",
@@ -1438,9 +1500,15 @@ def _check_provider(
         found = entity.fields.get(name)
         if found is None:
             yield _missing(provider, "claims", "field", name, entity.stored_fields)
-        elif found.computed is not None or name in (role_field, auth.username_field):
+        elif (
+            found.computed is not None
+            or found.sequence is not None
+            or name in (role_field, auth.username_field)
+        ):
             if found.computed is not None:
                 reason = "the app computes it."
+            elif found.sequence is not None:
+                reason = "the database gives its value."
             elif name == role_field:
                 reason = "it is the role."
             else:
@@ -2117,6 +2185,15 @@ def _check_seed_value(
             record,
             at=name,
             hint="Remove the value.",
+        )
+        return
+    if field.sequence is not None:
+        yield _error(
+            "unsuitable-field",
+            f"The field '{name}' has a sequence: the database gives its value.",
+            record,
+            at=name,
+            hint="Remove the value. The seed records get the numbers in their order.",
         )
         return
     try:

@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# Invoices: the small DSL additions of M33. An invoice gets the next
+# number of a sequence (`sequence`), and a line gets the next position.
+# The seed records get the numbers in their order. scripts/check-nextjs.sh,
+# scripts/check-react.sh, and scripts/check-fastapi.sh generate and check
+# the apps of this definition, and scripts/sequence_test.py creates
+# invoices in the Next.js app and in the mock store of the React app.
+version: 0
+
+app:
+  name: invoices
+  title: Invoices
+  description: Invoices of customers, with numbers in order.
+
+entities:
+  Customer:
+    display_field: name
+    crud: { views: [table], forms: [create] }
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+
+  Invoice:
+    display_field: number
+    crud: { views: [table, detail], forms: [create, update] }
+    fields:
+      number:
+        type: string
+        unique: true
+        sequence: { start: 1001, prefix: INV-, width: 4 }
+      issued_on: { type: date, required: true }
+      total: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
+    relations:
+      customer: { kind: many_to_one, target: Customer, required: true }
+      lines: { kind: one_to_many, target: Line, inverse: invoice }
+
+  Line:
+    display_field: text
+    crud: { views: [table], forms: [create] }
+    fields:
+      position: { type: integer, sequence: {} }
+      text: { type: string, required: true, max_length: 200 }
+      amount: { type: decimal, min: 0, precision: 12, scale: 2, format: currency }
+    relations:
+      invoice: { kind: many_to_one, target: Invoice, required: true, inverse: lines }
+
+seed:
+  Customer:
+    records:
+      acme: { name: Acme Corporation }
+      globex: { name: Globex }
+  Invoice:
+    records:
+      first: { issued_on: 2026-01-15, total: 1200, customer: acme }
+      second: { issued_on: 2026-02-01, total: 80.5, customer: globex }
+    mock: 4
+
+pages:
+  customers: { path: /customers, title: Customers, content: { view: customer_table } }
+  invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
+  invoice_detail:
+    path: "/invoices/{id}"
+    title: Invoice
+    entity: Invoice
+    content: { view: invoice_detail }
+  lines: { path: /lines, title: Lines, content: { view: line_table } }

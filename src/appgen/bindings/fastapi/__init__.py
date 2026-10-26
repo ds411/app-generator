@@ -472,7 +472,7 @@ BINDING = Binding(
         ),
     ),
     covers=frozenset(
-        {"app", "entity", "field", "relation", "operation", "param"}
+        {"app", "entity", "field", "sequence", "relation", "operation", "param"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}

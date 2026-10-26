@@ -1,7 +1,7 @@
 {% set table = nextjs.tables_by_entity[name] %}
 {{ trace_header(element_id) }}
-{% if table.relations or table.join_tables %}
-import { relations } from "drizzle-orm";
+{% if table.orm_imports %}
+import { {{ table.orm_imports | join(", ") }} } from "drizzle-orm";
 {% endif %}
 import { {{ table.pg_imports | join(", ") }} } from "drizzle-orm/pg-core";
 {% if table.files %}
@@ -13,6 +13,11 @@ import type { StoredFile } from "@/shared/storage";
 {% endif %}
 {% for module, const in table.related_modules %}
 import { {{ const }} } from "./{{ module }}";
+{% endfor %}
+{% for sequence in table.sequences %}
+
+{{ trace(sequence.element_id) }}
+export const {{ sequence.const }} = pgSequence({{ sequence.name | tojson }}, { startWith: {{ sequence.start }} });
 {% endfor %}
 {% for enum in table.enums %}
 

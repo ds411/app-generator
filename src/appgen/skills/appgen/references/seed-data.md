@@ -109,7 +109,8 @@ to a record, as `records`.
 
 Leave out a value that the data does not have. A required field without
 a default needs a value. Do not invent a value: ask, or add a `default`
-to the field if the task allows it. Do not give a computed field.
+to the field if the task allows it. Do not give a computed field or a field
+with `sequence`: the database gives its number.
 
 ## Load the records
 

@@ -92,6 +92,20 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 {% endif %}
+{% if react.sequences %}
+/**
+ * A field with a sequence: a new record gets the next number. A text field
+ * has `width`, and the number has zeros on the left up to the width.
+ */
+export type SequenceField = { key: string; start: number; prefix?: string; width?: number };
+
+/** Return the number in a value of a field with a sequence, or the start before the first. */
+function sequenceNumber(value: unknown, { start, prefix = "" }: SequenceField): number {
+  const number = Number(typeof value === "string" ? value.slice(prefix.length) : value);
+  return Number.isInteger(number) ? number : start - 1;
+}
+
+{% endif %}
 /** A change of state that no transition of a workflow allows. */
 export class TransitionError extends Error {
   constructor(message: string) {
@@ -165,6 +179,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.events %}
   private events: Events<T> = {};
 {% endif %}
+{% if react.sequences %}
+  private sequences: readonly SequenceField[] = [];
+{% endif %}
 
   constructor(
     private readonly entity: string,
@@ -209,7 +226,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async create(input: TInput): Promise<T> {
     await wait();
-{% set stored = ", ...storeTranslations(this.defaults, input, this.translatable, true)" if translatable else "" %}
+{% set stored = (", ...storeTranslations(this.defaults, input, this.translatable, true)" if translatable else "") ~ (", ...this.nextNumbers()" if react.sequences else "") %}
 {% if record_rules %}
     const record = { ...this.defaults, ...input{{ stored }}, ...this.ownerValues(), id: crypto.randomUUID() } as unknown as T;
 {% else %}
@@ -278,6 +295,14 @@ export class MockStore<T extends EntityRecord, TInput extends object>
    */
   withEvents(events: Events<T>): this {
     this.events = events;
+    return this;
+  }
+
+{% endif %}
+{% if react.sequences %}
+  /** Set the fields with a sequence: the store gives a new record the next number of each. */
+  withSequences(sequences: readonly SequenceField[]): this {
+    this.sequences = sequences;
     return this;
   }
 
@@ -455,6 +480,20 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   /** Return the stored record with the ID of a record, as the operations of the events leave it. */
   private current(record: T): T {
     return this.records.find((item) => item.id === record.id) ?? record;
+  }
+
+{% endif %}
+{% if react.sequences %}
+  /** Return the next number of each sequence: the largest number of the records plus one. */
+  private nextNumbers(): Record<string, string | number> {
+    const values: Record<string, string | number> = {};
+    for (const sequence of this.sequences) {
+      const numbers = this.records.map((record) => sequenceNumber((record as Record<string, unknown>)[sequence.key], sequence));
+      const next = Math.max(sequence.start - 1, ...numbers) + 1;
+      values[sequence.key] =
+        sequence.width === undefined ? next : `${sequence.prefix ?? ""}${String(next).padStart(sequence.width, "0")}`;
+    }
+    return values;
   }
 
 {% endif %}

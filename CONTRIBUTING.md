@@ -260,8 +260,9 @@ git config core.hooksPath .githooks
   the same way, and runs its seed test on Postgres. Then it generates
   `tests/fixtures/record-rules.yaml` (the record rules with conditions
   and owner paths) and the other fixtures of the script header, for
-  example `tests/fixtures/totals.yaml` (the totals of the relations),
-  and runs the same checks on them. It needs Docker.
+  example `tests/fixtures/totals.yaml` (the totals of the relations)
+  and `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037), and
+  runs the same checks on them. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
@@ -274,17 +275,21 @@ git config core.hooksPath .githooks
   limit, and it validates the deployment files of each target against
   their schemas. Then it generates `tests/fixtures/seed-data.yaml` (seed
   records, ADR 0021), checks it in the same way without the build, and
-  runs the seed two times with PGlite (`scripts/seed_test.py`). It needs
-  pnpm and Docker. Run it by hand with
-  `scripts/check-nextjs.sh [output folder]`.
+  runs the seed two times with PGlite (`scripts/seed_test.py`). The
+  script header lists the other fixtures that it checks, for example
+  `tests/fixtures/invoices.yaml` with the sequence test
+  (`scripts/sequence_test.py`). It needs pnpm and Docker. Run it by hand
+  with `scripts/check-nextjs.sh [output folder]`.
 - When a push changes the generator core, the React binding, or the
   shared binding code, the hook also runs `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs
   `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. Then it generates
   `tests/fixtures/seed-data.yaml`, and runs lint, type check, and
-  `appgen check` on it. It needs pnpm and Docker. Run it by hand with
-  `scripts/check-react.sh [output folder]`.
+  `appgen check` on it. Last, it does the same for
+  `tests/fixtures/invoices.yaml`, and runs the sequence test of the mock
+  store (`scripts/sequence_test.py --binding react`). It needs pnpm and
+  Docker. Run it by hand with `scripts/check-react.sh [output folder]`.
 - When a push changes the generator core, a front-end binding, or the
   shared binding code, the hook also runs
   `scripts/check-translations.sh`. The script generates the project

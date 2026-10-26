@@ -150,6 +150,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/jobs.yaml' 'tests/fixtures/files*' \
     'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
     'tests/fixtures/api-connections*' 'scripts/api_connection_test.py' \
+    'tests/fixtures/invoices.yaml' \
     'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
     'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps fastapi"
@@ -165,6 +166,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
     'tests/fixtures/files*' 'scripts/files_test.py' \
     'tests/fixtures/events.yaml' 'tests/fixtures/events-extensions/*' 'scripts/events_test.py' \
+    'tests/fixtures/invoices.yaml' 'scripts/sequence_test.py' \
     'scripts/mock_api.py' 'scripts/api_calls.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps nextjs"
@@ -174,6 +176,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
     'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
     'tests/fixtures/seed-data*' 'scripts/mock_api.py' 'scripts/api_calls.py' \
+    'tests/fixtures/invoices.yaml' 'scripts/sequence_test.py' \
     'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps react"
 fi
