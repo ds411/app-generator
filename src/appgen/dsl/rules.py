@@ -3,21 +3,44 @@
 from typing import Annotated, Literal
 
 import pydantic
-from pydantic import Discriminator, Tag
+from pydantic import Discriminator, StringConstraints, Tag
 
 from appgen.dsl.element import Element, MemberName, Text
 from appgen.dsl.ui.common import kind_tag
 from appgen.dsl.ui.forms import CompareOp
 
+TOTAL_OPERAND_PATTERN = r"^(count|sum|avg|min|max)\(\s*[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)?\s*\)$"
+"""A total of the lines of a record in a compare rule, for example `sum(lines.debit)`."""
+
+type CompareOperand = Annotated[
+    str, StringConstraints(pattern=rf"^[a-z][a-z0-9_]*$|{TOTAL_OPERAND_PATTERN}")
+]
+"""A side of a compare rule: a field, or a total of the lines of the record (ADR 0034)."""
+
+
+def is_total_operand(operand: str) -> bool:
+    """Return True if a side of a compare rule is a total, for example `count(lines)`."""
+    return "(" in operand
+
 
 class EntityCompareRule(Element):
-    """A rule that compares two fields of a record, for example `ends_at` after `starts_at`."""
+    """A rule that compares two values of a record, for example `ends_at` after `starts_at`.
+
+    A value is a field, or a total of the lines of the record, for example
+    `sum(lines.debit)`: the apps check a rule with a total after they write
+    the lines (ADR 0034).
+    """
 
     kind: Literal["compare"]
-    field: MemberName
+    field: CompareOperand
     op: CompareOp
-    other: MemberName
+    other: CompareOperand
     message: Text
+
+    @property
+    def totals(self) -> list[str]:
+        """Return the sides of the rule that are totals."""
+        return [side for side in (self.field, self.other) if is_total_operand(side)]
 
 
 class EntityUniqueRule(Element):

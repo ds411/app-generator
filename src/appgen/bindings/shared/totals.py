@@ -8,6 +8,10 @@ the key, as from the other values of the record. The React app with the
 FastAPI app reads the value of each computed field with totals from the API
 instead. The names of the totals are the names of the column properties of
 the FastAPI app.
+
+A compare rule can compare a total of the lines of a record, for example
+`sum(lines.debit)`: the Next.js repository reads the totals of the rules
+after a change, and checks the rules.
 """
 
 from dataclasses import dataclass, field
@@ -16,6 +20,7 @@ from pydantic import JsonValue
 
 from appgen.dsl.expressions import Total, expression_totals, parse_expression
 from appgen.dsl.model import AppDefinition, Field
+from appgen.dsl.rules import EntityCompareRule, is_total_operand
 from appgen.dsl.ui.dashboards import RecordFilter
 from appgen.gen.naming import camel
 from appgen.gen.render import GenerationError
@@ -109,6 +114,59 @@ def entity_totals(definition: AppDefinition, entity_name: str) -> list[TsTotal]:
             if spec.id not in found[key].ids:
                 found[key].ids.append(spec.id)
     return list(found.values())
+
+
+def rule_totals(definition: AppDefinition, entity_name: str) -> list[TsTotal]:
+    """Return the distinct totals of the compare rules of an entity, in source order.
+
+    A total of a rule has no filter, so its key is the key of the same
+    total of a computed field without a filter, for example
+    `sumLinesDebit`. Raise GenerationError if the name of a total is the
+    name of a member of the entity.
+    """
+    entity = definition.entities[entity_name]
+    found: dict[str, TsTotal] = {}
+    for rule in entity.rules.values():
+        if not isinstance(rule, EntityCompareRule):
+            continue
+        for side in rule.totals:
+            key = rule_side_key(side)
+            assert key is not None
+            total = parse_expression(side)
+            assert isinstance(total, Total)
+            snake = "_".join(
+                [total.function, total.relation, *([total.field] if total.field else [])]
+            )
+            if snake in entity.fields or snake in entity.relations:
+                raise GenerationError(
+                    f"The total '{total}' of the rule '{rule.id}' needs the key '{key}' in the "
+                    f"records, but the entity has a member '{snake}'. Rename the member."
+                )
+            if key not in found:
+                relation = entity.relations[total.relation]
+                found[key] = TsTotal(
+                    key=key,
+                    function=total.function,
+                    relation=total.relation,
+                    many_to_many=False,
+                    target=relation.target,
+                    inverse=relation.inverse,
+                    number=total.field,
+                    filter=None,
+                )
+            if rule.id not in found[key].ids:
+                found[key].ids.append(rule.id)
+    return list(found.values())
+
+
+def rule_side_key(side: str) -> str | None:
+    """Return the key of the total of a side of a compare rule, or None for a field."""
+    if not is_total_operand(side):
+        return None
+    total = parse_expression(side)
+    assert isinstance(total, Total)
+    parts = [total.function, total.relation, *([total.field] if total.field else [])]
+    return camel("_".join(parts))
 
 
 def has_totals(definition: AppDefinition, entity_name: str, field_name: str) -> bool:

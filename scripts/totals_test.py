@@ -13,6 +13,12 @@ tests/fixtures/totals.yaml, with PGlite (in memory):
    the filter of a total, and a `many_to_many` relation give the values
    of the database. The count and the sum of no records are 0, and the
    other functions give null.
+4. Write journal entries with their lines in one transaction, as the
+   server action of an operation with lines does. The compare rules over
+   the totals of the lines check them at the end of the transaction: a
+   balanced entry stays, and an unbalanced entry or an entry over its
+   debit limit gives the message of its rule and stores nothing. An
+   update of an entry out of a transaction checks the rules too.
 
 Run it from the repository root, after `pnpm install` in the app:
 
@@ -36,10 +42,13 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 
 import { invoiceRepository } from "./src/entities/invoice/server";
 import { invoiceLineRepository } from "./src/entities/invoice-line/server";
+import { journalEntryRepository } from "./src/entities/journal-entry/server";
+import { journalLineRepository } from "./src/entities/journal-line/server";
 import { postRepository } from "./src/entities/post/server";
 import { tagRepository } from "./src/entities/tag/server";
 import { voteRepository } from "./src/entities/vote/server";
-import { getDb } from "./src/shared/db/client";
+import { writeLines } from "./src/shared/api/lines";
+import { getDb, inTransaction } from "./src/shared/db/client";
 
 const db: any = getDb();
 await migrate(db, { migrationsFolder: "drizzle" });
@@ -58,6 +67,24 @@ function totals(record: any, keys: string[]): unknown[] {
   return keys.map((key) => record[key]);
 }
 
+/**
+ * Write a journal entry with a debit limit of 100 and its lines in one
+ * transaction, as the server action does. Return "stored", or the message
+ * of the error.
+ */
+async function journal(lines: [number, number][]): Promise<string> {
+  const items = lines.map(([debit, credit]) => ({ account: "Cash", debit, credit }));
+  try {
+    await inTransaction(async () => {
+      const entry = await journalEntryRepository.create({ memo: "Entry", debitLimit: 100 });
+      await writeLines(journalLineRepository, "JournalLine", "entryId", entry.id, items, "lines");
+    });
+    return "stored";
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 const empty = await invoiceRepository.create({ number: "A-1" });
 const full = await invoiceRepository.create({ number: "A-2", discount: 5 });
 for (const amount of [10.5, 20, 30.25]) {
@@ -70,12 +97,24 @@ for (const value of [1, 1, -1, 0]) {
   await voteRepository.create({ value, postId: post.id });
 }
 const invoices = await invoiceRepository.list({ sort: [{ field: "number", direction: "asc" }] });
+const balanced = await journal([[40, 0], [0, 25.5], [0, 14.5]]);
+const unbalanced = await journal([[40, 0], [0, 30]]);
+const overLimit = await journal([[150, 0], [0, 150]]);
+const [entry] = (await journalEntryRepository.list({})).items as any[];
+let lowered = "stored";
+try {
+  await journalEntryRepository.update(entry.id, { debitLimit: 10 });
+} catch (error) {
+  lowered = (error as Error).message;
+}
+const entries = await journalEntryRepository.list({});
 const report = {
   created: totals(empty, INVOICE),
   list: invoices.items.map((invoice: any) => totals(invoice, INVOICE)),
   read: totals(await invoiceRepository.get(full.id), INVOICE),
   post: totals(await postRepository.get(post.id), POST),
   changed: totals(await postRepository.update(post.id, { tags: [red.id, blue.id] }), POST),
+  journal: [balanced, unbalanced, overLimit, lowered, entries.total, entries.items[0]?.debitLimit],
 };
 console.log(JSON.stringify(report));
 process.exit(0);
@@ -95,6 +134,15 @@ def expected() -> dict[str, Any]:
         "post": [4, 1, 2, 1, 2],
         # The update gives the second tag: the totals of the response have it.
         "changed": [4, 1, 2, 2, 5],
+        # One entry stays, with its debit limit of 100.
+        "journal": [
+            "stored",
+            "The debits and the credits must balance.",
+            "The debits must stay within the debit limit.",
+            "The debits must stay within the debit limit.",
+            1,
+            100,
+        ],
     }
 
 
@@ -138,7 +186,10 @@ def run(app: Path) -> None:
         print(f"totals-test: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
-    print("totals-test: passed (5 functions, a filter, and a many_to_many relation)")
+    print(
+        "totals-test: passed (5 functions, a filter, a many_to_many relation, "
+        "and 2 compare rules over totals)"
+    )
 
 
 def main() -> None:

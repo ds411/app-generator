@@ -174,7 +174,8 @@ BINDING = Binding(
         Output(
             template="app/core/rules.py.j2",
             path="app/core/rules.py",
-            when="py.entities.values() | selectattr('check_rules') | list",
+            when="py.entities.values() | selectattr('check_rules') | list"
+            " or py.entities.values() | selectattr('total_rules') | list",
         ),
         Output(
             template="app/core/compute.py.j2",

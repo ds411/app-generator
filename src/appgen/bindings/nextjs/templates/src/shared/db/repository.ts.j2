@@ -1,6 +1,7 @@
 {{ trace_header("app") }}
 {% set translatable = i18n and i18n.translatable %}
 {% set storage = definition.storage %}
+{% set transactions = nextjs.jobs or lines_ops %}
 import "server-only";
 
 import {
@@ -56,7 +57,7 @@ import { deleteFiles, type StoredFile } from "@/shared/storage";
 {% if record_rules or translatable or storage %}
 
 {% endif %}
-import { type Database, getDb{{ ", runEvent" if nextjs.events }} } from "./client";
+import { {{ "checkAtEnd, " if nextjs.total_rules and transactions }}type Database, getDb{{ ", runEvent" if nextjs.events }} } from "./client";
 
 type Row = Record<string, unknown>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -82,7 +83,12 @@ export type InverseOne = {
   foreignKey: string;
 };
 
-/** A rule that compares two fields of a record, for example `endsAt` after `startsAt`. */
+/**
+ * A rule that compares two values of a record, for example `endsAt` after
+ * `startsAt`.{% if nextjs.total_rules %} A value is a field, or a total of the lines (ADR 0034), for
+ * example `sumLinesDebit`.{% endif %}
+
+ */
 export type CompareRule = {
   field: string;
   op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte";
@@ -191,6 +197,18 @@ export type RepositoryOptions<T> = {
    * of the records, of the table of the records with the name `record`.
    */
   totals?: (record: { id: PgColumn }) => Record<string, SQL<number | null>>;
+{% endif %}
+{% if nextjs.total_rules %}
+  /**
+   * The compare rules with totals of the lines (ADR 0034). The repository
+   * checks them after a change, with the totals in the database.{% if transactions %} In the work
+   * of `inTransaction()`, for example an operation with lines (ADR 0035),
+   * the check runs at the end of the work, after the lines.{% endif %} A broken
+   * rule gives a ValidationError.
+   */
+  totalRules?: CompareRule[];
+  /** The subqueries of the totals that only the rules use, as `totals`. */
+  ruleTotals?: (record: { id: PgColumn }) => Record<string, SQL<number | null>>;
 {% endif %}
 {% if translatable %}
   /**
@@ -318,6 +336,10 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.totals %}
   private readonly totals: RepositoryOptions<T>["totals"];
 {% endif %}
+{% if nextjs.total_rules %}
+  private readonly totalRules: CompareRule[];
+  private readonly ruleTotals: RepositoryOptions<T>["ruleTotals"];
+{% endif %}
 {% if translatable %}
   private readonly translatable: string[];
 {% endif %}
@@ -341,6 +363,10 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.totals %}
     this.totals = options.totals;
+{% endif %}
+{% if nextjs.total_rules %}
+    this.totalRules = options.totalRules ?? [];
+    this.ruleTotals = options.ruleTotals;
 {% endif %}
 {% if translatable %}
     this.translatable = options.translatable ?? [];
@@ -447,6 +473,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
       this.checkWorkflows(undefined, row);
       await this.checkRules(tx, row);
       await this.writeLinks(tx, String(row.id), values);
+{% if nextjs.total_rules %}
+      await this.checkTotals(tx, String(row.id));
+{% endif %}
 {% if record_rules %}
       await this.checkScope(tx, String(row.id), options.scope ?? null);
 {% endif %}
@@ -498,6 +527,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
       this.checkWorkflows(before[0] ?? (rows[0] as Row), rows[0] as Row);
       await this.checkRules(tx, rows[0] as Row);
       await this.writeLinks(tx, id, patch);
+{% if nextjs.total_rules %}
+      await this.checkTotals(tx, id);
+{% endif %}
 {% if record_rules %}
       await this.checkScope(tx, id, scope);
 {% endif %}
@@ -726,6 +758,49 @@ export class Repository<T extends EntityRecord, TInput extends object>
     }
   }
 
+{% if nextjs.total_rules %}
+  /**
+   * Check the compare rules with totals of a changed record (ADR 0034), with
+   * the totals in the database.{% if transactions %} In the work of `inTransaction()`, the check
+   * runs at the end of the work, after the lines of an operation (ADR 0035).{% endif %}
+
+   */
+  private async checkTotals(tx: Transaction, id: string): Promise<void> {
+    if (this.totalRules.length === 0) return;
+{% if transactions %}
+    await checkAtEnd(tx, async (db) => {
+      const row = await this.totalsRow(db, id);
+      for (const rule of this.totalRules) {
+        if (row !== undefined && !compareValues(row[rule.field], rule.op, row[rule.other])) {
+          throw new ValidationError({{ tr("rule.message") }});
+        }
+      }
+    });
+{% else %}
+    const row = await this.totalsRow(tx, id);
+    for (const rule of this.totalRules) {
+      if (row !== undefined && !compareValues(row[rule.field], rule.op, row[rule.other])) {
+        throw new ValidationError({{ tr("rule.message") }});
+      }
+    }
+{% endif %}
+  }
+
+  /** Return the stored row of a record with the totals of the rules, or undefined. */
+  private async totalsRow(db: Database | Transaction, id: string): Promise<Row | undefined> {
+    const record = alias(this.table, "record");
+    const columns = getTableColumns(record);
+    const recordId = columns.id as PgColumn;
+    const subqueries = { ...this.totals?.({ id: recordId }), ...this.ruleTotals?.({ id: recordId }) };
+    const rows: Row[] = await db
+      .select({ ...columns, ...subqueries })
+      .from(record)
+      .where(eq(recordId, id))
+      .limit(1);
+    return rows[0];
+  }
+
+{% endif %}
 {% if record_rules %}
   /**
    * Return the condition of the records of a scope (ADR 0018, ADR 0025):

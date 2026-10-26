@@ -7,7 +7,9 @@
 # (ADR 0035), and the lines have a workflow. The invoices and the lines
 # keep a change log (ADR 0040), also of the lines that an invoice writes.
 # The forms of the invoices edit the lines in a lines editor, and show the
-# totals before the save.
+# totals before the save. A journal entry has compare rules over the totals
+# of its lines: the debits and the credits balance, and the debits stay
+# within a limit.
 # scripts/check-fastapi.sh checks the FastAPI app of this definition, and
 # scripts/check-nextjs.sh the Next.js app (scripts/totals_test.py).
 version: 0
@@ -87,6 +89,44 @@ entities:
       name: { type: string, required: true, max_length: 40 }
       weight: { type: integer, min: 0 }
 
+  JournalEntry:
+    display_field: memo
+    crud: { views: [table] }
+    fields:
+      memo: { type: string, required: true, max_length: 120 }
+      debit_limit: { type: decimal, min: 0, scale: 2, format: currency }
+      total_debit: { type: decimal, scale: 2, format: currency, computed: sum(lines.debit) }
+    relations:
+      lines: { kind: one_to_many, target: JournalLine, inverse: entry }
+    rules:
+      balanced:
+        kind: compare
+        field: sum(lines.debit)
+        op: eq
+        other: sum(lines.credit)
+        message: The debits and the credits must balance.
+      within_limit:
+        kind: compare
+        field: sum(lines.debit)
+        op: lte
+        other: debit_limit
+        message: The debits must stay within the debit limit.
+
+  JournalLine:
+    display_field: account
+    crud: { views: [table] }
+    fields:
+      account: { type: string, required: true, max_length: 40 }
+      debit: { type: decimal, min: 0, scale: 2, default: 0, format: currency }
+      credit: { type: decimal, min: 0, scale: 2, default: 0, format: currency }
+    relations:
+      entry:
+        kind: many_to_one
+        target: JournalEntry
+        required: true
+        on_delete: cascade
+        inverse: lines
+
 pages:
   invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
   invoice_detail: { path: "/invoices/{id}", title: Invoice, content: { view: invoice_detail } }
@@ -94,10 +134,13 @@ pages:
   edit_invoice: { path: "/invoices/{id}/edit", title: Edit invoice, content: { form: edit_invoice } }
   posts: { path: /posts, title: Posts, content: { view: post_table } }
   post_detail: { path: "/posts/{id}", title: Post, content: { view: post_detail } }
+  journal: { path: /journal, title: Journal, content: { view: journal_entry_table } }
 
 operations:
   create_invoice: { kind: create, entity: Invoice, lines: [lines] }
   update_invoice: { kind: update, entity: Invoice, lines: [lines] }
+  create_journal_entry: { kind: create, entity: JournalEntry, lines: [lines] }
+  update_journal_entry: { kind: update, entity: JournalEntry, lines: [lines] }
 
 workflows:
   line_status:

@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 {% endif %}
-from app.features.{{ e.slice }}.schemas import {{ e.name }}Create, {{ e.name }}Read, {{ e.name }}Update
+{{ py.from_import("app.features." ~ e.slice ~ ".schemas", [e.name ~ "Create", e.name ~ "Read", e.name ~ "Update"]) }}
 from tests.payloads import {{ e.snake }}_payload
 
 

@@ -21,6 +21,7 @@ from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kind
 from appgen.bindings.shared.events import ts_events
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
+from appgen.bindings.shared.totals import rule_side_key
 from appgen.dsl.storage import format_size
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
@@ -592,6 +593,7 @@ BINDING = Binding(
     | views.HELPERS
     | {"public_kinds": public_kinds, "kind_operations": kind_operations}
     | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys}
+    | {"rule_side_key": rule_side_key}
     | {"size_text": format_size}
     | {"ts_events": ts_events},
     stub_markers=("TODO(appgen)", "Not implemented yet"),

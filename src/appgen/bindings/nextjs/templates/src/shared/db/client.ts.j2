@@ -80,9 +80,45 @@ export function ownDb(): Database {
  * in it too: a transaction of a repository becomes a savepoint. An error
  * rolls back all the writes of the work.
  */
+{% if nextjs.total_rules %}
+export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
+  return getDb().transaction((transaction) =>
+    ambient.run(transaction, async () => {
+      const pending: Check[] = [];
+      const result = await checks.run(pending, work);
+      for (const check of pending) {
+        await check();
+      }
+      return result;
+    }),
+  );
+}
+
+/** A check of a change that runs at the end of the work of `inTransaction()`. */
+type Check = () => Promise<void>;
+
+/** The checks of the work of `inTransaction()`. */
+const checks = new AsyncLocalStorage<Check[]>();
+
+/**
+ * Run a check of a change at the end of the work of `inTransaction()`, in
+ * its transaction, for example the compare rules with totals after the
+ * lines of an operation (ADR 0034). Outside the work, the check runs now,
+ * in the transaction `db` of the change.
+ */
+export async function checkAtEnd(db: Database, check: (db: Database) => Promise<void>): Promise<void> {
+  const pending = checks.getStore();
+  if (pending === undefined) {
+    await check(db);
+    return;
+  }
+  pending.push(() => check(getDb()));
+}
+{% else %}
 export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
   return getDb().transaction((transaction) => ambient.run(transaction, work));
 }
+{% endif %}
 {% endif %}
 {% if nextjs.events %}
 

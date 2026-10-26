@@ -1823,6 +1823,10 @@
       ],
       "type": "string"
     },
+    "CompareOperand": {
+      "pattern": "^[a-z][a-z0-9_]*$|^(count|sum|avg|min|max)\\(\\s*[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?\\s*\\)$",
+      "type": "string"
+    },
     "CompareRule": {
       "additionalProperties": false,
       "description": "A rule that compares two fields of the form.",
@@ -2738,7 +2742,7 @@
     },
     "EntityCompareRule": {
       "additionalProperties": false,
-      "description": "A rule that compares two fields of a record, for example `ends_at` after `starts_at`.",
+      "description": "A rule that compares two values of a record, for example `ends_at` after `starts_at`.\n\nA value is a field, or a total of the lines of the record, for example\n`sum(lines.debit)`: the apps check a rule with a total after they write\nthe lines (ADR 0034).",
       "patternProperties": {
         "^x-": {}
       },
@@ -2749,13 +2753,13 @@
           "type": "string"
         },
         "field": {
-          "$ref": "#/$defs/MemberName"
+          "$ref": "#/$defs/CompareOperand"
         },
         "op": {
           "$ref": "#/$defs/CompareOp"
         },
         "other": {
-          "$ref": "#/$defs/MemberName"
+          "$ref": "#/$defs/CompareOperand"
         },
         "message": {
           "$ref": "#/$defs/Text"

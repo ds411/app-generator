@@ -304,10 +304,11 @@ def _fit_rules(entity: Entity, records: list[Record], fixed: int = 0) -> None:
     120 minutes after the earlier value, so that a booking takes hours,
     not weeks. A record that repeats the values of a unique rule gets a
     number at the end of a string field of the rule. The mock data does
-    not keep the `no_overlap` rules.
+    not keep the `no_overlap` rules, and the compare rules with totals of
+    the lines.
     """
     for rule in entity.rules.values():
-        if isinstance(rule, EntityCompareRule) and rule.op in _SWAPS:
+        if isinstance(rule, EntityCompareRule) and rule.op in _SWAPS and not rule.totals:
             later, earlier = (
                 (rule.field, rule.other) if rule.op in ("gt", "gte") else (rule.other, rule.field)
             )

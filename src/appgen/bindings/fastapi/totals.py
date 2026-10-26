@@ -12,6 +12,12 @@ When the expression of a computed field has only totals, numbers, the
 stored number fields of the record, `+`, `-`, and `*`, it has an SQL
 form. The list endpoint then sorts by the field, and filters it with the
 parameters `<field>_min` and `<field>_max`.
+
+A compare rule with a total, for example `sum(lines.debit)` equal to
+`sum(lines.credit)`, reads the column property of the total too. A total
+that only the rules use is a deferred column property: the queries do not
+read it, and `check_totals` of the repository reads it again after a
+change.
 """
 
 import datetime as dt
@@ -32,10 +38,12 @@ from appgen.dsl.expressions import (
     Number,
     Total,
     expression_totals,
+    parse_expression,
 )
 from appgen.dsl.expressions import Call as FunctionCall
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.model import Field as DslField
+from appgen.dsl.rules import EntityCompareRule
 from appgen.gen.render import GenerationError
 
 if TYPE_CHECKING:
@@ -78,7 +86,9 @@ class PyTotal:
     via: str | None = None
     """For a many-to-many relation: the join table."""
     ids: list[str] = field(default_factory=list[str])
-    """The computed fields that use the total, for the traces."""
+    """The computed fields and the rules that use the total, for the traces."""
+    deferred: bool = False
+    """True if only the rules use the total: the queries do not read it."""
 
     @property
     def type(self) -> str:
@@ -104,7 +114,10 @@ class PyTotal:
         if self.via is not None:
             args.append(f"via={self.via}")
         inner = Call("totals.total", tuple(args))
-        return render(Call("column_property", (inner,)), 0, f"{self.entity.name}.{self.attr} = ")
+        options: tuple[Expr, ...] = ("deferred=True",) if self.deferred else ()
+        return render(
+            Call("column_property", (inner, *options)), 0, f"{self.entity.name}.{self.attr} = "
+        )
 
 
 def entity_totals(
@@ -140,9 +153,45 @@ def entity_totals(
         if existing is None:
             existing = _total(definition, entities, py_entity, total, attr, computed)
             py_entity.totals.append(existing)
+        existing.deferred = False
         if computed.id not in existing.ids:
             existing.ids.append(computed.id)
         found[text] = existing
+    return found
+
+
+def rule_totals(
+    definition: AppDefinition,
+    entities: dict[str, PyEntity],
+    entity_name: str,
+    rule: EntityCompareRule,
+) -> dict[str, PyTotal]:
+    """Add the totals of a compare rule to its entity, and return them by the sides of the rule.
+
+    A rule shares the total of a computed field without a filter. A new
+    total is deferred. Raise GenerationError if the attribute of a total is
+    the name of a member of the entity.
+    """
+    py_entity = entities[entity_name]
+    dsl_entity = definition.entities[entity_name]
+    found: dict[str, PyTotal] = {}
+    for side in rule.totals:
+        total = parse_expression(side)
+        assert isinstance(total, Total)
+        attr = "_".join([total.function, total.relation, *([total.field] if total.field else [])])
+        if attr in dsl_entity.fields or attr in dsl_entity.relations:
+            raise GenerationError(
+                f"The total '{total}' of the rule '{rule.id}' needs the attribute '{attr}' in "
+                f"the FastAPI app, but the entity has a member '{attr}'. Rename the member."
+            )
+        existing = next((t for t in py_entity.totals if t.attr == attr), None)
+        if existing is None:
+            existing = _total(definition, entities, py_entity, total, attr, None)
+            existing.deferred = True
+            py_entity.totals.append(existing)
+        if rule.id not in existing.ids:
+            existing.ids.append(rule.id)
+        found[side] = existing
     return found
 
 
@@ -152,7 +201,7 @@ def _total(
     entity: PyEntity,
     total: Total,
     attr: str,
-    computed: DslField,
+    computed: DslField | None,
 ) -> PyTotal:
     relation = next(r for r in entity.relations if r.name == total.relation)
     target = entities[relation.target]
@@ -170,7 +219,7 @@ def _total(
     else:
         remote = next(r for r in target.relations if r.name == relation.back_populates)
         conditions = [f"{source}.{remote.fk_attr} == {entity.name}.id"]
-    if computed.filter:
+    if computed is not None and computed.filter:
         builder_target = _Conditions(computed.id, target)
         builder = FilterBuilder(definition, builder_target, "total", source=source)
         for path, condition in computed.filter.items():

@@ -532,7 +532,7 @@ React app has mock data and no back end, so it does not check them.
 
 | `kind`       | Keys                                   | Check                                         | Error |
 | ------------ | -------------------------------------- | --------------------------------------------- | ----- |
-| `compare`    | `field`, `op`, `other`, `message`      | `field op other`. `op` is `eq`, `ne`, `lt`, `lte`, `gt`, or `gte`. | 422 |
+| `compare`    | `field`, `op`, `other`, `message`      | `field op other`. `op` is `eq`, `ne`, `lt`, `lte`, `gt`, or `gte`. `field` and `other` are fields or totals of the lines. | 422 |
 | `unique`     | `fields` (two or more), `message`      | No two records have the same values. The table has a unique constraint. | 409 |
 | `no_overlap` | `start`, `end`, `scope`, `message`     | The ranges `[start, end)` of two records with the same `scope` values do not overlap. | 409 |
 
@@ -543,6 +543,35 @@ date-times, or two texts. The start and the end of a `no_overlap` rule
 are two `date` or two `datetime` fields. An empty value passes a
 compare rule and a `no_overlap` rule: `required` checks it. The mock
 data keeps the compare and the unique rules.
+
+A side of a compare rule can also be a total of the lines of the
+record, as in a [computed field](#computed-fields): `count(<relation>)`,
+or `sum`, `avg`, `min`, or `max` of `<relation>.<field>`, through a
+`one_to_many` relation ([ADR 0034](adr/0034-totals.md)). A `count`
+compares with an `integer`, and the other totals with a number. The
+FastAPI and the Next.js apps check such a rule after each create and
+update of the record, with the totals in the database. An operation
+with [`lines`](#operations) checks it after it writes the lines, in the
+same transaction, so a broken rule stores nothing. The count and the
+sum of no lines are 0, and the other totals of no lines are empty, so
+they pass.
+
+```yaml
+# in: entities.Project
+rules:
+  within_budget:
+    kind: compare
+    field: sum(budget_lines.amount)
+    op: lte
+    other: budget
+    message: The budget lines must stay within the budget.
+```
+
+- A change of a line through the operations of the lines does not
+  check the rules of its record. Write the lines with an operation of
+  the record that has `lines`.
+- The seed records keep the rule with their seed lines. The mock data
+  does not keep a rule with totals.
 
 ```yaml
 # example: room-booking
