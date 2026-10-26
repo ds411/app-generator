@@ -1,0 +1,172 @@
+{{ trace_header("app") }}
+"""The worker of the jobs (ADR 0029): `python -m app.worker`.
+
+The worker runs each job of the app definition at its times, with a pass
+of all jobs each `JOBS_INTERVAL_SECONDS`. The table `job_runs` locks each
+run, so that more than one worker can run: each run runs one time. A pass
+runs the times of the last `JOBS_WINDOW_MINUTES` that are not done.
+
+- `python -m app.worker` runs the passes until SIGTERM or SIGINT. `GET
+  /health` on the port `WORKER_PORT` gives 200 while the passes run.
+- `python -m app.worker --once` runs one pass, and stops.
+- `--once --now 2026-06-15T12:00:00Z` runs one pass at a fixed time, for
+  example in a test.
+"""
+
+import argparse
+import asyncio
+import contextlib
+import datetime as dt
+import logging
+import signal
+import sys
+import time
+from collections.abc import Awaitable, Callable
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.config import Settings
+from app.core.db import make_engine, make_sessions
+from app.core.jobs import utc_now
+from app.core.logging import configure_logging
+{{ py.from_import("app.jobs", py.jobs.values() | map(attribute="module") | list) }}
+from app.models import configure_models
+
+logger = logging.getLogger("app.worker")
+
+type Job = Callable[
+    [async_sessionmaker[AsyncSession], Settings, dt.datetime, dt.timedelta], Awaitable[int]
+]
+"""The function `run` of a job: it runs the job at a time, and returns the count of the runs."""
+
+JOBS: dict[str, Job] = {
+{% for job in py.jobs.values() %}
+    {{ trace(job.id) }}
+    "{{ job.name }}": {{ job.module }}.run,
+{% endfor %}
+}
+"""The jobs of the app definition, by name."""
+
+
+async def run_jobs(
+    sessions: async_sessionmaker[AsyncSession], settings: Settings, now: dt.datetime
+) -> int:
+    """Run one pass of all jobs at a time. Return the count of the runs.
+
+    A job that fails goes into the log, and the other jobs still run.
+    """
+    window = dt.timedelta(minutes=settings.jobs_window_minutes)
+    count = 0
+    for name, job in JOBS.items():
+        try:
+            count += await job(sessions, settings, now, window)
+        except Exception:
+            logger.exception("The job %s failed.", name, extra={"job": name})
+    return count
+
+
+class Health:
+    """The state of the passes for the health endpoint: the time of the last progress."""
+
+    def __init__(self, interval: float) -> None:
+        self.limit = max(3 * interval, 300)
+        """The longest time without progress of a healthy worker, in seconds."""
+        self.last = time.monotonic()
+
+    def beat(self) -> None:
+        self.last = time.monotonic()
+
+    def alive(self) -> bool:
+        return time.monotonic() - self.last < self.limit
+
+
+async def serve_health(health: Health, port: int) -> asyncio.Server:
+    """Start the health endpoint: each request gets 200 while the passes run, else 503."""
+
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5)
+        except asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError:
+            writer.close()
+            return
+        alive = health.alive()
+        body = b'{"status":"ok"}' if alive else b'{"status":"stalled"}'
+        status = b"200 OK" if alive else b"503 Service Unavailable"
+        head = b"HTTP/1.1 " + status + b"\r\nContent-Type: application/json\r\n"
+        head += b"Content-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n"
+        writer.write(head + body)
+        with contextlib.suppress(ConnectionError):
+            await writer.drain()
+        writer.close()
+
+    return await asyncio.start_server(answer, "0.0.0.0", port)
+
+
+async def run_passes(sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
+    """Run a pass of the jobs each interval, until a signal stops the worker."""
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for stop_signal in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(stop_signal, stop.set)
+    health = Health(settings.jobs_interval_seconds)
+    server = await serve_health(health, settings.worker_port) if settings.worker_port else None
+    logger.info("The worker runs %d jobs.", len(JOBS))
+    try:
+        while not stop.is_set():
+            health.beat()
+            count = await run_jobs(sessions, settings, utc_now())
+            health.beat()
+            if count:
+                logger.info("The pass ran %d runs of the jobs.", count, extra={"runs": count})
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=settings.jobs_interval_seconds)
+    finally:
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+    logger.info("The worker stopped.")
+
+
+async def work(settings: Settings, *, once: bool, now: dt.datetime | None) -> int:
+    """Run one pass, or the passes until a signal. Return the exit code."""
+    engine = make_engine(settings.database_url)
+    sessions = make_sessions(engine)
+    try:
+        if once:
+            count = await run_jobs(sessions, settings, now or utc_now())
+            logger.info("The pass ran %d runs of the jobs.", count, extra={"runs": count})
+        else:
+            await run_passes(sessions, settings)
+    finally:
+        await engine.dispose()
+    return 0
+
+
+def _time(text: str) -> dt.datetime:
+    """Read a time in ISO 8601. A time without a time zone is in UTC."""
+    value = dt.datetime.fromisoformat(text)
+    return value if value.tzinfo is not None else value.replace(tzinfo=dt.UTC)
+
+
+def main(argv: list[str]) -> int:
+    """Read the options, and run the worker. Return the exit code."""
+    parser = argparse.ArgumentParser(prog="python -m app.worker", description="Run the jobs.")
+    parser.add_argument("--once", action="store_true", help="Run one pass of the jobs, and stop.")
+    parser.add_argument(
+        "--now",
+        type=_time,
+        help="With --once: the time of the pass in ISO 8601, for example 2026-06-15T12:00:00Z.",
+    )
+    args = parser.parse_args(argv)
+    once: bool = args.once
+    now: dt.datetime | None = args.now
+    if now is not None and not once:
+        parser.error("--now needs --once.")
+    settings = Settings()
+    configure_logging(settings.log_level, as_json=settings.log_json)
+    configure_models()
+    return asyncio.run(work(settings, once=once, now=now))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

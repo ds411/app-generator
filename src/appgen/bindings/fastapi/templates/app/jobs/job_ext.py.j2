@@ -1,0 +1,36 @@
+{{ trace_header(element_id) }}
+{% set job = py.jobs[name] %}
+{% if job.description %}
+"""The logic of the job `{{ job.name }}`.
+
+{{ job.description }}
+"""
+{% else %}
+"""The logic of the job `{{ job.name }}`."""
+{% endif %}
+
+import datetime as dt
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import Settings
+
+
+{% set line = "async def " ~ job.name ~ "(session: AsyncSession, settings: Settings, time: dt.datetime) -> None:" %}
+{% if line | length <= 100 %}
+{{ line }}
+{% else %}
+async def {{ job.name }}(
+    session: AsyncSession,
+    settings: Settings,
+    time: dt.datetime,
+) -> None:
+{% endif %}
+    """Run the job for a time of its schedule `{{ job.schedule.expression }}` (UTC).
+
+    The worker commits the session after this function. An exception rolls
+    the session back, and the worker tries the run again at its next pass
+    while the time is in the window of the jobs (`JOBS_WINDOW_MINUTES`).
+    """
+    # TODO(appgen): write the logic of the job {{ job.name }}.
+    raise NotImplementedError("jobs.{{ job.name }}")

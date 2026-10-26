@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The kinds of jobs (ADR 0029): a job at the time of a date field with an
+# offset, a job at the time of a date-time field with a filter through a
+# relation (the generated tests cannot give its values), a job on a
+# schedule with `$today` whose operation calls an API, and a job without
+# an entity (a gap). scripts/check-fastapi.sh checks the FastAPI app of
+# this definition.
+version: 0
+
+app:
+  name: job-check
+  title: Job Check
+  description: Invoices with reminders.
+
+entities:
+  Customer:
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      vip: { type: boolean, default: false }
+    relations:
+      invoices: { kind: one_to_many, target: Invoice, inverse: customer }
+
+  Invoice:
+    display_field: number
+    fields:
+      number: { type: string, required: true, unique: true, max_length: 20 }
+      due_on: { type: date, required: true }
+      amount: { type: decimal, scale: 2 }
+      paid: { type: boolean, default: false }
+      sent_at: { type: datetime }
+      status: { type: enum, values: [draft, sent, paid], default: draft }
+    relations:
+      customer: { kind: many_to_one, target: Customer, required: true, inverse: invoices }
+
+operations:
+  send_dunning:
+    kind: custom
+    entity: Invoice
+    description: Send a dunning letter to the customer.
+    params:
+      level: { type: integer, default: 1 }
+  check_rates:
+    kind: custom
+    entity: Invoice
+    description: Check the amount with the exchange rates of today.
+    apis: [exchange_rates]
+
+apis:
+  exchange_rates:
+    document: ../../examples/project-tracker/apis/exchange-rates.openapi.json
+    base_url_env: EXCHANGE_RATES_API_URL
+    security: { scheme: ApiKeyAuth, env: EXCHANGE_RATES_API_KEY }
+    operations: [getLatestRates]
+
+jobs:
+  dunning:
+    description: Send a dunning letter 3 days after the due date.
+    entity: Invoice
+    at: due_on
+    offset: 3d
+    filter: { paid: false, amount: { gt: 0 } }
+    operation: send_dunning
+  follow_up:
+    description: Follow up with the VIP customers 2 hours after an invoice is sent.
+    entity: Invoice
+    at: sent_at
+    offset: 2h
+    filter: { customer.vip: true }
+    operation: send_dunning
+  overdue:
+    description: Check the open invoices after their due date on each work day.
+    schedule: "30 6 * * 1-5"
+    entity: Invoice
+    filter: { due_on: { lt: $today }, status: { in: [draft, sent] } }
+    operation: check_rates
+  monthly_close:
+    description: Close the books of the month.
+    schedule: "@monthly"

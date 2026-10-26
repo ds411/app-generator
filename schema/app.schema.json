@@ -3749,6 +3749,86 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
     },
+    "Job": {
+      "additionalProperties": false,
+      "description": "An operation that the apps run on a schedule, or at the time that a date field gives.\n\nA job with an entity runs a custom operation of the entity on each\nrecord that its filter selects. A job without an entity runs a\nfunction that hand-written code gives (a generation gap).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Offset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filter": {
+          "$ref": "#/$defs/RecordFilter"
+        }
+      },
+      "title": "Job",
+      "type": "object"
+    },
     "JsonScalar": {
       "anyOf": [
         {
@@ -4421,6 +4501,10 @@
       ],
       "title": "NumberRule",
       "type": "object"
+    },
+    "Offset": {
+      "pattern": "^[+-]?[0-9]+[mhdw]$",
+      "type": "string"
     },
     "OnDelete": {
       "enum": [
@@ -6927,6 +7011,16 @@
         }
       ],
       "default": null
+    },
+    "jobs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Job"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/MemberName"
+      },
+      "title": "Jobs",
+      "type": "object"
     }
   },
   "required": [

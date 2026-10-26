@@ -1,0 +1,270 @@
+{{ trace_header(element_id) }}
+{% set job = py.jobs[name] %}
+{% set e = job.entity %}
+{% set op = job.operation %}
+{% set t = job.test %}
+{% set target = (op.name ~ "_ext") if e else (job.module ~ "_ext") %}
+{% set function = op.name if e else job.name %}
+"""The tests of the job `{{ job.name }}`, with a fixed clock.
+
+{% if e %}
+The tests replace the operation `{{ op.name }}` with a fake that records
+its calls. They store the records with the factories, and set the values
+that the job reads in the database directly, without the rules of the
+entity.
+{% if not t %}
+The tests cannot know the values that pass the filter, so they also
+replace the filter with one that selects all records.
+{% endif %}
+{% else %}
+The tests replace the function of `{{ job.module }}_ext.py` with a fake
+that records its calls.
+{% endif %}
+"""
+
+{{ job.test_imports() }}
+
+pytestmark = pytest.mark.anyio
+
+WINDOW = dt.timedelta(minutes=60)
+"""The window of the runs of the tests: the default of `JOBS_WINDOW_MINUTES`."""
+{% if job.at %}
+{% set value, time = job.test_times() %}
+VALUE = {{ value }}
+"""The time of `{{ job.at.name }}` of the record of a test."""
+TIME = {{ time }}
+"""The time of the run of the record."""
+{% else %}
+{% set first, second = job.schedule.test_codes() %}
+TIME = {{ first }}
+"""The first time of the schedule `{{ job.schedule.expression }}` in the tests."""
+NEXT = {{ second }}
+"""The next time of the schedule."""
+{% endif %}
+NOW = TIME + dt.timedelta(minutes=1)
+"""The time of the pass of a test: one minute after the time of the run."""
+{% set call = job.module ~ ".run(sessions, settings, NOW, WINDOW)" %}
+{% if e %}
+{% set record_type = "UUID" %}
+{% else %}
+{% set record_type = "dt.datetime" %}
+{% endif %}
+
+
+@pytest.fixture
+def calls(monkeypatch: pytest.MonkeyPatch) -> list[{{ record_type }}]:
+    """The {{ "records" if e else "times" }} of the calls of the {{ "operation" if e else "function of the job" }}, in order."""
+    found: list[{{ record_type }}] = []
+
+{% if e %}
+    async def fake(session: AsyncSession, record: {{ e.name }}, *args: object) -> None:
+        found.append(record.id)
+{% else %}
+    async def fake(session: AsyncSession, settings: Settings, time: dt.datetime) -> None:
+        found.append(time)
+{% endif %}
+
+    monkeypatch.setattr({{ target }}, "{{ function }}", fake)
+{% if e and not t %}
+    monkeypatch.setattr({{ job.module }}, "where", select_all)
+{% endif %}
+    return found
+{% if e and not t %}
+
+
+def select_all[*Ts](statement: Select[*Ts], moment: dt.datetime) -> Select[*Ts]:
+    """Select all records: the filter of the tests."""
+    return statement
+{% endif %}
+{% if e %}
+
+
+async def make_record(
+    session: AsyncSession,
+{% if job.at %}
+    value: {{ "dt.date" if job.at.type == "date" else "dt.datetime" }} = VALUE,
+{% endif %}
+{% if t and t.failing %}
+    *,
+    passes: bool = True,
+{% endif %}
+) -> UUID:
+{% if t and t.failing %}
+    """Store a record that the filter of the job selects, or (`passes=False`) does not select."""
+{% else %}
+    """Store a record that the filter of the job selects."""
+{% endif %}
+{% if t and t.now %}
+    now = NOW
+{% endif %}
+    record = await make_{{ e.snake }}(session)
+{% set values = job.record_values() %}
+{% if values %}
+    statement = update({{ e.name }}).where({{ e.name }}.id == record.id)
+    {{ py.call("statement = ", "statement.values", values, 4) }}
+    await session.execute(statement)
+{% endif %}
+    await session.commit()
+    return record.id
+{% endif %}
+
+
+async def run_of(session: AsyncSession, key: str) -> JobRun | None:
+    """Return the run of a key, with fresh data."""
+    statement = select(JobRun).where(JobRun.key == key)
+    return await session.scalar(statement.execution_options(populate_existing=True))
+{% set key_expr = 'f"' ~ job.name ~ ':{record}:{TIME:%Y-%m-%dT%H:%M:%SZ}"' if e else 'f"' ~ job.name ~ ':-:{TIME:%Y-%m-%dT%H:%M:%SZ}"' %}
+
+
+async def test_the_job_runs_once_for_each_{{ "record_and_" if e }}time(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    calls: list[{{ record_type }}],
+) -> None:
+{% if job.at %}
+    record = await make_record(session)
+{% if job.at.type == "date" %}
+    await make_record(session, VALUE + dt.timedelta(days=1))
+    await make_record(session, VALUE - dt.timedelta(days=1))
+{% else %}
+    await make_record(session, VALUE + dt.timedelta(hours=1))
+    await make_record(session, VALUE - WINDOW)
+{% endif %}
+
+    assert await {{ call }} == 1
+    assert await {{ call }} == 0
+
+    assert calls == [record]
+{% elif e %}
+    record = await make_record(session)
+
+    assert await {{ call }} == 1
+    assert await {{ call }} == 0
+{% if job.fixed_filter %}
+    assert await {{ job.module }}.run(sessions, settings, NEXT, WINDOW) == 1
+
+    assert calls == [record, record]
+{% else %}
+
+    assert calls == [record]
+{% endif %}
+{% else %}
+    assert await {{ call }} == 1
+    assert await {{ call }} == 0
+    assert await {{ job.module }}.run(sessions, settings, NEXT, WINDOW) == 1
+
+    assert calls == [TIME, NEXT]
+{% endif %}
+    run = await run_of(session, {{ key_expr }})
+    assert run is not None
+    assert run.status == "done"
+    assert run.attempts == 1
+{% if job.at and job.fixed_filter %}
+
+
+async def test_the_job_runs_again_after_a_change_of_the_time(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    calls: list[UUID],
+) -> None:
+    record = await make_record(session)
+    assert await {{ call }} == 1
+
+{% if job.at.type == "date" %}
+    later = VALUE + dt.timedelta(days=1)
+    statement = update({{ e.name }}).where({{ e.name }}.id == record).values({{ job.at.attr }}=later)
+    await session.execute(statement)
+    await session.commit()
+
+    now = NOW + dt.timedelta(days=1)
+    assert await {{ job.module }}.run(sessions, settings, now, WINDOW) == 1
+{% else %}
+    later = VALUE + dt.timedelta(minutes=30)
+    statement = update({{ e.name }}).where({{ e.name }}.id == record).values({{ job.at.attr }}=later)
+    await session.execute(statement)
+    await session.commit()
+
+    now = NOW + dt.timedelta(minutes=30)
+    assert await {{ job.module }}.run(sessions, settings, now, WINDOW) == 1
+{% endif %}
+
+    assert calls == [record, record]
+{% endif %}
+{% if t and t.failing %}
+
+
+async def test_the_job_leaves_out_a_record_that_the_filter_does_not_select(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    calls: list[UUID],
+) -> None:
+    await make_record(session, passes=False)
+
+    assert await {{ call }} == 0
+
+    assert calls == []
+{% endif %}
+
+
+async def test_two_workers_run_each_run_once(
+    migrated_url: str,
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    calls: list[{{ record_type }}],
+) -> None:
+{% if e %}
+    record = await make_record(session)
+{% endif %}
+    engine = make_engine(migrated_url)
+    try:
+        other = make_sessions(engine)
+        counts = await asyncio.gather(
+            {{ job.module }}.run(sessions, settings, NOW, WINDOW),
+            {{ job.module }}.run(other, settings, NOW, WINDOW),
+        )
+    finally:
+        await engine.dispose()
+
+    assert sorted(counts) == [0, 1]
+    assert calls == [{{ "record" if e else "TIME" }}]
+
+
+async def test_a_failed_run_is_in_the_log_and_runs_again(
+    monkeypatch: pytest.MonkeyPatch,
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    calls: list[{{ record_type }}],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+{% if e %}
+    record = await make_record(session)
+{% endif %}
+    attempts: list[int] = []
+
+{% if e %}
+    async def failing(session: AsyncSession, record: {{ e.name }}, *args: object) -> None:
+{% else %}
+    async def failing(session: AsyncSession, settings: Settings, time: dt.datetime) -> None:
+{% endif %}
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise RuntimeError("The first attempt fails.")
+
+    monkeypatch.setattr({{ target }}, "{{ function }}", failing)
+    with caplog.at_level(logging.ERROR, logger="app.jobs"):
+        assert await {{ call }} == 0
+    assert await {{ call }} == 1
+
+    [entry] = [r for r in caplog.records if r.name == "app.jobs"]
+    assert entry.__dict__["job"] == "{{ job.name }}"
+    assert entry.__dict__["record_id"] == {{ "str(record)" if e else '"-"' }}
+    assert attempts == [1, 2]
+    run = await run_of(session, {{ key_expr }})
+    assert run is not None
+    assert run.status == "done"
+    assert run.attempts == 2

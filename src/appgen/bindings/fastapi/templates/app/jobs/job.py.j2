@@ -1,0 +1,88 @@
+{{ trace_header(element_id) }}
+{% set job = py.jobs[name] %}
+{% set e = job.entity %}
+{% set op = job.operation %}
+"""The job `{{ job.name }}` of the app definition.
+
+{% if job.description %}
+{{ job.description | trim }}
+
+{% endif %}
+{{ job.docstring() }}
+"""
+
+{{ job.imports() }}
+
+NAME = "{{ job.name }}"
+{% if job.schedule %}
+{{ job.schedule.code() }}
+"""The schedule of the job in UTC: `{{ job.schedule.expression }}`."""
+{% else %}
+OFFSET = {{ job.offset_code }}
+"""The time of a run is the time of `{{ job.at.name }}` with this offset."""
+{% endif %}
+{% if e %}
+{% set aliases = job.aliases() %}
+{% if aliases %}
+
+{% for alias, cls in aliases %}
+{{ alias }} = aliased({{ cls }})
+{% endfor %}
+{% endif %}
+
+
+def where[*Ts](statement: Select[*Ts], moment: dt.datetime) -> Select[*Ts]:
+    """Return the statement for the records that the filter of the job selects at a time."""
+{% for line in job.where_lines() %}
+    {{ line }}
+{% endfor %}
+
+
+async def due(session: AsyncSession, now: dt.datetime, window: dt.timedelta) -> list[jobs.Due]:
+{% if job.schedule %}
+    """Return the runs at `now`: each record, at the last time of the schedule in the window."""
+{% else %}
+    """Return the runs at `now`: each record whose time is in the window before `now`."""
+{% endif %}
+{% for line in job.due_lines() %}
+    {{ line }}
+{% endfor %}
+{% endif %}
+
+
+async def run(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    now: dt.datetime,
+    window: dt.timedelta,
+) -> int:
+    """Run the job for each run that is due at `now`. Return the count of the runs."""
+{% if e %}
+    async with sessions() as session:
+        runs = await due(session, now, window)
+
+    async def action(session: AsyncSession, item: jobs.Due) -> None:
+        statement = select({{ e.name }}).where({{ e.name }}.id == item.record_id)
+        record = await session.scalar(where(statement, now))
+        if record is None:
+            # The record is gone, or the filter does not select it any more.
+            return
+{% set ns = namespace(indent=8) %}
+{% for c in job.clients %}
+{{ " " * ns.indent }}{{ py.call(c.param ~ " = ", c.client, c.args, ns.indent) }}
+{{ " " * ns.indent }}async with {{ c.param }}:
+{% set ns.indent = ns.indent + 4 %}
+{% endfor %}
+{{ " " * ns.indent }}{{ py.call("await " ~ op.name ~ "_ext.", op.name, job.run_args(), ns.indent) }}
+{% else %}
+    time = SCHEDULE.last(now, window)
+    if time is None:
+        return 0
+
+    async def action(session: AsyncSession, item: jobs.Due) -> None:
+        {{ py.call("await " ~ job.module ~ "_ext.", job.name, ["session", "settings", "item.time"], 8) }}
+
+    runs = [jobs.Due(None, time)]
+{% endif %}
+
+    return await jobs.run_due(sessions, NAME, runs, action)

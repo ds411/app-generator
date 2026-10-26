@@ -529,7 +529,7 @@ def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnos
                 yield _missing(widget, "entity", "entity", widget.entity, definition.entities)
                 return
             yield from _check_aggregate(definition, widget)
-            yield from _check_record_filter(definition, widget, widget.entity, widget.filter)
+            yield from check_record_filter(definition, widget, widget.entity, widget.filter)
             if isinstance(widget, ChartWidget):
                 yield from _check_chart_group(definition, widget)
         case ListWidget():
@@ -537,7 +537,7 @@ def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnos
             yield from _check_list_view(views, widget, "view", widget.view, None)
             view = views.get(widget.view)
             if isinstance(view, TableView | CardsView) and view.entity in definition.entities:
-                yield from _check_record_filter(definition, widget, view.entity, widget.filter)
+                yield from check_record_filter(definition, widget, view.entity, widget.filter)
                 if widget.sort is not None:
                     yield from _check_sort(definition, widget.sort, view.entity, widget.sort.field)
         case CustomWidget():
@@ -581,9 +581,10 @@ def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterat
         yield from _check_badge_ref(definition, widget, widget.badge, target)
 
 
-def _check_record_filter(
+def check_record_filter(
     definition: AppDefinition, element: Element, entity: str, record_filter: Mapping[str, object]
 ) -> Iterator[Diagnostic]:
+    """The paths, the operators, and the values of the filter of a widget or of a job."""
     for path, condition in record_filter.items():
         target = yield from _resolve(definition, element, "filter", entity, path)
         if target is None:

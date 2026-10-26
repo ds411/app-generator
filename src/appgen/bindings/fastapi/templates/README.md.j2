@@ -41,6 +41,9 @@ When you write the code of an extension file, change `@trace:gap` to
 | Migrate the database | `uv run alembic upgrade head`           |
 | Add the seed records | `uv run python -m app.cli seed`         |
 | Start the API      | `uv run fastapi dev app/main.py`          |
+{% if py.jobs %}
+| Run the jobs       | `uv run python -m app.worker`             |
+{% endif %}
 | Lint               | `uv run ruff check`                       |
 | Check the format   | `uv run ruff format --check`              |
 | Type check         | `uv run pyright`                          |
@@ -139,6 +142,35 @@ non-root user. To use other images, for example from a mirror, set the
 build arguments `UV_IMAGE` and `PYTHON_IMAGE`, and the environment
 variable `POSTGRES_IMAGE` for Compose.
 
+{% if py.jobs %}
+## Jobs
+
+The worker runs the jobs of the definition: `uv run python -m app.worker`
+(Compose starts it as the service `worker`). Each
+`JOBS_INTERVAL_SECONDS` (60), a pass runs each job at the current time,
+in UTC.
+
+| Job | When | What |
+| --- | ---- | ---- |
+{% for job in py.jobs.values() %}
+| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
+{% endfor %}
+
+- A run is for one record (or for none) and one time. The table
+  `job_runs` keeps each run with its state, and its key locks the run:
+  each run runs one time, also with more than one worker.
+- A pass runs only the times of the last `JOBS_WINDOW_MINUTES` (60).
+  After a stop of the workers, the times before the window do not run.
+- A failed run rolls back its changes, goes into the log with the job
+  and the record, and runs again at the next pass while its time is in
+  the window.
+- `uv run python -m app.worker --once --now 2026-06-15T12:00:00Z` runs
+  one pass at a fixed time. The tests of `tests/jobs/` use a fixed time
+  too.
+- `GET /health` on the port `WORKER_PORT` (8001) gives 200 while the
+  passes run, and 503 when they stop. 0 turns the endpoint off.
+
+{% endif %}
 ## Production
 
 - Logs: the API writes one log line for each request, with the method,
@@ -163,7 +195,7 @@ variable `POSTGRES_IMAGE` for Compose.
 {% if "kubernetes" in py.deploy %}
 - Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
   Deployment (2 replicas, a non-root user, a read-only file system), a
-  Service, and a Job that runs the migrations. The database is outside
+  Service, {{ "a Deployment of the worker of the jobs (2 replicas), " if py.jobs }}and a Job that runs the migrations. The database is outside
   the cluster. Push the image, set its name in `kustomization.yaml`,
   copy `secret.example.env` to `secret.env`, and set the values. Then
   run `kubectl delete job {{ app.name }}-migrate --ignore-not-found` and
@@ -178,8 +210,10 @@ variable `POSTGRES_IMAGE` for Compose.
     + (py.providers | map(attribute="client_secret_env") | list) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
-  limits), and Cloud Run accepts the same file. Push the image, and set
-  its name in `service.yaml` and `migrate-job.yaml`. Each secret is a
+  limits), and Cloud Run accepts the same file.{% if py.jobs %} `worker.yaml` is
+  a Knative Service of the worker of the jobs: always 1 instance, with
+  the CPU also between requests.{% endif %} Push the image, and set
+  its name in `service.yaml`{{ ", `worker.yaml`," if py.jobs }} and `migrate-job.yaml`. Each secret is a
   secret of its own, with the key (Knative) or the version (Cloud Run)
   `latest`. Run the migrations before each deployment of a new image.
   On a cluster with Knative Serving:
@@ -192,6 +226,9 @@ variable `POSTGRES_IMAGE` for Compose.
   kubectl apply -f deploy/knative/migrate-job.yaml
   kubectl wait --for=condition=complete job/{{ app.name }}-migrate --timeout=10m
   kubectl apply -f deploy/knative/service.yaml
+{% if py.jobs %}
+  kubectl apply -f deploy/knative/worker.yaml
+{% endif %}
   ```
 
   On Cloud Run, a Cloud Run job runs the migrations. The database must
@@ -206,6 +243,9 @@ variable `POSTGRES_IMAGE` for Compose.
     --command alembic --args upgrade,head \
     --set-secrets DATABASE_URL={{ app.name }}-database-url:latest --execute-now --wait
   gcloud run services replace deploy/knative/service.yaml
+{% if py.jobs %}
+  gcloud run services replace deploy/knative/worker.yaml
+{% endif %}
   ```
 
   A new Cloud Run service accepts only requests with a Google sign-in.
@@ -315,6 +355,10 @@ the code of the feature.
 | `app/core/`             | Code that all slices share: settings, database, errors, pagination, health, and schema bases. |
 | `migrations/`           | The Alembic migrations.                              |
 | `app/features/<slice>/` | One slice for each entity.                           |
+{% if py.jobs %}
+| `app/jobs/`             | One module for each job. A job without an entity has its logic in `<job>_ext.py`: write it there. |
+| `app/worker.py`         | The worker that runs the jobs.                       |
+{% endif %}
 {% if py_apis %}
 | `app/integrations/<api>/` | The client and the models of a third-party API, and the endpoints of an exposed API. |
 {% endif %}

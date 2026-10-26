@@ -1,6 +1,34 @@
 {{ trace_header("app") }}
+{# The environment of the API, and of the worker without the seed and the rate limit. #}
+{% macro environment(worker=False) %}
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
+{% if not worker %}
+      DATABASE_SEED: "true"
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+{% if py.redis %}
+      RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
+{% endif %}
+{% endif %}
+{% if definition.auth %}
+      # Set AUTH_SECRET in the shell or in .env: a long random text.
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+{% if definition.auth.password and not worker %}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+{% endif %}
+{% endif %}
+{% for api in py_apis.values() %}
+      {{ trace(api.id) }}
+      {{ api.url_env }}: ${{ "{" }}{{ api.url_env }}:-{{ api.base_url }}{{ "}" }}
+{% if api.client_id_env %}
+      {{ api.client_id_env }}: ${{ "{" }}{{ api.client_id_env }}:-{{ "}" }}
+{% endif %}
+{% if api.secret_env %}
+      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
+{% endif %}
+{% endfor %}
+{% endmacro %}
 # Start Postgres, run the migrations, and start the API on port 8000 with
-# the seed records:
+# the seed records{{ " and the worker of the jobs" if py.jobs }}:
 #   docker compose up --build
 {% if py.redis %}
 # With Redis for the rate limit of all replicas:
@@ -37,34 +65,23 @@ services:
   api:
     image: {{ app.name }}-api
     environment:
-      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/{{ py.package }}
-      DATABASE_SEED: "true"
-      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
-{% if py.redis %}
-      RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
-{% endif %}
-{% if definition.auth %}
-      # Set AUTH_SECRET in the shell or in .env: a long random text.
-      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
-{% if definition.auth.password %}
-      SEED_PASSWORD: ${SEED_PASSWORD:-}
-{% endif %}
-{% endif %}
-{% for api in py_apis.values() %}
-      {{ trace(api.id) }}
-      {{ api.url_env }}: ${{ "{" }}{{ api.url_env }}:-{{ api.base_url }}{{ "}" }}
-{% if api.client_id_env %}
-      {{ api.client_id_env }}: ${{ "{" }}{{ api.client_id_env }}:-{{ "}" }}
-{% endif %}
-{% if api.secret_env %}
-      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
-{% endif %}
-{% endfor %}
+{{ environment().rstrip() }}
     ports:
       - "8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
+{% if py.jobs %}
+
+  worker:
+    image: {{ app.name }}-api
+    command: ["python", "-m", "app.worker"]
+    environment:
+{{ environment(worker=True).rstrip() }}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+{% endif %}
 {% if py.redis %}
 
   redis:

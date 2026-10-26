@@ -22,8 +22,8 @@ runner = CliRunner()
 # The element kinds that each binding leaves out by design. A back-end
 # app has no pages and no UI, and a front-end app has no webhooks.
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": [],
-    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "webhook"],
+    "nextjs": ["job"],
+    "react": ["entity_compare_rule", "entity_overlap_rule", "entity_unique_rule", "job", "webhook"],
     "fastapi": ["page", "ui"],
 }
 

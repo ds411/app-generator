@@ -437,14 +437,18 @@ class PyApi:
     def dependency(self) -> str:
         return f"get_{self.module}_client"
 
-    def construction(self) -> str:
-        """Return the statement of the dependency that creates the client from the settings."""
+    def settings_args(self) -> list[str]:
+        """Return the arguments of the client from the settings: the URL and the credentials."""
         args = [f"settings.{self.url_setting}"]
         if self.client_id_setting:
             args.append(f"settings.{self.client_id_setting}")
         if self.secret_setting:
             args.append(f"settings.{self.secret_setting}")
-        return call("client = ", self.client, args)
+        return args
+
+    def construction(self) -> str:
+        """Return the statement of the dependency that creates the client from the settings."""
+        return call("client = ", self.client, self.settings_args())
 
     @property
     def mock_dependency(self) -> str:

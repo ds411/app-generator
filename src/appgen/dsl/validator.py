@@ -31,6 +31,7 @@ from appgen.dsl.auth import (
     SecondFactor,
     SignUp,
 )
+from appgen.dsl.cron import CronError, parse_cron
 from appgen.dsl.crud import plural, snake_name
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
@@ -43,6 +44,7 @@ from appgen.dsl.expressions import (
     Negate,
     parse_expression,
 )
+from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import AppDefinition, Element, Entity, Field, Relation
 from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
@@ -60,6 +62,7 @@ from appgen.dsl.storage import (
 from appgen.dsl.translations import LOCALE, VALUE
 from appgen.dsl.ui.checks import (
     FORMAT_TYPES,
+    check_record_filter,
     check_ui_dashboards,
     check_ui_forms,
     check_ui_references,
@@ -707,6 +710,153 @@ def check_workflows(definition: AppDefinition) -> Iterator[Diagnostic]:
                     f"A transition cannot change the field from '{transition.to}' to itself.",
                     transition,
                     at="to",
+                )
+
+
+def check_jobs(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A job has a schedule or a time, and runs a custom operation of its entity (ADR 0029)."""
+    for job in definition.jobs.values():
+        yield from _check_job_time(job)
+        if job.entity is None:
+            if job.at is not None or job.operation is not None:
+                what = "'at'" if job.at is not None else "an 'operation'"
+                yield _error(
+                    "missing-key",
+                    f"A job with {what} needs an 'entity': the entity of its records.",
+                    job,
+                    hint="Add the key 'entity'.",
+                )
+            elif job.filter:
+                yield _error(
+                    "invalid-option",
+                    "'filter' is only for a job with an 'entity'.",
+                    job,
+                    at="filter",
+                )
+            continue
+        entity = definition.entities.get(job.entity)
+        if entity is None:
+            yield _missing(job, "entity", "entity", job.entity, definition.entities)
+            continue
+        yield from _check_job_operation(definition, job)
+        if job.at is not None:
+            found = _rule_field(job, "at", job.at, entity.fields)
+            if isinstance(found, Diagnostic):
+                yield found
+            elif found.type not in ("date", "datetime") or found.computed is not None:
+                yield _error(
+                    "unsuitable-field",
+                    f"The field of 'at' must be a stored 'date' or 'datetime' field, but "
+                    f"'{job.entity}.{job.at}' is a '{found.type}'"
+                    f"{' (computed)' if found.computed is not None else ''}.",
+                    job,
+                    at="at",
+                )
+        yield from check_record_filter(definition, job, job.entity, job.filter)
+
+
+def _check_job_time(job: Job) -> Iterator[Diagnostic]:
+    if job.schedule is not None and job.at is not None:
+        yield _error(
+            "invalid-option",
+            "A job runs on a 'schedule' or at the time of 'at', not both.",
+            job,
+            at="at",
+            hint="Remove 'schedule' or 'at'.",
+        )
+    elif job.schedule is None and job.at is None:
+        yield _error(
+            "missing-key",
+            "A job needs 'schedule' (a cron expression in UTC) or 'at' (a date field of its "
+            "entity).",
+            job,
+            hint="Add for example 'schedule: \"0 7 * * *\"' (each day at 07:00 UTC).",
+        )
+    if job.schedule is not None:
+        try:
+            parse_cron(job.schedule)
+        except CronError as error:
+            yield _error(
+                "invalid-value",
+                f"The schedule is not valid: {error}",
+                job,
+                at="schedule",
+                hint='Write five fields in quotes, for example "30 6 * * 1-5" '
+                "(06:30 UTC from Monday to Friday).",
+            )
+    if job.offset is not None:
+        if job.at is None:
+            yield _error(
+                "invalid-option",
+                "'offset' is only for a job with 'at'.",
+                job,
+                at="offset",
+            )
+        try:
+            parse_offset(job.offset)
+        except ValueError:
+            units = ", ".join(f"{unit} ({name})" for unit, name in OFFSET_UNITS.items())
+            yield _error(
+                "invalid-value",
+                f"The offset '{job.offset}' is not valid. It is a whole number and a unit: "
+                f"{units}.",
+                job,
+                at="offset",
+                hint="Write for example '-24h' (24 hours before) or '30m' (30 minutes after).",
+            )
+
+
+def _check_job_operation(definition: AppDefinition, job: Job) -> Iterator[Diagnostic]:
+    """The operation of a job is a custom operation of its entity, without required params."""
+    customs = [
+        name
+        for name, op in definition.operations.items()
+        if op.kind == "custom" and op.entity == job.entity
+    ]
+    if job.operation is None:
+        hint = (
+            f"Use a custom operation of '{job.entity}', for example '{customs[0]}'."
+            if customs
+            else f"Add a custom operation of '{job.entity}', and name it in 'operation'."
+        )
+        yield _error(
+            "missing-key",
+            f"A job with an entity needs an 'operation': a custom operation of '{job.entity}'.",
+            job,
+            hint=hint,
+        )
+        return
+    operation = definition.operations.get(job.operation)
+    if operation is None:
+        yield _missing(job, "operation", "operation", job.operation, customs)
+        return
+    if operation.kind != "custom":
+        yield _error(
+            "unsuitable-operation",
+            f"A job runs a custom operation, but '{job.operation}' is a '{operation.kind}' "
+            "operation.",
+            job,
+            at="operation",
+            hint="Add a custom operation with the logic of the job.",
+        )
+    elif operation.entity != job.entity:
+        yield _error(
+            "unsuitable-operation",
+            f"The operation '{job.operation}' is an operation of '{operation.entity}', not of "
+            f"'{job.entity}'. A job runs an operation of its entity on each record.",
+            job,
+            at="operation",
+        )
+    else:
+        for name, param in operation.params.items():
+            if param.required and param.default is None:
+                yield _error(
+                    "unsuitable-operation",
+                    f"The operation '{job.operation}' has the required param '{name}'. "
+                    "A job runs the operation without params.",
+                    job,
+                    at="operation",
+                    hint="Make the param optional, or give it a default.",
                 )
 
 
@@ -2037,6 +2187,7 @@ CHECKS: list[Check] = [
     check_rules,
     check_translations,
     check_workflows,
+    check_jobs,
     check_auth,
     check_access,
     check_apis,

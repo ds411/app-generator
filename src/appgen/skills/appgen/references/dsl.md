@@ -30,6 +30,7 @@ valid.
 - [operations](#operations)
 - [pages](#pages)
 - [workflows](#workflows)
+- [jobs](#jobs)
 - [apis](#apis)
 - [webhooks](#webhooks)
 - [ui](#ui)
@@ -67,6 +68,7 @@ The file is YAML 1.1. The top level has these keys:
 | `webhooks`   | No       | The endpoints that other systems send signed events to.       |
 | `seed`       | No       | The records that the apps start with, for each entity.        |
 | `storage`    | No       | The place of the files of the `file` and `image` fields.      |
+| `jobs`       | No       | Work on a schedule, or at the time of a date field of each record. |
 
 A minimal definition:
 
@@ -708,6 +710,78 @@ workflows:
 The FastAPI app gives a 422 error, the Next.js app a `ValidationError`,
 and the React app (mock data) a `TransitionError`. The FastAPI app has a
 test of each workflow.
+
+## jobs
+
+A job is work that the apps run at a time: on a schedule, or at the
+time that a date field of each record gives
+([ADR 0029](https://github.com/ds411/app-generator/blob/main/docs/adr/0029-jobs.md)). A job with an entity runs a custom
+operation of the entity on each record of its filter, so the logic stays
+in the extension file of the operation. A job without an entity is a
+generation gap: hand-written code runs at each time of its schedule.
+
+```yaml
+# example: room-booking
+jobs:
+  booking_reminder:
+    description: Remind the organizer one day before the booking starts.
+    entity: Booking
+    at: starts_at
+    offset: -24h
+    filter: { status: confirmed }
+    operation: remind_organizer
+  expire_requests:
+    description: Cancel the requests that started without a confirmation.
+    schedule: "0 * * * *"
+    entity: Booking
+    filter: { status: requested, starts_at: { lt: $now } }
+    operation: expire_request
+  weekly_report:
+    description: Send the admins a report of the bookings of the week.
+    schedule: "0 7 * * 1"
+```
+
+- A job has `schedule` or `at`, not both.
+- `schedule` is a cron expression in UTC with five fields: the minute
+  (0-59), the hour (0-23), the day of the month (1-31), the month (1-12
+  or `jan`-`dec`), and the day of the week (0-7 or `sun`-`sat`, where 0
+  and 7 are Sunday). A field is `*`, a value, a range (`1-5`), a step
+  (`*/15`), or a list (`1,15`). The macros `@hourly`, `@daily`
+  (`@midnight`), `@weekly`, `@monthly`, and `@yearly` (`@annually`)
+  replace the five fields. When both day fields are not `*`, a day
+  matches when one of them matches, as in cron and in Kubernetes. Put
+  quotes around the expression: YAML reads a `*` at the start as an
+  alias.
+- `at` is a stored `date` or `datetime` field of `entity`. The job runs
+  for each record at the time of the field, plus `offset`. The time of a
+  `date` is midnight in UTC.
+- `offset` (with `at`) is a whole number with a sign and a unit: `m`
+  (minutes), `h` (hours), `d` (days), or `w` (weeks), for example `-24h`
+  (24 hours before) or `4h`. The default is 0.
+- `operation` is a custom operation of `entity`. Each run calls it on
+  one record, with the default values of its params, so it cannot have
+  a required param without a default.
+- `filter` (optional) selects the records: the filter syntax of the
+  [dashboards](#dashboards). `$now` is the time when the app runs the
+  job, and `$today` its date in UTC.
+- A job without `entity` has a `schedule`, and no `at`, `filter`, or
+  `operation`.
+
+A run is for one job, one record (or none), and one time. The apps keep
+the runs in the table `job_runs`, with a key of the job, the record, and
+the time, so each run runs one time, also with more than one worker. A
+run looks back for the times that are not done, in a window of 60
+minutes (`JOBS_WINDOW_MINUTES`): a job with a schedule runs the last
+time of its schedule in the window, on each record that the filter
+selects. A job with `at` runs each record whose time is in the window.
+A change of the date field gives a new time, and so a new run. A failed
+run rolls back its changes, goes into the log with the job and the
+record, and runs again later while its time is in the window.
+
+The FastAPI app runs the jobs in a worker process, `python -m
+app.worker` ([bindings.md](https://github.com/ds411/app-generator/blob/main/docs/bindings.md#the-worker-of-the-fastapi-app)).
+The generated tests of each job use a fixed clock. The Next.js binding
+does not run the jobs yet. The React app (mock data) has no jobs.
 
 ## apis
 
