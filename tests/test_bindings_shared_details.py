@@ -149,7 +149,14 @@ def test_a_list_widget_shows_the_columns_or_the_cards_of_its_view(
 ) -> None:
     widgets = {w.name: w for w in example.dashboard_plan("overview").widgets}
     due = widgets["due_soon"]
-    assert [c.name for c in due.columns] == ["title", "status", "priority", "assignee", "due_date"]
+    assert [c.name for c in due.columns] == [
+        "title",
+        "status",
+        "priority",
+        "assignee",
+        "due_date",
+        "screenshot",
+    ]
     assert due.body[-1] == "return sortBy(rows, (row) => row.dueDate).slice(0, 6);"
     assert due.sort_id == "ui.dashboards.overview.widgets.due_soon.sort"
     people = {w.name: w for w in details.dashboard_plan("stats").widgets}["people"]

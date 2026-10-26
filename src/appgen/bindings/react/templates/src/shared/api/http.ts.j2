@@ -65,6 +65,17 @@ export class ApiError extends Error {
   }
 }
 
+{% if definition.storage %}
+/** Send a request to the API, and return the JSON body of the response. A form data body is multipart. */
+export async function apiRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+{% if i18n %}
+  headers["Accept-Language"] = getLocale();
+{% endif %}
+  if (body !== undefined && !(body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+{% else %}
 /** Send a request to the API, and return the JSON body of the response. */
 export async function apiRequest(method: string, path: string, body?: unknown): Promise<unknown> {
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -74,6 +85,7 @@ export async function apiRequest(method: string, path: string, body?: unknown): 
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
+{% endif %}
   const token = accessToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -81,7 +93,11 @@ export async function apiRequest(method: string, path: string, body?: unknown): 
   const response = await fetch(API_URL + path, {
     method,
     headers,
+{% if definition.storage %}
+    body: body === undefined || body instanceof FormData ? body : JSON.stringify(body),
+{% else %}
     body: body === undefined ? undefined : JSON.stringify(body),
+{% endif %}
   });
   if (!response.ok) {
     let message = response.statusText || {{ js_format("The API gave the status {status}.", status="response.status") }};

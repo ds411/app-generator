@@ -138,7 +138,7 @@ def test_an_empty_seed_gives_no_target_to_an_optional_relation() -> None:
     ("example", "digest"),
     [
         # The values of the translatable fields in German (ADR 0026) are not in the screenshots.
-        ("project-tracker", "bc7bcda15186da33370b0f7c3d895e8d951c8ade5a9991dc8e8e58eb37e9ee08"),
+        ("project-tracker", "fb327d1305905bb9ce701f1e0f26efcef512238161759cfd836ad387c847bf89"),
         ("room-booking", "abcb48e23d20a6069a9f52da0f235bfb0dc9ec0c52da839c5be0836343aca506"),
     ],
 )

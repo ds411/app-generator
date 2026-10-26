@@ -1,0 +1,68 @@
+{{ trace_header("app") }}
+{% set next = binding.name == "nextjs" %}
+import { FileIcon } from "lucide-react";
+
+import type { FileValue } from "@/shared/api";
+import { fileSize } from "@/shared/lib/format";
+import { cn } from "@/shared/lib/utils";
+
+/** A link to the file of a file field, with its name and its size. An empty value shows a dash. */
+export function FileLink({ file, className }: { file: FileValue | null | undefined; className?: string }) {
+  if (!file) return <span className={cn("text-muted-foreground", className)}>—</span>;
+  return (
+    <a
+      href={file.url}
+      target="_blank"
+      rel="noreferrer"
+      title={file.name}
+      className={cn("inline-flex max-w-full min-w-0 items-center gap-1.5 underline-offset-4 hover:underline", className)}
+    >
+      <FileIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate">{file.name}</span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{fileSize(file.size)}</span>
+    </a>
+  );
+}
+
+const SIZES = {
+  sm: "size-10 rounded-md",
+  lg: "max-h-64 max-w-full rounded-lg",
+  cover: "-mt-4 aspect-video w-full",
+} as const;
+
+/**
+ * The image of a file field: small in a list (`sm`), larger in a detail
+ * view (`lg`), where it opens the file, or the cover of a card (`cover`).
+ * A file that is not an image shows a link. An empty value shows a dash,
+ * and no cover.
+ */
+export function ImageValue({
+  file,
+  size = "sm",
+  className,
+}: {
+  file: FileValue | null | undefined;
+  size?: keyof typeof SIZES;
+  className?: string;
+}) {
+  if (!file) return size === "cover" ? null : <span className={cn("text-muted-foreground", className)}>—</span>;
+  if (!file.type.startsWith("image/")) return size === "cover" ? null : <FileLink file={file} className={className} />;
+  const image = (
+{% if next %}
+    // The browser sends the session cookie for the file, and the image optimizer would not.
+    // eslint-disable-next-line @next/next/no-img-element
+{% endif %}
+    <img
+      src={file.url}
+      alt={file.name}
+      loading="lazy"
+      className={cn("bg-muted object-cover", size !== "cover" && "border", SIZES[size], className)}
+    />
+  );
+  if (size !== "lg") return image;
+  return (
+    <a href={file.url} target="_blank" rel="noreferrer" className="inline-block max-w-full align-middle">
+      {image}
+    </a>
+  );
+}

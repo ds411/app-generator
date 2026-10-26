@@ -151,12 +151,15 @@ file in their code, as text (Base64). A seed file can have 1 MB or less.
   signature. The S3 storage uses `@aws-sdk/client-s3`. Next.js limits
   the body of a server action to 1 MB by default, so `next.config.ts`
   allows the largest file of the file fields and 1 MB more.
-- React: the mock data keeps an uploaded file in the browser tab. With
-  `x-react-data: api`, the forms call the endpoints of the FastAPI app.
-
-The bindings add the file fields one after the other. Until a binding
-generates their code, `appgen generate` stops with an error for a
-definition with a file field.
+- React: the mock data keeps an uploaded file in the browser tab (an
+  object URL), and has the seed files as `data:` URLs. With
+  `x-react-data: api`, the forms call the endpoints of the FastAPI app
+  with a form data.
+- The forms of both front ends save the record first, and then upload
+  the new files and delete the removed files (`<entity>Files`). The file
+  widget checks the size and the type of a file before the upload, and
+  shows a preview of an image. The views show an image, a link to a
+  file, or an avatar with an image. The sign-up form takes no file.
 
 ## Consequences
 

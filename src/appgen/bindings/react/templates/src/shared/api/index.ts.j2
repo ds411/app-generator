@@ -23,11 +23,19 @@ export {
 } from "./dashboards";
 {% endif %}
 {% else %}
+{% if definition.storage %}
+export { FileError, type FileRule, MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
+{% else %}
 export { MOCK_LATENCY_MS, MockStore, TransitionError, type Workflow } from "./mock-store";
+{% endif %}
 {% endif %}
 export type {
   EntityApi,
   EntityRecord,
+{% if definition.storage %}
+  FileApi,
+  FileValue,
+{% endif %}
   Filter,
   FilterOp,
   ListQuery,

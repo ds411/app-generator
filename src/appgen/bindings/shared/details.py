@@ -21,6 +21,7 @@ from appgen.bindings.shared.views import (
     state_ids,
     ts_key,
 )
+from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.common import States
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import DetailSection, DetailTab, DetailView
@@ -145,7 +146,9 @@ def build_detail(ctx: ViewContext, name: str) -> DetailPlan:
     paths.append(title_path)
     title = ctx.value(entity, title_path, row=_ROW)
     plan.title = (
-        f"{{{title.text_expr}}}" if title.kind != "field" else f'{{String({title.expr} ?? "")}}'
+        f"{{{title.text_expr}}}"
+        if title.kind != "field" or title.type in FILE_TYPES
+        else f'{{String({title.expr} ?? "")}}'
     )
     if header is not None:
         if header.subtitle:
@@ -202,7 +205,7 @@ def _section(
     for path in section.fields:
         paths.append(path)
         value = ctx.value(plan.entity, path, row=_ROW)
-        result.fields.append((value.label, ctx.jsx(value, plan, avatar=True)))
+        result.fields.append((value.label, ctx.jsx(value, plan, avatar=True, large=True)))
     return result
 
 

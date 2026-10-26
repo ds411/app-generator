@@ -572,6 +572,10 @@ class _Builder:
             path = self.resolve(f"{path_text}.{display}")
         if path.computed or (path.field is not None and path.field.type not in _SORT_TYPES):
             return
+        last = path_text.rsplit(".", 1)[-1]
+        if path.field is None and any(f.name == last for f in path.entity.files):
+            # A file field (ADR 0027): the views do not sort by a file.
+            return
         key = self.keys.setdefault(path_text, PySortKey(path_text, path))
         key.test = key.test or _test(path)
         key.ids.append(element_id)

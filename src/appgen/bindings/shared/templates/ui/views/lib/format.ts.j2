@@ -156,3 +156,27 @@ export function initials(name: string): string {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 }
+{% if definition.storage %}
+
+{% if not i18n %}
+const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
+{% endif %}
+/** Return the size of a file as a short text with a unit, for example "5 MB" or "1.5 KB". */
+export function fileSize(size: number): string {
+{% if i18n %}
+  const sizeFormat = numberFormat({ maximumFractionDigits: 1 });
+{% endif %}
+  const units: [string, number][] = [
+    ["GB", 1024 ** 3],
+    ["MB", 1024 ** 2],
+    ["KB", 1024],
+  ];
+  for (const [unit, factor] of units) {
+    if (size >= factor) {
+      return `${sizeFormat.format(size / factor)} ${unit}`;
+    }
+  }
+  return `${sizeFormat.format(size)} B`;
+}
+{% endif %}

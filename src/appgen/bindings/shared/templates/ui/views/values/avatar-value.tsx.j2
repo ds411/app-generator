@@ -1,24 +1,43 @@
 {{ trace_header("app") }}
-import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
+{% set images = definition.storage is not none %}
+import { Avatar, {{ "AvatarFallback, AvatarImage" if images else "AvatarFallback" }} } from "@/shared/ui/avatar";
 import { initials } from "@/shared/lib/format";
 import { cn } from "@/shared/lib/utils";
 
+{% if images %}
+/** A record as an avatar with its image or its initials, and its name. */
+{% else %}
 /** A related record as an avatar with its initials, and its name. */
+{% endif %}
 export function AvatarValue({
   name,
+{% if images %}
+  image,
+{% endif %}
   size = "sm",
   showName = true,
   className,
 }: {
   name: string;
+{% if images %}
+  /** The URL of the image of an `image` field. Without it, the avatar shows the initials. */
+  image?: string | null;
+{% endif %}
   size?: "sm" | "default";
   showName?: boolean;
   className?: string;
 }) {
+{% if images %}
+  if (!name && !image) return <span className="text-muted-foreground">—</span>;
+{% else %}
   if (!name) return <span className="text-muted-foreground">—</span>;
+{% endif %}
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)} title={name}>
       <Avatar size={size}>
+{% if images %}
+        {image && <AvatarImage src={image} alt={name} className="object-cover" />}
+{% endif %}
         <AvatarFallback className="text-[10px] font-medium">{initials(name)}</AvatarFallback>
       </Avatar>
       {showName && <span className="truncate">{name}</span>}

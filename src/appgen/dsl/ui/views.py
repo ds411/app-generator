@@ -168,6 +168,8 @@ class Card(Element):
     """The default is the display field of the entity."""
     subtitle: FieldPath | None = None
     badge: BadgeRef | None = None
+    image: FieldPath | None = None
+    """An `image` field: the cover image at the top of the card."""
     fields: list[FieldPath] = pydantic.Field(default_factory=list[str])
     footer: list[FieldPath] = pydantic.Field(default_factory=list[str])
 

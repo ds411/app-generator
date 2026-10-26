@@ -86,6 +86,10 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% if "<FormattedValue" in render %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
 {% endif %}
+{% set file_names = (["FileLink"] if "<FileLink" in render else []) + (["ImageValue"] if "<ImageValue" in render else []) %}
+{% if file_names %}
+import { {{ file_names | join(", ") }} } from "@/shared/ui/values/file-value";
+{% endif %}
 {% set state = ["ViewLoading", "ViewMessage"] %}
 {% if plan.states.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
 import { {{ state | join(", ") }} } from "@/shared/ui/view-state";

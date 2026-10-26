@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from appgen.bindings import minimal, react
+from appgen.bindings import minimal
 from appgen.dsl import load_definition_text, validate_definition
 from appgen.dsl.schema import json_schema
 from appgen.dsl.storage import (
@@ -17,7 +17,8 @@ from appgen.dsl.storage import (
     seed_files,
     type_allows,
 )
-from appgen.gen import GenerationError, generate
+from appgen.dsl.ui.fields import default_widget, resolve_path
+from appgen.gen import generate
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(32))
 BASE = dedent(
@@ -234,9 +235,76 @@ def test_a_dashboard_filter_cannot_use_a_file() -> None:
     assert codes(text) == [("unsuitable-field", "ui.dashboards.home.widgets.shots")]
 
 
-def test_a_form_field_of_a_file_needs_a_widget() -> None:
+def test_a_form_field_of_a_file_gets_the_file_widget() -> None:
     text = BASE.replace("crud: true", "crud: { forms: [create] }")
-    assert ("missing-widget", "ui.forms.new_issue.fields.screenshot") in codes(text)
+    definition = load_definition_text(text, "app.yaml")
+    assert validate_definition(definition) == []
+    for name in ("screenshot", "report"):
+        assert default_widget(resolve_path(definition, "Issue", name)) == "file"
+
+
+@pytest.mark.parametrize(("field", "widget"), [("screenshot", "text"), ("title", "file")])
+def test_the_file_widget_is_only_for_the_file_fields(field: str, widget: str) -> None:
+    text = BASE + dedent(
+        f"""\
+        ui:
+          forms:
+            edit_issue:
+              entity: Issue
+              operation: update_issue
+              fields:
+                {field}: {{ widget: {widget} }}
+        """
+    )
+    assert codes(text) == [("unsuitable-field", f"ui.forms.edit_issue.fields.{field}")]
+
+
+def test_a_card_image_and_an_avatar_need_an_image_field() -> None:
+    text = BASE + dedent(
+        """\
+        ui:
+          views:
+            shots:
+              kind: cards
+              entity: Issue
+              card: { title: title, image: screenshot, footer: [screenshot] }
+            issues:
+              kind: table
+              entity: Issue
+              columns: { screenshot: { format: avatar }, report: { format: text } }
+        """
+    )
+    assert codes(text) == []
+    wrong = text.replace("image: screenshot", "image: report").replace(
+        "screenshot: { format: avatar }", "report: { format: avatar }"
+    )
+    assert codes(wrong.replace("report: { format: text }", "title: {}")) == [
+        ("unsuitable-field", "ui.views.shots.card"),
+        ("unsuitable-field", "ui.views.issues.columns.report"),
+    ]
+
+
+def test_the_sign_up_cannot_ask_for_a_file() -> None:
+    text = dedent(
+        """\
+        version: 0
+        app: { name: issues, title: Issues }
+        storage: { kind: local }
+        entities:
+          Person:
+            fields:
+              email: { type: email, required: true, unique: true }
+              photo: { type: image }
+        auth:
+          user_entity: Person
+          username_field: email
+          sign_up: { fields: [email, photo] }
+        """
+    )
+    assert messages(text) == [
+        "The sign-up form cannot upload the file of the 'image' field 'photo'."
+    ]
+    assert messages(text.replace("[email, photo]", "[email]")) == []
 
 
 @pytest.mark.parametrize(
@@ -370,12 +438,6 @@ def test_the_manifest_records_the_hash_of_each_seed_file(tmp_path: Path) -> None
     result = generate(definition, minimal.BINDING)
     file = definition.seed["Issue"].records["login"].files["screenshot"]
     assert result.documents["files/login.png"] == file.hash
-
-
-def test_a_binding_without_file_fields_stops() -> None:
-    definition = load_definition_text(BASE, "app.yaml")
-    with pytest.raises(GenerationError, match="does not generate 'image' fields yet"):
-        generate(definition, react.BINDING)
 
 
 def test_the_paths_of_the_files_are_no_page_paths() -> None:

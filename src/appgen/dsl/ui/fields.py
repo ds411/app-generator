@@ -9,6 +9,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.storage import FILE_TYPES
 
 SINGLE_KINDS = frozenset({"many_to_one", "one_to_one"})
 NUMBER_TYPES = frozenset({"integer", "decimal"})
@@ -103,6 +104,7 @@ WIDGET_TYPES: dict[str, frozenset[str] | None] = {
     "date": frozenset({"date"}),
     "datetime": frozenset({"datetime"}),
     "relation": frozenset({*SINGLE_KINDS, "many_to_many"}),
+    "file": FILE_TYPES,
     "custom": None,
 }
 """The field types and relation kinds that each form widget suits. None: all."""
@@ -119,6 +121,8 @@ _DEFAULT_WIDGETS = {
     "boolean": "switch",
     "date": "date",
     "datetime": "datetime",
+    "file": "file",
+    "image": "file",
     "many_to_one": "relation",
     "one_to_one": "relation",
     "many_to_many": "relation",

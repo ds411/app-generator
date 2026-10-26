@@ -97,6 +97,10 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% if "formatted" in plan.uses %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
 {% endif %}
+{% set file_names = (["FileLink"] if "<FileLink" in code else []) + (["ImageValue"] if "<ImageValue" in code else []) %}
+{% if file_names %}
+import { {{ file_names | join(", ") }} } from "@/shared/ui/values/file-value";
+{% endif %}
 {% for f in plan.forms %}
 import { {{ f.component }}Dialog } from "{{ f.module }}";
 {% endfor %}

@@ -95,6 +95,11 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% if "formatted" in plan.uses %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
 {% endif %}
+{% set file_code = plan.code() %}
+{% set file_names = (["FileLink"] if "<FileLink" in file_code else []) + (["ImageValue"] if "<ImageValue" in file_code else []) %}
+{% if file_names %}
+import { {{ file_names | join(", ") }} } from "@/shared/ui/values/file-value";
+{% endif %}
 {% for f in plan.forms %}
 import { {{ f.component }}Dialog } from "{{ f.module }}";
 {% endfor %}
@@ -461,7 +466,7 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
 
 {% macro record_card(plan, board=false) -%}
 {% set card = plan.card %}
-{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
+{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.image or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
 /** The card of one record. */
 {% set uses_lookups = "lookups." in code %}
 function RecordCard({
@@ -482,8 +487,11 @@ function RecordCard({
 {% endif %}
 }) {
   return (
-    <Card className="gap-3 py-4 transition-shadow hover:shadow-md"> {% if card.element_id %}{{ trace(card.element_id, jsx=True) }}{% endif %}
+    <Card className="gap-3 {{ "overflow-hidden " if card.image }}py-4 transition-shadow hover:shadow-md"> {% if card.element_id %}{{ trace(card.element_id, jsx=True) }}{% endif %}
 
+{% if card.image %}
+      {{ card.image }}
+{% endif %}
       <CardHeader className="px-4">
         <CardTitle className="line-clamp-2 text-base leading-snug">
 {% if card.href %}
@@ -545,7 +553,7 @@ import { {{ names | sort | join(", ") }} } from "@/shared/ui/card";
 
 {% macro card_uses_lookups(plan) -%}
 {% set card = plan.card %}
-{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
+{% set code = card.title ~ (card.href or "") ~ (card.subtitle or "") ~ (card.badge or "") ~ (card.image or "") ~ (card.fields | map(attribute=1) | join(" ")) ~ (card.footer | join(" ")) %}
 {{ "yes" if "lookups." in code }}
 {%- endmacro %}
 

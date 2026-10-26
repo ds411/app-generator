@@ -33,7 +33,11 @@ that the two generated apps work together:
    that the browser gets from the mock server of the third-party APIs
    (scripts/mock_api.py) through the generated client. The build sets
    the base URLs of the APIs to the mock server.
-7. Call the endpoint of an operation of the exposed APIs
+8. Upload a screenshot of a task in the edit form: the form sends the
+   file to the file endpoint of the FastAPI app, and the detail view
+   shows the image from its signed link. Then the form removes it
+   (ADR 0027).
+9. Call the endpoint of an operation of the exposed APIs
    `exchange_rates` and `finance` (`expose: true`) in the FastAPI app:
    the app must call the mock server with the API key, or with an
    OAuth 2.0 token and the cookie parameter, and give the example
@@ -409,6 +413,77 @@ function check(ok, message) {
 });
 """
 
+# Open a task, upload a screenshot in the edit form, and check the
+# request to the file endpoint, the record, and the image of the detail
+# view. Then remove the screenshot. The argument is a JSON object with
+# the URLs, the ID of the task, and the image as Base64.
+FILE_CHECK = """
+const { existsSync } = require("node:fs");
+const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+const timeout = 30000;
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+(async () => {
+  const test = JSON.parse(process.argv[1]);
+  const system = "/opt/pw-browsers/chromium";
+  let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    executablePath = existsSync(system) ? system : undefined;
+  }
+  const browser = await chromium.launch({ executablePath });
+  try {
+    const page = await browser.newPage();
+    const endpoint = `${test.api}/tasks/${test.task}/screenshot`;
+    const fileRequest = (method) => (response) =>
+      response.url() === endpoint && response.request().method() === method;
+    const record = async () => (await fetch(`${test.api}/tasks/${test.task}`)).json();
+
+    await page.goto(`${test.web}/tasks/${test.task}`);
+    const image = page.locator("main").getByRole("img", { name: "screenshot.png" });
+    await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+    const sheet = page.getByRole("dialog");
+    const buffer = Buffer.from(test.png, "base64");
+    const file = { name: "screenshot.png", mimeType: "image/png", buffer };
+    await sheet.locator('input[type="file"]').setInputFiles(file);
+    const uploaded = page.waitForResponse(fileRequest("PUT"), { timeout });
+    await sheet.getByRole("button", { name: "Save", exact: true }).click();
+    const upload = await uploaded;
+    check(upload.status() === 200, `The upload gave the status ${upload.status()}.`);
+    await sheet.waitFor({ state: "hidden", timeout });
+    const stored = (await record()).screenshot;
+    const shown = JSON.stringify(stored);
+    check(stored && stored.name === "screenshot.png", `The task has the file ${shown}.`);
+    check(stored.size === file.buffer.length, `The file has ${stored.size} bytes.`);
+    await image.waitFor({ timeout });
+    const src = await image.getAttribute("src");
+    check(src && src.startsWith(`${test.api}/file-links/`), `The image comes from ${src}.`);
+    const loaded = (img) => img.complete && img.naturalWidth === 48;
+    await page.waitForFunction(loaded, await image.elementHandle(), { timeout });
+
+    await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+    await sheet.getByRole("button", { name: "Remove the file", exact: true }).click();
+    const removed = page.waitForResponse(fileRequest("DELETE"), { timeout });
+    await sheet.getByRole("button", { name: "Save", exact: true }).click();
+    const remove = await removed;
+    check(remove.status() === 200, `The delete gave the status ${remove.status()}.`);
+    await sheet.waitFor({ state: "hidden", timeout });
+    await image.waitFor({ state: "detached", timeout });
+    check((await record()).screenshot === null, "The task has a screenshot after the delete.");
+  } finally {
+    await browser.close();
+  }
+})().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+"""
+SCREENSHOT = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAARklEQVR42u3WsQ0AIAgEQJZxMsd2A93BuACWxoJLvvyEq4"
+    "BofaUZc6d53Q8gIKByoF+Db30gIKB6IJsaCAjIP+R0AAEVBx0soKK1++CmdgAAAABJRU5ErkJggg=="
+)
+"""A PNG image of 48 by 32 pixels, as Base64."""
+
 # The calendar view and its page that the test adds to the definition:
 # the project tracker has no calendar.
 CALENDAR_VIEW = """\
@@ -641,7 +716,7 @@ def check_apps(definition: Path, mock: MockApi) -> None:
         for index, name in enumerate(names)
     ]
     task = {"title": "API task", "project_id": projects[0]["id"]}
-    request("POST", f"{API_URL}/tasks", task)
+    created_task = request("POST", f"{API_URL}/tasks", task)
     log(f"add {PEOPLE_COUNT} people, and {TODO_COUNT} tasks to do, for the large lists")
     people = [
         request(
@@ -731,6 +806,9 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     if not calls:
         raise ApiClientError("The dashboard did not call the holidays API.")
     log(f"the dashboard called the holidays API {len(calls)} times")
+    files = {"api": API_URL, "web": WEB_URL, "task": created_task["id"], "png": SCREENSHOT}
+    log(f"open {WEB_URL}/tasks/{created_task['id']}, and upload and remove a screenshot")
+    run("node", "-e", FILE_CHECK, json.dumps(files))
     check_exposed_api(mock)
 
 

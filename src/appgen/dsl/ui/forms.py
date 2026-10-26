@@ -19,6 +19,7 @@ type Widget = Literal[
     "date",
     "datetime",
     "relation",
+    "file",
     "custom",
 ]
 type FormMode = Literal["dialog", "sheet", "page"]

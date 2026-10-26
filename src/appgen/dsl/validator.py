@@ -1073,6 +1073,14 @@ def _check_sign_up(
                 sign_up,
                 at="fields",
             )
+        elif found.is_file:
+            yield _error(
+                "unsuitable-field",
+                f"The sign-up form cannot upload the file of the '{found.type}' field '{name}'.",
+                sign_up,
+                at="fields",
+                hint="A form of the record can upload the file after the sign-up.",
+            )
     for name, field in entity.stored_fields.items():
         if (
             field.required

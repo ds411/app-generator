@@ -11,13 +11,21 @@
 {%- endmacro %}
 {% set store = "HttpStore" if react.api else "MockStore" %}
 {% set events = ts_events(definition, name) %}
+{# The files of the file fields (ADR 0027): the access of the update operation, else of the create operation. #}
+{% set files = element.file_fields if definition.storage else {} %}
+{% set file_paths = api_entities[name].files if react.api else {} %}
+{% set file_kinds = kind_operations(definition, name) %}
+{% set file_op = file_kinds.get("update") or file_kinds.get("create") %}
+{% set has_files = files and (file_paths if react.api else true) %}
+{% set file_guard = definition.access and file_op and file_op not in definition.auth.public_operations %}
 {# With mock data, the store applies the record rules of the entity (ADR 0018, ADR 0025). #}
 {% set rule = record_rules.get(name) if not react.api else none %}
-{% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded else []) %}
+{% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) else []) %}
+{% set typed = not react.api and not has_files %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
-import { {% if not react.api %}type EntityApi, {% endif %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
+import { {% if typed %}type EntityApi, {% endif %}{% if has_files %}type FileApi, {% endif %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
 {% else %}
-import { {% if not react.api %}type EntityApi, {% endif %}{{ store }} } from "@/shared/api";
+import { {% if typed %}type EntityApi, {% endif %}{% if has_files %}type FileApi, {% endif %}{{ store }} } from "@/shared/api";
 {% endif %}
 
 {% if auth_names %}
@@ -26,7 +34,7 @@ import { {{ auth_names | join(", ") }} } from "@/shared/auth";
 {% endif %}
 {% if react.api %}
 {% set api = api_entities[name] %}
-import type { {{ type }}, {{ type }}Input } from "../model/types";
+import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if has_files }} } from "../model/types";
 
 /** The data access of {{ type }}: the endpoints {{ api.path }} of the FastAPI app. */
 export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_value(name) }}, {{ api.path | tojson }}, {
@@ -54,11 +62,11 @@ export const {{ var }}Options = {{ var }}Api.options((item) => String(item.{{ ap
 {% endfor %}
 {% endif %}
 {% else %}
-import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
+import { {{ var }}Defaults, type {{ type }}{{ ", type " ~ type ~ "FileField" if has_files }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";
 
 /** The data access of {{ type }}. It keeps the records in memory. */
-export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStore<{{ type }}, {{ type }}Input>(
+export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{% endif %} = new MockStore<{{ type }}, {{ type }}Input>(
   {{ ts_value(name) }},
   {{ var }}MockData,
   {{ var }}Defaults,
@@ -151,6 +159,29 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
 {% endif %}
 });
 {% else %}
+);
+{% endif %}
+{% endif %}
+{% if has_files %}
+
+{% if react.api %}
+/** The files of the file fields of {{ type }} (ADR 0027): the endpoints of the files of the FastAPI app. */
+export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = {{ var }}Api.files<{{ type }}FileField>({
+{% for field_name, field in files.items() if (field_name | camel) in file_paths %}
+  {{ field_name | camel }}: {{ ts_value(file_paths[field_name | camel]) }}, {{ trace(field.id) }}
+{% endfor %}
+});
+{% else %}
+/** The files of the file fields of {{ type }} (ADR 0027): the largest file, in bytes, and the media types. */
+export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = {{ var }}Api.files<{{ type }}FileField>(
+  {
+{% for field_name, field in files.items() %}
+    {{ field_name | camel }}: { maxSize: {{ field.size_limit }}, types: {{ ts_value(field.media_types) }} }, {{ trace(field.id) }}
+{% endfor %}
+  },
+{% if file_guard %}
+  () => requireOperation({{ file_op | tojson }}), {{ trace(definition.access.id) }}
+{% endif %}
 );
 {% endif %}
 {% endif %}

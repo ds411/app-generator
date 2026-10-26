@@ -7,7 +7,7 @@ FastAPI binding, which also makes its OpenAPI document. Without the key,
 the React app uses mock data.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from appgen.bindings.fastapi.model import python_app
@@ -55,6 +55,9 @@ class ApiEntity:
     """The query parameters and the sort keys of the list endpoint, for the views."""
     translations: bool = False
     """True if the entity has a translatable field: the client asks for all languages (ADR 0026)."""
+    files: dict[str, str] = field(default_factory=dict[str, str])
+    """The last part of the path of the endpoints of each file field (ADR 0027), by key, for
+    example `testReport: test-report`. Empty if the app has no endpoints of the files."""
 
 
 def data_source(definition: AppDefinition) -> DataSource:
@@ -69,6 +72,7 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
     for name, entity in definition.entities.items():
         py = app.entity(name)
         json_names = {f.id: f.name for f in py.fields}
+        json_names |= {f.id: f.name for f in py.files}
         json_names |= {r.id: r.fk_attr or "" for r in py.relations if r.side == "fk"}
         json_names |= {r.id: r.ids_field or "" for r in py.relations if r.side == "m2m"}
         translations = {f.id: f.translations_name for f in py.translatable}
@@ -106,6 +110,10 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
             ],
             list_endpoint=ListEndpoint(element_params, sort_keys),
             translations=bool(translations),
+            files={
+                keys[f.name]: f.path.removeprefix("/{id}/")
+                for f in (py.files if py.file_endpoints else [])
+            },
         )
     return result
 

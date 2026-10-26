@@ -184,8 +184,9 @@ def test_the_factories_give_a_value_to_each_field_as_the_reference_tells() -> No
         "async def make_task(session: AsyncSession, **values: Any)" in files["tests/factories.py"]
     )
     assert not task.fields["completed_at"].required
-    for name in task.fields:
-        assert f'"{name}":' in payload
+    for name, field in task.fields.items():
+        # The create takes no file: a form uploads it after the create (ADR 0027).
+        assert (f'"{name}":' in payload) != field.is_file
     text = " ".join(section("fastapi").split())
     assert "give a value to each field, also to the optional fields" in text
     assert '`make_task(session, status="todo", completed_at=None)`' in text
