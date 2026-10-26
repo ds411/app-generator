@@ -42,3 +42,4 @@ gives the rules.
 | 0023   | [Verification of the email address](0023-email-verification.md)       | Accepted |
 | 0024   | [Second factor of the sign-in](0024-second-factor.md)                  | Accepted |
 | 0025   | [Record rules with field conditions and owner paths](0025-record-rules.md) | Accepted |
+| 0026   | [Translations of the values of the records](0026-record-translations.md) | Accepted |

@@ -6,11 +6,26 @@ header that the API has, else the default language. `t` gives the
 translation of a text in the language of the request, or the text
 itself. Each response has the locale of the language in the header
 `Content-Language`.
+{% if py.translatable %}
+
+A translatable field has a value in each language (ADR 0026). A read
+gives the value of the language of the request, else the value of the
+default language. A write sets the value of the language of the request.
+With the query parameter `translations=all`, `<field>_translations` gives
+the values of all languages.
+{% endif %}
 """
 
 import re
 from contextvars import ContextVar
+{% if py.translatable %}
+from typing import Annotated, Any, Literal
 
+from fastapi import Query
+from pydantic import BaseModel
+{% else %}
+
+{% endif %}
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 LOCALES: dict[str, str] = {
@@ -33,9 +48,19 @@ MESSAGES: dict[str, dict[str, str]] = {
 }
 """The translations of each language: the key is a text of the default language."""
 
+{% if py.translatable %}
+type Language = Literal[{{ i18n.languages | map(attribute="code") | map("tojson") | join(", ") }}]
+"""The code of a language: a key of the values of a translatable field."""
+TRANSLATIONS = "`all` gives the values of all languages in `<field>_translations`."
+"""The description of the query parameter `translations`."""
+{% endif %}
+
 _TAGS = {code: {code.lower().replace("_", "-"), locale.lower()} for code, locale in LOCALES.items()}
 _VALUE = re.compile(r"\{(\w+)\}")
 _language: ContextVar[str] = ContextVar("language", default=DEFAULT)
+{% if py.translatable %}
+_all_translations: ContextVar[bool] = ContextVar("all_translations", default=False)
+{% endif %}
 
 
 def language() -> str:
@@ -90,6 +115,85 @@ def match_language(accept_language: str | None) -> str:
     return DEFAULT
 
 
+{% if py.translatable %}
+def show_translations(translations: str | None) -> None:
+    """Give the values of all languages in the reads of the request, for `translations=all`."""
+    _all_translations.set(translations == "all")
+
+
+async def translations_query(
+    translations: Annotated[Literal["all"] | None, Query(description=TRANSLATIONS)] = None,
+) -> None:
+    """The query parameter `translations` of the endpoints that return a record."""
+    show_translations(translations)
+
+
+def translated[M: BaseModel](model: M, *names: str) -> M:
+    """Give the translatable fields of a read the values of the language of the request.
+
+    The record keeps the value of the default language in the field, and
+    the values of the other languages in `<field>_translations`. A field
+    without a value in the language of the request keeps the value of the
+    default language. With `translations=all`, `<field>_translations` has
+    the values of all languages, else it is null.
+    """
+    selected = _language.get()
+    for name in names:
+        key = f"{name}_translations"
+        default = getattr(model, name)
+        stored: dict[str, Any] = getattr(model, key) or {}
+        values = {code: value for code, value in stored.items() if code in LOCALES and value}
+        if _all_translations.get():
+            setattr(model, key, ({DEFAULT: default} if default else {}) | values)
+        else:
+            setattr(model, key, None)
+        if selected != DEFAULT and selected in values:
+            setattr(model, name, values[selected])
+    return model
+
+
+def store_translations(
+    record: object, values: dict[str, Any], *names: str, created: bool = False
+) -> None:
+    """Set the values of the translatable fields of a request on a record.
+
+    A field of the request has the value of the language of the request:
+    the default language sets the field, another language sets its value in
+    `<field>_translations`. A new record without a value of the default
+    language takes the value of the request. `<field>_translations` of the
+    request sets the value of each language that it gives. Null or an
+    empty text removes the value of a language that is not the default.
+    """
+    selected = _language.get()
+    for name in names:
+        key = f"{name}_translations"
+        given: dict[str, Any] = values.pop(key, None) or {}
+        stored: dict[str, Any] = dict(getattr(record, key) or {})
+        if name in values:
+            value = values.pop(name)
+            if selected == DEFAULT or (created and DEFAULT not in given):
+                setattr(record, name, value)
+            if selected != DEFAULT:
+                stored[selected] = value
+        for code, value in given.items():
+            if code == DEFAULT:
+                setattr(record, name, value)
+            else:
+                stored[code] = value
+        kept = {code: value for code, value in stored.items() if code != DEFAULT and value}
+        setattr(record, key, kept or None)
+
+
+def reject_empty_default[M: BaseModel](model: M, *names: str) -> M:
+    """Reject null as the value of the default language of the required translatable fields."""
+    for name in names:
+        values: dict[str, Any] = getattr(model, f"{name}_translations") or {}
+        if DEFAULT in values and values[DEFAULT] is None:
+            raise ValueError(f"The field '{name}' needs a value in the default language.")
+    return model
+
+
+{% endif %}
 class LanguageMiddleware:
     """Select the language of each request, and give the response its `Content-Language`."""
 
@@ -120,7 +224,13 @@ class LanguageMiddleware:
             await send(message)
 
         token = _language.set(selected)
+{% if py.translatable %}
+        all_token = _all_translations.set(False)
+{% endif %}
         try:
             await self.app(scope, receive, send_with_language)
         finally:
+{% if py.translatable %}
+            _all_translations.reset(all_token)
+{% endif %}
             _language.reset(token)

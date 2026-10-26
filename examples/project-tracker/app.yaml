@@ -64,8 +64,8 @@ entities:
     description: A piece of work in a project.
     display_field: title
     fields:
-      title: { type: string, required: true, max_length: 200 }
-      description: { type: text }
+      title: { type: string, required: true, max_length: 200, translatable: true }
+      description: { type: text, translatable: true }
       status:
         type: enum
         values: [todo, in_progress, in_review, done]

@@ -111,6 +111,17 @@ def check_names(definition: AppDefinition) -> Iterator[Diagnostic]:
                     member,
                     hint="Use another name. Each entity has an implicit 'id' field.",
                 )
+        names = {*entity.fields, *entity.relations}
+        for name, field in entity.fields.items():
+            translations = f"{name}_translations"
+            if field.translatable and translations in names:
+                yield _error(
+                    "duplicate-name",
+                    f"The name '{translations}' is the name of the values of the translatable "
+                    f"field '{name}' in each language.",
+                    entity.fields.get(translations) or entity.relations[translations],
+                    hint="Rename the field or the relation.",
+                )
         for name, relation in entity.relations.items():
             column = f"{name}_id"
             if relation.kind in SINGLE_KINDS and column in entity.fields:
@@ -233,10 +244,26 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
     for entity in definition.entities.values():
         for field in entity.fields.values():
             yield from _check_field(field)
+            if field.translatable and definition.translations is None:
+                yield _error(
+                    "invalid-option",
+                    "A translatable field needs the languages of the section 'translations'.",
+                    field,
+                    at="translatable",
+                    hint="Add the section 'translations', or remove 'translatable'.",
+                )
+            if field.translatable and field.computed is not None:
+                yield _error(
+                    "invalid-option",
+                    "A computed field cannot be translatable.",
+                    field,
+                    at="translatable",
+                    hint="Remove 'translatable'. The apps compute the value.",
+                )
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
-            for key in ("unique", "computed"):
+            for key in ("unique", "computed", "translatable"):
                 if getattr(param, key):
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
@@ -1618,6 +1645,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "scale": {"decimal"},
         "values": {"enum"},
         "currency": NUMBER_TYPES,
+        "translatable": {"string", "text"},
     }
     for key, types in allowed.items():
         if key in field.model_fields_set and field.type not in types:

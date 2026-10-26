@@ -412,6 +412,26 @@ translations come from the `translations` section of the definition
 extension file, for example `ProblemError(422, t("The room is closed."))`,
 and add its translation to the definition.
 
+{% if py.translatable %}
+### Values in each language
+
+These fields have a value in each language:
+
+{% for e in py.entity_order() %}
+{% for f in e.translatable %}
+- `{{ e.name }}.{{ f.name }}`
+{% endfor %}
+{% endfor %}
+
+A read gives the value of the language of the request, else the value
+of the default language. With the query parameter `translations=all`, a
+read also gives the values of all languages in `<field>_translations`.
+A create or a change sets the value of the language of the request, and
+`<field>_translations` sets the value of each language that it gives.
+The table keeps the value of the default language in the column of the
+field, so the search, the sort, and the filters use it.
+
+{% endif %}
 {% endif %}
 ## Endpoints
 

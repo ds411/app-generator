@@ -4,9 +4,12 @@
 
 import asyncio
 from logging.config import fileConfig
+from typing import Literal
 
 from alembic import context
+from alembic.autogenerate.api import AutogenContext
 from sqlalchemy import pool
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -36,12 +39,24 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def render_item(type_: str, obj: object, autogen_context: AutogenContext) -> str | Literal[False]:
+    """Write the JSON type of Postgres as the first migration writes it.
+
+    Alembic writes `postgresql.JSONB(astext_type=Text())`, without an import of `Text`.
+    """
+    if type_ == "type" and isinstance(obj, JSONB):
+        autogen_context.imports.add("from sqlalchemy.dialects import postgresql")
+        return "postgresql.JSONB()"
+    return False
+
+
 def do_run_migrations(connection: Connection) -> None:
     # SQLite cannot alter a table: batch mode copies the table for each change.
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         render_as_batch=connection.dialect.name == "sqlite",
+        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()

@@ -3048,6 +3048,11 @@
             }
           ],
           "default": null
+        },
+        "translatable": {
+          "default": false,
+          "title": "Translatable",
+          "type": "boolean"
         }
       },
       "required": [

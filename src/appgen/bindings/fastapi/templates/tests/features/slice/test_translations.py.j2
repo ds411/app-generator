@@ -1,0 +1,148 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set lt = i18n_test %}
+{% set f = e.translatable[0] %}
+{% set operations = e.operations | rejectattr("custom") | list %}
+{% set create_op = operations | selectattr("kind", "eq", "create") | first | default(none) %}
+{% set read_op = operations | selectattr("kind", "eq", "read") | first | default(none) %}
+{% set update_op = operations | selectattr("kind", "eq", "update") | first | default(none) %}
+{% set list_op = operations | selectattr("kind", "eq", "list") | first | default(none) %}
+"""The translatable fields of the entity {{ e.name }} in two languages (ADR 0026).
+
+The record keeps the value of the default language in the field, and the
+values of the other languages in `<field>_translations`.
+"""
+
+{% set ns = namespace(lines=[
+    "import pytest",
+    "from httpx import AsyncClient",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from app.core.i18n import DEFAULT",
+    py.from_import("tests.factories", ["make_" ~ e.snake] + ([e.snake ~ "_input"] if create_op else [])),
+]) %}
+{% if update_op and f.required %}
+{% set ns.lines = ns.lines + ["from tests.problems import assert_problem"] %}
+{% endif %}
+{% if list_op %}
+{% set ns.lines = ns.lines + ["from typing import Any"] %}
+{% endif %}
+{{ py.imports(ns.lines) }}
+
+pytestmark = pytest.mark.anyio
+
+SECOND = {{ py.string(lt.second.code) }}
+"""A language that is not the default language."""
+IN_SECOND = {"Accept-Language": {{ py.string(lt.second_tag) }}}
+"""The headers of a request in the second language."""
+IN_UNKNOWN = {"Accept-Language": {{ py.string(lt.unknown_tag) }}}
+"""The headers of a request in a language that the API does not have."""
+ALL = {"translations": "all"}
+"""The query of a request for the values of all languages."""
+FIELD = {{ py.string(f.name) }}
+"""A translatable field."""
+VALUES = {{ py.string(f.translations_name) }}
+"""The values of the field in each language."""
+
+
+def sample(n: int) -> str:
+    """Return a valid value of the field."""
+    return {{ f.sample }}
+{% if read_op %}
+
+
+{{ trace(read_op.id) }}
+async def test_a_read_gives_the_value_of_the_language_of_the_request(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session, **{FIELD: sample(1001)})
+    record.{{ f.translations_attr }} = {SECOND: sample(1002)}
+    await session.commit()
+    url = f"{{ e.path ~ (read_op.path | replace("{id}", "{record.id}")) }}"
+    cases = [(None, sample(1001)), (IN_SECOND, sample(1002)), (IN_UNKNOWN, sample(1001))]
+
+    for headers, value in cases:
+        response = await client.get(url, headers=headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()[FIELD] == value
+        assert response.json()[VALUES] is None
+
+    response = await client.get(url, params=ALL, headers=IN_SECOND)
+
+    assert response.json()[FIELD] == sample(1002)
+    assert response.json()[VALUES] == {DEFAULT: sample(1001), SECOND: sample(1002)}
+{% endif %}
+{% if update_op %}
+
+
+{{ trace(update_op.id) }}
+async def test_a_change_sets_the_value_of_the_language_of_the_request(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session, **{FIELD: sample(1001)})
+    url = f"{{ e.path ~ (update_op.path | replace("{id}", "{record.id}")) }}"
+
+    response = await client.patch(url, json={FIELD: sample(1002)}, headers=IN_SECOND)
+
+    assert response.status_code == 200, response.text
+    assert response.json()[FIELD] == sample(1002)
+    response = await client.patch(url, json={}, params=ALL)
+    assert response.json()[FIELD] == sample(1001)
+    assert response.json()[VALUES] == {DEFAULT: sample(1001), SECOND: sample(1002)}
+
+    changes = {VALUES: {DEFAULT: sample(1003), SECOND: None}}
+    response = await client.patch(url, json=changes, params=ALL, headers=IN_SECOND)
+
+    assert response.status_code == 200, response.text
+    assert response.json()[FIELD] == sample(1003)
+    assert response.json()[VALUES] == {DEFAULT: sample(1003)}
+{% if f.required %}
+
+    response = await client.patch(url, json={VALUES: {DEFAULT: None}})
+
+    assert_problem(response, 422)
+{% endif %}
+{% endif %}
+{% if create_op %}
+
+
+{{ trace(create_op.id) }}
+async def test_a_new_record_takes_the_value_of_the_request_as_its_default(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    data = await {{ e.snake }}_input(session, **{FIELD: sample(1001)})
+
+    response = await client.post("{{ e.path ~ create_op.path }}", json=data, params=ALL, headers=IN_SECOND)
+
+    assert response.status_code == {{ create_op.status }}, response.text
+    assert response.json()[VALUES] == {DEFAULT: sample(1001), SECOND: sample(1001)}
+
+    data = await {{ e.snake }}_input(session, **{FIELD: sample(1002)})
+    data[VALUES] = {DEFAULT: sample(1003), SECOND: sample(1004)}
+    response = await client.post("{{ e.path ~ create_op.path }}", json=data, params=ALL)
+
+    assert response.status_code == {{ create_op.status }}, response.text
+    assert response.json()[FIELD] == sample(1003)
+    assert response.json()[VALUES] == {DEFAULT: sample(1003), SECOND: sample(1004)}
+{% endif %}
+{% if list_op %}
+
+
+{{ trace(list_op.id) }}
+async def test_a_list_gives_the_values_of_the_language_of_the_request(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session, **{FIELD: sample(1001)})
+    record.{{ f.translations_attr }} = {SECOND: sample(1002)}
+    await session.commit()
+
+    response = await client.get("{{ e.path ~ list_op.path }}", headers=IN_SECOND)
+
+    assert response.status_code == 200, response.text
+    items: list[dict[str, Any]] = response.json()["items"]
+    assert [item[FIELD] for item in items if item["id"] == str(record.id)] == [sample(1002)]
+    response = await client.get("{{ e.path ~ list_op.path }}", params=ALL)
+    items = response.json()["items"]
+    expected = {DEFAULT: sample(1001), SECOND: sample(1002)}
+    assert [item[VALUES] for item in items if item["id"] == str(record.id)] == [expected]
+{% endif %}

@@ -77,6 +77,8 @@ class Field(Element):
     """The ISO 4217 code of the currency of the `currency` format, for example `EUR`."""
     computed: Text | None = None
     """An expression of other fields (see `appgen.dsl.expressions`). The apps compute the value."""
+    translatable: bool = False
+    """The records have a value of the field in each language of `translations` (ADR 0026)."""
 
 
 class Relation(Element):
