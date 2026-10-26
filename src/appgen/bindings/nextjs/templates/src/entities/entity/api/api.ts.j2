@@ -3,19 +3,23 @@
 {% set var = name | camel %}
 {% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | list %}
 {% set lists = inverse_lists(definition, name) %}
-{% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
-import { createEntityApi, type EntityApi, type ListQuery, type ListResult } from "@/shared/api";
-{% else %}
-import { createEntityApi, type EntityApi } from "@/shared/api";
-{% endif %}
+{% set files = element.file_fields if definition.storage else {} %}
+{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) %}
+import { {{ api_names | join(", ") }} } from "@/shared/api";
 
-import type { {{ type }}, {{ type }}Input } from "../model/types";
+import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
 import {
   create{{ type }}Action,
   get{{ type }}Action,
   list{{ type }}Action,
   remove{{ type }}Action,
+{% if files %}
+  remove{{ type }}FileAction,
+{% endif %}
   update{{ type }}Action,
+{% if files %}
+  upload{{ type }}FileAction,
+{% endif %}
 } from "./{{ name | kebab }}-actions";
 
 /** The data access of {{ type }}. It calls the server actions, in the browser and on the server. */
@@ -26,6 +30,14 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = createEntity
   update: update{{ type }}Action,
   remove: remove{{ type }}Action,
 });
+{% if files %}
+
+/** The files of the file fields of {{ type }} (ADR 0027): the upload and the delete. */
+export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = createFileApi({{ ts_value(name) }}, {
+  upload: upload{{ type }}FileAction,
+  remove: remove{{ type }}FileAction,
+});
+{% endif %}
 {% for op_name, op in ops %}
 
 {% if op.description %}

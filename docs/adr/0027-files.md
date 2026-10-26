@@ -145,8 +145,12 @@ file in their code, as text (Base64). A seed file can have 1 MB or less.
   policy with `sandbox`, so that a file cannot run scripts. The S3
   storage uses boto3 in worker threads.
 - Next.js: the server actions of the forms take the files in their
-  form data. A route handler gives a file. It checks the session and the
-  access rules of the record, as a read does.
+  form data (`upload<Entity>FileAction`). A route handler gives a file
+  (`/files/<entity>/<id>/<field>`). It checks the session and the
+  access rules of the record, as a read does, so the URL needs no
+  signature. The S3 storage uses `@aws-sdk/client-s3`. Next.js limits
+  the body of a server action to 1 MB by default, so `next.config.ts`
+  allows the largest file of the file fields and 1 MB more.
 - React: the mock data keeps an uploaded file in the browser tab. With
   `x-react-data: api`, the forms call the endpoints of the FastAPI app.
 

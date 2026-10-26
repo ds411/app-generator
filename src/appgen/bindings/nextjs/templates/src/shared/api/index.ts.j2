@@ -1,5 +1,9 @@
 {{ trace_header("app") }}
+{% if definition.storage %}
+export { createEntityApi, createFileApi, type EntityActions, type FileActions, notifyChange } from "./client";
+{% else %}
 export { createEntityApi, type EntityActions, notifyChange } from "./client";
+{% endif %}
 export {
   type ActionError,
   type ActionResult,
@@ -10,6 +14,10 @@ export {
 export type {
   EntityApi,
   EntityRecord,
+{% if definition.storage %}
+  FileApi,
+  FileValue,
+{% endif %}
   Filter,
   FilterOp,
   ListQuery,

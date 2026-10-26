@@ -20,6 +20,7 @@ from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kinds
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
+from appgen.dsl.storage import format_size
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
@@ -35,6 +36,7 @@ _VERIFY_EMAIL = (
 )
 _MESSAGES = f"definition.auth and (definition.auth.password_reset or ({_VERIFY_EMAIL}))"
 _SECOND_FACTOR = "definition.auth and definition.auth.second_factor"
+_LOCAL_FILES = "definition.storage and definition.storage.kind == 'local'"
 
 # The app shell: the layouts, the menus, the breadcrumbs, and the search
 # (shared templates, see `appgen.bindings.shared.ui`). Each layout with
@@ -167,6 +169,11 @@ BINDING = Binding(
                 "secret.example.env",
             )
         ),
+        Output(
+            template="deploy/kubernetes/files-volume.yaml.j2",
+            path="deploy/kubernetes/files-volume.yaml",
+            when=f"'kubernetes' in nextjs.deploy and {_LOCAL_FILES}",
+        ),
         *(
             Output(
                 template=f"deploy/knative/{name}.j2",
@@ -267,6 +274,11 @@ BINDING = Binding(
         Output(template="src/shared/db/migrate.ts.j2", path="src/shared/db/migrate.ts"),
         Output(template="src/shared/db/seed.ts.j2", path="src/shared/db/seed.ts"),
         Output(template="src/shared/db/seed-data.ts.j2", path="src/shared/db/seed-data.ts"),
+        Output(
+            template="src/shared/db/seed-files.ts.j2",
+            path="src/shared/db/seed-files.ts",
+            when="nextjs.seed_files",
+        ),
         Output(template="src/shared/db/run-seed.ts.j2", path="src/shared/db/run-seed.ts"),
         Output(template="src/shared/db/run-migrate.ts.j2", path="src/shared/db/run-migrate.ts"),
         Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
@@ -379,6 +391,22 @@ BINDING = Binding(
             for_each="entity",
         ),
         Output(template="src/shared/db/repository.ts.j2", path="src/shared/db/repository.ts"),
+        # The storage of the files of the file fields, and a route of the files of each entity
+        # with file fields (ADR 0027).
+        *(
+            Output(
+                template=f"src/shared/storage/{name}.j2",
+                path=f"src/shared/storage/{name}",
+                when="definition.storage",
+            )
+            for name in ("storage.ts", "upload.ts", "index.ts")
+        ),
+        Output(
+            template="app/files/route.ts.j2",
+            path="app/files/{{ name | kebab }}/[id]/[field]/route.ts",
+            for_each="entity",
+            when="element.file_fields",
+        ),
         Output(template="src/shared/api/types.ts.j2", path="src/shared/api/types.ts"),
         Output(template="src/shared/api/errors.ts.j2", path="src/shared/api/errors.ts"),
         Output(template="src/shared/api/client.ts.j2", path="src/shared/api/client.ts"),
@@ -506,6 +534,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"entity_seed", "seed_record"}
         | {"job"}
+        | {"storage"}
     ),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
@@ -515,7 +544,8 @@ BINDING = Binding(
     | ui.HELPERS
     | views.HELPERS
     | {"public_kinds": public_kinds, "kind_operations": kind_operations}
-    | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys},
+    | {"gap_spec": gap_spec, "rule_key": db.record_key, "rule_keys": db.record_keys}
+    | {"size_text": format_size},
     stub_markers=("TODO(appgen)", "Not implemented yet"),
     extension_keys=(
         ExtensionKey(

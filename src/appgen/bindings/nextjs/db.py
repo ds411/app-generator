@@ -9,6 +9,7 @@ The templates of `src/shared/db/schema/` render these values. The seed
 of `src/shared/db/seed.ts` fills the tables with the shared mock records.
 """
 
+import base64
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.bindings.shared.typescript import translations_key
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.dsl.rules import EntityUniqueRule
+from appgen.dsl.storage import SeedFile
 from appgen.gen.naming import camel, snake
 from appgen.gen.render import GenerationError
 
@@ -36,6 +38,8 @@ class Column:
     element_id: str
     imports: tuple[str, ...]
     """The builders that the column imports from `drizzle-orm/pg-core`."""
+    file: bool = False
+    """True for the column of a file field: a `StoredFile` value (ADR 0027)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +182,11 @@ class Table:
         return sorted(names, key=lambda name: name.removeprefix("type "))
 
     @property
+    def files(self) -> list[Column]:
+        """The columns of the file fields (ADR 0027)."""
+        return [column for column in self.columns if column.file]
+
+    @property
     def relation_helpers(self) -> str:
         """The helpers of the `relations()` callback of the table, for example `one, many`."""
         kinds = {r.kind for r in self.relations}
@@ -236,9 +245,11 @@ def column_builder(name: str, spec: Field) -> tuple[str, tuple[str, ...], str | 
         case "enum":
             enum_const = "<enum>"
             code, imports = f'<enum>("{column}")', ()
-        case "json" | "file" | "image":
-            # A file field keeps the key, the name, the size, and the type of its file (ADR 0027).
+        case "json":
             code, imports = f'jsonb("{column}")', ("jsonb",)
+        case "file" | "image":
+            # A file field keeps the key, the name, the size, and the type of its file (ADR 0027).
+            code, imports = f'jsonb("{column}").$type<StoredFile>()', ("jsonb",)
     if spec.required:
         code += ".notNull()"
     if spec.unique:
@@ -273,7 +284,7 @@ def build_tables(definition: AppDefinition) -> list[Table]:
                     )
                 )
                 code = code.replace("<enum>", const)
-            table.columns.append(Column(camel(field_name), code, spec.id, imports))
+            table.columns.append(Column(camel(field_name), code, spec.id, imports, spec.is_file))
             if spec.translatable:
                 code = f'jsonb("{snake(field_name)}_translations").$type<Record<string, string>>()'
                 table.columns.append(
@@ -498,6 +509,29 @@ class SeedRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class SeedFileCode:
+    """The file of a file field of a seed record (ADR 0027), as Base64 text in the code."""
+
+    element_id: str
+    """The element of the record, for example `seed.Task.records.board`."""
+    record_id: str
+    key: str
+    """The key of the file in the storage, for example `task/<id>/screenshot/seed-<hash>`."""
+    type: str
+    content: str
+    """The content in Base64."""
+
+    _CHUNK = 76
+
+    def lines(self) -> list[str]:
+        """Return the lines of the content: TypeScript strings that `+` joins."""
+        return [
+            json.dumps(self.content[i : i + self._CHUNK])
+            for i in range(0, len(self.content), self._CHUNK)
+        ] or ['""']
+
+
+@dataclass(frozen=True, slots=True)
 class SeedTable:
     """The seed records of a table, as TypeScript object literals.
 
@@ -517,6 +551,8 @@ class SeedTable:
     records: list[SeedRecord] = field(default_factory=list[SeedRecord])
     record_links: list[str] = field(default_factory=list[str])
     record_joins: list[SeedJoin] = field(default_factory=list[SeedJoin])
+    files: list[SeedFileCode] = field(default_factory=list[SeedFileCode])
+    """The files of the file fields of the seed records (ADR 0027)."""
 
     @property
     def const(self) -> str:
@@ -535,6 +571,11 @@ class SeedTable:
     @property
     def record_links_const(self) -> str:
         return self.records_const.removesuffix("Records") + "RecordLinks"
+
+    @property
+    def files_const(self) -> str:
+        """The TypeScript name of the files of the seed records, for example `taskSeedFiles`."""
+        return self.records_const.removesuffix("Records") + "SeedFiles"
 
 
 def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTable]:
@@ -559,8 +600,17 @@ def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTabl
         keys = list(seed.records) if seed is not None else []
         generated = _SeedRows(definition, table)
         fixed = _SeedRows(definition, table)
+        files: list[SeedFileCode] = []
         for index, record in enumerate(data[table.entity]):
-            (fixed if index < len(seeds.get(table.entity, [])) else generated).add(entity, record)
+            if seed is None or index >= len(seeds.get(table.entity, [])):
+                generated.add(entity, record)
+                continue
+            element_id = f"{seed.id}.records.{keys[index]}"
+            stored: dict[str, dict[str, Any]] = {}
+            for name, seed_file in seed.records[keys[index]].files.items():
+                code, stored[name] = _seed_file(element_id, table, record["id"], name, seed_file)
+                files.append(code)
+            fixed.add(entity, record, stored)
         result[table.entity] = SeedTable(
             table,
             generated.rows,
@@ -574,8 +624,26 @@ def seed_tables(definition: AppDefinition, tables: list[Table]) -> list[SeedTabl
             ],
             record_links=fixed.links,
             record_joins=fixed.joins,
+            files=files,
         )
     return [result[entity] for entity in _insert_order(definition, by_entity)]
+
+
+def _seed_file(
+    element_id: str, table: Table, record_id: str, name: str, seed_file: SeedFile
+) -> tuple[SeedFileCode, dict[str, Any]]:
+    """Return the file of a file field of a seed record, and the value of its column.
+
+    The key has a part of the hash of the content, so that a changed file
+    gets a new key, as an upload does.
+    """
+    content = seed_file.content or b""
+    digest = seed_file.hash.removeprefix("sha256:")[:12]
+    key = f"{table.name}/{record_id}/{camel(name)}/seed-{digest}"
+    media_type = seed_file.media_type or "application/octet-stream"
+    value = {"key": key, "name": seed_file.name, "size": len(content), "type": media_type}
+    encoded = base64.b64encode(content).decode()
+    return SeedFileCode(element_id, record_id, key, media_type, encoded), value
 
 
 class _SeedRows:
@@ -588,10 +656,17 @@ class _SeedRows:
         self.links: list[str] = []
         self.joins = [SeedJoin(join, []) for join in table.join_tables]
 
-    def add(self, entity: Entity, record: dict[str, Any]) -> None:
+    def add(
+        self, entity: Entity, record: dict[str, Any], files: dict[str, dict[str, Any]] | None = None
+    ) -> None:
+        """Add a record. `files` has the value of each file field of a seed record with a file."""
         row = [("id", json.dumps(record["id"]))]
         link: list[tuple[str, str]] = []
         for field_name, spec in entity.stored_fields.items():
+            if spec.is_file:
+                value = (files or {}).get(field_name)
+                row.append((camel(field_name), _ts_object_of(value) if value else "null"))
+                continue
             row.append((camel(field_name), _ts_value(record.get(field_name), spec)))
             if spec.translatable:
                 values = record.get(f"{field_name}_translations")
@@ -654,6 +729,11 @@ def _ts_value(value: Any, spec: Field) -> str:
 
 def _ts_object(entries: list[tuple[str, str]]) -> str:
     return "{ " + ", ".join(f"{key}: {value}" for key, value in entries) + " }"
+
+
+def _ts_object_of(value: dict[str, Any]) -> str:
+    """Return a TypeScript object literal of a dict of JSON values."""
+    return _ts_object([(key, json.dumps(item, ensure_ascii=False)) for key, item in value.items()])
 
 
 @dataclass(frozen=True, slots=True)

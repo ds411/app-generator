@@ -25,6 +25,7 @@ from appgen.dsl.ui.fields import FieldTarget, default_widget, resolve_path
 from appgen.dsl.ui.forms import CompareRule, CustomRule, Form, FormField
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel, kebab, pascal
+from appgen.gen.render import GenerationError
 
 type ValueKind = Literal[
     "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json"
@@ -503,6 +504,10 @@ def default_widget_of(param: Field) -> str | None:
 def _value_field(
     name: str, key: str, form_field: FormField, value: Field, widget: str
 ) -> FieldPlan:
+    if value.is_file:
+        raise GenerationError(
+            f"The forms do not take '{value.type}' fields yet: '{value.id}' in '{form_field.id}'."
+        )
     kind = _KINDS[value.type]
     if kind == "text":
         value_type = "string"

@@ -94,6 +94,26 @@ spec:
               value: ""
 {% endif %}
 {% endfor %}
+{% if definition.storage %}
+{% set st = definition.storage %}
+            {{ trace(st.id) }}
+{% if st.kind == "s3" %}
+            # The bucket of the files of the file fields.
+            - name: {{ st.bucket_env }}
+              value: {{ app.name }}-files
+            - name: {{ st.region_env }}
+              value: eu-central-1
+            # The URL of a service that is not Amazon S3. Empty: Amazon S3.
+            - name: {{ st.endpoint_env }}
+              value: ""
+{% else %}
+            # The folder of the files of the file fields. The instances do not
+            # share it, and a new instance starts without the files: use the
+            # storage kind s3 for more than one instance.
+            - name: {{ st.folder_env }}
+              value: /app/uploads
+{% endif %}
+{% endif %}
             # The secrets. In Cloud Run, `name` is a secret of Secret Manager
             # and `key` its version. In Knative, `name` is a Kubernetes Secret
             # and `key` the key of the value in it.
@@ -136,6 +156,16 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ name }}-{{ p.client_secret_env | lower | replace("_", "-") }}
+                  key: latest
+{% endfor %}
+{% endif %}
+{% if definition.storage and definition.storage.kind == "s3" %}
+            {{ trace(definition.storage.id) }}
+{% for env in (definition.storage.access_key_env, definition.storage.secret_key_env) %}
+            - name: {{ env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-{{ env | lower | replace("_", "-") }}
                   key: latest
 {% endfor %}
 {% endif %}

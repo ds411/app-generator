@@ -812,6 +812,10 @@ class ViewContext:
         member = target.member
         member_label = label(last)
         if isinstance(member, Field):
+            if member.is_file:
+                raise GenerationError(
+                    f"The views do not show '{member.type}' fields yet: '{member.id}'."
+                )
             member_label = member.label or member_label
             raw = f"{expr}{dot}{camel(last)}"
             if member.computed is not None:

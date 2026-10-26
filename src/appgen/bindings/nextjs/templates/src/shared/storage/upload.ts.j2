@@ -1,0 +1,39 @@
+{{ trace_header(definition.storage.id) }}
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+
+import { ValidationError } from "@/shared/api";
+
+import { allows, fileName, type FileRule, getStorage, mediaTypeOf, sizeText, type StoredFile } from "./storage";
+
+/**
+ * Check an uploaded file against the rule of its field, save it, and return
+ * its value (ADR 0027). A file that is larger than the rule allows, or a
+ * media type that the rule does not allow, gives a ValidationError for the
+ * key of the field. The key of the file is new: `<folder>/<random hex>`.
+ */
+export async function uploadFile(
+  file: FormDataEntryValue | null,
+  rule: FileRule,
+  folder: string,
+  field: string,
+): Promise<StoredFile> {
+  if (!(file instanceof File)) {
+    const message = {{ tr(js("Select a file.")) }};
+    throw new ValidationError(message, [{ path: field, message }]);
+  }
+  if (file.size > rule.maxSize) {
+    const message = {{ js_format("The file is larger than {size}.", size="sizeText(rule.maxSize)") }};
+    throw new ValidationError(message, [{ path: field, message }]);
+  }
+  const content = new Uint8Array(await file.arrayBuffer());
+  const type = mediaTypeOf(content, file.type);
+  if (!allows(rule, type)) {
+    const message = {{ js_format("The type {type} is not allowed. Use one of: {types}.", type="type", types='rule.types.join(", ")') }};
+    throw new ValidationError(message, [{ path: field, message }]);
+  }
+  const key = `${folder}/${randomUUID().replaceAll("-", "")}`;
+  await getStorage().save(key, content, type);
+  return { key, name: fileName(file.name), size: content.byteLength, type };
+}

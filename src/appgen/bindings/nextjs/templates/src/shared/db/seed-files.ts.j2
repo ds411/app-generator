@@ -1,0 +1,29 @@
+{{ trace_header(definition.storage.id) }}
+// The files of the seed records (ADR 0027), as Base64 text, so that the
+// code of the app holds no binary files. The seed saves each file in the
+// storage when it adds its record.
+
+/** A file of a seed record: the ID of the record, the key in the storage, the media type, and the content in Base64. */
+export type SeedFile = {
+  recordId: string;
+  key: string;
+  type: string;
+  content: string;
+};
+{% for seed in nextjs.seed if seed.files %}
+
+{{ trace(seed.seed_id) }}
+export const {{ seed.files_const }}: SeedFile[] = [
+{% for file in seed.files %}
+  { {{ trace(file.element_id, scope="begin") }}
+    recordId: {{ file.record_id | tojson }},
+    key: {{ file.key | tojson }},
+    type: {{ file.type | tojson }},
+    content:
+{% for line in file.lines() %}
+      {{ line }}{{ " +" if not loop.last else "," }}
+{% endfor %}
+  }, {{ trace(file.element_id, scope="end") }}
+{% endfor %}
+];
+{% endfor %}

@@ -1,6 +1,10 @@
 {{ trace_header(element_id) }}
 {% set type = name | pascal %}
 {% set all = members(name, element) %}
+{% set files = all | rejectattr("input") | list %}
+{% if files %}
+import type { FileValue } from "@/shared/api";
+{% endif %}
 {% for m in all if m.field and m.field.type == "enum" %}
 {% if loop.first %}
 
@@ -19,19 +23,24 @@ export type {{ type }} = {
 {% endfor %}
 };
 
-/** The values that create a {{ type }}. The keys without a value get their defaults. */
+/** The values that create a {{ type }}. The keys without a value get their defaults.{{ " The files have their own upload." if files }} */
 export type {{ type }}Input = {
-{% for m in all %}
+{% for m in all if m.input %}
   {{ m.key }}{{ "" if m.input_required else "?" }}: {{ m.ts_type }}{{ " | null" if m.nullable }};
 {% endfor %}
 };
 
 /** The value of each optional key that the create input does not have. */
 export const {{ name | camel }}Defaults: Partial<Omit<{{ type }}, "id">> = {
-{% for m in all if not m.input_required %}
+{% for m in all if not m.input_required and m.input %}
   {{ m.key }}: {{ ts_value(m.default) }},
 {% endfor %}
 };
+{% if files %}
+
+/** The file fields of {{ type }} (ADR 0027). */
+export type {{ type }}FileField = {{ files | map(attribute="key") | map("tojson") | join(" | ") }};
+{% endif %}
 {% for op_name, op in operations_of(definition, name) if op.kind == "custom" and op.params %}
 
 /** The parameters of the operation {{ op_name }}. */

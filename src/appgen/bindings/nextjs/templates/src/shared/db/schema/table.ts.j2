@@ -4,6 +4,13 @@
 import { relations } from "drizzle-orm";
 {% endif %}
 import { {{ table.pg_imports | join(", ") }} } from "drizzle-orm/pg-core";
+{% if table.files %}
+
+import type { StoredFile } from "@/shared/storage";
+{% if table.related_modules %}
+
+{% endif %}
+{% endif %}
 {% for module, const in table.related_modules %}
 import { {{ const }} } from "./{{ module }}";
 {% endfor %}

@@ -67,7 +67,17 @@ spec:
           volumeMounts:
             - name: cache
               mountPath: /app/.next/cache
+{% if definition.storage and definition.storage.kind == "local" %}
+            {{ trace(definition.storage.id) }}
+            - name: files
+              mountPath: /app/uploads
+{% endif %}
       volumes:
         - name: cache
           emptyDir:
             sizeLimit: 256Mi
+{% if definition.storage and definition.storage.kind == "local" %}
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ name }}-files
+{% endif %}

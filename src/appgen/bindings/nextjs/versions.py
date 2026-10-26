@@ -85,6 +85,9 @@ SECOND_FACTOR_PACKAGES: dict[str, str] = {"uqr": "0.1.3"}
 `uqr` makes the QR code of the secret in the browser, without a service on the network.
 """
 
+S3_PACKAGES: dict[str, str] = {"@aws-sdk/client-s3": "3.1148.0"}
+"""The packages of the storage of the files in an S3-compatible service (`storage.kind: s3`)."""
+
 SMTP_PACKAGES: dict[str, str] = {"nodemailer": "10.1.0"}
 """The packages of the delivery of the messages by SMTP (`auth.delivery: smtp`, ADR 0017).
 

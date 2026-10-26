@@ -7,6 +7,18 @@ const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // PGlite (the local database) loads its WebAssembly files from node_modules.
   serverExternalPackages: ["@electric-sql/pglite"],
+{% if nextjs.upload_limit %}
+  {{ trace(definition.storage.id) }}
+  experimental: {
+    // The upload of a file in a server action (ADR 0027): the largest file
+    // of the file fields, and 1 MB for the rest of the form data.
+    serverActions: { bodySizeLimit: {{ nextjs.upload_limit }} },
+{% if nextjs.upload_limit > 10 * 1024 * 1024 %}
+    // The proxy (proxy.ts) reads the bodies of the requests up to this size.
+    proxyClientMaxBodySize: {{ nextjs.upload_limit }},
+{% endif %}
+  },
+{% endif %}
 };
 
 export default nextConfig;

@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from appgen.bindings import minimal, nextjs, react
+from appgen.bindings import minimal, react
 from appgen.dsl import load_definition_text, validate_definition
 from appgen.dsl.schema import json_schema
 from appgen.dsl.storage import (
@@ -372,14 +372,21 @@ def test_the_manifest_records_the_hash_of_each_seed_file(tmp_path: Path) -> None
     assert result.documents["files/login.png"] == file.hash
 
 
-@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING])
-def test_a_binding_without_file_fields_stops(binding: object) -> None:
-    from appgen.gen import Binding
-
-    assert isinstance(binding, Binding)
+def test_a_binding_without_file_fields_stops() -> None:
     definition = load_definition_text(BASE, "app.yaml")
     with pytest.raises(GenerationError, match="does not generate 'image' fields yet"):
-        generate(definition, binding)
+        generate(definition, react.BINDING)
+
+
+def test_the_paths_of_the_files_are_no_page_paths() -> None:
+    text = BASE + dedent(
+        """\
+        pages:
+          files: { path: /files, title: Files }
+          shots: { path: "/files/{id}/shots", title: Shots }
+        """
+    )
+    assert codes(text) == [("duplicate-name", "pages.shots")]
 
 
 def test_the_schema_describes_the_file_options_and_the_storage() -> None:

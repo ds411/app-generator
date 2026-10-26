@@ -1,0 +1,13 @@
+{{ trace_header(definition.storage.id) }}
+// The public API of the storage of the files (ADR 0027), for code on the
+// server only.
+export {
+  deleteFiles,
+  type FileRule,
+  fileResponse,
+  getStorage,
+  makeStorage,
+  type Storage,
+  type StoredFile,
+} from "./storage";
+export { uploadFile } from "./upload";
