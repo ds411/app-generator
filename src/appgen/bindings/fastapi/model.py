@@ -16,7 +16,12 @@ from dataclasses import field as dataclass_field
 from decimal import Decimal
 from typing import Any, cast
 
-from appgen.bindings.fastapi.dashboards import TEST_TODAY, PyDashboard, python_dashboards
+from appgen.bindings.fastapi.dashboards import (
+    TEST_PERIOD,
+    TEST_TODAY,
+    PyDashboard,
+    python_dashboards,
+)
 from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import (
     mocks_imports,
@@ -2257,6 +2262,12 @@ class PyApp:
     def test_today(self) -> str:
         """The date that the generated tests of the dashboards send as `today`."""
         return TEST_TODAY.isoformat()
+
+    @property
+    def test_period(self) -> tuple[str, str]:
+        """The first and the last day that the generated tests of the dashboards send as the
+        period: `start` and `end`."""
+        return (TEST_PERIOD[0].isoformat(), TEST_PERIOD[1].isoformat())
 
     @property
     def dashboard_guard(self) -> str | None:

@@ -1,10 +1,22 @@
 {{ trace_header("app") }}
+{% set compare = "period" in ui_views.features %}
 {% raw %}
 "use client";
 
+{% endraw %}
+{% if compare %}
+import { MoveDownRightIcon, MoveRightIcon, MoveUpRightIcon, type LucideIcon } from "lucide-react";
+{% else %}
 import type { LucideIcon } from "lucide-react";
+{% endif %}
+{% raw %}
 import type { ReactNode } from "react";
 
+{% endraw %}
+{% if compare and i18n %}
+import { numberFormat } from "@/shared/lib/format";
+{% endif %}
+{% raw %}
 import { Link } from "@/shared/lib/router";
 import { cn } from "@/shared/lib/utils";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -40,6 +52,31 @@ export function WidgetCard({
   );
 }
 
+{% endraw %}
+{% if compare %}
+{% if i18n %}
+/** The format of a change: a percentage with its sign, in the locale of the selected language. */
+const changeFormat = () => numberFormat({ style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 1 });
+{% else %}
+const CHANGE_FORMAT = new Intl.NumberFormat(undefined, { style: "percent", signDisplay: "exceptZero", maximumFractionDigits: 1 });
+/** The format of a change: a percentage with its sign. */
+const changeFormat = () => CHANGE_FORMAT;
+{% endif %}
+
+/** The change of a stat from the previous period, or a dash if the change is not known. */
+function StatChange({ change }: { change: number | null }) {
+  const Icon = change === null || change === 0 ? MoveRightIcon : change > 0 ? MoveUpRightIcon : MoveDownRightIcon;
+  const text = change === null ? "—" : changeFormat().format(change);
+  return (
+    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+      <Icon className="size-3.5" aria-hidden />
+      {{ jsx_format("{change} from the previous period", change="text") }}
+    </p>
+  );
+}
+
+{% endif %}
+{% raw %}
 /** A stat tile: a label, a value, an icon, and an optional link to a page. */
 export function StatTile({
   label,
@@ -47,7 +84,8 @@ export function StatTile({
   icon: Icon,
   color,
   href,
-  className,
+  className,{% endraw %}{% if compare %}
+  change,{% endif %}{% raw %}
 }: {
   label: string;
   value: string;
@@ -55,7 +93,9 @@ export function StatTile({
   /** A CSS color for the icon, for example a color token. */
   color?: string;
   href?: string;
-  className?: string;
+  className?: string;{% endraw %}{% if compare %}
+  /** The change from the previous period, as a fraction (0.1 is 10%), or null if it is not known. */
+  change?: number | null;{% endif %}{% raw %}
 }) {
   const content = (
     <Card className={cn("h-full gap-2 py-5 transition-shadow", href && "hover:shadow-md", className)}>
@@ -73,7 +113,8 @@ export function StatTile({
         )}
       </CardHeader>
       <CardContent className="px-5">
-        <p className="text-3xl font-semibold tracking-tight tabular-nums">{value || "—"}</p>
+        <p className="text-3xl font-semibold tracking-tight tabular-nums">{value || "—"}</p>{% endraw %}{% if compare %}
+        {change !== undefined && <StatChange change={change} />}{% endif %}{% raw %}
       </CardContent>
     </Card>
   );

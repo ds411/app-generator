@@ -49,6 +49,49 @@ def currency_path(field_path: str, currency_field: str) -> str:
     return f"{prefix}.{currency_field}" if prefix else currency_field
 
 
+type PeriodRange = Literal[
+    "today",
+    "last_7_days",
+    "last_30_days",
+    "last_90_days",
+    "last_365_days",
+    "this_week",
+    "this_month",
+    "this_year",
+    "last_week",
+    "last_month",
+    "last_year",
+    "all",
+    "custom",
+]
+"""A range of the period of a dashboard. `this_*` ends today, `last_week`, `last_month`, and
+`last_year` are the whole unit before, `all` has no limits, and `custom` lets the user pick
+the first and the last day."""
+
+PERIOD_RANGES: tuple[str, ...] = PeriodRange.__value__.__args__
+DEFAULT_RANGES: tuple[PeriodRange, ...] = (
+    "last_7_days",
+    "last_30_days",
+    "last_90_days",
+    "this_month",
+    "last_month",
+    "this_year",
+    "all",
+)
+"""The ranges of a period without `ranges`."""
+
+
+class DashboardPeriod(Element):
+    """The period of a dashboard: the user picks a range, and the widgets with a
+    `period_field` show the records of the range."""
+
+    default: PeriodRange = "last_30_days"
+    ranges: Annotated[list[PeriodRange], pydantic.Field(min_length=1)] = pydantic.Field(
+        default_factory=lambda: list(DEFAULT_RANGES)
+    )
+    """The ranges that the picker offers, in their order."""
+
+
 class WidgetBase(Element):
     """The keys of all widgets."""
 
@@ -57,7 +100,15 @@ class WidgetBase(Element):
     """The number of grid columns."""
 
 
-class StatWidget(WidgetBase):
+class PeriodWidget(WidgetBase):
+    """The keys of the widgets that can show the records of the period of the dashboard."""
+
+    period_field: MemberName | None = None
+    """A date or a date-time field of the entity: the widget shows the records whose value is
+    in the period of the dashboard."""
+
+
+class StatWidget(PeriodWidget):
     """A stat tile: a count or another aggregate of records."""
 
     kind: Literal["stat"]
@@ -73,9 +124,11 @@ class StatWidget(WidgetBase):
     """A color token."""
     link: MemberName | None = None
     """A page that the tile opens."""
+    compare: Literal["previous"] | None = None
+    """`previous` shows the change from the period of the same length before the period."""
 
 
-class ChartWidget(WidgetBase):
+class ChartWidget(PeriodWidget):
     """A chart of an aggregate for each group of records."""
 
     kind: Literal["chart"]
@@ -92,7 +145,7 @@ class ChartWidget(WidgetBase):
     """A badge set that gives the colors of the groups."""
 
 
-class ListWidget(WidgetBase):
+class ListWidget(PeriodWidget):
     """A short list of records in a table or a card list."""
 
     kind: Literal["list"]
@@ -125,4 +178,6 @@ class Dashboard(Element):
     title: Text | None = None
     description: Text | None = None
     grid: Grid | None = None
+    period: DashboardPeriod | None = None
+    """The period that the user picks for the widgets with a `period_field`."""
     widgets: Annotated[dict[MemberName, Widget], pydantic.Field(min_length=1)]

@@ -293,6 +293,8 @@ class WidgetEndpoint:
     """True if the endpoint takes `today`: the filter of the widget has `$today`."""
     week: bool = False
     """True if the endpoint takes `week_start`: a chart groups the dates by week."""
+    period: bool = False
+    """True if the endpoint takes `start` and `end`: the widget has a period field."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -757,8 +759,9 @@ class ViewContext:
 
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
         `date_range`, `select`, `multi_select`), the value components
-        (`badge`, `avatar`, `formatted`), and the charts (`chart`, and
-        `dates` for a chart of dates).
+        (`badge`, `avatar`, `formatted`), the charts (`chart`, and
+        `dates` for a chart of dates), and the period of a dashboard
+        (`period`).
         """
         found: set[str] = set()
         values = {"badge", "avatar", "formatted", "file"}
@@ -789,6 +792,9 @@ class ViewContext:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
             found |= dashboard.uses & {"chart", "dates"}
+            period = dashboard.dashboard.period
+            if period is not None:
+                found |= {"period", "date_range"} if "custom" in period.ranges else {"period"}
             for widget in dashboard.widgets:
                 found |= {c for col in widget.columns for c in _value_parts(col.cell)}
                 card = widget.card
@@ -1885,6 +1891,12 @@ def view_rules() -> tuple[Output, ...]:
             for template, path, when in (
                 ("lib/aggregate.ts.j2", "src/shared/lib/aggregate.ts", "ui_views.dashboards"),
                 ("ui/widget-card.tsx.j2", "src/shared/ui/widget-card.tsx", "ui_views.dashboards"),
+                ("lib/period.ts.j2", "src/shared/lib/period.ts", "'period' in ui_views.features"),
+                (
+                    "ui/period-picker.tsx.j2",
+                    "src/shared/ui/period-picker.tsx",
+                    "'period' in ui_views.features",
+                ),
                 (
                     "ui/dashboard-chart.tsx.j2",
                     "src/shared/ui/dashboard-chart.tsx",

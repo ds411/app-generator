@@ -4,12 +4,8 @@
 {{ py.signature("async def " ~ fn, args, " -> None:") }}
 {% endmacro %}
 {% macro get(w) -%}
-{% set url = d.path ~ w.path %}
-{% if w.today %}
-    response = await client.get("{{ url }}", params={"today": TODAY})
-{%- else %}
-    response = await client.get("{{ url }}")
-{%- endif %}
+{% set params = '{"today": TODAY, **PERIOD}' if w.today and w.period else '{"today": TODAY}' if w.today else "PERIOD" if w.period else none %}
+    {{ py.call("response = await ", "client.get", [py.string(d.path ~ w.path)] + (["params=" ~ params] if params else []), 4) }}
 {%- endmacro %}
 {% set tested = d.widgets | selectattr("test") | list %}
 {% set roles = definition.access.roles if definition.access else {} %}
@@ -73,6 +69,11 @@ pytestmark = pytest.mark.anyio
 
 TODAY = "{{ py.test_today }}"
 """The date that the tests send as `today`: the filters with `$today` compare with it."""
+{% endif %}
+{% if d.widgets | selectattr("period") | list %}
+
+PERIOD = {"start": "{{ py.test_period[0] }}", "end": "{{ py.test_period[1] }}"}
+"""The period that the tests send: the widgets with a period field read the records of its days."""
 {% endif %}
 {% for w in d.widgets %}
 

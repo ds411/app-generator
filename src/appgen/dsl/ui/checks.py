@@ -29,6 +29,8 @@ from appgen.dsl.ui.dashboards import (
     RELATIVE_DATES,
     ChartWidget,
     CustomWidget,
+    Dashboard,
+    DashboardPeriod,
     ListWidget,
     StatWidget,
     Widget,
@@ -660,8 +662,80 @@ def check_ui_dashboards(definition: AppDefinition) -> Iterator[Diagnostic]:
     if definition.ui is None:
         return
     for dashboard in definition.ui.dashboards.values():
+        if dashboard.period is not None:
+            yield from _check_period(dashboard.period)
+            widgets = dashboard.widgets.values()
+            if not any(not isinstance(w, CustomWidget) and w.period_field for w in widgets):
+                yield _error(
+                    "invalid-option",
+                    "The period of the dashboard changes no widget.",
+                    dashboard.period,
+                    hint="Give a widget 'period_field', a date field of its entity.",
+                )
         for widget in dashboard.widgets.values():
             yield from _check_widget(definition, widget)
+            if not isinstance(widget, CustomWidget):
+                yield from _check_period_field(definition, dashboard, widget)
+
+
+def _check_period(period: DashboardPeriod) -> Iterator[Diagnostic]:
+    """The default range of a period is one of its ranges, and each range is there once."""
+    twice = sorted({r for r in period.ranges if period.ranges.count(r) > 1})
+    if twice:
+        yield _error(
+            "invalid-value",
+            f"The ranges of the period have '{twice[0]}' more than once.",
+            period,
+            at="ranges",
+            hint="Give each range once.",
+        )
+    if period.default not in period.ranges:
+        yield _error(
+            "invalid-value",
+            f"The default range '{period.default}' is not one of the ranges of the period.",
+            period,
+            at="default",
+            hint=f"Add '{period.default}' to 'ranges', or use one of: {', '.join(period.ranges)}.",
+        )
+
+
+def _check_period_field(
+    definition: AppDefinition, dashboard: Dashboard, widget: StatWidget | ChartWidget | ListWidget
+) -> Iterator[Diagnostic]:
+    """A widget shows the records of the period by a date field. A compare needs the period."""
+    compare = isinstance(widget, StatWidget) and widget.compare is not None
+    if widget.period_field is None:
+        if compare:
+            yield _error(
+                "invalid-option",
+                "'compare' needs 'period_field': the widget compares the values of two periods.",
+                widget,
+                at="compare",
+                hint="Add 'period_field', a date field of the entity.",
+            )
+        return
+    if dashboard.period is None:
+        yield _error(
+            "invalid-option",
+            "'period_field' needs the 'period' of the dashboard.",
+            widget,
+            at="period_field",
+            hint="Add 'period' to the dashboard, or remove 'period_field'.",
+        )
+        return
+    if isinstance(widget, ListWidget):
+        views = definition.ui.views if definition.ui else {}
+        view = views.get(widget.view)
+        if not isinstance(view, TableView | CardsView):
+            return
+        entity = view.entity
+    else:
+        entity = widget.entity
+    if entity not in definition.entities:
+        return
+    target = yield from _resolve(definition, widget, "period_field", entity, widget.period_field)
+    if target is not None:
+        yield from _check_suits(widget, "period_field", "A period field", target, DATE_TYPES)
 
 
 def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnostic]:

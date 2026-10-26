@@ -567,7 +567,8 @@ BINDING = Binding(
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
-        | {"dashboard", "grid", "grid_override", "stat_widget", "chart_widget", "list_widget"}
+        | {"dashboard", "dashboard_period", "grid", "grid_override"}
+        | {"stat_widget", "chart_widget", "list_widget"}
         | {"form", "form_section", "form_field", "form_on_success"}
         | {"field_rules", "required_rule", "length_rule", "number_rule", "pattern_rule"}
         | {"compare_rule"}

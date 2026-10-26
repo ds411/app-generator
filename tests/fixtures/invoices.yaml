@@ -5,7 +5,8 @@
 # currency of the customer (`currency_field`). The invoice feed and the
 # line cards show the next page at their end (`pagination.mode: scroll`).
 # The charts of the dashboard group the dates by day, week, and year
-# (`interval`).
+# (`interval`). The dashboard has a period, and the widgets with a period
+# field show the invoices of its days (`period`, `period_field`).
 # scripts/check-nextjs.sh, scripts/check-react.sh, and
 # scripts/check-fastapi.sh generate and check the apps of this
 # definition, and scripts/sequence_test.py creates invoices in the
@@ -95,6 +96,9 @@ ui:
   dashboards:
     overview:
       title: Overview
+      period:
+        default: this_year
+        ranges: [last_7_days, last_30_days, this_month, last_month, this_year, all, custom]
       widgets:
         euro_total:
           kind: stat
@@ -103,6 +107,8 @@ ui:
           aggregate: sum
           field: total
           filter: { customer.currency: eur }
+          period_field: issued_on
+          compare: previous
         by_currency:
           kind: chart
           chart: bar
@@ -125,6 +131,7 @@ ui:
           entity: Invoice
           group_by: paid_at
           interval: week
+          period_field: issued_on
         by_year:
           kind: chart
           chart: bar
