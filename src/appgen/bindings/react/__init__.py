@@ -364,8 +364,10 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
     ),
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
+    # The events of the mock store follow (#392).
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook", "job"}
+        | {"event"}
     ),
     context=context,
     warnings=warnings,

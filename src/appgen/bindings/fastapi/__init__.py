@@ -282,6 +282,12 @@ BINDING = Binding(
             for_each="workflow",
         ),
         Output(
+            template="tests/features/slice/test_events.py.j2",
+            path=_TESTS + "/test_events.py",
+            for_each="entity",
+            when="py.entity(name).events",
+        ),
+        Output(
             template="tests/features/slice/test_schemas.py.j2",
             path=_TESTS + "/test_schemas.py",
             for_each="entity",
@@ -448,7 +454,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
-        | {"job"}
+        | {"job", "event"}
         | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),

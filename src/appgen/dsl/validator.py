@@ -35,6 +35,7 @@ from appgen.dsl.cron import CronError, parse_cron
 from appgen.dsl.crud import plural, snake_name
 from appgen.dsl.currencies import CURRENCY_CODES
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
+from appgen.dsl.events import Event
 from appgen.dsl.expressions import (
     Binary,
     Call,
@@ -73,6 +74,7 @@ from appgen.dsl.ui.checks import (
 )
 from appgen.dsl.ui.fields import FieldPathError, resolve_path
 from appgen.dsl.webhooks import EMAIL_SCHEMES, Webhook
+from appgen.dsl.workflows import Transition
 
 type Check = Callable[[AppDefinition], Iterator[Diagnostic]]
 
@@ -821,12 +823,8 @@ def _check_job_time(job: Job) -> Iterator[Diagnostic]:
 
 def _check_job_operation(definition: AppDefinition, job: Job) -> Iterator[Diagnostic]:
     """The operation of a job is a custom operation of its entity, without required params."""
-    customs = [
-        name
-        for name, op in definition.operations.items()
-        if op.kind == "custom" and op.entity == job.entity
-    ]
     if job.operation is None:
+        customs = _custom_operations(definition, job.entity)
         hint = (
             f"Use a custom operation of '{job.entity}', for example '{customs[0]}'."
             if customs
@@ -839,38 +837,114 @@ def _check_job_operation(definition: AppDefinition, job: Job) -> Iterator[Diagno
             hint=hint,
         )
         return
-    operation = definition.operations.get(job.operation)
+    assert job.entity is not None
+    yield from _check_run_operation(definition, job, "operation", job.operation, job.entity)
+
+
+def check_events(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """An event and a transition with `run` run a custom operation of their entity (ADR 0031)."""
+    for entity_name, entity in definition.entities.items():
+        for kind, event in entity.events.items():
+            yield from _check_run_operation(
+                definition, event, "operation", event.operation, entity_name
+            )
+            if event.fields is None:
+                continue
+            if kind != "changed":
+                yield _error(
+                    "invalid-option",
+                    f"'fields' is only for the event 'changed', not for '{kind}'.",
+                    event,
+                    at="fields",
+                )
+                continue
+            if len(set(event.fields)) != len(event.fields):
+                yield _error(
+                    "duplicate-name", "The names in 'fields' must be unique.", event, at="fields"
+                )
+            for name in event.fields:
+                found = entity.fields.get(name)
+                if found is None:
+                    yield _missing(event, "fields", "field", name, entity.stored_fields)
+                elif found.computed is not None:
+                    yield _error(
+                        "unsuitable-field",
+                        f"The field '{entity_name}.{name}' is computed. The event 'changed' "
+                        "watches the stored fields.",
+                        event,
+                        at="fields",
+                        hint="Name the stored fields that the computed field uses.",
+                    )
+    for workflow in definition.workflows.values():
+        if workflow.entity not in definition.entities:
+            continue
+        for transition in workflow.transitions.values():
+            if transition.run is not None:
+                yield from _check_run_operation(
+                    definition, transition, "run", transition.run, workflow.entity
+                )
+
+
+def _custom_operations(definition: AppDefinition, entity: str | None) -> list[str]:
+    return [
+        name
+        for name, op in definition.operations.items()
+        if op.kind == "custom" and op.entity == entity
+    ]
+
+
+def _check_run_operation(
+    definition: AppDefinition, element: Job | Event | Transition, key: str, name: str, entity: str
+) -> Iterator[Diagnostic]:
+    """The operation of a job, an event, or a transition: a custom operation of the entity.
+
+    The app runs it without params. An event or a transition runs it in
+    the transaction of the change, so it calls no API.
+    """
+    user = {Job: "A job", Event: "An event", Transition: "A transition"}[type(element)]
+    operation = definition.operations.get(name)
     if operation is None:
-        yield _missing(job, "operation", "operation", job.operation, customs)
+        yield _missing(element, key, "operation", name, _custom_operations(definition, entity))
         return
     if operation.kind != "custom":
         yield _error(
             "unsuitable-operation",
-            f"A job runs a custom operation, but '{job.operation}' is a '{operation.kind}' "
-            "operation.",
-            job,
-            at="operation",
-            hint="Add a custom operation with the logic of the job.",
+            f"{user} runs a custom operation, but '{name}' is a '{operation.kind}' operation.",
+            element,
+            at=key,
+            hint=f"Add a custom operation of '{entity}' with the logic.",
         )
-    elif operation.entity != job.entity:
+        return
+    if operation.entity != entity:
+        record = "each record" if isinstance(element, Job) else "the record that changes"
         yield _error(
             "unsuitable-operation",
-            f"The operation '{job.operation}' is an operation of '{operation.entity}', not of "
-            f"'{job.entity}'. A job runs an operation of its entity on each record.",
-            job,
-            at="operation",
+            f"The operation '{name}' is an operation of '{operation.entity}', not of "
+            f"'{entity}'. {user} runs an operation of its entity on {record}.",
+            element,
+            at=key,
         )
-    else:
-        for name, param in operation.params.items():
-            if param.required and param.default is None:
-                yield _error(
-                    "unsuitable-operation",
-                    f"The operation '{job.operation}' has the required param '{name}'. "
-                    "A job runs the operation without params.",
-                    job,
-                    at="operation",
-                    hint="Make the param optional, or give it a default.",
-                )
+        return
+    for param_name, param in operation.params.items():
+        if param.required and param.default is None:
+            yield _error(
+                "unsuitable-operation",
+                f"The operation '{name}' has the required param '{param_name}'. "
+                f"{user} runs the operation without params.",
+                element,
+                at=key,
+                hint="Make the param optional, or give it a default.",
+            )
+    if operation.apis and not isinstance(element, Job):
+        apis = ", ".join(f"'{api}'" for api in operation.apis)
+        yield _error(
+            "unsuitable-operation",
+            f"The operation '{name}' calls the API {apis}. {user} runs its operation in the "
+            "transaction of the change, without the clients of the APIs.",
+            element,
+            at=key,
+            hint="Call the API in a job, or in a custom operation that a request starts.",
+        )
 
 
 def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -2256,6 +2330,7 @@ CHECKS: list[Check] = [
     check_translations,
     check_workflows,
     check_jobs,
+    check_events,
     check_auth,
     check_access,
     check_apis,

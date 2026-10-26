@@ -68,3 +68,8 @@ typeCheckingMode = "strict"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = ["--strict-markers", "--strict-config"]
+{% if py.events %}
+markers = [
+    "events(*entities): run the events of the entities, or of all entities (ADR 0031)",
+]
+{% endif %}

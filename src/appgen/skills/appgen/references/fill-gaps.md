@@ -197,6 +197,15 @@ of the entity in snake case, for example `bookings`.
 - The generated test of a custom operation accepts the status 501 of the
   stub and the result of the logic. Write the tests of your logic in a
   new file, for example `tests/features/<slice>/test_<operation>_logic.py`.
+- An operation of an event or of a transition with `run` (ADR 0031)
+  also runs after the change of a record, in the transaction of the
+  change, without params (each param has its default). Change the
+  record or other records with the repository functions: in the
+  operation they do not commit, and they start no other event. Raise an
+  exception to roll back the change. Until the operation has its logic,
+  the stub fails, and so each change that starts the event fails (501).
+  The generated tests turn off the events: a test of your logic that
+  needs them has `@pytest.mark.events`.
 - The factories of `tests/factories.py` (`make_<entity>(session, **values)`)
   give a value to each field, also to the optional fields, and the
   values change with each call. In a test of your logic, give each value

@@ -1,0 +1,316 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set created = e.created_event %}
+{% set changed = e.changed_event %}
+{% set deleted = e.deleted_event %}
+{% set transitions = e.update_events | selectattr("kind", "eq", "transition") | list %}
+{% set changes = e.event_test_changes() %}
+{% set others = e.event_test_others() %}
+{% set loop_event = e.loop_event %}
+{% set needs_state = e.event_test_sets_state %}
+{# The delete of a record with file fields also deletes its files (ADR 0027). #}
+{% set storage = ", FolderStorage(tmp_path)" if e.files else "" %}
+"""The tests of the events of {{ e.name }} (ADR 0031).
+
+The tests replace the operations of the events with fakes that record
+their calls. A fake also records if the record is in the database at
+the time of the call, in the transaction of the change.
+"""
+
+{{ e.event_test_imports() }}
+
+pytestmark = [pytest.mark.anyio, pytest.mark.events("{{ e.name }}")]
+
+type Call = tuple[str, UUID, bool]
+"""A call of an operation: its name, the record, and true if the record is in the database."""
+{% if changes %}
+{{ py.literal(changes, "CHANGES = ") }}
+"""The fields of a change that runs the event `changed`."""
+{% endif %}
+{% if others %}
+{{ py.literal(others, "OTHERS = ") }}
+"""Fields that the event `changed` does not watch."""
+{% endif %}
+
+
+async def stored(session: AsyncSession, id: UUID) -> bool:
+    """Return true if the database has the record of an ID, in the open transaction."""
+    statement = select(func.count()).select_from({{ e.name }}).where({{ e.name }}.id == id)
+    return await session.scalar(statement) == 1
+
+
+async def count(session: AsyncSession) -> int:
+    """Return the count of the records in the database."""
+    return await session.scalar(select(func.count()).select_from({{ e.name }})) or 0
+
+
+async def fail(*args: Any) -> None:
+    """An operation that fails."""
+    raise RuntimeError("The test fails the operation.")
+{% if needs_state %}
+
+
+async def set_state(session: AsyncSession, record: {{ e.name }}, **values: Any) -> {{ e.name }}:
+    """Set values of a record in the database directly, without the workflows, and return it."""
+    await session.execute(update({{ e.name }}).where({{ e.name }}.id == record.id).values(**values))
+    await session.commit()
+    return await repository.get(session, record.id)
+{% endif %}
+
+
+@pytest.fixture(autouse=True)
+def calls(monkeypatch: pytest.MonkeyPatch) -> list[Call]:
+    """The calls of the operations of the events, in order."""
+    found: list[Call] = []
+
+    def fake(name: str) -> Callable[..., Awaitable[None]]:
+        async def operation(session: AsyncSession, record: {{ e.name }}, *args: Any) -> None:
+            found.append((name, record.id, await stored(session, record.id)))
+
+        return operation
+
+{% for op in e.event_operations %}
+    monkeypatch.setattr({{ op.name }}_ext, "{{ op.name }}", fake("{{ op.name }}"))
+{% endfor %}
+    return found
+{% if created %}
+{% set op = created.operation.name %}
+
+
+{{ trace(created.id) }}
+async def test_created_runs_{{ op }}_after_the_record_is_stored(
+    session: AsyncSession,
+    calls: list[Call],
+) -> None:
+    data = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session))
+
+    record = await repository.create(session, data)
+
+    assert calls == [("{{ op }}", record.id, True)]
+
+
+async def test_created_stores_nothing_when_{{ op }}_fails(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session))
+    other = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session))
+    before = await count(session)
+
+    async def operation(session: AsyncSession, record: {{ e.name }}, *args: Any) -> None:
+        # The commit of a change in the operation commits nothing.
+        await repository.create(session, other)
+        await fail()
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", operation)
+    with pytest.raises(RuntimeError):
+        await repository.create(session, data)
+    await session.rollback()
+
+    assert await count(session) == before
+{% endif %}
+{% if changed %}
+{% set op = changed.operation.name %}
+{% if changes %}
+{% set f = e.event_test_field() %}
+
+
+{{ trace(changed.id) }}
+async def test_changed_runs_{{ op }}_when_a_field_changes(
+    session: AsyncSession,
+    calls: list[Call],
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({name: other[name] for name in CHANGES})
+    calls.clear()
+
+    record = await repository.update(session, record, changes)
+
+    assert calls == [("{{ op }}", record.id, True)]
+
+
+async def test_changed_keeps_the_record_when_{{ op }}_fails(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    id, value = record.id, record.{{ f.attr }}
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({name: other[name] for name in CHANGES})
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", fail)
+    with pytest.raises(RuntimeError):
+        await repository.update(session, record, changes)
+    await session.rollback()
+
+    assert (await repository.get(session, id)).{{ f.attr }} == value
+{% endif %}
+
+
+{% if not changes %}
+{{ trace(changed.id) }}
+{% endif %}
+async def test_changed_does_not_run_{{ op }}_without_a_change(
+    session: AsyncSession,
+    calls: list[Call],
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    calls.clear()
+
+    await repository.update(session, record, {{ e.name }}Update.model_validate({}))
+
+    assert calls == []
+{% if others %}
+
+
+async def test_changed_does_not_run_{{ op }}_for_other_fields(
+    session: AsyncSession,
+    calls: list[Call],
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({name: other[name] for name in OTHERS})
+    calls.clear()
+
+    await repository.update(session, record, changes)
+
+    assert calls == []
+{% endif %}
+{% endif %}
+{% for t in transitions %}
+{% set op = t.operation.name %}
+{% set w = t.workflow %}
+{% set start = t.before[0] %}
+
+
+{{ trace(t.id) }}
+async def test_{{ t.name }}_runs_{{ op }}(
+    session: AsyncSession,
+    calls: list[Call],
+) -> None:
+    record = await make_{{ e.snake }}(session)
+{% if start != w.start %}
+    record = await set_state(session, record, {{ w.attr }}="{{ start }}")
+{% endif %}
+    changes = {{ e.name }}Update.model_validate({"{{ w.field }}": "{{ t.after }}"})
+    calls.clear()
+
+    record = await repository.update(session, record, changes)
+
+    assert calls == [{% for name in e.transition_calls(t) %}("{{ name }}", record.id, True){{ ", " if not loop.last }}{% endfor %}]
+
+
+async def test_{{ t.name }}_keeps_the_state_when_{{ op }}_fails(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = await make_{{ e.snake }}(session)
+{% if start != w.start %}
+    record = await set_state(session, record, {{ w.attr }}="{{ start }}")
+{% endif %}
+    id = record.id
+    changes = {{ e.name }}Update.model_validate({"{{ w.field }}": "{{ t.after }}"})
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", fail)
+    with pytest.raises(RuntimeError):
+        await repository.update(session, record, changes)
+    await session.rollback()
+
+    assert (await repository.get(session, id)).{{ w.attr }} == "{{ start }}"
+{% endfor %}
+{% if deleted %}
+{% set op = deleted.operation.name %}
+
+
+{{ trace(deleted.id) }}
+async def test_deleted_runs_{{ op }}_after_the_record_is_deleted(
+    session: AsyncSession,
+    calls: list[Call],
+{% if e.files %}
+    tmp_path: Path,
+{% endif %}
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    calls.clear()
+
+    await repository.delete(session, record{{ storage }})
+
+    assert calls == [("{{ op }}", record.id, False)]
+
+
+async def test_deleted_keeps_the_record_when_{{ op }}_fails(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+{% if e.files %}
+    tmp_path: Path,
+{% endif %}
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    id = record.id
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", fail)
+    with pytest.raises(RuntimeError):
+        await repository.delete(session, record{{ storage }})
+    await session.rollback()
+
+    assert await stored(session, id)
+{% endif %}
+{% if loop_event %}
+{% set op = loop_event.operation.name %}
+
+
+async def test_a_change_in_the_operation_of_an_event_starts_no_event(
+    session: AsyncSession,
+    calls: list[Call],
+    monkeypatch: pytest.MonkeyPatch,
+{% if e.files and loop_event.kind == "deleted" %}
+    tmp_path: Path,
+{% endif %}
+) -> None:
+{% if loop_event.kind == "created" %}
+    data = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session))
+    other = {{ e.name }}Create.model_validate(await {{ e.snake }}_input(session))
+    before = await count(session)
+
+    async def operation(session: AsyncSession, record: {{ e.name }}, *args: Any) -> None:
+        calls.append(("{{ op }}", record.id, True))
+        await repository.create(session, other)
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", operation)
+    record = await repository.create(session, data)
+
+    assert calls == [("{{ op }}", record.id, True)]
+    assert await count(session) == before + 2
+{% elif loop_event.kind == "deleted" %}
+    record = await make_{{ e.snake }}(session)
+    other = await make_{{ e.snake }}(session)
+
+    async def operation(session: AsyncSession, record: {{ e.name }}, *args: Any) -> None:
+        calls.append(("{{ op }}", record.id, False))
+        await repository.delete(session, other{{ storage }})
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", operation)
+    calls.clear()
+    await repository.delete(session, record{{ storage }})
+
+    assert calls == [("{{ op }}", record.id, False)]
+    assert not await stored(session, other.id)
+{% else %}
+    record = await make_{{ e.snake }}(session)
+    first = await {{ e.snake }}_input(session)
+    second = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({name: first[name] for name in CHANGES})
+    more = {{ e.name }}Update.model_validate({name: second[name] for name in CHANGES})
+
+    async def operation(session: AsyncSession, record: {{ e.name }}, *args: Any) -> None:
+        calls.append(("{{ op }}", record.id, True))
+        await repository.update(session, record, more)
+
+    monkeypatch.setattr({{ op }}_ext, "{{ op }}", operation)
+    calls.clear()
+    record = await repository.update(session, record, changes)
+
+    assert calls == [("{{ op }}", record.id, True)]
+{% endif %}
+{% endif %}

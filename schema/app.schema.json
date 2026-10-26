@@ -2687,6 +2687,16 @@
             }
           ],
           "default": null
+        },
+        "events": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EventInput"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/EventName"
+          },
+          "title": "Events",
+          "type": "object"
         }
       },
       "required": [
@@ -2864,6 +2874,69 @@
     },
     "EnvName": {
       "pattern": "^[A-Z][A-Z0-9_]*$",
+      "type": "string"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "description": "A custom operation of the entity that runs after a change of a record.\n\nThe operation runs in the transaction of the change, after the change\nis in the database. An error of the operation rolls back the change.\nThe short form is the name of the operation: `created: notify_owner`.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "EventInput": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Event"
+        }
+      ]
+    },
+    "EventName": {
+      "enum": [
+        "created",
+        "changed",
+        "deleted"
+      ],
       "type": "string"
     },
     "Field": {
@@ -6391,6 +6464,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
             },
             {
               "type": "null"

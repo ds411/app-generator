@@ -24,6 +24,10 @@ from app.core.auth import current_user
 {% endif %}
 from app.core.config import Settings
 from app.core.db import Base
+{% set event_entities = py.entity_order() | selectattr("events") | sort(attribute="slice") | list %}
+{% for e in event_entities %}
+from app.features.{{ e.slice }} import repository as {{ e.snake }}_repository
+{% endfor %}
 {% for api in py_apis.values() | sort(attribute="module") %}
 from app.integrations.{{ api.module }}.client import {{ api.dependency }}
 {% endfor %}
@@ -36,6 +40,36 @@ from app.main import create_app
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+{% if event_entities %}
+
+
+EVENTS = [
+{% for e in event_entities %}
+{% for hook in e.event_hooks %}
+    ("{{ e.name }}", {{ e.snake }}_repository, "{{ hook }}"),
+{% endfor %}
+{% endfor %}
+]
+"""The functions of the repositories that run the events (ADR 0031)."""
+
+
+async def _no_event(*args: object) -> None:
+    """Run no event."""
+
+
+@pytest.fixture(autouse=True)
+def turn_off_events(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn off the events of the entities, so that the operations of the events do not run.
+
+    The tests of the other features do not depend on the logic of these
+    operations. A test with the mark `events` runs the events of all
+    entities, and `events("{{ event_entities[0].name }}")` runs the events of one entity.
+    """
+    marker = request.keywords.get("events")
+    for entity, repository, name in EVENTS:
+        if marker is None or (marker.args and entity not in marker.args):
+            monkeypatch.setattr(repository, name, _no_event)
+{% endif %}
 
 
 @pytest.fixture(scope="session")

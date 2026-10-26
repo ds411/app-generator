@@ -2,7 +2,11 @@
 """The database: the model base class, the engine, and one session for each request."""
 
 import datetime as dt
+{% if py.events %}
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+{% else %}
 from collections.abc import AsyncIterator, Sequence
+{% endif %}
 from enum import StrEnum
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -132,8 +136,26 @@ CONFLICT = (
 )
 
 
+{% if py.events %}
+EVENT_KEY = "appgen.event"
+"""The key of `session.info` while the operation of an event runs (ADR 0031)."""
+
+
+{% endif %}
 async def commit(session: AsyncSession) -> None:
+{% if py.events %}
+    """Commit the session. A broken constraint gives a 409 Conflict error.
+
+    In the operation of an event, it only writes the changes to the
+    database: the change that started the event commits them, so that an
+    error rolls back the change and the work of the operation together.
+    """
+    if session.info.get(EVENT_KEY):
+        await flush(session)
+        return
+{% else %}
     """Commit the session. A broken constraint gives a 409 Conflict error."""
+{% endif %}
     try:
         await session.commit()
     except IntegrityError as error:
@@ -153,6 +175,29 @@ async def flush(session: AsyncSession) -> None:
         raise ProblemError(409, {{ "t(CONFLICT)" if i18n else "CONFLICT" }}) from error
 
 
+{% if py.events %}
+async def run_event[**P](
+    session: AsyncSession,
+    operation: Callable[P, Awaitable[object]],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> None:
+    """Run the operation of an event in the transaction of the change that started it.
+
+    A change in the operation of an event starts no other event: the
+    events stop after one level, so that two events cannot start each
+    other without end. In the operation, `commit()` does not commit.
+    """
+    if session.info.get(EVENT_KEY):
+        return
+    session.info[EVENT_KEY] = True
+    try:
+        await operation(*args, **kwargs)
+    finally:
+        del session.info[EVENT_KEY]
+
+
+{% endif %}
 async def ensure_exists[M: Record](
     session: AsyncSession, model: type[M], id: UUID, field: str
 ) -> None:
