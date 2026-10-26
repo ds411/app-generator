@@ -41,10 +41,16 @@ def sort_order(
     sort: str | None,
     columns: Mapping[str, InstrumentedAttribute[Any] | ColumnElement[Any]],
     default: InstrumentedAttribute[Any],
+{% if py.full_text %}
+    rank: ColumnElement[float] | None = None,
+{% endif %}
 ) -> list[UnaryExpression[Any]]:
     """Return the ORDER BY terms for a sort parameter. The default column ends the order.
 
     Empty values come last in both directions, on Postgres and on SQLite.
+{% if py.full_text %}
+    Without a sort, the rank of the full-text search comes first, if any.
+{% endif %}
     """
     terms: list[UnaryExpression[Any]] = []
     for part in (sort or "").split(","):
@@ -63,6 +69,10 @@ def sort_order(
             raise ProblemError(422, f"Cannot sort by '{name}'. Use one of: {names}.")
 {% endif %}
         terms.append((column.desc() if descending else column.asc()).nulls_last())
+{% if py.full_text %}
+    if not terms and rank is not None:
+        terms.append(rank.desc())
+{% endif %}
     terms.append(default.asc())
     return terms
 

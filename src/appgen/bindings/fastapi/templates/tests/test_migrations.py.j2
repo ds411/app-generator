@@ -3,6 +3,9 @@
 
 import asyncio
 
+{% if py.full_text %}
+import pytest
+{% endif %}
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -11,6 +14,13 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.db import Base
 from tests.conftest import alembic_config
+{% if py.full_text %}
+
+# SQLite cannot compare the GIN indexes of the full-text search, which exist only on Postgres.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:autogenerate skipping metadata-specified expression-based index:UserWarning"
+)
+{% endif %}
 
 
 def _differences(connection: Connection) -> list[object]:

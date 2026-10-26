@@ -5,8 +5,10 @@
 # (scripts/api_calls.py), and the smoke test (scripts/smoke_test.py:
 # start the app and request it), in Docker and with SQLite (--local, with the mock server of
 # the third-party APIs, scripts/mock_api.py), the schema change on a
-# database with data (scripts/check_schema_change.py), the rate limit
-# that two processes share in Redis (scripts/check_shared_rate_limit.py),
+# database with data (scripts/check_schema_change.py), the full-text
+# search and its migration on Postgres (scripts/check_full_text_search.py),
+# the rate limit that two processes share in Redis
+# (scripts/check_shared_rate_limit.py),
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
 # example, which has the sign-in, the sign-up, the roles, and a
@@ -126,6 +128,9 @@ uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
 
 step "schema change"
 uv run --locked scripts/check_schema_change.py "$out"
+
+step "full-text search on Postgres"
+uv run --locked scripts/check_full_text_search.py "$out"
 
 step "shared rate limit"
 rm -rf "$out-rate-limit"

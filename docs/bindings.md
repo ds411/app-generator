@@ -256,6 +256,7 @@ The keys of the bindings of this repository:
 | `fastapi` | `x-fastapi-column` | `relation`      | The foreign key column of a `many_to_one` or owning `one_to_one` relation. |
 | `fastapi` | `x-fastapi-rate-limit-store` | `app` | `memory` (default) or `redis`: where the rate limit counts the requests. |
 | `fastapi` | `x-fastapi-deploy` | `app` | `kubernetes` (default), `knative`, or a list of both: the folders in `deploy/`. |
+| `fastapi` | `x-fastapi-search` | `app` | `like` (default) or `fulltext`: the search of `q` in the list endpoints. |
 | `nextjs`  | `x-nextjs-rate-limit-store` | `app` | `memory` (default) or `redis`: where the rate limit counts the requests. |
 | `nextjs`  | `x-nextjs-deploy` | `app`            | `kubernetes` (default), `knative`, or a list of both: the folders in `deploy/`. |
 | `react`   | `x-mock-count`    | `entity`         | An integer, 1 or more.        |
@@ -432,6 +433,46 @@ project tracker with SQLite, and checks that a record stays. The change
 adds a field, and makes a field translatable: the next migration adds
 the column of its translations
 ([ADR 0026](adr/0026-record-translations.md)).
+
+### The full-text search of the FastAPI app
+
+With `x-fastapi-search: fulltext` in the `app` section, the parameter
+`q` of the list endpoints is a web search on Postgres: words, a phrase
+in quotes, `or`, and `-word` for a word that a record must not have.
+
+```yaml
+app:
+  name: project-tracker
+  title: Project Tracker
+  x-fastapi-search: fulltext
+```
+
+- The text fields of the entity in its search filters (and its display
+  field, if it is a text) make one text search vector
+  (`search_vector` in `app/core/search.py`). A GIN index on the vector
+  makes the search fast. A field of a related record, for example
+  `owner.name`, has its own vector, without an index.
+- The text search configuration comes from the default language of
+  `translations`, for example `english` for `en` and `german` for `de`,
+  else `simple`. A configuration of a language compares the stems of
+  the words: `reports` finds `report`. A translatable field keeps the
+  value of the default language in its column, so the search compares
+  the words of that value ([ADR 0026](adr/0026-record-translations.md)).
+- Without a sort, the records come in the order of their rank
+  (`ts_rank`). With a sort, the sort decides the order.
+- On SQLite, the search stays `LIKE` for each word, and the migrations
+  do not create the GIN indexes.
+- A new app gets the GIN indexes in its first migration. To add them to
+  an app that exists, generate the app again, and make the next
+  migration with Alembic on a Postgres database:
+  `DATABASE_URL=postgresql+asyncpg://... uv run alembic revision --autogenerate -m "full-text search"`.
+  `migrations/env.py` writes each GIN index under a test of the
+  dialect, so that the migration also runs on SQLite. On SQLite,
+  Alembic does not compare the indexes of an expression.
+- The generated tests check the rank, `-word`, a phrase, and `or` on
+  Postgres. `scripts/check_full_text_search.py` (in
+  `scripts/check-fastapi.sh`) adds the indexes to an app that exists on
+  Postgres, and checks that the search of the projects uses its index.
 
 ## Shared templates
 

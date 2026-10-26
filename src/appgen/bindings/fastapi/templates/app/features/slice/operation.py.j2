@@ -187,7 +187,7 @@ async def {{ op.name }}(
 {% endfor %}
 {% endfor %}
     total = await session.scalar(select(func.count()).select_from(statement.subquery()))
-    order = sort_order(query.sort, SORTABLE, {{ e.name }}.id)
+    order = sort_order(query.sort, SORTABLE, {{ e.name }}.id{{ ", rank" if e.query.ranked }})
     records = await session.scalars(
         statement.order_by(*order).limit(query.limit).offset(query.offset)
     )

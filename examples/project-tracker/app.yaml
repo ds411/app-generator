@@ -9,6 +9,7 @@ app:
   name: project-tracker
   title: Project Tracker
   description: Plan projects, split them into tasks, and assign the tasks to people.
+  x-fastapi-search: fulltext
 
 entities:
   Person:

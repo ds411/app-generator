@@ -110,6 +110,10 @@ all records of an entity (#336, #337, #338):
   values of the API and with the totals of the list endpoints. It checks
   that the dashboard calls each widget endpoint once, and that no
   request loads all records.
+- With `x-fastapi-search: fulltext` on the app, the search of a view is
+  the full-text search of Postgres (#341, `docs/bindings.md`). The
+  client sends `q` as before, and without a sort the records come in the
+  order of their rank.
 
 ## Consequences
 
