@@ -56,8 +56,8 @@ import { loadRelated, NotFoundError, type RelatedStep } from "@/shared/api";
 {% else %}
 import { NotFoundError } from "@/shared/api";
 {% endif %}
-{% for entity in ([plan.entity] + plan.lookups) | unique %}
-import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% for entity, entity_names in plan.entity_imports() %}
+import { {{ entity_names | join(", ") }} } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
 {% for line in plan.imports %}
 {{ line }}
@@ -156,6 +156,31 @@ function subscribe(listener: () => void): () => void {
   const stops = [{% for entity in ([plan.entity] + plan.lookups) | unique %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
   return () => stops.forEach((stop) => stop());
 }
+{% for tab in plan.tabs if tab.history %}
+{% if tab.history.fields %}
+
+/** The fields of the change log of the tab {{ tab.label }} (ADR 0040), by name. */
+function {{ tab.name | camel }}Fields(): Record<string, HistoryField> {
+  return {
+{% for f in tab.history.fields %}
+    {{ f.key }}: { label: {{ tr(js(f.label)) }}{% if f.format != "text" %}, format: {{ js(f.format) }}{% endif %}{% if f.currency %}, currency: {{ js(f.currency) }}{% endif %} },
+{% endfor %}
+  };
+}
+{% endif %}
+{% if tab.history.records %}
+
+/** The display values of the related records of the change log of the tab {{ tab.label }}. */
+const {{ tab.name | camel }}Records = {
+{% for r in tab.history.records %}
+  {{ r.key }}: async (id: string) => {
+    const item = await {{ r.target | camel }}Api.get(id);
+    return {{ r.text }};
+  },
+{% endfor %}
+};
+{% endif %}
+{% endfor %}
 {% if plan.actions %}
 
 {{ m.action_group("viewActions", plan.actions, plan.type) }}
@@ -230,6 +255,19 @@ export function {{ name | pascal }}View({ id }: {{ name | pascal }}ViewProps) {
         <TabsContent value={{ js(tab.name) }} className="space-y-4"> {{ trace(tab.element_id, jsx=True) }}
 {% if tab.gap %}
           <{{ tab.gap.name }} record={record} />
+{% elif tab.history %}
+          <HistoryList
+            history={ {{- tab.history.api -}} }
+            id={record.id}
+            fields={ {{- (tab.name | camel) ~ "Fields()" if tab.history.fields else "{}" -}} }
+{% if tab.history.records %}
+            records={ {{- tab.name | camel -}} Records}
+{% endif %}
+{% if tab.history.restore %}
+            restore={{ js(tab.history.restore) }}
+{% endif %}
+            subscribe={subscribe}
+          />
 {% elif tab.view %}
 {% if tab.params %}
           <{{ tab.view | pascal }}View params={ {{- tab.params -}} } />

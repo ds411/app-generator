@@ -4,7 +4,11 @@
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set sf = definition.auth.second_factor %}
 {% set required = sf.required_roles if sf and definition.access else [] %}
-{% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
+{# The change log (ADR 0040) names a user with the display field, else with the user name. #}
+{% set history_users = has_history(definition) and not react.api %}
+{% set label_key = history_user_key(definition) if history_users else none %}
+{% set label_key = none if label_key == key else label_key %}
+{% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; label?: string | null" if label_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
 {{ trace_header(definition.auth.id) }}
 {% if react.api %}
 // The sign-in of the app with the FastAPI app (ADR 0011): the API checks
@@ -79,7 +83,7 @@ const users: MockUser[] = [
 const users: {{ user_type }}[] = [
 {% endif %}
 {% for record in mock[definition.auth.user_entity] %}
-  { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %} },
+  { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %}{% if label_key %}, label: {{ record[label_key] | tojson }}{% endif %} },
 {% endfor %}
 ];
 {% if sign_up %}
@@ -185,6 +189,14 @@ export function currentUserId(): string | null {
     return null;
   }
 }
+{% if history_users %}
+
+/** Return the display value of a mock user for the change log (ADR 0040), or null. */
+export function userLabel(id: string): string | null {
+  const user = {{ "allUsers()" if sign_up else "users" }}.find((item) => item.id === id);
+  return user === undefined ? null : {{ "(user.label ?? user.username)" if label_key else "user.username" }};
+}
+{% endif %}
 
 {% if sf %}
 /** The state of the second factor of the signed-in user (ADR 0024). */

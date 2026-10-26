@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { type ActionResult, unwrap } from "./errors";
-import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}ListQuery, ListResult } from "./types";
+import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}{{ "HistoryApi, HistoryEntry, " if has_history(definition) }}ListQuery, ListResult } from "./types";
 
 /** The server actions of the data access of one entity. */
 export type EntityActions<T extends EntityRecord, TInput, TPatch = Partial<TInput>> = {
@@ -96,6 +96,31 @@ export function createFileApi<T extends EntityRecord, TField extends string>(
     },
     async remove(id, field) {
       const record = unwrap(await actions.remove(id, field));
+      notifyChange(entity);
+      return record;
+    },
+  };
+}
+{% endif %}
+{% if has_history(definition) %}
+
+/** The server actions of the change log of one entity (ADR 0040). */
+export type HistoryActions<T extends EntityRecord> = {
+  list(id: string, page?: { page: number; pageSize: number }): Promise<ActionResult<ListResult<HistoryEntry>>>;
+  restore(id: string, entryId: string): Promise<ActionResult<T>>;
+};
+
+/**
+ * Return the change log of an entity: it calls the server actions, and
+ * after a restore it calls the listeners of the entity in this browser tab.
+ */
+export function createHistoryApi<T extends EntityRecord>(entity: string, actions: HistoryActions<T>): HistoryApi<T> {
+  return {
+    async list(id, page) {
+      return unwrap(await actions.list(id, page));
+    },
+    async restore(id, entryId) {
+      const record = unwrap(await actions.restore(id, entryId));
       notifyChange(entity);
       return record;
     },

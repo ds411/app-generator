@@ -183,6 +183,37 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
     return result
 
 
+def history_members(entity_name: str, entity: Entity) -> list[Member]:
+    """Return the keys of the change log of an entity (ADR 0040), in source order.
+
+    They are the keys of the fields and the relations that the log keeps:
+    the entries have the name in the definition, and the records the key.
+    """
+    by_name = {m.name: m for m in members(entity_name, entity) if m.translations is None}
+    return [by_name[name] for name in entity.history_members]
+
+
+def history_user_key(definition: AppDefinition) -> str | None:
+    """Return the key that names a user in the change log: the display field, else the user name.
+
+    A computed or a file display field is not a column, so the user name
+    names the user then. Without `auth`, the entries have no user.
+    """
+    auth = definition.auth
+    if auth is None:
+        return None
+    users = definition.entities[auth.user_entity]
+    name = users.display_field
+    if name is None or users.fields[name].computed is not None or users.fields[name].is_file:
+        name = auth.username_field
+    return camel(name)
+
+
+def has_history(definition: AppDefinition) -> bool:
+    """Return True if an entity keeps a change log (ADR 0040)."""
+    return any(entity.history is not None for entity in definition.entities.values())
+
+
 def operations_of(definition: AppDefinition, entity_name: str) -> list[tuple[str, Any]]:
     """Return the operations on an entity, in source order, as (name, operation) pairs."""
     return [(n, op) for n, op in definition.operations.items() if op.entity == entity_name]
@@ -298,6 +329,9 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "enum_values_name": enum_values_name,
     "members": members,
     "translations_key": translations_key,
+    "history_members": history_members,
+    "has_history": has_history,
+    "history_user_key": history_user_key,
     "operations_of": operations_of,
     "inverse_lists": inverse_lists,
     "line_items": line_items,

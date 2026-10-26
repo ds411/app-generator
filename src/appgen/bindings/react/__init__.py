@@ -388,12 +388,11 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
         | {"event"}
         | {"storage"}
+        | {"history"}
     ),
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
-    # The change log of the React app follows (#399).
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook", "job"}
-        | {"history"}
     ),
     context=context,
     warnings=warnings,

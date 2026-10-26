@@ -96,6 +96,13 @@ of the entity in snake case, for example `bookings`.
   the change, and they start no other event. Throw an error to roll back
   the change. Until the operation has its logic, the stub throws, and so
   each change that starts the event fails.
+- The repositories add the entries of the change log of an entity with
+  `history` (ADR 0040) in `create`, `update`, and `remove`. An
+  operation that changes records with them adds the entries too. A
+  change with SQL adds none. `<entity>History` of `@/entities/<entity>`
+  gives the entries of a record (`list(id, page)`) and a restore
+  (`restore(id, entryId)`), and `HistoryList` of
+  `@/shared/ui/history-list` shows them.
 - A third-party API of the definition has a server-only client in
   `@/shared/api/<api>`, for example `holidaysClient()`, which reads the
   base URL and the secret from the environment. Call it in an operation

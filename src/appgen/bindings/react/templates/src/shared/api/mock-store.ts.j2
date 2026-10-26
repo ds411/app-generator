@@ -1,6 +1,8 @@
 {{ trace_header("app") }}
 {% set translatable = i18n and i18n.translatable %}
-{% if translatable %}
+{% if translatable and react.history %}
+import { defaultLanguage, storeTranslations, translateRecord } from "@/shared/lib/i18n";
+{% elif translatable %}
 import { storeTranslations, translateRecord } from "@/shared/lib/i18n";
 {% endif %}
 {% if record_rules %}
@@ -10,18 +12,15 @@ import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/p
 
 {% endif %}
 import { applyQuery } from "./query";
-{% if definition.storage %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] %}
+{% if type_names | length > 5 %}
 import {
-  type EntityApi,
-  type EntityRecord,
-  type FileApi,
-  type FileValue,
-  type ListQuery,
-  type ListResult,
-  NotFoundError,
+{% for type_name in type_names %}
+  {{ type_name }},
+{% endfor %}
 } from "./types";
 {% else %}
-import { type EntityApi, type EntityRecord, type ListQuery, type ListResult, NotFoundError } from "./types";
+import { {{ type_names | join(", ") }} } from "./types";
 {% endif %}
 
 /** A workflow on an enum field: the allowed changes of the field. */
@@ -240,6 +239,26 @@ function checkFile(file: File, rule: FileRule): void {
 }
 
 {% endif %}
+{% if react.history %}
+/** A field or a relation that the change log keeps (ADR 0040): the name in the app definition, and the key of the record. */
+export type HistoryMember = readonly [name: string, key: string];
+
+/** The signed-in user of the entries of the change log, and the display value of a user. */
+export type HistoryUsers = {
+  current: () => string | null;
+  label: (id: string) => string | null;
+};
+
+/** An entry of the change log of the mock store: the entry, and the ID of its record. */
+type StoredEntry = Omit<HistoryEntry, "user"> & { recordId: string };
+
+/** Return the values of the kept fields of a record, by name. A missing value is null. */
+function snapshot(record: object, members: readonly HistoryMember[]): Record<string, unknown> {
+  const values = record as Record<string, unknown>;
+  return Object.fromEntries(members.map(([name, key]) => [name, values[key] ?? null]));
+}
+
+{% endif %}
 /** The time that each call waits, so that the UI shows its loading states. */
 export const MOCK_LATENCY_MS = 250;
 {% if lines_ops %}
@@ -291,6 +310,11 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if react.totals %}
   private totals: readonly Total[] = [];
+{% endif %}
+{% if react.history %}
+  private historyMembers: readonly HistoryMember[] = [];
+  private historyUsers: HistoryUsers | undefined;
+  private entries: StoredEntry[] = [];
 {% endif %}
 
   constructor(
@@ -367,13 +391,23 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.events %}
     const created = this.events.created;
     await this.runEvents(record, created ? [created] : []);
+{% if react.history %}
+    this.log(record.id, "created", undefined, this.current(record));
+{% endif %}
     return this.show(this.current(record));
 {% else %}
+{% if react.history %}
+    this.log(record.id, "created", undefined, record);
+{% endif %}
     return this.show(record);
 {% endif %}
   }
 
+{% if react.history %}
+  async update(id: string, patch: Partial<TInput>, action: HistoryAction = "changed"): Promise<T> {
+{% else %}
   async update(id: string, patch: Partial<TInput>): Promise<T> {
+{% endif %}
     await wait();
 {% set stored = ", ...storeTranslations(before, patch, this.translatable)" if translatable else "" %}
 {% if record_rules %}
@@ -391,15 +425,21 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     this.notify();
 {% if react.events %}
     await this.runEvents(record, this.changeEvents(before, record));
+{% if react.history %}
+    this.log(id, action, before, this.current(record));
+{% endif %}
     return this.show(this.current(record));
 {% else %}
+{% if react.history %}
+    this.log(id, action, before, record);
+{% endif %}
     return this.show(record);
 {% endif %}
   }
 
   async remove(id: string): Promise<void> {
     await wait();
-{% if react.events %}
+{% if react.events or react.history %}
     const record = this.find(id{{ ', "change"' if record_rules }});
 {% else %}
     this.find(id{{ ', "change"' if record_rules }});
@@ -409,6 +449,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.events %}
     const deleted = this.events.deleted;
     await this.runEvents(record, deleted ? [deleted] : []);
+{% endif %}
+{% if react.history %}
+    this.log(id, "deleted", record, undefined);
 {% endif %}
   }
 
@@ -447,6 +490,77 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       dependents.set(target, stores);
     }
     return this;
+  }
+
+{% endif %}
+{% if react.history %}
+  /**
+   * Keep a change log of the records (ADR 0040), and return its entries
+   * and the restore. The store adds an entry for each create, change, and
+   * delete, until the page reloads. `members` are the kept fields, and
+   * `users` gives the signed-in user. `guards` check the access first.
+   */
+  history(
+    members: readonly HistoryMember[],
+    users?: HistoryUsers,
+    guards: { list?: () => void; restore?: () => void } = {},
+  ): HistoryApi<T> {
+    this.historyMembers = members;
+    this.historyUsers = users;
+    return {
+      list: async (id, page = { page: 1, pageSize: 20 }) => {
+        guards.list?.();
+        await wait();
+        this.find(id);
+        const entries = this.entries.filter((entry) => entry.recordId === id).reverse();
+        const start = (page.page - 1) * page.pageSize;
+        const items = entries.slice(start, start + page.pageSize).map(
+          ({ id: entryId, action, userId, at, changes }): HistoryEntry => ({
+            id: entryId,
+            action,
+            userId,
+            user: userId === null ? null : (this.historyUsers?.label(userId) ?? null),
+            at,
+            changes,
+          }),
+        );
+        return { items, total: entries.length, page: page.page, pageSize: page.pageSize };
+      },
+      restore: async (id, entryId) => {
+        guards.restore?.();
+        const entry = this.entries.find((item) => item.id === entryId && item.recordId === id);
+        if (entry === undefined) {
+          throw new NotFoundError("HistoryEntry", entryId);
+        }
+        if (entry.action !== "changed" && entry.action !== "restored") {
+          throw new Error({{ tr(js("Only the entry of a change has old values to restore.")) }});
+        }
+        const keys = new Map(this.historyMembers);
+        const patch: Record<string, unknown> = {};
+        for (const [name, change] of Object.entries(entry.changes)) {
+          const key = keys.get(name);
+          if (key !== undefined) {
+            patch[key] = change.old;
+          }
+        }
+{% if react.sequences %}
+        // A restore keeps the numbers of the fields with a sequence.
+        for (const sequence of this.sequences) {
+          delete patch[sequence.key];
+        }
+{% endif %}
+{% if translatable %}
+        // The change log keeps the value of the default language.
+        for (const key of this.translatable) {
+          if (key in patch) {
+            patch[`${key}Translations`] = { [defaultLanguage]: patch[key] };
+            delete patch[key];
+          }
+        }
+{% endif %}
+        return this.update(id, patch as Partial<TInput>, "restored");
+      },
+    };
   }
 
 {% endif %}
@@ -652,6 +766,32 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   /** Return the stored record with the ID of a record, as the operations of the events leave it. */
   private current(record: T): T {
     return this.records.find((item) => item.id === record.id) ?? record;
+  }
+
+{% endif %}
+{% if react.history %}
+  /**
+   * Add an entry to the change log, with the old and the new value of each
+   * kept field that changed. A change without a new value adds no entry.
+   */
+  private log(id: string, action: HistoryAction, before: T | undefined, after: T | undefined): void {
+    if (this.historyMembers.length === 0) {
+      return;
+    }
+    const old = before === undefined ? {} : snapshot(before, this.historyMembers);
+    const now = after === undefined ? {} : snapshot(after, this.historyMembers);
+    const changes: HistoryEntry["changes"] = {};
+    for (const [name] of this.historyMembers) {
+      const value = { old: old[name] ?? null, new: now[name] ?? null };
+      if (JSON.stringify(value.old) !== JSON.stringify(value.new)) {
+        changes[name] = value;
+      }
+    }
+    if ((action === "changed" || action === "restored") && Object.keys(changes).length === 0) {
+      return;
+    }
+    const userId = this.historyUsers?.current() ?? null;
+    this.entries = [...this.entries, { id: crypto.randomUUID(), recordId: id, action, userId, at: new Date().toISOString(), changes }];
   }
 
 {% endif %}

@@ -9,6 +9,7 @@ TypeScript expressions over the record (`record`) and the related records
 
 from dataclasses import dataclass, field
 
+from appgen.bindings.shared.auth import kind_operations
 from appgen.bindings.shared.gaps import GapSpec, component_gap
 from appgen.bindings.shared.views import (
     ActionPlan,
@@ -21,6 +22,7 @@ from appgen.bindings.shared.views import (
     state_ids,
     ts_key,
 )
+from appgen.dsl.model import Field
 from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.common import States
 from appgen.dsl.ui.states import effective_states
@@ -45,6 +47,61 @@ class SectionPlan:
     gap: GapSpec | None = None
 
 
+_HISTORY_FORMATS = {
+    "number",
+    "currency",
+    "percent",
+    "date",
+    "datetime",
+    "relative_time",
+    "boolean",
+    "email",
+    "url",
+}
+"""The formats of the values of the change log. The other formats show the value as text."""
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryField:
+    """A field or a relation of the change log of a history tab (ADR 0040)."""
+
+    name: str
+    """The name in the app definition: the key of the changes of an entry."""
+    label: str
+    format: str = "text"
+    currency: str | None = None
+
+    @property
+    def key(self) -> str:
+        return ts_key(self.name)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryRecord:
+    """A relation of the change log: the display value of the related record of an ID."""
+
+    name: str
+    target: str
+    text: str
+    """The TypeScript text of the related record `item`."""
+
+    @property
+    def key(self) -> str:
+        return ts_key(self.name)
+
+
+@dataclass(slots=True)
+class HistoryPlan:
+    """A tab with the change log of the record (ADR 0040), and its restore."""
+
+    api: str
+    """The `HistoryApi` of the entity, for example `taskHistory`."""
+    fields: list[HistoryField] = field(default_factory=list[HistoryField])
+    records: list[HistoryRecord] = field(default_factory=list[HistoryRecord])
+    restore: str | None = None
+    """The update operation of the entity: without it, the tab has no restore."""
+
+
 @dataclass(slots=True)
 class TabPlan:
     """A tab of a detail view: sections, a list view of related records, or a gap."""
@@ -61,6 +118,7 @@ class TabPlan:
     params: str | None = None
     """The query parameters of the related records, of `record`, for a view that sends its query."""
     gap: GapSpec | None = None
+    history: HistoryPlan | None = None
 
 
 @dataclass(slots=True)
@@ -105,7 +163,23 @@ class DetailPlan:
         sections = [*self.sections, *(s for tab in self.tabs for s in tab.sections)]
         parts += [jsx for s in sections for _, jsx in s.fields]
         parts += [(a.href or "") + (a.run or "") + (a.navigate_to or "") for a in self.actions]
+        parts += [r.text for tab in self.tabs if tab.history for r in tab.history.records]
         return " ".join(parts)
+
+    def entity_imports(self) -> list[tuple[str, list[str]]]:
+        """Return the names that the view imports from each entity slice, in order."""
+        names = {
+            entity: [f"{camel(entity)}Api", f"type {pascal(entity)}"]
+            for entity in dict.fromkeys([self.entity, *self.lookups])
+        }
+        for tab in self.tabs:
+            if tab.history is None:
+                continue
+            if tab.history.api not in names[self.entity]:
+                names[self.entity].insert(1, tab.history.api)
+            for record in tab.history.records:
+                names.setdefault(record.target, [f"{camel(record.target)}Api"])
+        return list(names.items())
 
     def needs(self, name: str) -> bool:
         """Return True if the code of the view calls a helper, for example `pageHref`."""
@@ -181,6 +255,9 @@ def build_detail(ctx: ViewContext, name: str) -> DetailPlan:
     for tab in plan.tabs:
         if tab.view:
             imports.add(f'import {{ {pascal(tab.view)}View }} from "@/widgets/{kebab(tab.view)}";')
+        if tab.history:
+            names = "type HistoryField, HistoryList" if tab.history.fields else "HistoryList"
+            imports.add(f'import {{ {names} }} from "@/shared/ui/history-list";')
     plan.imports = sorted(imports)
     plan.icons |= {a.action.icon for a in plan.actions if a.action.icon}
     plan.icons |= {tab.icon for tab in plan.tabs if tab.icon}
@@ -221,8 +298,39 @@ def _tab(
             result.params = related_params(ctx, plan.entity, tab)
         else:
             result.where = related_test(ctx, plan.entity, tab.relation)
+    elif tab.history:
+        result.history = history_plan(ctx, plan.entity)
     for section_name, section in tab.sections.items():
         result.sections.append(_section(ctx, plan, section_name, section, paths))
+    return result
+
+
+def history_plan(ctx: ViewContext, entity_name: str) -> HistoryPlan:
+    """Return the plan of a tab with the change log of a record (ADR 0040).
+
+    The tab shows the label of each kept field, its values in the format
+    of the field, and the display value of the related record of a
+    relation. The restore needs the update operation of the entity.
+    """
+    definition = ctx.definition
+    entity = definition.entities[entity_name]
+    result = HistoryPlan(
+        api=f"{camel(entity_name)}History",
+        restore=kind_operations(definition, entity_name).get("update"),
+    )
+    for name in entity.history_members:
+        member = entity.fields.get(name)
+        if isinstance(member, Field):
+            value = ctx.value(entity_name, name, row=_ROW)
+            fmt = value.format if value.format in _HISTORY_FORMATS else "text"
+            result.fields.append(HistoryField(name, value.label, fmt, value.currency))
+            continue
+        relation = entity.relations[name]
+        result.fields.append(HistoryField(name, relation.label or label(name)))
+        target = relation.target
+        display = definition_display(definition.entities[target])
+        text = ctx.value(target, display, row="item").text_expr
+        result.records.append(HistoryRecord(name, target, text))
     return result
 
 

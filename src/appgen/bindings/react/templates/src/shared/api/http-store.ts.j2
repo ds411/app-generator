@@ -1,17 +1,14 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-{% if definition.storage %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] %}
+{% if type_names | length > 6 %}
 import {
-  type EntityApi,
-  type EntityRecord,
-  type FileApi,
-  type Filter,
-  type ListQuery,
-  type ListResult,
-  NotFoundError,
+{% for type_name in type_names %}
+  {{ type_name }},
+{% endfor %}
 } from "./types";
 {% else %}
-import { type EntityApi, type EntityRecord, type Filter, type ListQuery, type ListResult, NotFoundError } from "./types";
+import { {{ type_names | join(", ") }} } from "./types";
 {% endif %}
 
 /** The JSON names of an entity in the API. */
@@ -256,6 +253,42 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
         return send("PUT", id, field, body);
       },
       remove: (id, field) => send("DELETE", id, field),
+    };
+  }
+
+{% endif %}
+{% if react.history %}
+  /**
+   * Return the change log of the records (ADR 0040): `GET <path>/{id}/history`
+   * and `POST <path>/{id}/history/{entry_id}/restore`. The changes of an
+   * entry have the names of the fields in the app definition.
+   */
+  history(): HistoryApi<T> {
+    return {
+      list: async (id, page = { page: 1, pageSize: 20 }) => {
+        const query = `?limit=${page.pageSize}&offset=${(page.page - 1) * page.pageSize}`;
+        const result = (await this.request("GET", id, undefined, "/history", query)) as {
+          items: Record<string, unknown>[];
+          total: number;
+        };
+        const items = result.items.map(
+          (item): HistoryEntry => ({
+            id: String(item.id),
+            action: item.action as HistoryAction,
+            userId: typeof item.user_id === "string" ? item.user_id : null,
+            user: typeof item.user === "string" ? item.user : null,
+            at: String(item.at),
+            changes: item.changes as HistoryEntry["changes"],
+          }),
+        );
+        return { items, total: result.total, page: page.page, pageSize: page.pageSize };
+      },
+      restore: async (id, entryId) => {
+        const suffix = `/history/${encodeURIComponent(entryId)}/restore`;
+        const record = this.fromJson(await this.request("POST", id, undefined, suffix, this.translations()));
+        this.notify();
+        return record;
+      },
     };
   }
 

@@ -25,6 +25,7 @@ from appgen.bindings.shared.totals import entity_totals, total_keys
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
 from appgen.bindings.shared.typescript import (
     Member,
+    has_history,
     members,
     to_json,
 )
@@ -193,6 +194,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "totals": {}
             if api
             else {name: totals for name in entities if (totals := entity_totals(definition, name))},
+            # The change log (ADR 0040): the mock store keeps the entries, else the FastAPI app.
+            "history": has_history(definition),
         },
     }
 

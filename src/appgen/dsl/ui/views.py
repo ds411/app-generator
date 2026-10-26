@@ -287,7 +287,7 @@ class DetailSection(Element):
 
 
 class DetailTab(Element):
-    """A tab of a detail view: sections, a list of related records, or a gap."""
+    """A tab of a detail view: sections, a list of related records, the change log, or a gap."""
 
     label: Text | None = None
     icon: IconName | None = None
@@ -298,15 +298,17 @@ class DetailTab(Element):
     """A one_to_many or many_to_many relation of the entity."""
     view: MemberName | None = None
     """A table or a card list of the target entity of the relation."""
+    history: bool = False
+    """The entries of the change log of the record (ADR 0040), with a restore."""
     custom: bool = False
 
     @model_validator(mode="after")
     def _one_content(self) -> Self:
         related = self.relation is not None or self.view is not None
-        if sum([bool(self.sections), related, self.custom]) != 1:
+        if sum([bool(self.sections), related, self.history, self.custom]) != 1:
             raise PydanticCustomError(
                 "tab_content",
-                "Set exactly one of: sections, relation and view, or custom: true",
+                "Set exactly one of: sections, relation and view, history: true, or custom: true",
             )
         if related and (self.relation is None or self.view is None):
             raise PydanticCustomError("tab_content", "Set both relation and view")

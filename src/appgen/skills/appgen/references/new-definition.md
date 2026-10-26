@@ -226,7 +226,9 @@ generated app has a stub for it, and the check reports it in `gaps`.
   create, change, and delete, with the user, the time, and the old and
   the new values, and a restore of the old values of a change.
   `history: { fields: [...] }` keeps only some fields and `many_to_one`
-  relations. Only the FastAPI binding keeps a change log for now.
+  relations. A tab of a detail view with `history: true` shows the
+  entries with a restore button, and the CRUD detail view of the entity
+  has one.
 
 ## Operations
 

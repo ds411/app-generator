@@ -1,0 +1,25 @@
+{{ trace_header("app") }}
+import { index, jsonb, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+
+/**
+ * The change log of the records (ADR 0040): one row for each create,
+ * change, and delete of a record of an entity with `history`. The FastAPI
+ * app has the same table, with the same columns.
+ */
+export const historyEntriesTable = pgTable(
+  "history_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The name of the entity in the app definition.
+    entity: varchar("entity", { length: 63 }).notNull(),
+    recordId: uuid("record_id").notNull(),
+    // `created`, `changed`, `deleted`, or `restored`.
+    action: varchar("action", { length: 10 }).notNull(),
+    // The signed-in user of the change, or null. The entries stay after the delete of the user.
+    userId: uuid("user_id"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    // The old and the new value of each changed field, by its name in the app definition.
+    changes: jsonb("changes").$type<Record<string, { old: unknown; new: unknown }>>().notNull(),
+  },
+  (table) => [index("ix_history_entries_record_id").on(table.recordId)],
+);

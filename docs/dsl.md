@@ -196,6 +196,8 @@ operation, a view, or a form with the same name in the definition wins
 over the expanded one. The default table shows the fields and the
 single relations, the detail view shows them in one section, and the
 forms have all fields and relations except `one_to_many` relations.
+The detail view of an entity with [`history`](#history) also has the
+tab `history`, with the change log of the record.
 
 ```yaml
 entities:
@@ -684,6 +686,12 @@ Booking:
   entries, the newest first) and
   `POST /<entity>/{id}/history/{entry_id}/restore`. The entries stay
   after the delete of a record.
+- The Next.js app keeps the same table, and its server actions add the
+  entries. The React app with mock data keeps the entries in memory,
+  until the page reloads, and the React app with the FastAPI app
+  (`x-react-data: api`) reads them from the endpoints.
+- A tab of a detail view with `history: true` shows the entries (see
+  [views](#views)).
 
 ### Relations
 
@@ -1826,7 +1834,12 @@ ui:
 page. `header` (`title`, `subtitle`, `badges`), `sections` (`title`,
 `description`, `fields`, `columns`, or `custom: true`), `tabs`
 (`label`, `icon`, and `sections`, or `relation` and `view`, or
-`custom: true`), and `actions`.
+`history: true`, or `custom: true`), and `actions`. A tab with
+`history: true` shows the change log of the record (see
+[History](#history)): each entry with the user, the time, and the
+changes, the newest first. An entry of a change has a restore button,
+if the user may update the record. The entity of the view must keep a
+change log (`invalid-option`).
 
 ```yaml
 ui:
@@ -1839,6 +1852,7 @@ ui:
         summary: { title: Summary, fields: [assignee, due_date, estimate_hours], columns: 3 }
       tabs:
         comments: { label: Comments, icon: message-square, relation: comments, view: comment_table }
+        history: { label: History, icon: history, history: true }
         activity: { label: Activity, custom: true }
 ```
 
@@ -2610,6 +2624,11 @@ use in the app does not show.
   `Go to the previous month`, `Choose the month`, `Choose the year`,
   `Today, {date}`, `{date}, selected`.
 - Dashboards: `View all`, `No data yet`, `Other`, `None`.
+- The change log of a record (see [History](#history)): `History`,
+  `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
+  `Older`, `No changes yet.`, `The history did not load.`,
+  `The old values are back.`, `The restore did not succeed.`,
+  `Only the entry of a change has old values to restore.`.
 - Actions and forms: `Cancel`, `Close`, `Saved.`,
   `The action did not succeed.`, `The form did not save.`,
   `Select a value`, `Search`, `No results.`, `Loading…` (a search on

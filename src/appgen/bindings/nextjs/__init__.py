@@ -291,6 +291,10 @@ BINDING = Binding(
         Output(template="src/shared/db/run-migrate.ts.j2", path="src/shared/db/run-migrate.ts"),
         Output(template="src/shared/db/schema/index.ts.j2", path="src/shared/db/schema/index.ts"),
         *(
+            Output(template=f"{path}.j2", path=path, when="nextjs.history")
+            for path in ("src/shared/db/schema/history-entries.ts", "src/shared/db/history.ts")
+        ),
+        *(
             Output(
                 template=template,
                 path=path,
@@ -581,9 +585,8 @@ BINDING = Binding(
         | {"entity_seed", "seed_record"}
         | {"job", "event"}
         | {"storage"}
+        | {"history"}
     ),
-    # The change log of the Next.js app follows (#399).
-    excludes=frozenset({"history"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

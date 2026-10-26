@@ -3,7 +3,7 @@
 from pathlib import Path
 from textwrap import dedent
 
-from appgen.bindings import fastapi, nextjs, react
+from appgen.bindings import fastapi
 from appgen.dsl import load_definition, load_definition_text, validate_definition
 from appgen.dsl.history import History
 from appgen.dsl.schema import json_schema
@@ -226,9 +226,3 @@ def test_the_room_booking_example_keeps_the_user_and_checks_the_permissions() ->
     assert '    "restore_booking_history_entry": "update_booking",\n' in access
     tests = files["tests/features/bookings/test_history.py"]
     assert "async def test_an_entry_has_the_signed_in_user(" in tests
-
-
-def test_the_front_ends_keep_the_change_log_later() -> None:
-    assert "history" in fastapi.BINDING.covers
-    for binding in (nextjs, react):
-        assert "history" in binding.BINDING.excludes

@@ -23,6 +23,7 @@ from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
+from appgen.bindings.shared.typescript import has_history
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
@@ -307,6 +308,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 for entity in definition.entities.values()
                 for rule in entity.rules.values()
             ),
+            # The change log (ADR 0040): one table for all entities, and the helpers.
+            "history": has_history(definition),
             "frame_headers": frame_headers(definition),
         },
     }

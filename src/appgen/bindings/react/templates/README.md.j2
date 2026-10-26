@@ -142,6 +142,28 @@ The app has mock data, so the page keeps the connections in
 
 {% endif %}
 {% endif %}
+{% if react.history %}
+## Change log
+
+The app keeps a change log of these entities: an entry for each
+create, change, and delete of a record, with the user, the time, and
+the old and the new values.
+
+{% for entity_name, entity in definition.entities.items() if entity.history %}
+- `{{ entity_name }}`: {% for member in entity.history_members %}`{{ member }}`{{ ", " if not loop.last }}{% endfor %}.
+{% endfor %}
+
+`<entity>History` of `@/entities/<entity>` gives the entries of a record
+and a restore, which gives the fields of the entry of a change their
+old values back.
+{% if react.api %}
+It calls the history endpoints of the FastAPI app.
+{% else %}
+With mock data, the app keeps the entries in memory, until the page
+reloads.
+{% endif %}
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 

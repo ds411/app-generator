@@ -9,6 +9,9 @@ export {
 {% if element.file_fields and definition.storage %}
   {{ var }}Files,
 {% endif %}
+{% if element.history %}
+  {{ var }}History,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

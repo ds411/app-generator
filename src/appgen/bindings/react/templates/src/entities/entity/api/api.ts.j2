@@ -22,12 +22,25 @@
 {% set totals = react.totals.get(name, []) %}
 {# With mock data, the store applies the record rules of the entity (ADR 0018, ADR 0025). #}
 {% set rule = record_rules.get(name) if not react.api else none %}
-{% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) else []) %}
-{% set typed = not react.api and not has_files %}
+{# The change log (ADR 0040): with mock data, the access of the read and of the update operation. #}
+{% set history = element.history %}
+{% set history_guards = {} %}
+{% if history and definition.access and not react.api %}
+{% for kind, guard_kind in (("list", "read"), ("restore", "update")) %}
+{% set op_name = file_kinds.get(guard_kind) %}
+{% if op_name and op_name not in definition.auth.public_operations %}
+{% set _ = history_guards.update({kind: op_name}) %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% set history_users = history and definition.auth and not react.api %}
+{% set auth_names = (["currentUserId"] if history_users else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards else []) + (["userLabel"] if history_users else []) %}
+{% set typed = not react.api and not has_files and not history %}
+{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
-import { {% if typed %}type EntityApi, {% endif %}{% if has_files %}type FileApi, {% endif %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
+import { {% for t in api_types %}{{ t }}, {% endfor %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
 {% else %}
-import { {% if typed %}type EntityApi, {% endif %}{% if has_files %}type FileApi, {% endif %}{{ store }} } from "@/shared/api";
+import { {% for t in api_types %}{{ t }}, {% endfor %}{{ store }} } from "@/shared/api";
 {% endif %}
 
 {% if auth_names %}
@@ -200,6 +213,34 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% endfor %}
 {% if totals %}
 ]);
+{% endif %}
+{% endif %}
+{% if history %}
+
+{% if react.api %}
+/** The change log of {{ type }} (ADR 0040): the history endpoints of the FastAPI app. */
+export const {{ var }}History: HistoryApi<{{ type }}> = {{ var }}Api.history(); {{ trace(history.id) }}
+{% else %}
+/** The change log of {{ type }} (ADR 0040): the store keeps the entries in memory, until the page reloads. */
+export const {{ var }}History: HistoryApi<{{ type }}> = {{ var }}Api.history( {{ trace(history.id) }}
+  [
+{% for m in history_members(name, element) %}
+    [{{ ts_value(m.name) }}, {{ ts_value(m.key) }}],
+{% endfor %}
+  ],
+{% if history_users %}
+  { current: currentUserId, label: userLabel },
+{% elif history_guards %}
+  undefined,
+{% endif %}
+{% if history_guards %}
+  {
+{% for kind, op_name in history_guards.items() %}
+    {{ kind }}: () => requireOperation({{ op_name | tojson }}),
+{% endfor %}
+  }, {{ trace(definition.access.id) }}
+{% endif %}
+);
 {% endif %}
 {% endif %}
 {% if has_files %}

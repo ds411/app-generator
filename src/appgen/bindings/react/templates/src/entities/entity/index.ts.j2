@@ -12,6 +12,9 @@ export {
 {% if element.file_fields and definition.storage and (api_entities[name].files if react.api else true) %}
   {{ var }}Files,
 {% endif %}
+{% if element.history %}
+  {{ var }}History,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

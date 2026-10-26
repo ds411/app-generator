@@ -14,6 +14,9 @@ import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 
 {% endif %}
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
+{% if element.history %}
+import type { HistoryMember } from "@/shared/db/history";
+{% endif %}
 import { Repository{{ ", total" if totals }} } from "@/shared/db/repository";
 
 {% set events = ts_events(definition, name) %}
@@ -23,6 +26,15 @@ import { {{ schemas | join(", ") }} } from "../model/schema";
 {% endif %}
 import { {{ var }}Defaults, type {{ type }}, type {{ type }}Input } from "../model/types";
 
+{% if element.history %}
+/** The fields and the relations that the change log of {{ type }} keeps (ADR 0040): the name and the key. */
+export const {{ var }}HistoryMembers: HistoryMember[] = [ {{ trace(element.history.id) }}
+{% for m in history_members(name, element) %}
+  [{{ ts_value(m.name) }}, {{ ts_value(m.key) }}],
+{% endfor %}
+];
+
+{% endif %}
 /** The data access of {{ type }} in the database. Use it only on the server. */
 export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   entity: {{ ts_value(name) }},
@@ -31,6 +43,9 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% set translatable = element.fields.items() | selectattr("1.translatable") | list %}
 {% if translatable %}
   translatable: [{% for field_name, field in translatable %}{{ ts_value(field_name | camel) }}{{ ", " if not loop.last }}{% endfor %}],
+{% endif %}
+{% if element.history %}
+  history: {{ var }}HistoryMembers,
 {% endif %}
 {% if element.file_fields %}
   // The URLs of the files: app/files/{{ name | kebab }}/[id]/[field]/route.ts (ADR 0027).

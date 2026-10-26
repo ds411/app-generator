@@ -23,3 +23,10 @@ export * from "./webhook-events";
 {{ trace(w.id) }}
 {% endfor %}
 {% endif %}
+{% if has_history(definition) %}
+// The change log of the records (ADR 0040).
+export * from "./history-entries";
+{% for entity in definition.entities.values() if entity.history %}
+{{ trace(entity.history.id) }}
+{% endfor %}
+{% endif %}

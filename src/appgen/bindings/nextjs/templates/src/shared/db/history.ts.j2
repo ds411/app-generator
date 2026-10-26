@@ -1,0 +1,158 @@
+{{ trace_header("app") }}
+{% set users = nextjs.tables_by_entity[definition.auth.user_entity] if definition.auth else none %}
+import "server-only";
+
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import { and, desc, eq{{ ", inArray" if users }} } from "drizzle-orm";
+import { z } from "zod";
+
+import { type HistoryAction, type HistoryEntry, type ListResult, NotFoundError, ValidationError } from "@/shared/api";
+
+import { type Database, getDb } from "./client";
+import { historyEntriesTable{{ ", " ~ users.const if users }} } from "./schema";
+
+// The change log of the records (ADR 0040). The repositories add an entry
+// for each create, change, and delete of a record, in the transaction of
+// the change.
+
+type Row = Record<string, unknown>;
+
+/** A field or a relation that the change log keeps: the name in the app definition, and the key of the row. */
+export type HistoryMember = readonly [name: string, key: string];
+
+/** The values of the kept fields of a record, by name. */
+export type Snapshot = Record<string, unknown>;
+
+/** The signed-in user of the request: the entries of its changes have the user. */
+const actingUser = new AsyncLocalStorage<string | null>();
+
+/** Run work for a user: the entries of the changes of the work have the user. */
+export function asUser<T>(user: string | null, work: () => Promise<T>): Promise<T> {
+  return actingUser.run(user, work);
+}
+
+/** Return a value as the change log keeps it: a time as text in UTC, and no undefined. */
+function jsonValue(value: unknown): unknown {
+  return value instanceof Date ? value.toISOString() : (value ?? null);
+}
+
+/** Return the values of the kept fields of a row. */
+export function snapshot(row: Row, members: readonly HistoryMember[]): Snapshot {
+  return Object.fromEntries(members.map(([name, key]) => [name, jsonValue(row[key])]));
+}
+
+/**
+ * Add an entry to the change log, in the transaction of a change. The
+ * entry has the old and the new value of each field that changed. A
+ * change without a new value adds no entry.
+ */
+export async function addEntry(
+  tx: Database,
+  entity: string,
+  recordId: string,
+  action: HistoryAction,
+  before: Snapshot | null,
+  after: Snapshot | null,
+): Promise<void> {
+  const changes: HistoryEntry["changes"] = {};
+  for (const name of Object.keys(after ?? before ?? {})) {
+    const old = before?.[name] ?? null;
+    const value = after?.[name] ?? null;
+    if (JSON.stringify(old) !== JSON.stringify(value)) {
+      changes[name] = { old, new: value };
+    }
+  }
+  if ((action === "changed" || action === "restored") && Object.keys(changes).length === 0) {
+    return;
+  }
+  const userId = actingUser.getStore() ?? null;
+  await tx.insert(historyEntriesTable).values({ entity, recordId, action, userId, at: new Date(), changes });
+}
+
+type EntryRow = typeof historyEntriesTable.$inferSelect;
+
+/** The rules of the page of a list of entries. */
+const pageSchema = z.object({
+  page: z.int().min(1).default(1),
+  pageSize: z.int().min(1).max(100).default(20),
+});
+
+/** Return a page of the entries of a record, the newest first, with the display value of each user. */
+export async function historyPage(entity: string, recordId: string, query: unknown): Promise<ListResult<HistoryEntry>> {
+  const { page, pageSize } = pageSchema.parse(query ?? {});
+  const db = getDb();
+  const where = and(eq(historyEntriesTable.entity, entity), eq(historyEntriesTable.recordId, recordId));
+  const total = await db.$count(historyEntriesTable, where);
+  const rows: EntryRow[] = await db
+    .select()
+    .from(historyEntriesTable)
+    .where(where)
+    .orderBy(desc(historyEntriesTable.at), desc(historyEntriesTable.id))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+{% if users %}
+  const ids = [...new Set(rows.map((row) => row.userId).filter((id) => id !== null))];
+  const users =
+    ids.length > 0
+      ? await db
+          .select({ id: {{ users.const }}.id, label: {{ users.const }}.{{ history_user_key(definition) }} })
+          .from({{ users.const }})
+          .where(inArray({{ users.const }}.id, ids))
+      : [];
+  const labels = new Map(users.map((user) => [user.id, user.label === null ? null : String(user.label)]));
+{% endif %}
+  const items = rows.map((row) => ({
+    id: row.id,
+    action: row.action as HistoryAction,
+    userId: row.userId,
+{% if users %}
+    user: row.userId === null ? null : (labels.get(row.userId) ?? null),
+{% else %}
+    user: null,
+{% endif %}
+    at: row.at.toISOString(),
+    changes: row.changes,
+  }));
+  return { items, total, page, pageSize };
+}
+
+/**
+ * Return the entry of a record that a restore gives back. An entry of
+ * another record does not exist, and only the entry of a change has old
+ * values: else a ValidationError.
+ */
+export async function restorable(entity: string, recordId: string, entryId: string): Promise<EntryRow> {
+  const rows: EntryRow[] = await getDb()
+    .select()
+    .from(historyEntriesTable)
+    .where(
+      and(
+        eq(historyEntriesTable.id, entryId),
+        eq(historyEntriesTable.entity, entity),
+        eq(historyEntriesTable.recordId, recordId),
+      ),
+    )
+    .limit(1);
+  const [entry] = rows;
+  if (entry === undefined) {
+    throw new NotFoundError("HistoryEntry", entryId);
+  }
+  if (entry.action !== "changed" && entry.action !== "restored") {
+    throw new ValidationError({{ tr(js("Only the entry of a change has old values to restore.")) }});
+  }
+  return entry;
+}
+
+/** Return the old values of an entry by the key of the row, for the fields that the log keeps now. */
+export function oldValues(entry: EntryRow, members: readonly HistoryMember[]): Row {
+  const keys = new Map(members);
+  const values: Row = {};
+  for (const [name, change] of Object.entries(entry.changes)) {
+    const key = keys.get(name);
+    if (key !== undefined) {
+      values[key] = change.old;
+    }
+  }
+  return values;
+}
