@@ -105,6 +105,7 @@ to a record, as `records`.
 | `datetime`                        | ISO 8601 with an offset, for example `2026-01-05T09:30:00Z`. A value without an offset is in UTC. |
 | `uuid`                            | A UUID.                                                      |
 | `json`                            | Any value. In a CSV cell: JSON text.                         |
+| `file`, `image`                   | The path of a local file, from the folder of the definition, for example `files/a101.jpg`. The file has 1 MB or less, and suits the `max_size` and the `types` of the field. |
 
 Leave out a value that the data does not have. A required field without
 a default needs a value. Do not invent a value: ask, or add a `default`

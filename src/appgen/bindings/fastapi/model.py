@@ -29,6 +29,7 @@ from appgen.bindings.fastapi.pysource import (
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.access import RecordRule
 from appgen.dsl.expressions import (
@@ -2501,6 +2502,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
     translations. `i18n_test` has the values of the test of the languages.
     `py_seed` has the rows of the seed (ADR 0021).
     """
+    reject_file_fields(definition, "fastapi")
     apis = python_apis(definition)
     plan = i18n_plan(definition)
     py = python_app(definition)

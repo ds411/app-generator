@@ -13,6 +13,7 @@ from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
+from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -100,6 +101,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
+    reject_file_fields(definition, "react")
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}

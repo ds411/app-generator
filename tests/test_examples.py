@@ -8,6 +8,7 @@ from appgen.dsl import check_file
 from appgen.dsl.model import FIELD_TYPES, OPERATION_KINDS, RELATION_KINDS
 from appgen.dsl.schema import json_schema
 from appgen.dsl.source import read_yaml
+from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.dashboards import StatWidget
 from appgen.dsl.ui.tokens import TokenTable
 from appgen.dsl.ui.views import BoardView, DetailView, TableView
@@ -124,7 +125,8 @@ def test_edge_cases_use_each_field_type_relation_kind_and_operation_kind() -> No
     field_types = {field.type for entity in entities for field in entity.fields.values()}
     kinds = {relation.kind for entity in entities for relation in entity.relations.values()}
     operations = {operation.kind for operation in definition.operations.values()}
-    assert field_types == set(FIELD_TYPES)
+    # The edge cases get the file fields when all bindings generate them (ADR 0027).
+    assert field_types == set(FIELD_TYPES) - FILE_TYPES
     assert kinds == set(RELATION_KINDS)
     assert operations == set(OPERATION_KINDS)
 

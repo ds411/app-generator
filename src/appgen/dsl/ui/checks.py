@@ -13,6 +13,7 @@ from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Page
 from appgen.dsl.openapi import accepts, object_properties, property_chain, query_value
+from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.api_data import api_data
 from appgen.dsl.ui.common import (
     ActionBase,
@@ -267,7 +268,7 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
     if view.states is not None:
         yield from _check_states(view.states, view.actions)
     if not isinstance(view, DetailView | CalendarView) and view.sort is not None:
-        yield from _check_paths(definition, view.sort, "field", entity, [view.sort.field])
+        yield from _check_sort(definition, view.sort, entity, view.sort.field)
     match view:
         case TableView():
             for name, column in view.columns.items():
@@ -538,9 +539,7 @@ def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnos
             if isinstance(view, TableView | CardsView) and view.entity in definition.entities:
                 yield from _check_record_filter(definition, widget, view.entity, widget.filter)
                 if widget.sort is not None:
-                    yield from _check_paths(
-                        definition, widget.sort, "field", view.entity, [widget.sort.field]
-                    )
+                    yield from _check_sort(definition, widget.sort, view.entity, widget.sort.field)
         case CustomWidget():
             pass
 
@@ -588,6 +587,9 @@ def _check_record_filter(
     for path, condition in record_filter.items():
         target = yield from _resolve(definition, element, "filter", entity, path)
         if target is None:
+            continue
+        if target.type in FILE_TYPES:
+            yield _no_file(element, "filter", "A filter", target)
             continue
         conditions: dict[str, object] = (
             cast(dict[str, object], condition) if isinstance(condition, dict) else {"eq": condition}
@@ -773,6 +775,25 @@ def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> It
     target = yield from _resolve(definition, filter_, "field", entity, filter_.field)
     if target is not None:
         yield from _check_suits(filter_, "field", f"A {filter_.kind} filter", target, types)
+
+
+def _check_sort(
+    definition: AppDefinition, element: Element, entity: str, path: str
+) -> Iterator[Diagnostic]:
+    target = yield from _resolve(definition, element, "field", entity, path)
+    if target is not None and target.type in FILE_TYPES:
+        yield _no_file(element, "field", "A sort", target)
+
+
+def _no_file(element: Element, key: str, what: str, target: FieldTarget) -> Diagnostic:
+    return _error(
+        "unsuitable-field",
+        f"{what} cannot use the field '{target.entity}.{target.name}' ({target.type}): it holds "
+        "a file.",
+        element,
+        at=key,
+        hint="Use another field.",
+    )
 
 
 def _check_paths(
