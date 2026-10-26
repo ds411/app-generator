@@ -300,7 +300,10 @@ def test_the_formats_use_the_locale_of_the_selected_language(binding: Binding) -
     assert "document.documentElement.lang = localeOf(language);" in i18n
     formats = files["src/shared/lib/format.ts"]
     assert 'import { getLocale, t } from "@/shared/lib/i18n";' in formats
-    assert 'return numberFormat({ style: "currency", currency }).format(Number(value));' in formats
+    assert (
+        'return numberFormat({ style: "currency", currency: currencyCode(currency) })'
+        ".format(Number(value));"
+    ) in formats
     calendar = files["src/shared/ui/calendar.tsx"]
     assert "weekStartsOn={firstWeekday()}" in calendar
     assert 'labelNext: () => t("Go to the next month"),' in calendar

@@ -22,6 +22,33 @@ A value is a literal, or `$today` or `$now` for a date.
 """
 
 
+def single_value(record_filter: RecordFilter, path: str) -> str | None:
+    """Return the one text that a filter allows for a field path, or None.
+
+    The condition is the text, `{eq: <text>}`, or `{in: [<text>]}`. A stat
+    of an amount with a currency field shows the currency of this value.
+    """
+    condition = record_filter.get(path)
+    if isinstance(condition, dict):
+        if set(condition) == {"eq"}:
+            condition = condition["eq"]
+        elif set(condition) == {"in"} and isinstance(condition["in"], list):
+            values = condition["in"]
+            condition = values[0] if len(values) == 1 else None
+    return condition if isinstance(condition, str) else None
+
+
+def currency_path(field_path: str, currency_field: str) -> str:
+    """Return the path of the currency field of an amount, from the entity of the amount path.
+
+    The currency field is a path from the entity of the amount: for the
+    amount `invoice.total` and the currency field `customer.currency`, the
+    result is `invoice.customer.currency`.
+    """
+    prefix = field_path.rpartition(".")[0]
+    return f"{prefix}.{currency_field}" if prefix else currency_field
+
+
 class WidgetBase(Element):
     """The keys of all widgets."""
 

@@ -93,6 +93,9 @@ class FieldPlan:
     """For a number: the display format of the field (`number`, `currency`, or `percent`)."""
     currency: str | None = None
     """For a `currency` number: the ISO 4217 code, or None for the default currency."""
+    currency_expr: str | None = None
+    """For a `currency` number: the TypeScript code of the currency of the record
+    (`currency_field`), or None."""
     input_type: str = "text"
     required: bool = False
     required_message: str = "Enter a value."
@@ -420,6 +423,8 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         ),
         None,
     )
+    if params is None:
+        _currency_exprs(definition, entity, fields, lookups, operation.kind != "create")
     return FormPlan(
         name=name,
         form=form,
@@ -444,6 +449,40 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         widgets={f.widget for f in fields}
         | ({"number_format"} if any(f.format for f in fields) else set()),
     )
+
+
+def _currency_exprs(
+    definition: AppDefinition,
+    entity: str,
+    fields: list[FieldPlan],
+    lookups: list[str],
+    record: bool,
+) -> None:
+    """Give each amount of a form the currency of its record (`currency_field`).
+
+    The currency is the value of a field of the form, else the value of the
+    record that the form edits. Through one relation, it is a field of the
+    record that the relation field selects. Else the amount has the
+    currency of the field.
+    """
+    by_name = {f.name: f for f in fields}
+    entity_fields = definition.entities[entity].fields
+    for plan in fields:
+        value = entity_fields.get(plan.name)
+        if plan.format != "currency" or value is None or value.currency_field is None:
+            continue
+        head, _, tail = value.currency_field.partition(".")
+        source = by_name.get(head)
+        code = None
+        if not tail and source is not None:
+            code = f"values.{source.key}"
+        elif not tail and record:
+            code = f"record?.{camel(head)}"
+        elif tail and "." not in tail and source is not None and source.target in lookups:
+            related = f"related.{camel(source.target)}"
+            code = f'{related}.get(values.{source.key} ?? "")?.{camel(tail)}'
+        if code is not None:
+            plan.currency_expr = f"{code} ?? {js(plan.currency)}" if plan.currency else code
 
 
 def sign_up_plan(definition: AppDefinition) -> SignUpPlan | None:

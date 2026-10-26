@@ -21,7 +21,7 @@ export function NumberInput({
   onChange: (value: number | null) => void;
   format: Format;
   /** The ISO 4217 code of the `currency` format. The default is `CURRENCY`. */
-  currency?: string;
+  currency?: string | null;
   placeholder?: string;
   step?: number;
   disabled?: boolean;

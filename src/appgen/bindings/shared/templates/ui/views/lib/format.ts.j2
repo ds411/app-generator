@@ -23,6 +23,27 @@ export type Format =
 /** The default currency of the `currency` format. A field can give another currency. */
 export const CURRENCY = "USD";
 
+const currencyCodes = new Map<string, string>();
+
+/**
+ * Return the ISO 4217 code of a currency in upper case, else `CURRENCY`. A record can give
+ * its currency (`currency_field`): an empty value, or a text that is not a code of three
+ * letters, gives `CURRENCY`.
+ */
+export function currencyCode(currency: string | null | undefined): string {
+  if (!currency) return CURRENCY;
+  let code = currencyCodes.get(currency);
+  if (code === undefined) {
+    try {
+      code = new Intl.NumberFormat(undefined, { style: "currency", currency }).resolvedOptions().currency ?? CURRENCY;
+    } catch {
+      code = CURRENCY;
+    }
+    currencyCodes.set(currency, code);
+  }
+  return code;
+}
+
 {% if i18n %}
 /** The formats of each locale. The app makes a format at its first use. */
 const formats = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>();
@@ -113,14 +134,14 @@ export function formatRelative(date: Date, now: Date = new Date()): string {
  * Return a value as text in a format. An empty value gives an empty text.
  * The `currency` format uses `currency` (an ISO 4217 code), else `CURRENCY`.
  */
-export function formatValue(value: unknown, format: Format = "text", currency: string = CURRENCY): string {
+export function formatValue(value: unknown, format: Format = "text", currency?: string | null): string {
   if (value === null || value === undefined || value === "") return "";
   switch (format) {
 {% if i18n %}
     case "number":
       return numberFormat({ maximumFractionDigits: 2 }).format(Number(value));
     case "currency":
-      return numberFormat({ style: "currency", currency }).format(Number(value));
+      return numberFormat({ style: "currency", currency: currencyCode(currency) }).format(Number(value));
     case "percent":
       return numberFormat({ style: "percent", maximumFractionDigits: 1 }).format(Number(value));
     case "date":
@@ -131,7 +152,7 @@ export function formatValue(value: unknown, format: Format = "text", currency: s
     case "number":
       return numberFormat.format(Number(value));
     case "currency":
-      return currencyFormat(currency).format(Number(value));
+      return currencyFormat(currencyCode(currency)).format(Number(value));
     case "percent":
       return percentFormat.format(Number(value));
     case "date":

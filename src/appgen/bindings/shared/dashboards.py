@@ -38,6 +38,8 @@ from appgen.dsl.ui.dashboards import (
     ListWidget,
     RecordFilter,
     StatWidget,
+    currency_path,
+    single_value,
 )
 from appgen.dsl.ui.fields import resolve_path
 from appgen.dsl.ui.states import BUILT_IN_STATES
@@ -320,11 +322,21 @@ def _field_format(ctx: ViewContext, widget: StatWidget) -> str | None:
 
 
 def _field_currency(ctx: ViewContext, widget: StatWidget) -> str | None:
-    """Return the currency of the field of an aggregate, or None."""
+    """Return the currency of the field of an aggregate, or None.
+
+    For a field with the currency of each record (`currency_field`), the
+    filter of the widget allows one currency (the validator checks it).
+    """
     if widget.aggregate == "count" or widget.field is None:
         return None
     member = resolve_path(ctx.definition, widget.entity, widget.field).member
-    return member.currency if isinstance(member, Field) else None
+    if not isinstance(member, Field):
+        return None
+    if member.currency_field is not None:
+        path = currency_path(widget.field, member.currency_field)
+        code = single_value(widget.filter, path)
+        return code.upper() if code else member.currency
+    return member.currency
 
 
 def _chart(

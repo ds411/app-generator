@@ -46,6 +46,7 @@ from appgen.dsl.ui.common import (
     OperationAction,
     States,
 )
+from appgen.dsl.ui.dashboards import currency_path
 from appgen.dsl.ui.fields import SINGLE_KINDS, resolve_path
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
@@ -143,6 +144,8 @@ class Value:
     """The target entity of a relation."""
     currency: str | None = None
     """The ISO 4217 code of a `currency` value, or None for the default currency."""
+    currency_expr: str | None = None
+    """The TypeScript code of the currency of the record (`currency_field`), or None."""
     name_expr: str = '""'
     """For a file field: the text of the record that has the file, for an avatar."""
 
@@ -846,7 +849,19 @@ class ViewContext:
             enum_values = tuple(member.values or ()) if member.type == "enum" else ()
             fmt = fmt or ("badge" if badge else _DEFAULT_FORMATS[member.type])
             currency = member.currency if fmt == "currency" else None
-            currency_arg = f", {js(currency)}" if currency else ""
+            currency_expr = None
+            if fmt == "currency" and member.currency_field is not None:
+                # The currency of the record: a path from the entity of the amount.
+                code = self.value(
+                    entity,
+                    currency_path(path, member.currency_field),
+                    row=row,
+                    optional=record_optional,
+                ).expr
+                currency_expr = f"{code} ?? {js(currency)}" if currency else code
+            currency_arg = (
+                f", {currency_expr}" if currency_expr else f", {js(currency)}" if currency else ""
+            )
             text = (
                 f'String({raw} ?? "")'
                 if member.type in ("string", "text", "email", "url", "enum")
@@ -866,6 +881,7 @@ class ViewContext:
                 badge=camel(badge) if badge else None,
                 enum_values=enum_values,
                 currency=currency,
+                currency_expr=currency_expr,
             )
         if member is None:
             raw = f"{expr}{dot}id"
@@ -1168,6 +1184,8 @@ class ViewContext:
             return f"<FormattedValue value={{{value.text_expr}}} />"
         fmt = value.format if value.format != "avatar" else "text"
         currency = f" currency={js(value.currency)}" if value.currency else ""
+        if value.currency_expr:
+            currency = f" currency={{{value.currency_expr}}}"
         return f'<FormattedValue value={{{value.expr}}} format="{fmt}"{currency} />'
 
     def href(self, entity: str, page_name: str, params: dict[str, str], row: str) -> str:
@@ -1374,10 +1392,9 @@ class ViewContext:
                 members = self.definition.entities[current]
                 relation = members.relations.get(segment)
                 if relation is None:
-                    computed = members.fields.get(segment)
-                    if computed is not None and computed.computed is not None:
-                        inner = expression_paths(parse_expression(computed.computed))
-                        found += self._related_keys(current, holder, inner)
+                    field = members.fields.get(segment)
+                    if field is not None:
+                        found += self._related_keys(current, holder, _field_paths(field))
                     break
                 if relation.kind in SINGLE_KINDS:
                     found.append((relation.target, RelatedKey(holder, camel(segment) + "Id")))
@@ -1418,10 +1435,9 @@ class ViewContext:
             for segment in path.split("."):
                 relation = self.definition.entities[current].relations.get(segment)
                 if relation is None:
-                    computed = self.definition.entities[current].fields.get(segment)
-                    if computed is not None and computed.computed is not None:
-                        inner = expression_paths(parse_expression(computed.computed))
-                        found |= self._lookups(current, inner)
+                    field = self.definition.entities[current].fields.get(segment)
+                    if field is not None:
+                        found |= self._lookups(current, _field_paths(field))
                     break
                 found.add(relation.target)
                 current = relation.target
@@ -1616,6 +1632,13 @@ class ViewContext:
                 imports=(f'import {{ {function} }} from "@/{gap[0]}.gen";',),
             )
         return None
+
+
+def _field_paths(field: Field) -> list[str]:
+    """Return the paths that the value of a field reads: the paths of its expression
+    (a computed field), and its currency field."""
+    paths = list(expression_paths(parse_expression(field.computed))) if field.computed else []
+    return [*paths, *([field.currency_field] if field.currency_field else [])]
 
 
 def _value_parts(code: str) -> set[str]:
