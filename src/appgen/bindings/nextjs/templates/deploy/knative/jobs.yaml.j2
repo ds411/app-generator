@@ -1,0 +1,14 @@
+{% from "deploy/jobs-macros.j2" import cron_jobs with context %}
+{% set name = app.name ~ "-web" %}
+{{ trace_header("app") }}
+# The schedulers of the jobs (ADR 0029) on a cluster with Knative: each
+# CronJob calls the route /api/jobs/<job> of the Knative Service with the
+# secret JOBS_SECRET. Set the namespace of the service in the address
+# (here `default`). Cloud Run has no CronJobs: use Cloud Scheduler
+# (README.md, section Jobs).
+#   kubectl apply -f deploy/knative/jobs.yaml
+# The schedules are in UTC. A call runs the runs that are due in the
+# window before it (JOBS_WINDOW_MINUTES), and each run runs one time, so a
+# late call or a second call does no harm. A failed run gives the status
+# 500, and the CronJob shows a failed Job.
+{{ cron_jobs("http://" ~ name ~ ".default.svc.cluster.local", name ~ "-jobs-secret", "latest") }}

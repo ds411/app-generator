@@ -1,0 +1,261 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import { createHash, timingSafeEqual } from "node:crypto";
+
+import { and, eq, lt, or, sql } from "drizzle-orm";
+
+import { getDb, inTransaction, jobRunsTable } from "@/shared/db";
+
+/*
+ * The runs of the jobs (ADR 0029): the table `job_runs`, the lock of each
+ * run, the schedules, and the route of each job.
+ *
+ * A scheduler calls the route `/api/jobs/<job>` of a job, and the call runs
+ * the runs of the job that are due in the window before its time
+ * (JOBS_WINDOW_MINUTES). A run is for one record (or for none) and one
+ * time. Its key is the job, the record, and the time in UTC, for example
+ * `booking_reminder:<id>:2026-06-14T12:00:00Z`, the same key as in the
+ * FastAPI app. A call inserts the row of a run before it starts the run,
+ * and the key is the primary key: so two calls never start the same run,
+ * also on two replicas. A run that failed, or whose call stopped (the lock
+ * ends after `LEASE_MS`), runs again at the next call, while its time is in
+ * the window.
+ */
+
+const MINUTE_MS = 60_000;
+/** How long a run stays locked to its call. After that, another call can take the run. */
+const LEASE_MS = 10 * MINUTE_MS;
+/** The maximum length of the error of a failed run in the table. */
+const ERROR_LENGTH = 2000;
+
+/** A run that is due: its record (null for a job without an entity) and its time. */
+export type Due = { recordId: string | null; time: Date };
+
+/** A run of a job with an entity: it is for one record. */
+export type RecordDue = Due & { recordId: string };
+
+/** The counts of the runs of a call: the runs that ran, and the runs that failed. */
+export type JobResult = { runs: number; failed: number };
+
+/** The function of the module of a job in `src/app/jobs/`: it runs the runs that are due at `now`. */
+export type Job = (now: Date, windowMs: number) => Promise<JobResult>;
+
+/** The values that each field of a cron schedule allows. The days of the week start at 0, Sunday. */
+type ScheduleFields = {
+  minutes: number[];
+  hours: number[];
+  days: number[];
+  months: number[];
+  weekdays: number[];
+  /** True if the expression limits both day fields: a day matches when one of them matches. */
+  eitherDay?: boolean;
+};
+
+/** A cron schedule in UTC. */
+export class Schedule {
+  private readonly minutes: Set<number>;
+  private readonly hours: Set<number>;
+  private readonly days: Set<number>;
+  private readonly months: Set<number>;
+  private readonly weekdays: Set<number>;
+  private readonly eitherDay: boolean;
+
+  constructor(
+    readonly expression: string,
+    fields: ScheduleFields,
+  ) {
+    this.minutes = new Set(fields.minutes);
+    this.hours = new Set(fields.hours);
+    this.days = new Set(fields.days);
+    this.months = new Set(fields.months);
+    this.weekdays = new Set(fields.weekdays);
+    this.eitherDay = fields.eitherDay ?? false;
+  }
+
+  /** Return true if the schedule runs at the minute of a time. */
+  matches(time: Date): boolean {
+    if (!this.minutes.has(time.getUTCMinutes()) || !this.hours.has(time.getUTCHours())) {
+      return false;
+    }
+    if (!this.months.has(time.getUTCMonth() + 1)) {
+      return false;
+    }
+    const day = this.days.has(time.getUTCDate());
+    const weekday = this.weekdays.has(time.getUTCDay());
+    return this.eitherDay ? day || weekday : day && weekday;
+  }
+
+  /** Return the last time of the schedule at or before `now` in the window, or null. */
+  last(now: Date, windowMs: number): Date | null {
+    for (
+      let time = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
+      time > now.getTime() - windowMs;
+      time -= MINUTE_MS
+    ) {
+      if (this.matches(new Date(time))) {
+        return new Date(time);
+      }
+    }
+    return null;
+  }
+}
+
+/** Return the numbers from `first` to `last`, for the fields of a schedule. */
+export function span(first: number, last: number): number[] {
+  return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+}
+
+/** Return the date of a time in UTC, for example `2026-06-15`. */
+export function dateOf(time: Date | number): string {
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+/** Return the start of a day in UTC, or of a later day with `days`. */
+export function dayStart(day: string, days = 0): Date {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + days * 24 * 60 * MINUTE_MS);
+}
+
+/** Return the key of the run of a job, the same in the FastAPI and the Next.js apps. */
+export function runKey(job: string, due: Due): string {
+  return `${job}:${due.recordId ?? "-"}:${due.time.toISOString().slice(0, 19)}Z`;
+}
+
+/**
+ * Run each run that no other call has, one after the other. Each run has
+ * its own transaction: the work and the state `done` are stored together.
+ * A failed run rolls back its work, gets the state `failed`, and goes into
+ * the log with the job and the record.
+ */
+export async function runDue<T extends Due>(
+  job: string,
+  runs: T[],
+  action: (item: T) => Promise<void>,
+): Promise<JobResult> {
+  const result: JobResult = { runs: 0, failed: 0 };
+  for (const item of runs) {
+    const key = runKey(job, item);
+    if (!(await claim(key, job, item))) {
+      continue;
+    }
+    try {
+      await inTransaction(async () => {
+        // The first write of the transaction, as in the FastAPI app.
+        await setRun(key, { status: "done", finishedAt: new Date() });
+        await action(item);
+      });
+      result.runs += 1;
+    } catch (error) {
+      result.failed += 1;
+      const record = item.recordId ?? "-";
+      const due = item.time.toISOString();
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: `The job ${job} failed for the record ${record} at ${due}.`,
+          job,
+          record_id: record,
+          due,
+          error: error instanceof Error ? (error.stack ?? message) : message,
+        }),
+      );
+      await setRun(key, {
+        status: "failed",
+        finishedAt: new Date(),
+        error: message.slice(0, ERROR_LENGTH),
+      });
+    }
+  }
+  return result;
+}
+
+/** Lock a run for this call. Return false if the run is done, or if another call has it. */
+async function claim(key: string, job: string, due: Due): Promise<boolean> {
+  const db = getDb();
+  const now = new Date();
+  const lock = {
+    status: "running",
+    startedAt: now,
+    lockedUntil: new Date(now.getTime() + LEASE_MS),
+    finishedAt: null,
+    error: null,
+  };
+  const inserted = await db
+    .insert(jobRunsTable)
+    .values({ key, job, recordId: due.recordId, due: due.time, attempts: 1, ...lock })
+    .onConflictDoNothing()
+    .returning({ key: jobRunsTable.key });
+  if (inserted.length > 0) {
+    return true;
+  }
+  const free = or(
+    eq(jobRunsTable.status, "failed"),
+    and(eq(jobRunsTable.status, "running"), lt(jobRunsTable.lockedUntil, now)),
+  );
+  const updated = await db
+    .update(jobRunsTable)
+    .set({ attempts: sql`${jobRunsTable.attempts} + 1`, ...lock })
+    .where(and(eq(jobRunsTable.key, key), free))
+    .returning({ key: jobRunsTable.key });
+  return updated.length > 0;
+}
+
+async function setRun(key: string, values: Partial<typeof jobRunsTable.$inferInsert>): Promise<void> {
+  await getDb().update(jobRunsTable).set(values).where(eq(jobRunsTable.key, key));
+}
+
+/**
+ * Run a job for a call of its route. The call must have the header
+ * `Authorization: Bearer <JOBS_SECRET>`, else the route gives 401. With
+ * JOBS_FIXED_CLOCK=true, the parameter `now` sets the time of the call for
+ * the tests, for example `?now=2026-06-15T12:00:00Z`. The route gives the
+ * counts of the runs, with 500 when a run failed, so that the scheduler
+ * shows the failure.
+ */
+export async function handleJob(request: Request, name: string, job: Job): Promise<Response> {
+  if (!authorized(request)) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const now = callTime(request);
+  if (typeof now === "string") {
+    return Response.json({ error: now }, { status: 400 });
+  }
+  const result = await job(now, windowMs());
+  const status = result.failed > 0 ? 500 : 200;
+  return Response.json({ job: name, now: now.toISOString(), ...result }, { status });
+}
+
+/** Return true if the request has the secret of the jobs. Without JOBS_SECRET, no request has it. */
+function authorized(request: Request): boolean {
+  const secret = process.env.JOBS_SECRET;
+  if (!secret) {
+    console.error("Set JOBS_SECRET to run the jobs (README.md, section Jobs).");
+    return false;
+  }
+  // Compare the hashes in constant time, so that the time of the answer tells nothing.
+  const hash = (text: string) => createHash("sha256").update(text).digest();
+  return timingSafeEqual(hash(request.headers.get("authorization") ?? ""), hash(`Bearer ${secret}`));
+}
+
+/** Return the time of a call, or the error of a wrong parameter `now`. */
+function callTime(request: Request): Date | string {
+  const value = new URL(request.url).searchParams.get("now");
+  if (value === null) {
+    return new Date();
+  }
+  if (process.env.JOBS_FIXED_CLOCK !== "true") {
+    return "The parameter now needs the setting JOBS_FIXED_CLOCK=true.";
+  }
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? `The parameter now is not a time: ${value}` : time;
+}
+
+/** Return the window of the jobs: a call runs the times in it (JOBS_WINDOW_MINUTES, default 60). */
+function windowMs(): number {
+  const minutes = Number(process.env.JOBS_WINDOW_MINUTES || 60);
+  if (!Number.isInteger(minutes) || minutes < 1) {
+    throw new Error("Set JOBS_WINDOW_MINUTES to a whole number of minutes, 1 or more.");
+  }
+  return minutes * MINUTE_MS;
+}

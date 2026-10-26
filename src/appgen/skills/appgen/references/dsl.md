@@ -813,8 +813,12 @@ record, and runs again later while its time is in the window.
 
 The FastAPI app runs the jobs in a worker process, `python -m
 app.worker` ([bindings.md](https://github.com/ds411/app-generator/blob/main/docs/bindings.md#the-worker-of-the-fastapi-app)).
-The generated tests of each job use a fixed clock. The Next.js binding
-does not run the jobs yet. The React app (mock data) has no jobs.
+The generated tests of each job use a fixed clock. The Next.js app runs
+each job in the route `POST /api/jobs/<job>`, which a scheduler calls
+with the secret `JOBS_SECRET`: a Kubernetes CronJob, Cloud Scheduler,
+or the service `jobs` of Compose
+([bindings.md](https://github.com/ds411/app-generator/blob/main/docs/bindings.md#the-jobs-of-the-nextjs-app)). Both apps have
+the same table `job_runs`. The React app (mock data) has no jobs.
 
 ## apis
 

@@ -72,6 +72,41 @@ non-root user. If `drizzle/` does not exist, the build writes the first
 migration from the schema. `node migrate.mjs` in the image applies the
 migrations and stops.
 
+{% if nextjs.jobs %}
+## Jobs
+
+A scheduler calls the route `POST /api/jobs/<job>` of each job, with
+the header `Authorization: Bearer <JOBS_SECRET>`. A call runs the runs
+of the job that are due in the last `JOBS_WINDOW_MINUTES` (60), in
+UTC. The deployment files have a CronJob for each job with a schedule,
+and one each minute for the jobs at the time of a date field. Compose
+starts the service `jobs`, which calls each route each minute.
+
+| Job | When | What |
+| --- | ---- | ---- |
+{% for job in nextjs.jobs.values() %}
+| `{{ job.name }}` | {{ job.when }} | {% if job.entity %}The operation `{{ job.operation }}` on each {{ job.entity }} record of the filter{% else %}`src/app/jobs/{{ job.module }}.ext.ts`{% endif %} |
+{% endfor %}
+
+- A run is for one record (or for none) and one time. The table
+  `job_runs` keeps each run with its state, and its key locks the run:
+  each run runs one time, also with two calls at the same time or more
+  than one replica.
+- A call runs only the times of the window. A late call runs the same
+  runs, and a second call runs none again. After a stop of the
+  scheduler, the times before the window do not run.
+- A failed run rolls back its changes, goes into the log (a JSON line
+  with the job and the record), and runs again at the next call while
+  its time is in the window. The route then gives 500, with the counts
+  of the runs.
+- Without the secret, the route gives 401. Without `JOBS_SECRET`, each
+  call gives 401.
+- `JOBS_FIXED_CLOCK=true` lets the parameter `now` set the time of a
+  call, for the tests:
+  `curl -X POST -H "Authorization: Bearer $JOBS_SECRET" "http://localhost:3000/api/jobs/<job>?now=2026-06-15T12:00:00Z"`.
+  Do not set it in production.
+
+{% endif %}
 ## Production
 
 {% set name = app.name ~ "-web" %}
@@ -105,7 +140,7 @@ migrations and stops.
 {% if "kubernetes" in nextjs.deploy %}
 - Kubernetes: `deploy/kubernetes/` has a Kustomize folder with a
   Deployment (2 replicas, a non-root user, a read-only file system), a
-  Service, and a Job that applies the migrations. The database is
+  Service, {{ "the CronJobs of the jobs (`jobs.yaml`), " if nextjs.jobs }}and a Job that applies the migrations. The database is
   outside the cluster. Push the image, set its name in
   `kustomization.yaml`, copy `secret.example.env` to `secret.env`, and
   set the values. Then run
@@ -115,13 +150,15 @@ migrations and stops.
 {% if "knative" in nextjs.deploy %}
 {% set image = "registry.example.com/" ~ name ~ ":0.1.0" %}
 {# The secrets of deploy/knative/service.yaml: each one is a secret of its own. #}
-{% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if nextjs.redis else [])
+{% set secrets = ["DATABASE_URL"] + (["JOBS_SECRET"] if nextjs.jobs else [])
+    + (["RATE_LIMIT_STORE_URL"] if nextjs.redis else [])
     + (["AUTH_SECRET"] if definition.auth else [])
     + ((definition.auth.providers.values() | map(attribute="client_secret_env") | list) if definition.auth else [])
     + (ts_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
-  limits), and Cloud Run accepts the same file. Push the image, and set
+  limits), and Cloud Run accepts the same file.{% if nextjs.jobs %} `jobs.yaml` has the
+  CronJobs of the jobs for a cluster with Knative.{% endif %} Push the image, and set
   its name in `service.yaml` and `migrate-job.yaml`. Each secret is a
   secret of its own, with the key (Knative) or the version (Cloud Run)
   `latest`. Apply the migrations before each deployment of a new image.
@@ -135,6 +172,9 @@ migrations and stops.
   kubectl apply -f deploy/knative/migrate-job.yaml
   kubectl wait --for=condition=complete job/{{ name }}-migrate --timeout=10m
   kubectl apply -f deploy/knative/service.yaml
+{% if nextjs.jobs %}
+  kubectl apply -f deploy/knative/jobs.yaml
+{% endif %}
   ```
 
   On Cloud Run, a Cloud Run job applies the migrations. The database
@@ -154,6 +194,24 @@ migrations and stops.
   A new Cloud Run service accepts only requests with a Google sign-in.
   For a public app, run `gcloud run services add-iam-policy-binding
   {{ name }} --member=allUsers --role=roles/run.invoker`.
+{% if nextjs.jobs %}
+
+  Cloud Run has no CronJobs: Cloud Scheduler calls the route of each
+  job. The route reads the secret from the header `Authorization`, so
+  the service must accept requests without a Google sign-in (see
+  above). A request of Cloud Run can take at most `timeoutSeconds` (60
+  in `service.yaml`): the runs that do not start in that time run at the
+  next call.
+
+  ```sh
+  url=$(gcloud run services describe {{ name }} --format 'value(status.url)')
+{% for job in nextjs.jobs.values() %}
+  gcloud scheduler jobs create http {{ name }}-{{ job.module }} --schedule "{{ job.schedule.expression if job.schedule else "* * * * *" }}" \
+    --time-zone Etc/UTC --http-method POST --uri "$url/api/jobs/{{ job.name }}" \
+    --headers "Authorization=Bearer <JOBS_SECRET>"
+{% endfor %}
+  ```
+{% endif %}
 {% endif %}
 {% if definition.auth %}
 

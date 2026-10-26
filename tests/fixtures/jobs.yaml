@@ -4,7 +4,8 @@
 # relation (the generated tests cannot give its values), a job on a
 # schedule with `$today` whose operation calls an API, and a job without
 # an entity (a gap). scripts/check-fastapi.sh checks the FastAPI app of
-# this definition.
+# this definition, and scripts/check-nextjs.sh the Next.js app, with the
+# hand-written operations of tests/fixtures/jobs-extensions/nextjs/.
 version: 0
 
 app:
@@ -15,6 +16,7 @@ app:
 entities:
   Customer:
     display_field: name
+    crud: { views: [table] }
     fields:
       name: { type: string, required: true, max_length: 120 }
       vip: { type: boolean, default: false }
@@ -23,6 +25,7 @@ entities:
 
   Invoice:
     display_field: number
+    crud: { views: [table] }
     fields:
       number: { type: string, required: true, unique: true, max_length: 20 }
       due_on: { type: date, required: true }
@@ -45,6 +48,10 @@ operations:
     entity: Invoice
     description: Check the amount with the exchange rates of today.
     apis: [exchange_rates]
+
+pages:
+  invoices: { path: /invoices, title: Invoices, content: { view: invoice_table } }
+  customers: { path: /customers, title: Customers, content: { view: customer_table } }
 
 apis:
   exchange_rates:

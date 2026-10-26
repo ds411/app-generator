@@ -1,0 +1,69 @@
+{{ trace_header(element_id) }}
+{% set job = nextjs.jobs[name] %}
+import "server-only";
+
+{% for line in job.imports() %}
+{{ line }}
+{% endfor %}
+
+/**
+ * The job `{{ job.name }}` of the app definition.
+{% if job.description %}
+ *
+ * {{ job.description | trim | wordwrap(72, wrapstring="\n * ") }}
+{% endif %}
+ *
+ * {{ job.summary }}
+{% if job.entity %}
+ * Each run calls the operation `{{ job.operation }}` on a record that the
+ * filter of the job selects, in the transaction of the run.
+{% else %}
+ * Each run calls `{{ job.ext_function }}()` of `{{ job.module }}.ext.ts`, in the
+ * transaction of the run.
+{% endif %}
+ */
+
+const NAME = "{{ job.name }}";
+{% if job.schedule %}
+/** The schedule of the job in UTC: `{{ job.schedule.expression }}`. */
+{{ job.schedule.code() }}
+{% else %}
+/** The time of a run is the time of `{{ job.at_name }}` with this offset ({{ job.offset }}), in milliseconds. */
+const OFFSET_MS = {{ '{:_}'.format(job.offset_ms) }};
+{% endif %}
+{% if job.entity %}
+{% if job.filter.code is not none %}
+
+/** Return the condition of the filter of the job{{ " at a time" if job.where_param }}. */
+function where({{ job.where_param }}): SQL | undefined {
+{{ job.where_code() }}
+}
+{% endif %}
+
+{% if job.schedule %}
+/** Return the runs at `now`: each record, at the last time of the schedule in the window. */
+{% else %}
+/** Return the runs at `now`: each record whose time is in the window before `now`. */
+{% endif %}
+async function due(now: Date, windowMs: number): Promise<RecordDue[]> {
+{{ job.due_code() }}
+}
+
+/** Run the job for each run that is due at `now`. */
+export async function {{ job.function }}(now: Date, windowMs: number): Promise<JobResult> {
+  const runs = await due(now, windowMs);
+  return runDue(NAME, runs, async (item) => {
+{{ job.action_code() }}
+  });
+}
+{% else %}
+
+/** Run the job for the last time of its schedule in the window, if it has not run. */
+export async function {{ job.function }}(now: Date, windowMs: number): Promise<JobResult> {
+  const time = SCHEDULE.last(now, windowMs);
+  if (time === null) {
+    return { runs: 0, failed: 0 };
+  }
+  return runDue(NAME, [{ recordId: null, time }], (item) => {{ job.ext_function }}(item.time));
+}
+{% endif %}

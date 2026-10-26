@@ -1,0 +1,24 @@
+{{ trace_header("app") }}
+import { integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+
+/**
+ * The runs of the jobs (ADR 0029): one row for each job, record, and
+ * time. The FastAPI app has the same table, with the same keys.
+ */
+export const jobRunsTable = pgTable("job_runs", {
+  // The job, the record (or `-`), and the time of the run in UTC.
+  key: varchar("key", { length: 200 }).primaryKey(),
+  job: varchar("job", { length: 63 }).notNull(),
+  // The record of the run, or null for a job without an entity.
+  recordId: uuid("record_id"),
+  // The time of the run: a time of the schedule, or the time of the record.
+  due: timestamp("due", { withTimezone: true }).notNull(),
+  // `running`, `done`, or `failed`.
+  status: varchar("status", { length: 10 }).notNull(),
+  attempts: integer("attempts").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  // The error of the last attempt of a failed run. The name of the column is the key.
+  error: text(),
+});

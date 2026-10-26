@@ -175,6 +175,14 @@ BINDING = Binding(
             )
             for name in ("service.yaml", "migrate-job.yaml")
         ),
+        *(
+            Output(
+                template=f"deploy/{target}/jobs.yaml.j2",
+                path=f"deploy/{target}/jobs.yaml",
+                when=f"{target!r} in nextjs.deploy and nextjs.jobs",
+            )
+            for target in ("kubernetes", "knative")
+        ),
         Output(template="README.md.j2", path="README.md"),
         Output(template="root-pages-readme.md.j2", path="pages/README.md"),
         *(
@@ -225,6 +233,33 @@ BINDING = Binding(
         Output(template="proxy.ts.j2", path="proxy.ts"),
         Output(template="src/shared/lib/rate-limit.ts.j2", path="src/shared/lib/rate-limit.ts"),
         Output(template="app/health/route.ts.j2", path="app/health/route.ts"),
+        # The jobs (ADR 0029): the table of the runs, and for each job a module and a route
+        # handler that a scheduler calls.
+        Output(
+            template="src/shared/db/schema/job-runs.ts.j2",
+            path="src/shared/db/schema/job-runs.ts",
+            when="nextjs.jobs",
+        ),
+        Output(
+            template="src/shared/lib/jobs.ts.j2", path="src/shared/lib/jobs.ts", when="nextjs.jobs"
+        ),
+        Output(
+            template="src/app/jobs/job.ts.j2",
+            path="src/app/jobs/{{ nextjs.jobs[name].module }}.ts",
+            for_each="job",
+        ),
+        Output(
+            template="src/app/jobs/job.ext.ts.j2",
+            path="src/app/jobs/{{ nextjs.jobs[name].module }}.ext.ts",
+            for_each="job",
+            when="nextjs.jobs[name].gap",
+            extension=True,
+        ),
+        Output(
+            template="app/api/jobs/route.ts.j2",
+            path="app/api/jobs/{{ name }}/route.ts",
+            for_each="job",
+        ),
         Output(template="env.example.j2", path=".env.example"),
         Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
         Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
@@ -465,9 +500,8 @@ BINDING = Binding(
         | {"api", "api_operation"}
         | {"webhook"}
         | {"entity_seed", "seed_record"}
+        | {"job"}
     ),
-    # The jobs of the Next.js app follow (#391).
-    excludes=frozenset({"job"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

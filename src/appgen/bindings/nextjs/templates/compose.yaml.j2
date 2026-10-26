@@ -2,6 +2,10 @@
 # Run the app with a Postgres database: docker compose up --build
 # The app applies the migrations in drizzle/ when it starts, and fills
 # the empty tables with the seed records.
+{% if nextjs.jobs %}
+# Set JOBS_SECRET in the shell or in .env: the service jobs calls the
+# route of each job each minute with it.
+{% endif %}
 {% if nextjs.redis %}
 # With Redis for the rate limit of all replicas:
 #   RATE_LIMIT_PER_MINUTE=1200 RATE_LIMIT_STORE_URL=redis://redis:6379/0 \
@@ -33,6 +37,11 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
 {% if nextjs.redis %}
       RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
+{% endif %}
+{% if nextjs.jobs %}
+      # The secret of the routes of the jobs (/api/jobs/<job>), and the window of a call.
+      JOBS_SECRET: ${JOBS_SECRET:?Set JOBS_SECRET}
+      JOBS_WINDOW_MINUTES: ${JOBS_WINDOW_MINUTES:-60}
 {% endif %}
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
@@ -74,6 +83,29 @@ services:
     depends_on:
       db:
         condition: service_healthy
+{% if nextjs.jobs %}
+
+  # The scheduler of the jobs: it calls the route of each job each minute,
+  # and the route runs the runs that are due (README.md, section Jobs).
+  jobs:
+    image: ${CURL_IMAGE:-curlimages/curl:{{ nextjs.curl_version }}}
+    environment:
+      JOBS_SECRET: ${JOBS_SECRET:?Set JOBS_SECRET}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          sleep 60
+          for job in {{ nextjs.jobs | join(" ") }}; do
+            curl --silent --show-error --max-time 300 --variable %JOBS_SECRET \
+              --expand-header "Authorization: Bearer {{ "{{JOBS_SECRET}}" }}" \
+              --request POST "http://app:3000/api/jobs/$$job"
+            echo
+          done
+        done
+    depends_on:
+      - app
+{% endif %}
 {% if nextjs.redis %}
 
   redis:

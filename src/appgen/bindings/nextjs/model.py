@@ -10,6 +10,7 @@ from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
+from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules
@@ -204,6 +205,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     tables = build_tables(definition)
     by_entity = {table.entity: table for table in tables}
     rules = record_rules(definition)
+    jobs = ts_jobs(definition, by_entity)
     return {
         "ts_apis": ts_apis(definition),
         "ts_webhooks": ts_webhooks(definition),
@@ -235,8 +237,13 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "pages": pages,
             "package_json": package_json(definition),
             "node_version": versions.NODE_VERSION,
+            "curl_version": versions.CURL_VERSION,
             "redis": uses_redis(definition),
             "smtp": uses_smtp(definition),
             "deploy": deploy_targets(definition),
+            # The jobs (ADR 0029): a route handler and a module for each job, and the CronJobs
+            # that call the routes.
+            "jobs": jobs,
+            "cron_jobs": cron_jobs(f"{definition.app.name}-web", jobs),
         },
     }
