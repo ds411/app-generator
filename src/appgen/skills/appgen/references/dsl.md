@@ -3312,6 +3312,9 @@ use in the app does not show.
 - The bell of the notices (see [notifications](#notifications)):
   `Notices`, `Notices: {count} unread`, `Mark all read`,
   `No notices yet.`.
+- The mentions (see [Mentions](#mentions)): `Users` (the list of the
+  suggestions), and the text of the notice
+  `You are mentioned in {record}.`.
 - The change log of a record (see [History](#history)): `History`,
   `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
   `Older`, `No changes yet.`, `The history did not load.`,
