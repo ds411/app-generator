@@ -570,6 +570,13 @@ A computed field with a total of a relation, for example
   three records, with no related records, with one, and with all, and
   check the value of each computed field with totals in the read
   endpoint, the sort, and the filters.
+- A compare rule with a total, for example `sum(lines.debit)` equal to
+  `sum(lines.credit)`, is a check of `check_totals` in the repository.
+  It reads the totals of the rules again after the changes, and gives a
+  422 error. A total that only the rules use is a deferred column
+  property. The tests of an operation with lines
+  (`test_<operation>_lines.py`) send two lines that keep the rules, and
+  two lines that break each rule (`total_rules.py` finds the values).
 
 ### The lines of the FastAPI app
 
@@ -812,9 +819,16 @@ for example `sum(lines.amount)`, from the same data as the FastAPI app
 - With the FastAPI app (`x-react-data: api`), the type has the key of
   each computed field with totals instead, and the API client reads its
   value from the API.
+- A compare rule with a total is in the option `totalRules` of the
+  Next.js repository, and the subqueries of the totals that only the
+  rules use in `ruleTotals`. The repository checks the rules after a
+  create and an update, and at the end of the work of `inTransaction()`
+  (`checkAtEnd`), so a server action checks them after the lines.
 - `scripts/totals_test.py` adds invoices, lines, posts, votes, and tags
   of `tests/fixtures/totals.yaml` with PGlite, and checks each total of
-  the records that the Next.js repositories give. The UI test
+  the records that the Next.js repositories give. It also writes
+  journal entries with their lines in one transaction, and checks the
+  compare rules over the totals. The UI test
   `ui-tests/tests/totals.spec.ts` sees the count of the tasks of a
   project of the project tracker (`task_count`) in the table of the
   projects, in the detail view, and in the pagination of the tasks of

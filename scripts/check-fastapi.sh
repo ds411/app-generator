@@ -40,8 +40,9 @@
 # with the authorization code flow), check it, run its tests on Postgres
 # and SQLite, and connect a user at the mock OAuth server
 # (scripts/api_connection_test.py). Then generate tests/fixtures/totals.yaml
-# (the totals of the relations in computed fields), and check it and run
-# its tests on Postgres and SQLite. Last, generate
+# (the totals of the relations in computed fields, and the compare rules
+# over totals), and check it and run its tests on Postgres and SQLite.
+# Last, generate
 # tests/fixtures/invoices.yaml (the small DSL additions of M33: the
 # sequences of the numbers on Postgres, and the largest number plus one
 # on SQLite), and check it and run its tests on Postgres and SQLite.

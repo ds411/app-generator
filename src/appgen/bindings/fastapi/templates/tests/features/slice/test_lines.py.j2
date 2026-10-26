@@ -8,6 +8,24 @@
 {% macro request(method, args) -%}
 {{ py.call("response = await ", "client." ~ method, args) }}
 {%- endmacro %}
+{#- The items of two lines of a test of a rule with totals (ADR 0034). #}
+{% macro rule_items(var, item, case, rows) %}
+    {{ var }} = [
+{% for row in rows %}
+        await {{ item }}(session{{ case.item_args(row) }}),
+{% endfor %}
+    ]
+{% endmacro %}
+{#- The check of the message of a broken rule. #}
+{% macro rule_message(case) %}
+{% set check = '    assert response.json()["detail"] == ' ~ py.string(case.rule.message) %}
+{% if check | length <= 100 %}
+{{ check }}
+{% else %}
+    message = {{ py.string(case.rule.message) }}
+    assert response.json()["detail"] == message
+{% endif %}
+{% endmacro %}
 {% set url = e.path ~ op.path %}
 {% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
 """The tests of the lines of the operation `{{ op.name }}` (ADR 0035): the record and its lines
@@ -80,6 +98,35 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
     assert await session.scalar(select(func.count()).select_from({{ e.name }})) == records
     assert await session.scalar(select(func.count()).select_from({{ t.name }})) == lines
+{% for case in ln.rule_cases %}
+
+
+{{ trace(ln.id) }}
+{{ trace(case.rule.id) }}
+{{ sig("test_" ~ op.name ~ "_keeps_the_rule_" ~ case.rule.name) }}    payload = await {{ e.snake }}_input(session)
+{{ rule_items('payload["' ~ ln.name ~ '"]', item, case, case.kept) | trim("\n") }}
+
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
+
+    assert response.status_code == 201, response.text
+{% if case.broken %}
+
+
+{{ trace(ln.id) }}
+{{ trace(case.rule.id) }}
+{{ sig("test_" ~ op.name ~ "_checks_the_rule_" ~ case.rule.name) }}    payload = await {{ e.snake }}_input(session)
+{{ rule_items('payload["' ~ ln.name ~ '"]', item, case, case.broken) | trim("\n") }}
+    records = await session.scalar(select(func.count()).select_from({{ e.name }}))
+    # End the read, so that the app can write (SQLite locks the database for a write).
+    await session.commit()
+
+    {{ request("post", ['"' ~ url ~ '"', "json=payload"]) }}
+
+    assert_problem(response, 422)
+{{ rule_message(case) | trim("\n") }}
+    assert await session.scalar(select(func.count()).select_from({{ e.name }})) == records
+{% endif %}
+{% endfor %}
 {% for w in t.workflows if w.other_state %}
 
 
@@ -140,6 +187,33 @@ async def _{{ ln.name }}_of(session: AsyncSession, id: UUID) -> list[UUID]:
     assert_problem(response, 422)
     assert response.json()["errors"][0]["loc"] == ["body", "{{ ln.name }}", 1]
     assert await _{{ ln.name }}_of(session, record.id) == [line.id]
+{% for case in ln.rule_cases %}
+
+
+{{ trace(ln.id) }}
+{{ trace(case.rule.id) }}
+{{ sig("test_" ~ op.name ~ "_keeps_the_rule_" ~ case.rule.name) }}    record = await make_{{ e.snake }}(session)
+{{ rule_items("items", item, case, case.kept) | trim("\n") }}
+
+    {{ request("patch", [id_url, 'json={"' ~ ln.name ~ '": items}']) }}
+
+    assert response.status_code == 200, response.text
+    assert len(await _{{ ln.name }}_of(session, record.id)) == 2
+{% if case.broken %}
+
+
+{{ trace(ln.id) }}
+{{ trace(case.rule.id) }}
+{{ sig("test_" ~ op.name ~ "_checks_the_rule_" ~ case.rule.name) }}    record = await make_{{ e.snake }}(session)
+{{ rule_items("items", item, case, case.broken) | trim("\n") }}
+
+    {{ request("patch", [id_url, 'json={"' ~ ln.name ~ '": items}']) }}
+
+    assert_problem(response, 422)
+{{ rule_message(case) | trim("\n") }}
+    assert await _{{ ln.name }}_of(session, record.id) == []
+{% endif %}
+{% endfor %}
 {% for w in t.workflows if w.other_state %}
 
 

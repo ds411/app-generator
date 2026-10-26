@@ -91,6 +91,39 @@ The front ends give the same values:
 - The React app with the FastAPI app (`x-react-data: api`) reads the
   value of each computed field with totals from the API.
 
+### Compare rules over totals
+
+A side (`field` or `other`) of a compare rule of an entity can be a
+total of a `one_to_many` relation, for example `sum(lines.debit)` equal
+to `sum(lines.credit)` for a journal entry. The rule is a check of the
+record and its lines, so it runs after the lines are in the database:
+
+- The FastAPI repository has `check_totals`: it flushes the changes,
+  reads the totals of the rules again (`session.refresh`), and checks
+  the rules. `create` and `update` of the repository call it, and an
+  operation with lines calls it after it writes the lines, before the
+  commit. A total that only the rules use is a deferred column
+  property, so the queries of the entity do not read it.
+- The Next.js repository has the options `totalRules` and `ruleTotals`
+  (the subqueries of the totals that only the rules use). After a create
+  or an update, it reads the row of the record with the totals, and
+  checks the rules. In the work of `inTransaction()`, for example the
+  server action of an operation with lines, the check runs at the end
+  of the work (`checkAtEnd` in `src/shared/db/client.ts`), after the
+  lines. A broken rule gives a ValidationError and rolls back the work.
+- The React app with mock data does not check the rules of the
+  entities. With the FastAPI app, the form shows the error of the API.
+- The validator checks the rules with the seed records of the lines.
+- The generated FastAPI tests give the fields of the rules fixed
+  samples that keep the rules with no lines and with one to three lines,
+  and send two lines that keep the rules and two lines that break each
+  rule.
+
+A change of a line through the operations of its own entity does not
+check the rules of its record. A check there would break each journal
+entry with its first line, before the second line exists. The record
+and its lines change together in an operation with lines (ADR 0035).
+
 ## Consequences
 
 - A total is correct after each change of the related records, also a
@@ -110,3 +143,6 @@ The front ends give the same values:
 - The views of the Next.js app and of the React app with mock data sort
   and filter the computed fields with totals in the browser, as the
   other computed fields.
+- A compare rule over totals costs one more query after each create and
+  update of its entity. The operations of the lines can break the rule,
+  and the mock data does not keep it.

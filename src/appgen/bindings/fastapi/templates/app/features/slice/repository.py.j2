@@ -22,6 +22,9 @@
     await check_rules(session, record)
 {% endif %}
     await validate(session, record, created=False)
+{% if e.total_rules %}
+    await check_totals(session, record)
+{% endif %}
 {% if e.scoped %}
     await check_scope(session, record, scope)
 {% endif %}
@@ -221,11 +224,17 @@ async def create(
 ) -> {{ e.name }}:
     """Validate and store a new record, and return it. It must be in the scope of the request."""
     record = await add(session, data, scope)
+{% if e.total_rules %}
+    await check_totals(session, record)
+{% endif %}
     await check_scope(session, record, scope)
 {% else %}
 async def create(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     """Validate and store a new record, and return it."""
     record = await add(session, data)
+{% if e.total_rules %}
+    await check_totals(session, record)
+{% endif %}
 {% endif %}
     await commit(session)
     return await get(session, record.id)
@@ -394,7 +403,12 @@ async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
             if item.id is None:
                 values["{{ lines.link_attr }}"] = record.id
                 data = {{ t.name }}Create.model_validate(values)
+{% if t.total_rules %}
+                line = await {{ target_repository }}add(session, data)
+                await {{ target_repository }}check_totals(session, line)
+{% else %}
                 await {{ target_repository }}add(session, data)
+{% endif %}
             elif (line := current.get(item.id)) is not None:
                 changes = {{ t.name }}Update.model_validate(values)
                 await {{ target_repository }}change(session, line, changes)
@@ -488,6 +502,23 @@ async def on_deleted(session: AsyncSession, record: {{ e.name }}) -> None:
 async def check_rules(session: AsyncSession, record: {{ e.name }}) -> None:
     """Check the rules of the entity {{ e.name }}. A broken rule gives a 422 or a 409 error."""
 {% for r in e.check_rules %}
+    {{ trace(r.id) }}
+{% for line in r.check_lines() %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+
+
+{% endif %}
+{% if e.total_rules %}
+async def check_totals(session: AsyncSession, record: {{ e.name }}) -> None:
+    """Check the rules of {{ e.name }} with totals, after a change of the record and its lines.
+
+    The totals come from the database (ADR 0034). A broken rule gives a 422 error.
+    """
+    await flush(session)
+    {{ e.refresh_totals() }}
+{% for r in e.total_rules %}
     {{ trace(r.id) }}
 {% for line in r.check_lines() %}
     {{ line }}

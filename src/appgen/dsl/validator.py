@@ -13,6 +13,7 @@ import operator
 import re
 import uuid
 from collections.abc import Callable, Iterable, Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
@@ -61,7 +62,12 @@ from appgen.dsl.model import (
     Sequence,
 )
 from appgen.dsl.openapi import Ref, SecurityScheme, property_chain, query_value
-from appgen.dsl.rules import EntityCompareRule, EntityRule, EntityUniqueRule
+from appgen.dsl.rules import (
+    EntityCompareRule,
+    EntityRule,
+    EntityUniqueRule,
+    is_total_operand,
+)
 from appgen.dsl.seed import EntitySeed, SeedRecord, is_record_key, normal_value
 from appgen.dsl.storage import (
     FILE_PATHS,
@@ -808,26 +814,27 @@ _COMPARE_GROUPS = (
 
 def check_rules(definition: AppDefinition) -> Iterator[Diagnostic]:
     """The rules of an entity refer to its stored fields, and the fields suit the rule."""
-    for entity in definition.entities.values():
+    for entity_name, entity in definition.entities.items():
         stored = entity.stored_fields
         singles = {n for n, r in entity.relations.items() if r.kind in SINGLE_KINDS}
         for rule in entity.rules.values():
             if isinstance(rule, EntityCompareRule):
                 found = [
-                    _rule_field(rule, key, getattr(rule, key), stored) for key in ("field", "other")
+                    _compare_side(definition, entity_name, rule, key, stored)
+                    for key in ("field", "other")
                 ]
                 for diagnostic in found:
                     if isinstance(diagnostic, Diagnostic):
                         yield diagnostic
                 a, b = found
                 if (
-                    isinstance(a, Field)
-                    and isinstance(b, Field)
-                    and not any(a.type in g and b.type in g for g in _COMPARE_GROUPS)
+                    isinstance(a, str)
+                    and isinstance(b, str)
+                    and not any(a in g and b in g for g in _COMPARE_GROUPS)
                 ):
                     yield _error(
                         "unsuitable-field",
-                        f"A compare rule cannot compare a '{a.type}' with a '{b.type}'.",
+                        f"A compare rule cannot compare a '{a}' with a '{b}'.",
                         rule,
                         at="other",
                     )
@@ -856,6 +863,58 @@ def check_rules(definition: AppDefinition) -> Iterator[Diagnostic]:
                         at="end",
                     )
                 yield from _rule_members(rule, "scope", rule.scope, stored, singles)
+
+
+def _comparable_sides(definition: AppDefinition, entity: str, rule: EntityCompareRule) -> bool:
+    """Return True if the sides of a compare rule are valid, and of types that compare."""
+    stored = definition.entities[entity].stored_fields
+    a, b = (_compare_side(definition, entity, rule, key, stored) for key in ("field", "other"))
+    if not isinstance(a, str) or not isinstance(b, str):
+        return False
+    return any(a in g and b in g for g in _COMPARE_GROUPS)
+
+
+def _compare_side(
+    definition: AppDefinition,
+    entity: str,
+    rule: EntityCompareRule,
+    key: str,
+    stored: dict[str, Field],
+) -> str | Diagnostic:
+    """Return the type of a side of a compare rule, or its error.
+
+    A side is a stored field, or a total of the lines of the record
+    (ADR 0034): `count` gives an `integer`, `avg` a `decimal`, and the other
+    functions the type of their field.
+    """
+    side: str = getattr(rule, key)
+    if not is_total_operand(side):
+        found = _rule_field(rule, key, side, stored)
+        return found.type if isinstance(found, Field) else found
+    try:
+        total = parse_expression(side)
+    except ExpressionError as error:
+        return _error("invalid-value", f"The total '{side}' is not valid: {error}", rule, at=key)
+    # The pattern of a side lets only a total through.
+    assert isinstance(total, Total)
+    problem = next(iter(_check_total(definition, entity, rule, total, at=key)), None)
+    if problem is not None:
+        return problem
+    relation = definition.entities[entity].relations[total.relation]
+    if relation.kind != "one_to_many":
+        return _error(
+            "unsuitable-field",
+            f"The total '{total}' of a compare rule needs a one_to_many relation, but "
+            f"'{entity}.{total.relation}' is {relation.kind}.",
+            rule,
+            at=key,
+            hint="A compare rule compares the totals of the lines of a record.",
+        )
+    if total.field is None:
+        return "integer"
+    if total.function == "avg":
+        return "decimal"
+    return definition.entities[relation.target].fields[total.field].type
 
 
 def _rule_field(rule: Element, key: str, name: str, stored: dict[str, Field]) -> Field | Diagnostic:
@@ -2212,7 +2271,7 @@ def check_seed(definition: AppDefinition) -> Iterator[Diagnostic]:
             continue
         for record in seed.records.values():
             yield from _check_record(name, entity, record, keys)
-        yield from _check_seed_rules(entity, seed)
+        yield from _check_seed_rules(definition, name, entity, seed)
     yield from _check_seed_one_to_one(definition)
     yield from _check_seed_targets(definition)
 
@@ -2464,8 +2523,13 @@ def _seed_values(entity: Entity, record: SeedRecord) -> dict[str, Any]:
     return result
 
 
-def _check_seed_rules(entity: Entity, seed: EntitySeed) -> Iterator[Diagnostic]:
-    """The records have unique values in the unique fields, and keep the rules of the entity."""
+def _check_seed_rules(
+    definition: AppDefinition, entity_name: str, entity: Entity, seed: EntitySeed
+) -> Iterator[Diagnostic]:
+    """The records have unique values in the unique fields, and keep the rules of the entity.
+
+    A total of a compare rule adds the seed records of the lines (ADR 0034).
+    """
     records = list(seed.records.values())
     values = {record.key: _seed_values(entity, record) for record in records}
     for name, field in entity.stored_fields.items():
@@ -2481,15 +2545,24 @@ def _check_seed_rules(entity: Entity, seed: EntitySeed) -> Iterator[Diagnostic]:
                 records, values, rule.fields, f"{names} (rule '{rule_name}')", None
             )
         elif isinstance(rule, EntityCompareRule):
+            if not _comparable_sides(definition, entity_name, rule):
+                continue  # check_rules reports the sides.
             for record in records:
-                a = _comparable(entity, rule.field, values[record.key].get(rule.field))
-                b = _comparable(entity, rule.other, values[record.key].get(rule.other))
+                a, b = (
+                    _seed_total(definition, entity, side, record.key)
+                    if is_total_operand(side)
+                    else _comparable(entity, side, values[record.key].get(side))
+                    for side in (rule.field, rule.other)
+                )
                 if a is not None and b is not None and not _SEED_OPS[rule.op](a, b):
                     yield _error(
                         "invalid-record",
                         f"The record does not keep the rule '{rule_name}': {rule.message}",
                         record,
-                        at=rule.field,
+                        at=None if rule.totals else rule.field,
+                        hint="The seed records of the lines give the totals of the rule."
+                        if rule.totals
+                        else None,
                     )
         else:
             ranges: list[tuple[SeedRecord, Any, Any, list[Any]]] = []
@@ -2545,6 +2618,44 @@ def _check_seed_unique(
             )
 
 
+def _seed_total(definition: AppDefinition, entity: Entity, side: str, key: str) -> Any:
+    """Return the value of a total of a compare rule over the seed records of the lines.
+
+    The count and the sum of no lines are 0, and the other totals are None.
+    A side that is not valid gives None: check_rules reports it.
+    """
+    try:
+        total = parse_expression(side)
+    except ExpressionError:
+        return None
+    relation = entity.relations.get(total.relation) if isinstance(total, Total) else None
+    if not isinstance(total, Total) or relation is None or relation.inverse is None:
+        return None
+    target = definition.entities.get(relation.target)
+    if target is None:
+        return None
+    seed = definition.seed.get(relation.target)
+    records = list(seed.records.values()) if seed is not None else []
+    rows = [_seed_values(target, record) for record in records]
+    lines = [row for row in rows if row.get(relation.inverse) == key]
+    if total.field is None:
+        return len(lines)
+    numbers = [
+        Decimal(str(line[total.field])) for line in lines if line.get(total.field) is not None
+    ]
+    if not numbers:
+        return 0 if total.function == "sum" else None
+    match total.function:
+        case "sum":
+            return sum(numbers, Decimal(0))
+        case "avg":
+            return sum(numbers, Decimal(0)) / len(numbers)
+        case "min":
+            return min(numbers)
+        case _:
+            return max(numbers)
+
+
 def _comparable(entity: Entity, name: str, value: Any) -> Any:
     """Return a value in a form that the compare operators can compare."""
     field = entity.fields.get(name)
@@ -2554,6 +2665,9 @@ def _comparable(entity: Entity, name: str, value: Any) -> Any:
         return datetime.date.fromisoformat(value)
     if field.type == "datetime":
         return datetime.datetime.fromisoformat(value)
+    if field.type == "decimal":
+        # A total of decimals is a Decimal, and a float is not equal to it.
+        return Decimal(str(value))
     return value
 
 

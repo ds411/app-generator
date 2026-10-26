@@ -8,7 +8,7 @@ without a commit. The module of the operation has its input schema: the input
 of the record with the lines.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from appgen.bindings.fastapi.pysource import call
@@ -17,6 +17,7 @@ from appgen.gen.naming import pascal
 
 if TYPE_CHECKING:
     from appgen.bindings.fastapi.model import PyEntity, PyOperation, PyRelation
+    from appgen.bindings.fastapi.total_rules import RuleCase
 
 
 @dataclass(slots=True)
@@ -31,6 +32,8 @@ class PyLines:
     """The entity of the lines."""
     link: PyRelation
     """The `many_to_one` relation of the lines to the record (the inverse)."""
+    rule_cases: list[RuleCase] = field(default_factory=list["RuleCase"])
+    """The tests of the compare rules with totals of these lines (ADR 0034)."""
 
     @property
     def id(self) -> str:

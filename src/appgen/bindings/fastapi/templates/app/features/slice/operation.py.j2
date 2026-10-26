@@ -9,6 +9,10 @@
     {{ trace(lines.id) }}
     await repository.{{ lines.function }}(session, record, data.{{ lines.attr }})
 {% endfor %}
+{% if e.total_rules %}
+    # The rules with totals read the new lines (ADR 0034).
+    await repository.check_totals(session, record)
+{% endif %}
 {% if sarg %}
     await repository.check_scope(session, record, scope)
 {% endif %}

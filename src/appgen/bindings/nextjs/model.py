@@ -26,6 +26,7 @@ from appgen.bindings.shared.totals import total_keys
 from appgen.bindings.shared.ui import ui_plan
 from appgen.bindings.shared.views import ViewContext
 from appgen.dsl.model import AppDefinition, Page
+from appgen.dsl.rules import EntityCompareRule
 from appgen.gen.naming import kebab, pascal
 
 RATE_LIMIT_STORE_KEY = "x-nextjs-rate-limit-store"
@@ -299,6 +300,13 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "events": has_events(definition),
             # The totals of the related records (ADR 0034): the subqueries of the repositories.
             "totals": repository_totals(definition, by_entity),
+            # The compare rules with totals of the lines (ADR 0034): the repositories check
+            # them after a change.
+            "total_rules": any(
+                isinstance(rule, EntityCompareRule) and rule.totals
+                for entity in definition.entities.values()
+                for rule in entity.rules.values()
+            ),
             "frame_headers": frame_headers(definition),
         },
     }

@@ -73,7 +73,7 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   ],
 {% endif %}
-{% if totals %}
+{% if totals and totals.totals %}
   // The totals of the related records (ADR 0034): a subquery for each one, of the record `record`.
   totals: (record) => ({
 {% for t in totals.totals %}
@@ -84,7 +84,8 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   }),
 {% endif %}
-{% set compares = element.rules.values() | selectattr("kind", "eq", "compare") | list %}
+{% set compares = element.rules.values() | selectattr("kind", "eq", "compare") | rejectattr("totals") | list %}
+{% set total_rules = element.rules.values() | selectattr("kind", "eq", "compare") | selectattr("totals") | list %}
 {% set overlaps = element.rules.values() | selectattr("kind", "eq", "no_overlap") | list %}
 {% if compares %}
   compare: [
@@ -97,6 +98,30 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
     }, {{ trace(rule.id, scope="end") }}
 {% endfor %}
   ],
+{% endif %}
+{% if total_rules %}
+  // The compare rules with totals of the lines (ADR 0034): checked after a change.
+  totalRules: [
+{% for rule in total_rules %}
+    { {{ trace(rule.id, scope="begin") }}
+      field: {{ ts_value(rule_side_key(rule.field) or rule_key(element, rule.field)) }},
+      op: {{ ts_value(rule.op) }},
+      other: {{ ts_value(rule_side_key(rule.other) or rule_key(element, rule.other)) }},
+      message: {{ text(rule.message) if i18n else ts_value(rule.message) }},
+    }, {{ trace(rule.id, scope="end") }}
+{% endfor %}
+  ],
+{% endif %}
+{% if totals and totals.rules %}
+  // The totals that only the rules use: a subquery for each one, of the record `record`.
+  ruleTotals: (record) => ({
+{% for t in totals.rules %}
+{% for id in t.ids %}
+    {{ trace(id) }}
+{% endfor %}
+    {{ t.code }}
+{% endfor %}
+  }),
 {% endif %}
 {% if overlaps %}
   noOverlap: [

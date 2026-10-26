@@ -28,9 +28,9 @@
 # Then generate tests/fixtures/invoices.yaml (the small DSL additions of
 # M33), and run lint, type check, appgen check, and the sequence test
 # (scripts/sequence_test.py) on it.
-# Last, generate tests/fixtures/totals.yaml (totals of relations, ADR
-# 0034), and run lint, type check, appgen check, and the totals test
-# (scripts/totals_test.py) on it.
+# Last, generate tests/fixtures/totals.yaml (totals of relations and the
+# compare rules over totals, ADR 0034), and run lint, type check, appgen
+# check, and the totals test (scripts/totals_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #

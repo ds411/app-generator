@@ -41,6 +41,7 @@ from appgen.bindings.fastapi.pysource import (
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.fastapi.total_rules import fix_rule_samples, total_rule_cases
 from appgen.bindings.fastapi.totals import (
     PyTotal,
     TotalsTest,
@@ -49,6 +50,7 @@ from appgen.bindings.fastapi.totals import (
     models_code,
     models_head,
     models_imports,
+    rule_totals,
     totals_test,
 )
 from appgen.bindings.fastapi.webhooks import python_webhooks
@@ -671,6 +673,9 @@ class PyRule:
     """no_overlap: the attributes of the scope fields and foreign keys."""
     translated: bool = False
     """True if the app has translations: the message goes through `t` (ADR 0010)."""
+    totals: list[str] = dataclass_field(default_factory=list[str])
+    """compare: the attributes of the totals of the lines (ADR 0034). `check_totals` checks a
+    rule with totals, after the lines."""
 
     def unique_constraint(self, prefix: str) -> str:
         """Return the `UniqueConstraint` of a unique rule. The migration uses `prefix="sa."`."""
@@ -1422,7 +1427,26 @@ class PyEntity:
     @property
     def check_rules(self) -> list[PyRule]:
         """The rules that the repository checks before it stores a record."""
-        return [r for r in self.rules if r.kind != "unique"]
+        return [r for r in self.rules if r.kind != "unique" and not r.totals]
+
+    @property
+    def total_rules(self) -> list[PyRule]:
+        """The compare rules with totals: `check_totals` checks them after the lines (ADR 0034)."""
+        return [r for r in self.rules if r.totals]
+
+    @property
+    def rule_totals(self) -> list[str]:
+        """The attributes of the totals of the rules, which `check_totals` reads again."""
+        return list(dict.fromkeys(attr for r in self.total_rules for attr in r.totals))
+
+    def refresh_totals(self) -> str:
+        """Return the statement of `check_totals` that reads the totals of the rules again."""
+        names = [f'"{attr}"' for attr in self.rule_totals]
+        statement = call("await ", "session.refresh", ["record", f"[{', '.join(names)}]"])
+        if all(4 + len(line) <= LINE_LENGTH for line in statement.splitlines()):
+            return statement
+        items = "".join(f"            {name},\n" for name in names)
+        return f"await session.refresh(\n        record,\n        [\n{items}        ],\n    )"
 
     def target(self, rel: PyRelation) -> PyEntity:
         return self.app_entities[rel.target]
@@ -1789,7 +1813,7 @@ class PyEntity:
             ),
             f"from app.features.{self.slice}.validation_ext import validate",
         }
-        flush = self.scoped or self.events or self.lines or self.history_flush
+        flush = self.scoped or self.events or self.lines or self.history_flush or self.total_rules
         core = {"commit"} | ({"flush"} if flush else set[str]())
         if self.events:
             core.add("run_event")
@@ -1843,7 +1867,7 @@ class PyEntity:
             i18n.add("DEFAULT")
         if i18n:
             lines.add(from_import("app.core.i18n", i18n))
-        checks = {r.kind for r in self.check_rules}
+        checks = {r.kind for r in [*self.check_rules, *self.total_rules]}
         if checks:
             names = {"compare"} if "compare" in checks else set[str]()
             names |= {"overlaps"} if "no_overlap" in checks else set[str]()
@@ -2459,6 +2483,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _computed(definition, entities)
     _rules(definition, entities)
     _workflows(definition, entities)
+    fix_rule_samples(definition, entities)
     _check_extensions(definition, entities)
     _check_embed_cycles(entities)
     auth = definition.auth
@@ -2474,6 +2499,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
     _events(definition, entities, operations)
     python_lines(definition, entities, operations)
+    total_rule_cases(definition, entities)
     _record_rules(definition, entities)
     _history(definition, entities)
     search_config = _search_config(definition)
@@ -2886,7 +2912,15 @@ def _rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
 
         for rule_name, rule in entity.rules.items():
             py_rule = PyRule(name=rule_name, id=rule.id, kind=rule.kind, message="")
-            if isinstance(rule, EntityCompareRule):
+            if isinstance(rule, EntityCompareRule) and rule.totals:
+                totals = rule_totals(definition, entities, name, rule)
+                py_rule.field, py_rule.other = (
+                    totals[side].attr if side in totals else attr(side)
+                    for side in (rule.field, rule.other)
+                )
+                py_rule.totals = [t.attr for t in totals.values()]
+                py_rule.op, py_rule.message = rule.op, rule.message
+            elif isinstance(rule, EntityCompareRule):
                 py_rule.field, py_rule.other = attr(rule.field), attr(rule.other)
                 py_rule.op, py_rule.message = rule.op, rule.message
                 later = {"gt": rule.field, "gte": rule.field, "lt": rule.other, "lte": rule.other}

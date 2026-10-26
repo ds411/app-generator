@@ -6,6 +6,10 @@ in `src/shared/db/repository.ts`): the lists, the reads, and the results
 of the changes. The query names the table of the records `record`, so
 that the subquery of a relation of the entity to itself tells the record
 from its related records. The views compute the fields from the totals.
+
+The compare rules with totals of the lines (`totalRules`) read their
+totals after a change, with the subqueries of `totals` and of
+`ruleTotals`, the totals that only the rules use.
 """
 
 import re
@@ -13,7 +17,7 @@ from dataclasses import dataclass, field
 
 from appgen.bindings.nextjs.db import Table, TsCall, TsCode, format_ts
 from appgen.bindings.nextjs.jobs import FilterBuilder, TsFilter
-from appgen.bindings.shared.totals import TsTotal, entity_totals
+from appgen.bindings.shared.totals import TsTotal, entity_totals, rule_totals
 from appgen.dsl.model import AppDefinition
 from appgen.gen.naming import camel
 
@@ -26,13 +30,14 @@ _OPERATORS = (
 
 @dataclass(slots=True)
 class TsTotalQuery:
-    """The subquery of a total: a key of the `totals` option of the repository."""
+    """The subquery of a total: a key of the `totals` or the `ruleTotals` option of the
+    repository."""
 
     key: str
     code: str
     """The entry of the key, for example `sumLinesAmount: total("sum", ...),`."""
     ids: list[str]
-    """The computed fields that use the total, for the traces."""
+    """The computed fields or the rules that use the total, for the traces."""
 
 
 @dataclass(slots=True)
@@ -40,6 +45,8 @@ class RepositoryTotals:
     """The totals of an entity in its repository, with what their code imports."""
 
     totals: list[TsTotalQuery] = field(default_factory=list[TsTotalQuery])
+    rules: list[TsTotalQuery] = field(default_factory=list[TsTotalQuery])
+    """The totals that only the compare rules use: the option `ruleTotals`."""
     operators: list[str] = field(default_factory=list[str])
     """The functions of `drizzle-orm`."""
     tables: list[str] = field(default_factory=list[str])
@@ -53,18 +60,21 @@ def repository_totals(
     found: dict[str, RepositoryTotals] = {}
     for name in definition.entities:
         totals = entity_totals(definition, name)
-        if not totals:
+        keys = {t.key for t in totals}
+        rules = [t for t in rule_totals(definition, name) if t.key not in keys]
+        if not totals and not rules:
             continue
         result = RepositoryTotals()
         used: set[str] = set()
-        for total in totals:
-            filter_ = TsFilter()
-            code = _code(definition, tables, name, total, filter_)
-            entry = format_ts(code, 4, f"{total.key}: ", ",")
-            result.totals.append(TsTotalQuery(total.key, entry, total.ids))
-            used |= filter_.tables
-            used.add(tables[total.target].const)
-        text = "\n".join(t.code for t in result.totals)
+        for queries, group in ((result.totals, totals), (result.rules, rules)):
+            for total in group:
+                filter_ = TsFilter()
+                code = _code(definition, tables, name, total, filter_)
+                entry = format_ts(code, 4, f"{total.key}: ", ",")
+                queries.append(TsTotalQuery(total.key, entry, total.ids))
+                used |= filter_.tables
+                used.add(tables[total.target].const)
+        text = "\n".join(t.code for t in [*result.totals, *result.rules])
         result.operators = [n for n in _OPERATORS if re.search(rf"\b{n}\(", text)]
         result.tables = sorted(used)
         found[name] = result
