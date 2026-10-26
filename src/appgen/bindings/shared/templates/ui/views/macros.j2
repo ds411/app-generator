@@ -150,9 +150,9 @@ function subscribe(listener: () => void): () => void {
 {%- endif %}
 {%- endmacro %}
 
-{% macro related_steps(related) -%}
+{% macro related_steps(related, name="RELATED") -%}
 /** The related records, in the order of their loads: the store of each entity, and the keys of their IDs. */
-const RELATED: RelatedStep[][] = [
+const {{ name }}: RelatedStep[][] = [
 {% for stage in related %}
   [
 {% for step in stage %}

@@ -1,0 +1,173 @@
+{{ trace_header(element_id) }}
+{% set d = py.dashboards[name] %}
+{% macro sig(fn, args) %}
+{% set line = "async def " ~ fn ~ "(" ~ args ~ ") -> None:" %}
+{% if line | length <= 100 %}
+{{ line }}
+{% else %}
+async def {{ fn }}(
+    {{ args }}
+) -> None:
+{% endif %}
+{% endmacro %}
+{% macro get(w) -%}
+{% set url = d.path ~ w.path %}
+{% if w.today %}
+    response = await client.get("{{ url }}", params={"today": TODAY})
+{%- else %}
+    response = await client.get("{{ url }}")
+{%- endif %}
+{%- endmacro %}
+{% set tested = d.widgets | selectattr("test") | list %}
+{% set roles = definition.access.roles if definition.access else {} %}
+{% set denied = [] %}
+{% set owned = [] %}
+{% for w in d.widgets if roles and w.protected %}
+{% set ns_r = namespace(deny=none, allow=none, owner=none) %}
+{% for role_name, r in roles.items() %}
+{% if r.allows_operation(w.permission) %}{% if ns_r.allow is none %}{% set ns_r.allow = role_name %}{% endif %}{% elif ns_r.deny is none %}{% set ns_r.deny = role_name %}{% endif %}
+{% set rule = r.records.get(w.entity.name) %}
+{% if rule and rule.owner and not rule.where and "read" in rule.operations and r.allows_operation(w.permission) and ns_r.owner is none %}{% set ns_r.owner = role_name %}{% endif %}
+{% endfor %}
+{% if ns_r.deny and ns_r.allow %}{% set _ = denied.append((w, ns_r.deny, ns_r.allow)) %}{% endif %}
+{% if ns_r.owner and w.scoped and w.entity.owner and w.test and w.kind == "stat" and w.aggregate == "count" %}{% set _ = owned.append((w, ns_r.owner)) %}{% endif %}
+{% endfor %}
+{% set u = py.entity(definition.auth.user_entity) if denied or owned else none %}
+{% set role_field = (u.fields | selectattr("name", "eq", definition.access.role_field) | first) if u else none %}
+{% set code = tested | map(attribute="test.records") | map("tojson") | join(" ") ~ (tested | map(attribute="test.checks") | map("join", " ") | join(" ")) %}
+"""The tests of the dashboard `{{ d.name }}`: the value of each widget, from known records.
+
+Each test stores records that pass the filter of the widget, and a record
+that fails each path of the filter. It checks the value of the endpoint
+on the database of the tests: Postgres, or SQLite.
+"""
+
+{% set ns = namespace(lines=["import pytest", "from httpx import AsyncClient"], factories=[], enums={}) %}
+{% if tested or denied %}
+{% set ns.lines = ns.lines + ["from sqlalchemy.ext.asyncio import AsyncSession"] %}
+{% endif %}
+{% if "dt." in code %}
+{% set ns.lines = ns.lines + ["import datetime as dt"] %}
+{% endif %}
+{% if "Decimal(" in code %}
+{% set ns.lines = ns.lines + ["from decimal import Decimal"] %}
+{% endif %}
+{% for w in tested %}
+{% set ns.factories = ns.factories + ["make_" ~ w.entity.snake] %}
+{% if w.test.parents %}
+{% set ns.factories = ns.factories + ["make_" ~ w.test.parents[0].snake] %}
+{% endif %}
+{% for e in py.entity_order() %}
+{% for f in e.fields if f.enum and (f.enum.name ~ ".") in code %}
+{% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".enums import " ~ f.enum.name] %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
+{% if u %}
+{% set ns.factories = ns.factories + ["make_" ~ u.snake] %}
+{% set ns.lines = ns.lines + ["from app.core.auth import make_token", "from app.features." ~ u.slice ~ ".models import " ~ u.name] %}
+{% endif %}
+{% if owned %}
+{% set ns.lines = ns.lines + ["from sqlalchemy.ext.asyncio import AsyncSession"] %}
+{% endif %}
+{% if ns.factories %}
+{% set ns.lines = ns.lines + [py.from_import("tests.factories", ns.factories | unique | list)] %}
+{% endif %}
+{{ py.imports(ns.lines | unique | list) }}
+
+pytestmark = pytest.mark.anyio
+{% if d.widgets | selectattr("today") | list %}
+
+TODAY = "{{ py.test_today }}"
+"""The date that the tests send as `today`: the filters with `$today` compare with it."""
+{% endif %}
+{% for w in d.widgets %}
+
+
+{{ trace(w.id) }}
+{{ sig("test_" ~ w.operation_id ~ "_without_records", "client: AsyncClient") }}{{ get(w) }}
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {{ w.empty }}
+{% if w.test %}
+{% set t = w.test %}
+
+
+{{ trace(w.id) }}
+{{ sig("test_" ~ w.operation_id ~ "_computes_its_value", "client: AsyncClient, session: AsyncSession") }}{% if t.now %}
+    now = dt.datetime.now(dt.UTC)
+{% endif %}
+{% if t.parents %}
+    parents = [await make_{{ t.parents[0].snake }}(session) for _ in range({{ t.parents[2] }})]
+{% endif %}
+{% if t.records | map("length") | sum or "records" in (t.checks | join(" ")) %}
+    records = [await make_{{ w.entity.snake }}(session) for _ in range({{ t.records | length }})]
+{% else %}
+    for _ in range({{ t.records | length }}):
+        await make_{{ w.entity.snake }}(session)
+{% endif %}
+{% for record in t.records %}
+{% set index = loop.index0 %}
+{% for attr, value in record.items() %}
+    records[{{ index }}].{{ attr }} = {{ value }}
+{% endfor %}
+{% endfor %}
+    await session.commit()
+
+{{ get(w) }}
+
+    assert response.status_code == 200, response.text
+{% for line in t.checks %}
+    {{ line }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% if u %}
+
+
+async def _headers(session: AsyncSession, role: str) -> tuple[{{ u.name }}, dict[str, str]]:
+    """Store a user with a role, and return the user and the headers with a token of the user."""
+    user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
+    return user, {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+{% endif %}
+{% for w, deny, allow in denied %}
+
+
+{{ trace(w.id) }}
+{{ sig("test_" ~ w.operation_id ~ "_needs_the_operation_" ~ w.permission, "anonymous_client: AsyncClient, session: AsyncSession") }}    for role, status in (("{{ deny }}", 403), ("{{ allow }}", 200)):
+        _, headers = await _headers(session, role)
+        response = await anonymous_client.get("{{ d.path }}{{ w.path }}", headers=headers)
+
+        assert response.status_code == status, response.text
+{% endfor %}
+{% for w, role in owned %}
+{% set t = w.test %}
+
+
+{{ trace(w.entity.owner.id) }}
+{{ sig("test_" ~ w.operation_id ~ "_counts_only_the_records_of_the_role_" ~ role, "anonymous_client: AsyncClient, session: AsyncSession") }}{% if t.now %}
+    now = dt.datetime.now(dt.UTC)
+{% endif %}
+    user, headers = await _headers(session, "{{ role }}")
+    other, _ = await _headers(session, "{{ role }}")
+    records = [await make_{{ w.entity.snake }}(session) for _ in range({{ t.passing }})]
+{% for record in t.records[:t.passing] %}
+{% set index = loop.index0 %}
+{% for attr, value in record.items() %}
+    records[{{ index }}].{{ attr }} = {{ value }}
+{% endfor %}
+    records[{{ index }}].{{ w.entity.owner.fk_attr }} = {{ "user" if index == 0 else "other" }}.id
+{% endfor %}
+    await session.commit()
+
+{% if w.today %}
+    response = await anonymous_client.get(
+        "{{ d.path }}{{ w.path }}", params={"today": TODAY}, headers=headers
+    )
+{% else %}
+    response = await anonymous_client.get("{{ d.path }}{{ w.path }}", headers=headers)
+{% endif %}
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 1.0}
+{% endfor %}

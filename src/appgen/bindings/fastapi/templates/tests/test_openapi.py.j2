@@ -13,6 +13,12 @@ ENDPOINTS = [
     ("{{ op.method }}", "{{ e.path }}{{ op.path }}"),
 {% endfor %}
 {% endfor %}
+{% for d in py.dashboards.values() %}
+{% for w in d.widgets %}
+    {{ trace(w.id) }}
+    ("get", "{{ d.path }}{{ w.path }}"),
+{% endfor %}
+{% endfor %}
 ]
 SCHEMAS = [
 {% for schema, element_id in py.openapi_schemas %}

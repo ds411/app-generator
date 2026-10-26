@@ -231,6 +231,11 @@ BINDING = Binding(
             path="src/shared/lib/use-options.ts",
             when="react.api",
         ),
+        Output(
+            template="src/shared/api/dashboards.ts.j2",
+            path="src/shared/api/dashboards.ts",
+            when="react.api and ui_views.widgets",
+        ),
         Output(template="src/shared/api/index.ts.j2", path="src/shared/api/index.ts"),
         # The clients of the third-party APIs without a secret (shared
         # templates, see `appgen.bindings.shared.integrations`).

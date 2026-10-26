@@ -1,0 +1,56 @@
+{{ trace_header("app") }}
+"""The helpers of the dashboard endpoints: the numbers, the groups, the months, and today."""
+
+import datetime as dt
+from collections.abc import Iterable, Sequence
+from typing import Annotated, Any
+
+from fastapi import Query
+from sqlalchemy import ColumnElement, func, literal_column
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+
+from app.features.dashboards.schemas import ChartGroup, ChartValues
+
+Today = Annotated[
+    dt.date | None,
+    Query(
+        description="The date of today for `$today` in the filter of the widget, in the time "
+        "zone of the user. The default is the date in UTC."
+    ),
+]
+
+
+def utc_today() -> dt.date:
+    """Return the date of today in UTC."""
+    return dt.datetime.now(dt.UTC).date()
+
+
+def number(value: Any) -> float | None:
+    """Return an aggregate of the database as a number, or None without numbers."""
+    return None if value is None else float(value)
+
+
+def chart_values(rows: Iterable[Sequence[Any]]) -> ChartValues:
+    """Return the groups of a chart from the rows of the database: the key and the value."""
+    groups = [
+        ChartGroup(key=None if row[0] is None else str(row[0]), value=number(row[1]))
+        for row in rows
+    ]
+    groups.sort(key=lambda group: (group.key is None, group.key or ""))
+    return ChartValues(groups=groups)
+
+
+def month_of(
+    session: AsyncSession, column: InstrumentedAttribute[Any], *, utc: bool = False
+) -> ColumnElement[str]:
+    """Return the month of a date or a date-time column, as `YYYY-MM`.
+
+    A date-time gives the month in UTC: Postgres keeps the time zone, and
+    SQLite stores the time in UTC. The formats are SQL literals, so that the
+    `GROUP BY` clause has the same expression as the `SELECT` clause.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        value = func.timezone(literal_column("'UTC'"), column) if utc else column
+        return func.to_char(value, literal_column("'YYYY-MM'"))
+    return func.strftime(literal_column("'%Y-%m'"), column)

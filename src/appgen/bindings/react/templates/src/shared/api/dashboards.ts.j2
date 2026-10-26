@@ -1,0 +1,65 @@
+{{ trace_header("app") }}
+import { apiRequest } from "./http";
+import type { RelatedStore } from "./related";
+import type { EntityRecord } from "./types";
+
+/** One group of a chart of the API: its key (null for no value), and the aggregate of its records. */
+export type ChartValue = { key: string | null; value: number | null };
+
+/** A store that makes a record from the JSON of the API, for example `HttpStore`. */
+export type RecordReader<T> = { fromJson(json: unknown): T };
+
+/** The query parameters of a widget endpoint, for example `{ today: "2026-06-15" }`. */
+type WidgetParams = Readonly<Record<string, string>>;
+
+function widgetPath(path: string, params: WidgetParams): string {
+  const query = new URLSearchParams(params).toString();
+  return query ? `${path}?${query}` : path;
+}
+
+/** Return the value of a stat widget: an aggregate of records, or null without numbers. */
+export async function statValue(path: string, params: WidgetParams = {}): Promise<number | null> {
+  const body = (await apiRequest("GET", widgetPath(path, params))) as { value: number | null };
+  return body.value;
+}
+
+/** Return the groups of a chart widget that have records, sorted by key. */
+export async function chartValues(path: string, params: WidgetParams = {}): Promise<ChartValue[]> {
+  const body = (await apiRequest("GET", widgetPath(path, params))) as { groups: ChartValue[] };
+  return body.groups;
+}
+
+/** Return the records of a list widget, in the order and the count of the widget. */
+export async function widgetRecords<T>(
+  store: RecordReader<T>,
+  path: string,
+  params: WidgetParams = {},
+): Promise<T[]> {
+  const items = (await apiRequest("GET", widgetPath(path, params))) as unknown[];
+  return items.map((item) => store.fromJson(item));
+}
+
+/** Load the related records of the groups of a chart of a relation: the records of their keys. */
+export async function groupRecords(
+  entity: string,
+  store: RelatedStore,
+  groups: readonly ChartValue[],
+): Promise<Record<string, ReadonlyMap<string, EntityRecord>>> {
+  const ids = groups.flatMap((group) => (group.key === null ? [] : [group.key]));
+  return { [entity]: await store.byIds(ids) };
+}
+
+/** Merge the related records of the widgets: one map of records for each entity. */
+export function mergeLookups(
+  entities: readonly string[],
+  parts: readonly Record<string, ReadonlyMap<string, EntityRecord>>[],
+): Record<string, Map<string, EntityRecord>> {
+  const merged = new Map(entities.map((entity) => [entity, new Map<string, EntityRecord>()]));
+  for (const part of parts) {
+    for (const [entity, records] of Object.entries(part)) {
+      const target = merged.get(entity);
+      records.forEach((record, id) => target?.set(id, record));
+    }
+  }
+  return Object.fromEntries(merged);
+}

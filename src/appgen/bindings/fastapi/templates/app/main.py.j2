@@ -40,10 +40,17 @@ from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 from app.core.second_factor import router as second_factor_router
 {% endif %}
 from app.core.seed import seed_database
-{% for e in py.entity_order() | sort(attribute="slice") %}
+{% set slices = py.entity_order() | map(attribute="slice") | list + (["dashboards"] if py.dashboards else []) %}
+{% for slice in slices | sort %}
 
-{{ trace(e.id) }}
-from app.features.{{ e.slice }}.router import router as {{ e.slice }}_router
+{% if slice == "dashboards" and py.dashboards %}
+{% for d in py.dashboards.values() %}
+{{ trace(d.id) }}
+{% endfor %}
+{% else %}
+{{ trace((py.entity_order() | selectattr("slice", "eq", slice) | first).id) }}
+{% endif %}
+from app.features.{{ slice }}.router import router as {{ slice }}_router
 {% endfor %}
 {% for api in exposed | sort(attribute="module") %}
 
@@ -146,6 +153,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router({{ api.module }}_router)
 {% endif %}
 {% endfor %}
+{% for d in py.dashboards.values() %}
+    {{ trace(d.id) }}
+{% endfor %}
+{% if py.dashboards %}
+    app.include_router(dashboards_router)
+{% endif %}
     return app
 
 

@@ -272,6 +272,16 @@ class ListEndpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class WidgetEndpoint:
+    """The endpoint of a dashboard widget, for a dashboard that reads its values from the API."""
+
+    path: str
+    """The path, for example `/dashboards/overview/open-tasks`."""
+    today: bool = False
+    """True if the endpoint takes `today`: the filter of the widget has `$today`."""
+
+
+@dataclass(frozen=True, slots=True)
 class RelatedKey:
     """A key with the ID, or the list of IDs, of related records."""
 
@@ -486,18 +496,21 @@ class ViewContext:
         forms: bool = False,
         endpoints: Mapping[str, ListEndpoint] | None = None,
         api_server: bool = False,
+        widgets: Mapping[str, WidgetEndpoint] | None = None,
     ) -> None:
         """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
 
         With `endpoints` (the list endpoints by entity name), the list views
         send their query to the API. With `api_server`, the server component
         of a page calls the operation of a view of API data (Next.js), else
-        the view calls it in the browser.
+        the view calls it in the browser. `widgets` gives the endpoint of each
+        dashboard widget by element ID: the dashboards read their values.
         """
         self.definition = definition
         self.with_forms = forms
         self.api_server = api_server
         self.endpoints: dict[str, ListEndpoint] = dict(endpoints or {})
+        self.widgets: dict[str, WidgetEndpoint] = dict(widgets or {})
         ui = definition.ui
         self.badge_sets: dict[str, BadgeSet] = dict(ui.badges) if ui else {}
         self.list_views: dict[str, str] = {

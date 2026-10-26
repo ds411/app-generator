@@ -97,6 +97,19 @@ all records of an entity (#336, #337, #338):
   the board loads one page for each column and moves a card, and a
   calendar of the tasks (which the script adds to the definition) loads
   the shown days.
+- A dashboard computes its values on the server (#339, #340). The
+  FastAPI app has one endpoint for each stat, chart, and list widget
+  (ADR 0006), and the dashboard calls each endpoint once with
+  `Promise.all`. A widget with `$today` in its filter sends the date of
+  the browser (`today`), so that the server and the browser agree on the
+  day. A list widget then loads its related records by ID. A chart of a
+  relation gives the IDs of the groups, and the dashboard loads their
+  records by ID for the labels. With mock data, the dashboard computes
+  the values in the browser as before.
+- The check script compares the stat tiles of the dashboard with the
+  values of the API and with the totals of the list endpoints. It checks
+  that the dashboard calls each widget endpoint once, and that no
+  request loads all records.
 
 ## Consequences
 
@@ -109,7 +122,10 @@ all records of an entity (#336, #337, #338):
   (Fixed in M18 for the tables and the card lists: see the update.)
 - After the update for M18, the related records that a view shows (for
   example the people of the owner column), the boards, the forms, and
-  the dashboards still load all pages of their entities. (Fixed in M26
-  for the views and the forms: see the update.)
+  the dashboards still load all pages of their entities. (Fixed in M26:
+  see the update.)
+- A dashboard in API mode needs the FastAPI app of the same definition:
+  each widget has its own endpoint, so a change of a widget changes the
+  two apps.
 - The custom operations run on the server, so their extension files of
   the React app are not generated in this mode.

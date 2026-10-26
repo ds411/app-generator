@@ -14,6 +14,7 @@ from dataclasses import field as dataclass_field
 from decimal import Decimal
 from typing import Any, cast
 
+from appgen.bindings.fastapi.dashboards import TEST_TODAY, PyDashboard, python_dashboards
 from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import mocks_imports, py_features, python_apis
 from appgen.bindings.fastapi.names import attribute, plural, singular
@@ -1328,6 +1329,31 @@ class PyApp:
     smtp: bool = False
     """True if the app sends these messages by SMTP (`auth.delivery: smtp`), not with the
     extension file `app/core/messages_ext.py`."""
+    dashboards: dict[str, PyDashboard] = field(default_factory=dict[str, PyDashboard])
+    """The dashboards with the endpoints of their widgets, by name."""
+    access: bool = False
+    """True if the app has roles (`access`)."""
+    auth: bool = False
+    """True if the app has the sign-in (`auth`)."""
+
+    @property
+    def test_today(self) -> str:
+        """The date that the generated tests of the dashboards send as `today`."""
+        return TEST_TODAY.isoformat()
+
+    @property
+    def dashboard_guard(self) -> str | None:
+        """The dependency of the protected widget endpoints, or None without the sign-in."""
+        if self.access:
+            return "check_access"
+        return "current_user" if self.auth else None
+
+    @property
+    def dashboard_guard_module(self) -> str | None:
+        """The module in `app/core/` of the dependency of the protected widget endpoints."""
+        if self.access:
+            return "access"
+        return "auth" if self.auth else None
 
     def entity(self, name: str) -> PyEntity:
         return self.entities[name]
@@ -1359,6 +1385,14 @@ class PyApp:
                 found[op.params_class] = op.id
             if op.returns:
                 found[f"{op.returns}Read"] = self.entities[op.returns].id
+        for dashboard in self.dashboards.values():
+            for widget in dashboard.widgets:
+                if widget.kind == "stat":
+                    found.setdefault("StatValue", widget.id)
+                elif widget.kind == "chart":
+                    found.setdefault("ChartValues", widget.id)
+                else:
+                    found.setdefault(f"{widget.entity.name}Read", widget.entity.id)
         return sorted(found.items())
 
     def imports(self, lines: list[str]) -> str:
@@ -1500,6 +1534,9 @@ def python_app(definition: AppDefinition) -> PyApp:
         smtp=bool(_message_elements(definition))
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
+        dashboards=python_dashboards(definition, entities),
+        access=definition.access is not None,
+        auth=auth is not None,
     )
 
 

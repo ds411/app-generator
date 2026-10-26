@@ -476,23 +476,7 @@ class _Builder:
         return PyPath(name, (), self.entity, field=found)
 
     def resolve(self, path: str) -> PyPath:
-        entity = self.entity
-        hops: list[Hop] = []
-        segments = path.split(".")
-        for segment in segments[:-1]:
-            relation = next(r for r in entity.relations if r.name == segment)
-            target = entity.target(relation)
-            hops.append(Hop(entity, relation, target))
-            entity = target
-        last = segments[-1]
-        found = next((f for f in entity.fields if f.name == last), None)
-        if found is not None:
-            return PyPath(path, tuple(hops), entity, field=found)
-        relation = next((r for r in entity.relations if r.name == last), None)
-        if relation is not None:
-            return PyPath(path, tuple(hops), entity, relation=relation)
-        computed = any(c.name == last for c in entity.computed)
-        return PyPath(path, tuple(hops), entity, computed=computed)
+        return resolve_path(self.entity, path)
 
     def done(self) -> PyListQuery:
         params = list(self.params.values())
@@ -527,6 +511,26 @@ class _Builder:
                     "or remove a filter of a view."
                 )
         return PyListQuery(params, list(self.keys.values()))
+
+
+def resolve_path(entity: PyEntity, path: str) -> PyPath:
+    """Return a field path of the definition, from an entity, in the terms of the binding."""
+    hops: list[Hop] = []
+    segments = path.split(".")
+    for segment in segments[:-1]:
+        relation = next(r for r in entity.relations if r.name == segment)
+        target = entity.target(relation)
+        hops.append(Hop(entity, relation, target))
+        entity = target
+    last = segments[-1]
+    found = next((f for f in entity.fields if f.name == last), None)
+    if found is not None:
+        return PyPath(path, tuple(hops), entity, field=found)
+    relation = next((r for r in entity.relations if r.name == last), None)
+    if relation is not None:
+        return PyPath(path, tuple(hops), entity, relation=relation)
+    computed = any(c.name == last for c in entity.computed)
+    return PyPath(path, tuple(hops), entity, computed=computed)
 
 
 _ID_TEST = TestPlan(attr="id")
