@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The totals of the relations in computed fields: an invoice adds the
+# amounts of its lines, and a post counts its votes and its tags. Each
+# function of a total has a field here, also with a filter, over a
+# one_to_many and over a many_to_many relation.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+version: 0
+
+app:
+  name: totals-check
+  title: Totals Check
+  description: Invoices with lines, and posts with votes.
+
+entities:
+  Invoice:
+    display_field: number
+    crud: { views: [table, detail] }
+    fields:
+      number: { type: string, required: true, unique: true, max_length: 20 }
+      discount: { type: decimal, min: 0, scale: 2, default: 0, format: currency }
+      line_count: { type: integer, computed: count(lines) }
+      subtotal: { type: decimal, scale: 2, format: currency, computed: sum(lines.amount) }
+      total: { type: decimal, scale: 2, format: currency, computed: sum(lines.amount) - discount }
+      average_line: { type: decimal, scale: 2, format: currency, computed: avg(lines.amount) }
+      smallest_line: { type: decimal, scale: 2, format: currency, computed: min(lines.amount) }
+      largest_line: { type: decimal, scale: 2, format: currency, computed: max(lines.amount) }
+    relations:
+      lines: { kind: one_to_many, target: InvoiceLine, inverse: invoice }
+
+  InvoiceLine:
+    display_field: description
+    crud: { views: [table] }
+    fields:
+      description: { type: string, required: true, max_length: 120 }
+      quantity: { type: integer, min: 1, default: 1 }
+      amount: { type: decimal, required: true, scale: 2, format: currency }
+    relations:
+      invoice:
+        kind: many_to_one
+        target: Invoice
+        required: true
+        on_delete: cascade
+        inverse: lines
+
+  Post:
+    display_field: title
+    crud: { views: [table, detail] }
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      vote_count: { type: integer, computed: count(votes) }
+      score: { type: integer, computed: sum(votes.value) }
+      upvotes:
+        type: integer
+        computed: count(votes)
+        filter: { value: { gt: 0 } }
+      tag_count: { type: integer, computed: count(tags) }
+      tag_weight: { type: integer, computed: sum(tags.weight) }
+    relations:
+      votes: { kind: one_to_many, target: Vote, inverse: post }
+      tags: { kind: many_to_many, target: Tag }
+
+  Vote:
+    crud: { views: [table] }
+    fields:
+      value: { type: integer, required: true, min: -1, max: 1 }
+    relations:
+      post:
+        kind: many_to_one
+        target: Post
+        required: true
+        on_delete: cascade
+        inverse: votes
+
+  Tag:
+    display_field: name
+    crud: { views: [table] }
+    fields:
+      name: { type: string, required: true, max_length: 40 }
+      weight: { type: integer, min: 0 }

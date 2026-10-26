@@ -1,14 +1,7 @@
 {{ trace_header(element_id) }}
 {% set d = py.dashboards[name] %}
 {% macro sig(fn, args) %}
-{% set line = "async def " ~ fn ~ "(" ~ args ~ ") -> None:" %}
-{% if line | length <= 100 %}
-{{ line }}
-{% else %}
-async def {{ fn }}(
-    {{ args }}
-) -> None:
-{% endif %}
+{{ py.signature("async def " ~ fn, args, " -> None:") }}
 {% endmacro %}
 {% macro get(w) -%}
 {% set url = d.path ~ w.path %}

@@ -196,7 +196,7 @@ async def update(
     rule, the record stays with the user.{% endif +%}
     """
 {% else %}
-async def update(session: AsyncSession, record: {{ e.name }}, data: {{ e.name }}Update) -> {{ e.name }}:
+{{ py.signature("async def update", ["session: AsyncSession", "record: " ~ e.name, "data: " ~ e.name ~ "Update"], " -> " ~ e.name ~ ":") }}
     """Change the fields that the request gives, validate the record, and return it."""
 {% endif %}
 {% if e.before_attrs %}

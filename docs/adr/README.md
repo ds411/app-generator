@@ -50,3 +50,4 @@ gives the rules.
 | 0031   | [Events of the entities](0031-events.md)                               | Accepted |
 | 0032   | [Pages in frames of other websites](0032-pages-in-frames.md)           | Accepted |
 | 0033   | [Calls of an API in the name of a user](0033-api-connections.md)       | Accepted |
+| 0034   | [Totals of the relations in computed fields](0034-totals.md)           | Accepted |

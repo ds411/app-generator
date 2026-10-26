@@ -3149,6 +3149,17 @@
           ],
           "default": null
         },
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "translatable": {
           "default": false,
           "title": "Translatable",

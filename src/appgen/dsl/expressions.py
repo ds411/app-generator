@@ -1,11 +1,13 @@
 """The expressions of computed fields: a small language of numbers and field paths.
 
 An expression has numbers, field paths, the operators `+`, `-`, `*`, and
-`/`, parentheses, and the functions `hours(start, end)` and
-`days(start, end)`, which give the time between two dates or date-times.
-The bindings write each expression in their language, so that an
-expression has the same value in each app. An empty operand gives an
-empty value.
+`/`, parentheses, the functions `hours(start, end)` and
+`days(start, end)`, which give the time between two dates or date-times,
+and the totals of a relation to many records: `count(<relation>)`, and
+`sum`, `avg`, `min`, and `max` of `<relation>.<field>`. The bindings
+write each expression in their language, so that an expression has the
+same value in each app. An empty operand gives an empty value. A total
+of no records is 0 for `count` and `sum`, and empty for the others.
 """
 
 import re
@@ -14,6 +16,8 @@ from dataclasses import dataclass
 
 FUNCTIONS: dict[str, int] = {"hours": 2, "days": 2}
 """The functions of the expressions, with their number of arguments."""
+TOTALS: tuple[str, ...] = ("count", "sum", "avg", "min", "max")
+"""The functions of the totals of a relation: `count(<relation>)`, `sum(<relation>.<field>)`."""
 
 _TOKEN = re.compile(
     r"\s*(?:(?P<number>\d+(?:\.\d+)?)|(?P<name>[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)"
@@ -48,6 +52,20 @@ class Call:
 
 
 @dataclass(frozen=True, slots=True)
+class Total:
+    """A total of the records of a relation, for example `sum(lines.amount)` or `count(votes)`."""
+
+    function: str
+    relation: str
+    field: str | None = None
+    """The number field of the related records. None for `count`."""
+
+    def __str__(self) -> str:
+        path = self.relation if self.field is None else f"{self.relation}.{self.field}"
+        return f"{self.function}({path})"
+
+
+@dataclass(frozen=True, slots=True)
 class Binary:
     """An operation on two operands: `+`, `-`, `*`, or `/`."""
 
@@ -63,7 +81,7 @@ class Negate:
     operand: Expression
 
 
-type Expression = Number | FieldRef | Call | Binary | Negate
+type Expression = Number | FieldRef | Call | Total | Binary | Negate
 
 
 def parse_expression(text: str) -> Expression:
@@ -77,7 +95,10 @@ def parse_expression(text: str) -> Expression:
 
 
 def expression_paths(expression: Expression) -> Iterator[str]:
-    """Yield the field paths of an expression, in source order."""
+    """Yield the field paths of the record in an expression, in source order.
+
+    The paths of the totals are not paths of the record: `expression_totals` gives them.
+    """
     match expression:
         case FieldRef(path):
             yield path
@@ -89,7 +110,21 @@ def expression_paths(expression: Expression) -> Iterator[str]:
             yield from expression_paths(right)
         case Negate(operand):
             yield from expression_paths(operand)
-        case Number():
+        case Number() | Total():
+            pass
+
+
+def expression_totals(expression: Expression) -> Iterator[Total]:
+    """Yield the totals of an expression, in source order."""
+    match expression:
+        case Total():
+            yield expression
+        case Binary(_, left, right):
+            yield from expression_totals(left)
+            yield from expression_totals(right)
+        case Negate(operand):
+            yield from expression_totals(operand)
+        case Number() | FieldRef() | Call():
             pass
 
 
@@ -107,7 +142,7 @@ def date_paths(expression: Expression) -> Iterator[str]:
             yield from date_paths(right)
         case Negate(operand):
             yield from date_paths(operand)
-        case Number() | FieldRef():
+        case Number() | FieldRef() | Total():
             pass
 
 
@@ -175,8 +210,10 @@ class _Parser:
         if kind == "name":
             if self.peek() != "(":
                 return FieldRef(value)
+            if value in TOTALS:
+                return self.total(value)
             if value not in FUNCTIONS:
-                names = ", ".join(f"'{name}'" for name in FUNCTIONS)
+                names = ", ".join(f"'{name}'" for name in [*FUNCTIONS, *TOTALS])
                 raise ExpressionError(f"Unknown function '{value}'. The functions are {names}.")
             self.take()
             args = [self.sum()]
@@ -194,3 +231,22 @@ class _Parser:
             self.expect(")")
             return inner
         raise ExpressionError(f"Unexpected '{value}'.")
+
+    def total(self, function: str) -> Total:
+        """Parse the argument of a total: a relation, or a field of a relation."""
+        self.take()
+        kind, path = self.take()
+        segments = path.split(".")
+        if function == "count":
+            if kind != "name" or len(segments) != 1:
+                raise ExpressionError(
+                    f"The function 'count' takes a relation, not '{path}', for example "
+                    "count(lines)."
+                )
+        elif kind != "name" or len(segments) != 2:
+            raise ExpressionError(
+                f"The function '{function}' takes a field of a relation, not '{path}', for "
+                f"example {function}(lines.amount)."
+            )
+        self.expect(")")
+        return Total(function, segments[0], segments[1] if len(segments) == 2 else None)

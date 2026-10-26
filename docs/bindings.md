@@ -535,6 +535,31 @@ app:
   `scripts/check-fastapi.sh`) adds the indexes to an app that exists on
   Postgres, and checks that the search of the projects uses its index.
 
+### The totals of the FastAPI app
+
+A computed field with a total of a relation, for example
+`sum(lines.amount)`, gets its value from the database
+([ADR 0034](adr/0034-totals.md)).
+
+- `app/core/totals.py` has the function `total`, which makes the
+  correlated subquery of a total: `count`, `sum` (0 for no records),
+  `avg`, `min`, or `max` of the related records, with the conditions of
+  the relation and of the `filter` of the field.
+- `app/models.py` adds each total to its model as a `column_property`,
+  after it imports all models, for example
+  `Invoice.sum_lines_amount`. The name is the function, the relation,
+  and the field, with the name of the computed field first when the
+  field has a `filter`. The model declares the attribute under
+  `if TYPE_CHECKING:`, and the property of the computed field reads it.
+- When the expression has only totals, numbers, stored number fields
+  of the entity, `+`, `-`, and `*`, the list endpoint sorts by the field
+  with the same SQL expression, and filters it with `<field>_min` and
+  `<field>_max`.
+- The generated tests in `tests/features/<slice>/test_totals.py` make
+  three records, with no related records, with one, and with all, and
+  check the value of each computed field with totals in the read
+  endpoint, the sort, and the filters.
+
 ### The events of the FastAPI app
 
 The repository of an entity runs its `events` and the `run` operations

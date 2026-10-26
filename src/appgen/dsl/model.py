@@ -28,6 +28,7 @@ from appgen.dsl.storage import (
 )
 from appgen.dsl.translations import Translations
 from appgen.dsl.ui.common import Action
+from appgen.dsl.ui.dashboards import RecordFilter
 from appgen.dsl.ui.model import UI
 from appgen.dsl.ui.page import PageArrangement, PageContent
 from appgen.dsl.ui.views import Format
@@ -91,6 +92,8 @@ class Field(Element):
     """The ISO 4217 code of the currency of the `currency` format, for example `EUR`."""
     computed: Text | None = None
     """An expression of other fields (see `appgen.dsl.expressions`). The apps compute the value."""
+    filter: RecordFilter | None = None
+    """A computed field: the related records that its totals use (the filter of the dashboards)."""
     translatable: bool = False
     """The records have a value of the field in each language of `translations` (ADR 0026)."""
     max_size: Annotated[int, pydantic.Field(ge=1), BeforeValidator(size_input)] | None = (

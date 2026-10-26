@@ -1,0 +1,114 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set t = e.totals_test %}
+{% macro sig(fn, args) %}
+{{ py.signature("async def " ~ fn, args, " -> None:") }}
+{% endmacro %}
+"""The tests of the totals of the relations of the entity {{ e.name }} (ADR 0034).
+
+Three records have none, one, and all of the related records. Each
+computed field with a total has a known value in each record.
+"""
+
+{{ t.imports() }}
+
+pytestmark = pytest.mark.anyio
+{% for s in t.sets %}
+
+{{ trace(s.relation.id) }}
+{{ s.constant }}: list[dict[str, Any]] = [
+{% for line in s.record_lines() %}
+{{ line }}
+{% endfor %}
+]
+{% endfor %}
+
+
+async def _records(session: AsyncSession) -> list[{{ e.name }}]:
+    """Store three records: with none, with one, and with all of the related records."""
+{% for s in t.sets if s.relation.side == "m2m" %}
+    {{ s.relation.attr }} = [await make_{{ s.target.snake }}(session, **values) for values in {{ s.constant }}]
+{% endfor %}
+    records: list[{{ e.name }}] = []
+    for count in (0, 1, None):
+        record = await make_{{ e.snake }}(session{{ t.make_args() }})
+{% for s in t.sets if s.relation.side != "m2m" %}
+        for values in {{ s.constant }}[:count]:
+            await make_{{ s.target.snake }}(session, {{ s.fk }}=record.id, **values)
+{% endfor %}
+        records.append(record)
+    return records
+{% if t.list_path %}
+
+
+async def _ids(client: AsyncClient, params: dict[str, Any]) -> list[str]:
+    """Return the IDs of the items of the first page of the list endpoint, in order."""
+    response = await client.get("{{ t.list_path }}", params=params)
+    assert response.status_code == 200, response.text
+    return [item["id"] for item in response.json()["items"]]
+{% endif %}
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+{% for c in t.checks %}
+        {{ trace(c.id) }}
+        ("{{ c.name }}", {{ c.json_values }}),
+{% endfor %}
+    ],
+)
+{{ sig("test_" ~ e.snake ~ "_has_the_totals_of_its_related_records", "client: AsyncClient, session: AsyncSession, key: str, expected: list[Any]") }}    records = await _records(session)
+    for record, value in zip(records, expected, strict=True):
+{% if t.read_path %}
+        response = await client.get(f"{{ t.read_path }}")
+        assert response.status_code == 200, response.text
+        assert response.json()[key] == value
+{% else %}
+        response = await client.get("{{ t.list_path }}", params={"id": [str(record.id)]})
+        assert response.status_code == 200, response.text
+        assert response.json()["items"][0][key] == value
+{% endif %}
+{% if t.list_path and t.sql_checks %}
+
+
+@pytest.mark.parametrize(
+    ("key", "values"),
+    [
+{% for c in t.sql_checks %}
+        {{ trace(c.id) }}
+        ("{{ c.name }}", {{ c.python_values }}),
+{% endfor %}
+    ],
+)
+{{ sig("test_" ~ e.slice ~ "_sort_by_a_total", "client: AsyncClient, session: AsyncSession, key: str, values: list[Any]") }}    records = await _records(session)
+    pairs = [(value, str(r.id)) for value, r in zip(values, records, strict=True)]
+    wanted = {str(r.id) for r in records}
+
+    ascending = await _ids(client, {"sort": key})
+    descending = await _ids(client, {"sort": f"-{key}"})
+
+    assert [i for i in ascending if i in wanted] == expected_order(pairs)
+    assert [i for i in descending if i in wanted] == expected_order(pairs, descending=True)
+{% endif %}
+{% if t.list_path and t.bound_checks %}
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+{% for c in t.bound_checks %}
+{% for end in ("min", "max") %}
+        {{ trace(c.id) }}
+        ({"{{ c.name }}_{{ end }}": "{{ c.bound() }}"}, {{ c.selected(end) }}),
+{% endfor %}
+{% endfor %}
+    ],
+)
+{{ sig("test_" ~ e.slice ~ "_filter_by_a_total", "client: AsyncClient, session: AsyncSession, params: dict[str, str], expected: list[int]") }}    records = await _records(session)
+    wanted = {str(r.id) for r in records}
+
+    ids = [i for i in await _ids(client, params) if i in wanted]
+
+    assert sorted(ids) == sorted(str(records[i].id) for i in expected)
+{% endif %}

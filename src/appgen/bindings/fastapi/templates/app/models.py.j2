@@ -1,38 +1,43 @@
 {{ trace_header("app") }}
 """All models of the app. Alembic and the relations between slices need them all."""
-
-from sqlalchemy.orm import configure_mappers
 {% set password = definition.auth and definition.auth.password %}
+{% set first = [] %}
 {% if password %}
-
-{{ trace(definition.auth.id) }}
-from app.core.auth import Credential
+{% set first = first + [([definition.auth.id], "from app.core.auth import Credential")] %}
 {% endif %}
 {% if py_connections %}
-
-{% for api in py_connections %}
-{{ trace(api.id) }}
-{% endfor %}
-from app.core.connections import ApiConnection
+{% set first = first + [(py_connections | map(attribute="id") | list, "from app.core.connections import ApiConnection")] %}
 {% endif %}
 {% if py.jobs %}
-{% if not password and not py_connections %}
-
-{% endif %}
-from app.core.jobs import JobRun
+{% set first = first + [([], "from app.core.jobs import JobRun")] %}
 {% endif %}
 {% if py_webhooks %}
-
-{% for w in py_webhooks.values() %}
-{{ trace(w.id) }}
-{% endfor %}
-from app.core.webhooks import WebhookEvent
+{% set first = first + [(py_webhooks.values() | map(attribute="id") | list, "from app.core.webhooks import WebhookEvent")] %}
 {% endif %}
-{% for e in py.entity_order() | sort(attribute="slice") %}
 
-{{ trace(e.id) }}
-from app.features.{{ e.slice }}.models import {{ e.name }}
+{{ py.models_head() }}
+{% for ids, line in py.models_imports(first) %}
+{% if ids or loop.first %}
+
+{% endif %}
+{% for id in ids %}
+{{ trace(id) }}
 {% endfor %}
+{{ line }}
+{% endfor %}
+{% set totals = py.models_totals() %}
+{% if totals %}
+
+{% for ids, code in totals %}
+{% if not loop.first %}
+
+{% endif %}
+{% for id in ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ code }}
+{% endfor %}
+{% endif %}
 
 __all__ = [
 {% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else [])) | sort %}

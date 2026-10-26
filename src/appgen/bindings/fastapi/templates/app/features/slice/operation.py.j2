@@ -97,7 +97,7 @@ async def {{ op.name }}(
     return {{ e.name }}Read.model_validate(record)
 {% endif %}
 {% elif op.kind == "create" %}
-async def {{ op.name }}(data: {{ e.name }}Create, session: SessionDep) -> {{ e.name }}Read:
+{{ py.signature("async def " ~ op.name, ["data: " ~ e.name ~ "Create", "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
     """{{ op.description or ("Create a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.create(session, data)
     return {{ e.name }}Read.model_validate(record)
@@ -117,7 +117,7 @@ async def {{ op.name }}(
     return {{ e.name }}Read.model_validate(record)
 {% endif %}
 {% elif op.kind == "read" %}
-async def {{ op.name }}(id: UUID, session: SessionDep) -> {{ e.name }}Read:
+{{ py.signature("async def " ~ op.name, ["id: UUID", "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
     """{{ op.description or ("Return a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
     return {{ e.name }}Read.model_validate(record)
@@ -139,7 +139,7 @@ async def {{ op.name }}(
     return {{ e.name }}Read.model_validate(record)
 {% endif %}
 {% elif op.kind == "update" %}
-async def {{ op.name }}(id: UUID, data: {{ e.name }}Update, session: SessionDep) -> {{ e.name }}Read:
+{{ py.signature("async def " ~ op.name, ["id: UUID", "data: " ~ e.name ~ "Update", "session: SessionDep"], " -> " ~ e.name ~ "Read:") }}
     """{{ op.description or ("Change the given fields of a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
     record = await repository.update(session, record, data)
@@ -162,7 +162,7 @@ async def {{ op.name }}(
     record = await repository.get(session, id)
     await repository.delete(session, record, storage)
 {% elif op.kind == "delete" %}
-async def {{ op.name }}(id: UUID, session: SessionDep) -> None:
+{{ py.signature("async def " ~ op.name, ["id: UUID", "session: SessionDep"], " -> None:") }}
     """{{ op.description or ("Delete a record of the entity " ~ e.name ~ ".") }}"""
     record = await repository.get(session, id)
     await repository.delete(session, record)
@@ -183,9 +183,7 @@ async def {{ op.name }}(
     show_translations(query.translations)
 {% endif %}
 {% else %}
-async def {{ op.name }}(
-    query: Annotated[{{ op.name | pascal }}Query, Query()], session: SessionDep
-) -> Page[{{ e.name }}Read]:
+{{ py.signature("async def " ~ op.name, ["query: Annotated[" ~ (op.name | pascal) ~ "Query, Query()]", "session: SessionDep"], " -> Page[" ~ e.name ~ "Read]:") }}
     """{{ op.description or ("Return a page of the records of the entity " ~ e.name ~ ".") }}"""
     statement = select({{ e.name }})
 {% if e.translations_query %}

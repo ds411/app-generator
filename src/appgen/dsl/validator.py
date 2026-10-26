@@ -43,6 +43,8 @@ from appgen.dsl.expressions import (
     ExpressionError,
     FieldRef,
     Negate,
+    Total,
+    expression_totals,
     parse_expression,
 )
 from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
@@ -299,7 +301,7 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
-            for key in ("unique", "computed", "translatable"):
+            for key in ("unique", "computed", "translatable", "filter"):
                 if getattr(param, key):
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
@@ -436,6 +438,14 @@ def check_storage(definition: AppDefinition) -> Iterator[Diagnostic]:
 def check_computed(definition: AppDefinition) -> Iterator[Diagnostic]:
     """A computed field is a number, and its expression refers to fields that suit it."""
     for entity_name, entity in definition.entities.items():
+        for field in entity.fields.values():
+            if field.filter is not None and field.computed is None:
+                yield _error(
+                    "invalid-option",
+                    "'filter' is only for a computed field with totals.",
+                    field,
+                    at="filter",
+                )
         for field in entity.computed_fields.values():
             assert field.computed is not None
             if field.type not in NUMBER_TYPES:
@@ -465,6 +475,65 @@ def check_computed(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
                 continue
             yield from _check_expression(definition, entity_name, field, expression, False)
+            if field.filter is not None:
+                yield from _check_total_filter(definition, entity, field, expression)
+
+
+def _check_total_filter(
+    definition: AppDefinition, entity: Entity, field: Field, expression: Expression
+) -> Iterator[Diagnostic]:
+    """The filter of the totals names the stored fields of the related records, with values."""
+    assert field.filter is not None
+    targets: list[str] = []
+    for total in expression_totals(expression):
+        relation = entity.relations.get(total.relation)
+        if relation is not None and relation.target not in targets:
+            targets.append(relation.target)
+    if not targets:
+        yield _error(
+            "invalid-option",
+            "'filter' is only for a computed field with totals.",
+            field,
+            at="filter",
+            hint="Add a total, for example count(lines), or remove 'filter'.",
+        )
+        return
+    for target in targets:
+        fields = definition.entities[target].stored_fields
+        for path, condition in field.filter.items():
+            if path not in fields:
+                yield _error(
+                    "unknown-reference",
+                    f"The filter of the totals names '{path}', which is not a stored field of "
+                    f"the entity '{target}'.",
+                    field,
+                    at="filter",
+                    hint="A filter of a total names the fields of the related records.",
+                )
+            elif "$" in json.dumps(condition):
+                yield _error(
+                    "invalid-value",
+                    f"The filter of the totals cannot use $today or $now ('{path}').",
+                    field,
+                    at="filter",
+                    hint="The apps compute a total in each query, without the time of a request.",
+                )
+        known = {p: c for p, c in field.filter.items() if p in fields and "$" not in json.dumps(c)}
+        yield from check_record_filter(definition, field, target, known)
+
+
+def _unknown_member(
+    element: Element, at: str, what: str, entity: str, name: str, choices: Iterable[str]
+) -> Diagnostic:
+    """Return the error of a total that names a relation or a field that does not exist."""
+    matches = difflib.get_close_matches(name, list(choices), n=1)
+    return _error(
+        "unknown-reference",
+        f"The entity '{entity}' has no {what} '{name}'.",
+        element,
+        at=at,
+        hint=f"Did you mean '{matches[0]}'?" if matches else None,
+    )
 
 
 def _check_expression(
@@ -501,6 +570,8 @@ def _check_expression(
                     field,
                     at="computed",
                 )
+        case Total():
+            yield from _check_total(definition, entity, field, expression)
         case Call(name, args):
             for arg in args:
                 if not isinstance(arg, FieldRef):
@@ -519,6 +590,54 @@ def _check_expression(
             yield from _check_expression(definition, entity, field, operand, False)
         case _:
             pass
+
+
+def _check_total(
+    definition: AppDefinition, entity: str, element: Element, total: Total, at: str = "computed"
+) -> Iterator[Diagnostic]:
+    """A total goes through a relation to many records, to a stored number field."""
+    relation = definition.entities[entity].relations.get(total.relation)
+    if relation is None:
+        relations = definition.entities[entity].relations
+        yield _unknown_member(element, at, "relation", entity, total.relation, relations)
+        return
+    if relation.kind not in ("one_to_many", "many_to_many"):
+        yield _error(
+            "unsuitable-field",
+            f"The total '{total}' needs a one_to_many or a many_to_many relation, but "
+            f"'{entity}.{total.relation}' is {relation.kind}.",
+            element,
+            at=at,
+            hint="Use the field of the related record, for example "
+            f"'{total.relation}.<field>', without a function.",
+        )
+        return
+    if total.field is None:
+        return
+    target = definition.entities.get(relation.target)
+    if target is None:
+        return
+    member = target.fields.get(total.field)
+    if member is None:
+        yield _unknown_member(element, at, "field", relation.target, total.field, target.fields)
+    elif member.type not in NUMBER_TYPES:
+        yield _error(
+            "unsuitable-field",
+            f"The total '{total}' needs an 'integer' or a 'decimal' field, but "
+            f"'{relation.target}.{total.field}' is '{member.type}'.",
+            element,
+            at=at,
+        )
+    elif member.computed is not None:
+        yield _error(
+            "unsuitable-field",
+            f"The total '{total}' adds the computed field '{relation.target}.{total.field}'. "
+            "A total adds only stored fields.",
+            element,
+            at=at,
+            hint="Store the value in a field of the related records, or add the totals of "
+            "the fields of its expression.",
+        )
 
 
 _COMPARE_GROUPS = (

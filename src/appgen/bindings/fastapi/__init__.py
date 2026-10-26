@@ -181,6 +181,11 @@ BINDING = Binding(
             path="app/core/compute.py",
             when="py.entities.values() | selectattr('computed') | list",
         ),
+        Output(
+            template="app/core/totals.py.j2",
+            path="app/core/totals.py",
+            when="py.entities.values() | selectattr('totals') | list",
+        ),
         Output(template="package.py.j2", path="app/features/__init__.py"),
         Output(template="package.py.j2", path=_SLICE + "/__init__.py", for_each="entity"),
         Output(
@@ -291,6 +296,12 @@ BINDING = Binding(
             template="tests/features/slice/test_schemas.py.j2",
             path=_TESTS + "/test_schemas.py",
             for_each="entity",
+        ),
+        Output(
+            template="tests/features/slice/test_totals.py.j2",
+            path=_TESTS + "/test_totals.py",
+            for_each="entity",
+            when="py.entity(name).totals_test",
         ),
         Output(
             template="tests/features/slice/test_operation.py.j2",

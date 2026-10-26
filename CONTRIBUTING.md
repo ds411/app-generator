@@ -257,9 +257,11 @@ git config core.hooksPath .githooks
   the email address, and the second factor), and runs Ruff, pyright,
   the generated tests, and `appgen check` on it. Then it generates
   `tests/fixtures/seed-data.yaml` (seed records, ADR 0021), checks it in
-  the same way, and runs its seed test on Postgres. Last, it generates
+  the same way, and runs its seed test on Postgres. Then it generates
   `tests/fixtures/record-rules.yaml` (the record rules with conditions
-  and owner paths), and runs the same checks on it. It needs Docker.
+  and owner paths) and the other fixtures of the script header, for
+  example `tests/fixtures/totals.yaml` (the totals of the relations),
+  and runs the same checks on them. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
