@@ -1,4 +1,5 @@
 {{ trace_header("app") }}
+{% set translatable = i18n and i18n.translatable %}
 import "server-only";
 
 import {
@@ -38,9 +39,16 @@ import {
 
 {% if record_rules %}
 import { ForbiddenError } from "@/shared/auth/access";
+{% endif %}
+{% if translatable %}
+import { storeTranslations, translateRecord } from "@/shared/lib/i18n";
+{% endif %}
+{% if record_rules %}
 import type { RecordScope } from "@/shared/lib/permissions";
 {% endif %}
+{% if record_rules or translatable %}
 
+{% endif %}
 import { type Database, getDb } from "./client";
 
 type Row = Record<string, unknown>;
@@ -125,6 +133,15 @@ export type RepositoryOptions<T> = {
   noOverlap?: OverlapRule[];
   /** The workflows of the entity. A change that no transition allows gives a ValidationError. */
   workflows?: Workflow[];
+{% if translatable %}
+  /**
+   * The keys of the translatable fields (ADR 0026). The table keeps the
+   * value of the default language in the column of the field, and the
+   * values of the other languages in `<field>Translations`. The records
+   * have the value of the language of the request.
+   */
+  translatable?: string[];
+{% endif %}
 {% if record_rules %}
   /**
    * The key of the ID of the owner in the record, for an owner rule of one
@@ -205,6 +222,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
   private readonly compare: CompareRule[];
   private readonly noOverlap: OverlapRule[];
   private readonly workflows: Workflow[];
+{% if translatable %}
+  private readonly translatable: string[];
+{% endif %}
 {% if record_rules %}
   private readonly belongsTo: ((user: string) => SQL) | undefined;
 {% endif %}
@@ -217,6 +237,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.compare = options.compare ?? [];
     this.noOverlap = options.noOverlap ?? [];
     this.workflows = options.workflows ?? [];
+{% if translatable %}
+    this.translatable = options.translatable ?? [];
+{% endif %}
 {% if record_rules %}
     const owner = options.owner === undefined ? undefined : this.columns[options.owner];
     this.belongsTo = options.belongsTo ?? (owner === undefined ? undefined : (user) => eq(owner, user));
@@ -301,7 +324,15 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% else %}
   async create(input: TInput): Promise<T> {
 {% endif %}
+{% if translatable %}
+    const values: Row = {
+      ...this.defaults,
+      ...input,
+      ...storeTranslations(this.defaults, input, this.translatable, true),
+    };
+{% else %}
     const values: Row = { ...this.defaults, ...input };
+{% endif %}
     return getDb().transaction(async (tx) => {
       const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
       const [row] = rows as [Row];
@@ -328,9 +359,17 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const where = eq(this.table.id, id);
 {% endif %}
     return getDb().transaction(async (tx) => {
+{% if translatable %}
+      const reads = this.workflows.length > 0 || this.translatable.length > 0;
+      const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
+      const values = this.toRow(
+        before[0] ? { ...patch, ...storeTranslations(before[0], patch, this.translatable) } : patch,
+      );
+{% else %}
       const before: Row[] =
         this.workflows.length > 0 ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(patch);
+{% endif %}
       const rows: Row[] =
         Object.keys(values).length > 0
           ? await tx.update(this.table).set(values).where(where).returning()
@@ -616,9 +655,19 @@ export class Repository<T extends EntityRecord, TInput extends object>
 
   /** Return the records of rows: with ISO 8601 texts for the times, and with the relations. */
   private async toRecords(db: Database | Transaction, rows: Row[]): Promise<T[]> {
+{% if translatable %}
+    // The values of the translatable fields in the language of the request.
+    const records = rows.map((row) =>
+      translateRecord(
+        Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toRecordValue(value)])),
+        this.translatable,
+      ),
+    );
+{% else %}
     const records = rows.map((row) =>
       Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toRecordValue(value)])),
     );
+{% endif %}
     const ids = records.map((record) => String(record.id));
     for (const relation of this.inverseOne) {
       const targets = new Map<string, string>();

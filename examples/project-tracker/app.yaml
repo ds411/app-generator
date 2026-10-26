@@ -1297,5 +1297,6 @@ translations:
         'Yes': Ja
         '{count} chosen': '{count} gewählt'
         '{count} selected': '{count} ausgewählt'
+        '{field} ({language})': '{field} ({language})'
         '{first}–{last} of {total}': '{first}–{last} von {total}'
         '{label}: all': '{label}: alle'

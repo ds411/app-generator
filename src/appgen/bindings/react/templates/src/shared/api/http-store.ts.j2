@@ -14,6 +14,11 @@ export type ApiShape = {
   sorts: readonly string[];
   /** The key of the display field, and true if `q` of the list endpoint searches it. */
   display: { key: string; search: boolean };
+  /**
+   * True if the entity has a translatable field (ADR 0026). The client asks
+   * for the values of all languages (`translations=all`), for the forms.
+   */
+  translations?: boolean;
 };
 
 /** A choice of a record: its ID and its text. */
@@ -163,17 +168,17 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
   }
 
   async get(id: string): Promise<T> {
-    return this.fromJson(await this.request("GET", id));
+    return this.fromJson(await this.request("GET", id, undefined, "", this.translations()));
   }
 
   async create(input: TInput): Promise<T> {
-    const record = this.fromJson(await this.request("POST", null, this.toJson(input)));
+    const record = this.fromJson(await this.request("POST", null, this.toJson(input), "", this.translations()));
     this.notify();
     return record;
   }
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
-    const record = this.fromJson(await this.request("PATCH", id, this.toJson(patch)));
+    const record = this.fromJson(await this.request("PATCH", id, this.toJson(patch), "", this.translations()));
     this.notify();
     return record;
   }
@@ -242,6 +247,9 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     if (sort.length > 0) {
       search.set("sort", sort.join(","));
     }
+    if (this.shape.translations) {
+      search.set("translations", "all");
+    }
     const items: T[] = [];
     let total = 0;
     while (items.length < count) {
@@ -272,8 +280,13 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     return json;
   }
 
-  private async request(method: string, id: string | null, body?: unknown, suffix = ""): Promise<unknown> {
-    const path = id === null ? this.path : `${this.path}/${encodeURIComponent(id)}${suffix}`;
+  /** The query of the values of all languages of the translatable fields, or no query. */
+  private translations(): string {
+    return this.shape.translations ? "?translations=all" : "";
+  }
+
+  private async request(method: string, id: string | null, body?: unknown, suffix = "", query = ""): Promise<unknown> {
+    const path = (id === null ? this.path : `${this.path}/${encodeURIComponent(id)}${suffix}`) + query;
     try {
       return await apiRequest(method, path, body);
     } catch (error) {

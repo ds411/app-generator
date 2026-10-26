@@ -73,6 +73,17 @@ class Member:
     """The value of the key when the create input does not have it."""
     field: Field | None = None
     relation: Relation | None = None
+    translations: Field | None = None
+    """The translatable field whose values in each language the key has (ADR 0026)."""
+
+
+TRANSLATIONS_TYPE = "Partial<Record<string, string | null>>"
+"""The TypeScript type of the values of a translatable field, by language code."""
+
+
+def translations_key(name: str) -> str:
+    """Return the key of the values of a translatable field, for example `titleTranslations`."""
+    return camel(name) + "Translations"
 
 
 def members(entity_name: str, entity: Entity) -> list[Member]:
@@ -82,7 +93,10 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
     the relations that the record stores: the ID of the target for
     `many_to_one` and `one_to_one`, and the list of IDs for
     `many_to_many`. A `one_to_many` relation is not stored: the target
-    stores the other side.
+    stores the other side. A translatable field has a second key after
+    it, with its values in each language (ADR 0026): in a record, the
+    field has the value of the selected language, and the second key the
+    values of all languages.
     """
     result: list[Member] = []
     for name, field in entity.stored_fields.items():
@@ -102,6 +116,19 @@ def members(entity_name: str, entity: Entity) -> list[Member]:
                 field=field,
             )
         )
+        if field.translatable:
+            result.append(
+                Member(
+                    name=f"{name}_translations",
+                    key=translations_key(name),
+                    element_id=field.id,
+                    ts_type=TRANSLATIONS_TYPE,
+                    nullable=True,
+                    input_required=False,
+                    default=None,
+                    translations=field,
+                )
+            )
     for name, relation in entity.relations.items():
         if relation.kind in ("many_to_one", "one_to_one"):
             result.append(
@@ -212,7 +239,11 @@ def _number(value: float) -> str:
 
 def zod_schema(entity_name: str, member: Member) -> str:
     """Return the zod schema of a key of the create input of an entity."""
-    if member.field is not None:
+    if member.translations is not None:
+        # A value of one language: null or an empty text removes it.
+        value = member.translations.model_copy(update={"required": False})
+        code = f"z.record(z.string(), {zod_type(value)}.nullable())"
+    elif member.field is not None:
         enum_values = (
             enum_values_name(entity_name, member.name) if member.field.type == "enum" else None
         )
@@ -242,6 +273,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "enum_type": enum_type,
     "enum_values_name": enum_values_name,
     "members": members,
+    "translations_key": translations_key,
     "operations_of": operations_of,
     "inverse_lists": inverse_lists,
     "param_type": param_type,

@@ -1,6 +1,12 @@
 {{ trace_header("app") }}
+{% set translatable = i18n and i18n.translatable %}
+{% if translatable %}
+import { storeTranslations, translateRecord } from "@/shared/lib/i18n";
+{% endif %}
 {% if record_rules %}
 import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/permissions";
+{% endif %}
+{% if translatable or record_rules %}
 
 {% endif %}
 import { applyQuery } from "./query";
@@ -71,6 +77,10 @@ function wait(): Promise<void> {
  * mock data, and keeps the changes until the page reloads.{% if record_rules %} With a record
  * rule, a user uses only the records of the rule: the other records do not
  * exist for the user, and a new or changed record must be part of the rule.{% endif +%}
+{% if translatable %}
+ * The store keeps the value of the default language in each translatable
+ * field, and gives the records in the selected language (ADR 0026).
+{% endif %}
  */
 export class MockStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
@@ -83,6 +93,10 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     data: readonly T[],
     private readonly defaults: Partial<Omit<T, "id">>,
     private readonly workflows: readonly Workflow[] = [],
+{% if translatable %}
+    /** The keys of the translatable fields. */
+    private readonly translatable: readonly string[] = [],
+{% endif %}
 {% if record_rules %}
     private readonly rules?: RecordRules,
 {% endif %}
@@ -96,26 +110,32 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
     await wait();
 {% if record_rules %}
-    return applyQuery(
+    const result = applyQuery(
       this.records.filter((record) => this.allows(record, "read")),
       query,
     );
 {% else %}
-    return applyQuery(this.records, query);
+    const result = applyQuery(this.records, query);
+{% endif %}
+{% if translatable %}
+    return { ...result, items: result.items.map((record) => this.show(record)) };
+{% else %}
+    return result;
 {% endif %}
   }
 
   async get(id: string): Promise<T> {
     await wait();
-    return { ...this.find(id) };
+    return this.show(this.find(id));
   }
 
   async create(input: TInput): Promise<T> {
     await wait();
+{% set stored = ", ...storeTranslations(this.defaults, input, this.translatable, true)" if translatable else "" %}
 {% if record_rules %}
-    const record = { ...this.defaults, ...input, ...this.ownerValues(), id: crypto.randomUUID() } as unknown as T;
+    const record = { ...this.defaults, ...input{{ stored }}, ...this.ownerValues(), id: crypto.randomUUID() } as unknown as T;
 {% else %}
-    const record = { ...this.defaults, ...input, id: crypto.randomUUID() } as unknown as T;
+    const record = { ...this.defaults, ...input{{ stored }}, id: crypto.randomUUID() } as unknown as T;
 {% endif %}
     this.checkWorkflows(undefined, record);
 {% if record_rules %}
@@ -123,17 +143,18 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.records = [...this.records, record];
     this.notify();
-    return { ...record };
+    return this.show(record);
   }
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     await wait();
+{% set stored = ", ...storeTranslations(before, patch, this.translatable)" if translatable else "" %}
 {% if record_rules %}
     const before = this.find(id, "change");
-    const record = { ...before, ...patch, ...this.ownerValues(), id } as T;
+    const record = { ...before, ...patch{{ stored }}, ...this.ownerValues(), id } as T;
 {% else %}
     const before = this.find(id);
-    const record = { ...before, ...patch, id } as T;
+    const record = { ...before, ...patch{{ stored }}, id } as T;
 {% endif %}
     this.checkWorkflows(before, record);
 {% if record_rules %}
@@ -141,7 +162,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
-    return { ...record };
+    return this.show(record);
   }
 
   async remove(id: string): Promise<void> {
@@ -238,6 +259,17 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       throw new NotFoundError(this.entity, id);
     }
     return record;
+  }
+{% endif %}
+
+{% if translatable %}
+  /** Return a copy of a stored record in the selected language. */
+  private show(record: T): T {
+    return translateRecord(record, this.translatable);
+  }
+{% else %}
+  private show(record: T): T {
+    return { ...record };
   }
 {% endif %}
 

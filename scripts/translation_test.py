@@ -141,14 +141,29 @@ def test_definition(definition: AppDefinition, binding: str, folder: Path) -> Pa
 
 def ignored_texts(definition: AppDefinition) -> list[str]:
     """Return the texts that are not UI text: the values of the records, the values of the
-    example answers of the APIs (the views of API data), and the language names."""
+    example answers of the APIs (the views of API data), and the language names.
+
+    A translatable field (ADR 0026) has a value in the test language, so
+    its value in the default language is not in the list: a page that
+    shows it fails.
+    """
     texts = {LABEL}
     if definition.translations is not None:
         texts |= {language.label for language in definition.translations.languages.values()}
-    for records in mock_data(definition).values():
+    for entity_name, records in mock_data(definition).items():
+        fields = definition.entities[entity_name].fields
+        translatable = {name for name, field in fields.items() if field.translatable}
         for record in records:
-            for value in record.values():
-                values: list[Any] = value if isinstance(value, list) else [value]
+            for key, value in record.items():
+                if key in translatable:
+                    continue
+                values: list[Any] = (
+                    list(value.values())
+                    if isinstance(value, dict)
+                    else value
+                    if isinstance(value, list)
+                    else [value]
+                )
                 texts |= {item.strip() for item in values if isinstance(item, str)}
     for api in definition.apis.values():
         for operation in api.spec.operations:

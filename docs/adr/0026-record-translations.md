@@ -83,8 +83,35 @@ We use a JSON column for each translatable field.
     migration adds the column and that the record keeps its value.
   - The generated tests read and write a translatable field of each
     entity in the default language and in a second language.
-- The front ends (Next.js and React) store and show the values in the
-  same way. Their stories decide the details of the forms.
+- The front ends (Next.js and React) use the same rules:
+  - A record has the value of the selected language in the field, else
+    the value of the default language, and the values of all languages
+    in `<field>Translations`. So the views, the detail views, the
+    relation fields, and the breadcrumbs show the value of the selected
+    language without a change. A change of the language loads the
+    records again.
+  - The Next.js app stores the values as the FastAPI app does: the
+    column `<field>_translations` is `jsonb`, and `pnpm db:generate`
+    makes its migration. The repository gives the records in the
+    language of the request. The React app with mock data keeps the
+    records in the same form in memory. The shared functions
+    `translateRecord` and `storeTranslations` of `src/shared/lib/i18n.ts`
+    do the work.
+  - With `x-react-data: api`, the React app asks the FastAPI app for the
+    values of all languages (`translations=all`), and the API gives the
+    value of the language of `Accept-Language` in the field.
+  - A form has an input for the value of each language of a
+    translatable field, for example `Title (English)` and
+    `Title (Deutsch)`. The input of the form gives the values of all
+    languages in `<field>Translations`, so the values are the same in
+    each selected language. An input of a language has the `lang` and
+    the `dir` of the language.
+  - The mock data of the React app and the seed data of the Next.js app
+    have a value in each language: the value of the default language
+    with the label of the language, for example
+    `Write the release notes (Deutsch)`. The translation check of the
+    front ends finds a value of the default language of a translatable
+    field on a page in the test language.
 
 ## Consequences
 
@@ -101,5 +128,5 @@ We use a JSON column for each translatable field.
   API check the length of each value.
 - A client that does not know the translations gets the value of its
   language in the field, as before.
-- The Next.js app with the seed data has the values of the default
-  language only: the seed has no values in other languages.
+- The mock and the seed values of the other languages are not real
+  translations: they show which language a page uses.

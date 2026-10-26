@@ -55,6 +55,13 @@ class I18nPlan:
     element_id: str
     default: str
     languages: list[LanguagePlan]
+    translatable: bool = False
+    """True if an entity has a translatable field: its records have a value in each language."""
+
+    @property
+    def others(self) -> list[LanguagePlan]:
+        """The languages that are not the default language, in order."""
+        return [language for language in self.languages if language.code != self.default]
 
 
 def i18n_plan(definition: AppDefinition) -> I18nPlan | None:
@@ -79,6 +86,11 @@ def i18n_plan(definition: AppDefinition) -> I18nPlan | None:
             )
             for code in order
         ],
+        translatable=any(
+            field.translatable
+            for entity in definition.entities.values()
+            for field in entity.fields.values()
+        ),
     )
 
 

@@ -13,6 +13,11 @@ of the record (`SOURCE_FIELDS`), for example the key `MP` for the
 project "Meridian Portal". The rules are in this shared module, so that
 each binding gets the same records.
 
+A translatable field (ADR 0026) has a value in each other language of
+`translations` too, in the key `<field>_translations`: the value of the
+default language with the label of the language, for example
+"Write the release notes (Deutsch)".
+
 An entity can set the number of records with the extension key
 `x-mock-count` (default: 12).
 
@@ -95,9 +100,11 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
 
     Each record has `id`, one key for each field, and one key for each
     stored relation: the ID of the target (or None) for `many_to_one` and
-    `one_to_one`, and a list of IDs for `many_to_many`. The keys are the
-    names of the definition; the templates convert them. The seed records
-    of the definition come first (see `seed_records`).
+    `one_to_one`, and a list of IDs for `many_to_many`. A translatable
+    field has the key `<field>_translations` after the fields: its values
+    in the other languages by code, or None. The keys are the names of
+    the definition; the templates convert them. The seed records of the
+    definition come first (see `seed_records`).
     """
     seeds = seed_records(definition)
     ids: dict[str, list[str]] = {}
@@ -144,6 +151,11 @@ def mock_data(definition: AppDefinition) -> dict[str, list[Record]]:
                 elif field_name in seen:
                     seen[field_name].add(value)
                 record[field_name] = value
+            for field_name, field in fields.items():
+                if field.translatable:
+                    record[f"{field_name}_translations"] = _translations(
+                        definition, field, record[field_name]
+                    )
             for relation_name, relation in entity.relations.items():
                 targets = ids[relation.target]
                 if relation.kind == "many_to_one":
@@ -191,6 +203,10 @@ def seed_records(definition: AppDefinition) -> dict[str, list[Record]]:
             record: Record = {"id": ids[name][key]}
             for field_name, field in entity.stored_fields.items():
                 record[field_name] = normal_value(field, values.get(field_name, field.default))
+            for field_name, field in entity.stored_fields.items():
+                if field.translatable:
+                    # A seed record gives the value of the default language only.
+                    record[f"{field_name}_translations"] = None
             for relation_name, relation in entity.relations.items():
                 targets = ids.get(relation.target, {})
                 keys = [k for k in link_keys(relation, values.get(relation_name)) if k in targets]
@@ -225,6 +241,29 @@ def seed_records(definition: AppDefinition) -> dict[str, list[Record]]:
                     ):
                         found[relation_name].append(other["id"])
     return result
+
+
+def _translations(definition: AppDefinition, field: Field, value: Any) -> dict[str, str] | None:
+    """Return the values of a translatable field in the other languages, or None without a value.
+
+    A value is the value of the default language with the label of the
+    language, within the `max_length` of the field. A field with a
+    `pattern` keeps the value, so that it matches the pattern.
+    """
+    translations = definition.translations
+    if not isinstance(value, str) or not value or translations is None:
+        return None
+    result: dict[str, str] = {}
+    for code, language in translations.languages.items():
+        if code == translations.default:
+            continue
+        suffix = f" ({language.label})"
+        text = value if field.pattern else value + suffix
+        if field.max_length is not None and len(text) > field.max_length:
+            text = value[: max(field.max_length - len(suffix), 1)].rstrip() + suffix
+            text = text[: field.max_length]
+        result[code] = text
+    return result or None
 
 
 def _fit_rules(entity: Entity, records: list[Record], fixed: int = 0) -> None:
