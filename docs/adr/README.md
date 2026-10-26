@@ -59,6 +59,7 @@ gives the rules.
 | 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |
 | 0042   | [Daily snapshots of the stat widgets](0042-stat-snapshots.md)          | Accepted |
 | 0043   | [Mentions of users in a text](0043-mentions.md)                        | Accepted |
+| 0044   | [Emails of the notices](0044-notice-emails.md)                         | Accepted |
 | 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |
 | 0046   | [Places: point fields and the geo filters](0046-geo-points.md)          | Accepted |
 | 0047   | [The available filter: records without an overlap in a range of days](0047-available-filter.md) | Accepted |

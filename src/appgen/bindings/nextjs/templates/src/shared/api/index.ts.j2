@@ -31,6 +31,9 @@ export type {
   Notice,
   NoticeApi,
 {% endif %}
+{% if has_notice_emails(definition) %}
+  NoticeSetting,
+{% endif %}
 {% if has_available(definition) %}
   OwnerRange,
 {% endif %}

@@ -166,7 +166,11 @@ def front_end(text: str, binding: Binding) -> dict[str, str]:
 
 
 def without_password(text: str) -> str:
-    """Return the room booking example without the sign-in with a password and the second factor."""
+    """Return the room booking example without the sign-in with a password and the second factor.
+
+    Without the delivery by SMTP, the notifications have no emails.
+    """
+    text = text.replace("    email: true\n", "")
     start, end = text.index("  sign_up:\n"), text.index("  providers:\n")
     text = text[:start] + "  password: false\n" + text[end:]
     start = text.index("  # Each member can turn on a second factor")

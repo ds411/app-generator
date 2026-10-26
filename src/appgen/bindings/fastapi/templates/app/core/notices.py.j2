@@ -2,7 +2,8 @@
 {% set u = py.entity(definition.auth.user_entity) %}
 """The endpoints of the notices of the signed-in user (ADR 0041): the list, and the reads.
 
-The repositories of the entities add the notices (`app/core/notifications.py`).
+The repositories of the entities add the notices (`app/core/notifications.py`).{% if py.notice_emails %}
+The settings turn the emails of the notifications on and off (ADR 0044).{% endif %}
 """
 
 import datetime as dt
@@ -20,7 +21,20 @@ from app.core.errors import ProblemError, problem_responses
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
+{% if py.notice_emails %}
+from app.core.notifications import (
+    EMAILS,
+    Notice,
+    NoticeQuery,
+    NoticeRead,
+    NoticeSetting,
+    NoticeSettingChange,
+    NoticeSettingRead,
+    notice_text,
+)
+{% else %}
 from app.core.notifications import Notice, NoticeQuery, NoticeRead, notice_text
+{% endif %}
 from app.core.pagination import Page
 from app.features.{{ u.slice }}.models import {{ u.name }}
 
@@ -112,3 +126,48 @@ async def read_all_notices(session: SessionDep, user: CurrentUser) -> None:
     )
     await session.execute(statement)
     await commit(session)
+{% if py.notice_emails %}
+
+
+{% for id in py.notice_emails.ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.get(
+    "/settings",
+    responses=problem_responses(401),
+    summary="List the settings of the emails",
+    operation_id="list_notice_settings",
+)
+async def list_notice_settings(session: SessionDep, user: CurrentUser) -> list[NoticeSettingRead]:
+    """Return the emails of each notification with emails for the signed-in user (ADR 0044).
+
+    Without a choice of the user, the emails are on.
+    """
+    rows = await session.scalars(select(NoticeSetting).where(NoticeSetting.user_id == user.id))
+    stored = {row.notification: row.email for row in rows}
+    return [
+        NoticeSettingRead(notification=name, email=stored.get(name, True))
+        for name in sorted(EMAILS)
+    ]
+
+
+@router.put(
+    "/settings/{notification}",
+    responses=problem_responses(401, 404, 422),
+    summary="Change the emails of a notification",
+    operation_id="change_notice_setting",
+)
+async def change_notice_setting(
+    notification: str, change: NoticeSettingChange, session: SessionDep, user: CurrentUser
+) -> NoticeSettingRead:
+    """Turn the emails of a notification on or off for the signed-in user."""
+    if notification not in EMAILS:
+        {{ py.problem(404, "The notification {notification} has no emails.", 8, notification="notification") }}
+    setting = await session.get(NoticeSetting, (user.id, notification))
+    if setting is None:
+        session.add(NoticeSetting(user_id=user.id, notification=notification, email=change.email))
+    else:
+        setting.email = change.email
+    await commit(session)
+    return NoticeSettingRead(notification=notification, email=change.email)
+{% endif %}

@@ -131,6 +131,8 @@ export type ExpectedAuth = {
    * The receiver finds the notice in the bell of the top bar.
    */
   notice?: {
+    /** The name of the notification. */
+    notification: string;
     /** The user names of the user of the change and of the receiver. */
     actor: string;
     receiver: string;
@@ -141,6 +143,23 @@ export type ExpectedAuth = {
     value: string;
     /** The text of the notice. */
     text: string;
+  } | null;
+  /**
+   * The emails of the notices (ADR 0044): after the test of the notices,
+   * the receiver turns off the emails of the first notification with
+   * emails on the page /notice-settings.
+   */
+  noticeEmails?: {
+    /** The names in words of the notifications with emails, in the order of the page. */
+    labels: string[];
+    /**
+     * The file of the mock SMTP server, or null: the app sends no emails.
+     * With a file, the test calls the route of the job `notice_emails`
+     * with the secret, and finds the email of the notice to the address.
+     */
+    mailbox: string | null;
+    to: string;
+    secret: string;
   } | null;
   /**
    * The mentions (ADR 0043): a user with all operations mentions another

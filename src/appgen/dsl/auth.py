@@ -23,6 +23,9 @@ SECOND_FACTOR_PATH = "/second-factor"
 CONNECTIONS_PATH = "/connections"
 """The path of the page of the connections of a user to the APIs with the authorization code
 flow (ADR 0033), and the start of the paths of the flow in the Next.js app."""
+NOTICE_SETTINGS_PATH = "/notice-settings"
+"""The path of the page that turns the emails of the notifications on and off (ADR 0044), with a
+notification with `email: true`."""
 PROVIDER_PATHS = "/auth/"
 """With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8

@@ -781,6 +781,24 @@ import the helpers.
   `tests/features/<slice>/test_mentions.py` add a record with a mention,
   change it with one more mention, and check the notices, also without
   a notice for the user of the change and for an ID without a user.
+- A notification with `email: true` ([ADR 0044](adr/0044-notice-emails.md))
+  is in `EMAILS` of `app/core/notifications.py`. `add_notices()` sets
+  the column `email` of its notices: the email waits. The model
+  `NoticeSetting` (table `notice_settings`) keeps the choices of the
+  users. `GET /notices/settings` gives the state of each notification
+  of `EMAILS` for the signed-in user, and
+  `PUT /notices/settings/{notification}` changes it (404 for a
+  notification without emails).
+- The built-in job `notice_emails` (`app/jobs/notice_emails.py`, each
+  minute) takes the oldest 100 notices that wait, joins the user and the
+  setting, sends each email with `deliver_email()` of
+  `app/core/mail.py`, and sets `email` to false. The links of the email
+  start with the setting `FRONT_END_URL`: the detail page of the record
+  (`LINKS`) and the page `/notice-settings`. At the first error of the
+  SMTP server, the run stops, and the other notices wait.
+  `tests/jobs/test_notice_emails.py` replaces `send_email()`, and checks
+  the emails, a user that turned off the emails, an error of the SMTP
+  server, and the log of the development app without `SMTP_HOST`.
 
 ### The secret links of the FastAPI app
 
@@ -1260,6 +1278,30 @@ bell of the top bar.
 - The UI test `ui-tests/tests/auth.spec.ts` cancels a booking of a
   member as an administrator in the room booking example, signs in as
   the member, and opens the notice in the bell.
+
+The emails of the notices ([ADR 0044](adr/0044-notice-emails.md)):
+
+- The page `/notice-settings` (`NoticeSettingsPage` of
+  `src/features/notices`) has a switch for each notification with
+  `email: true`, with the name of the notification in words. A change
+  calls `notices.setEmail()`, and saves at once. The bell has the link
+  "Email settings" to the page. The page needs a signed-in user.
+- The Next.js app has the column `email` of the table `notices` and the
+  table `notice_settings` (`src/shared/db/schema/notices.ts`), and the
+  server actions `noticeSettingsAction` and `setNoticeEmailAction`. The
+  built-in job `notice_emails` (`src/app/jobs/notice-emails.ts`) sends
+  the emails with `sendEmail()` of `src/shared/auth/mail.ts`, and the
+  route `app/api/jobs/notice_emails/route.ts` runs it. The links start
+  with `PUBLIC_URL`.
+- The React app with mock data keeps the choices in the session storage
+  of the browser tab, and sends no emails. With `x-react-data: api`, it
+  calls `GET /notices/settings` and `PUT /notices/settings/{notification}`
+  of the FastAPI app.
+- The UI test `ui-tests/tests/auth.spec.ts` continues the test of the
+  notices: in the Next.js app, it calls the route of the job, and finds
+  the email of the notice in the file of the mock SMTP server. Then the
+  member opens the page with the link of the bell, and turns off the
+  emails of a notification.
 
 The mentions of a `text` field ([ADR 0043](adr/0043-mentions.md)) use
 the same notices:

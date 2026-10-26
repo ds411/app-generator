@@ -1,0 +1,110 @@
+{% set e = py.notice_emails %}
+{% set job = e.job %}
+{% set u = py.entity(definition.auth.user_entity) %}
+{{ trace_header(*e.ids) }}
+"""The built-in job `{{ job.name }}` (ADR 0044): the emails of the notices.
+
+The job runs on the schedule `{{ job.schedule.expression }}` (UTC). Each run sends the
+emails of the oldest notices that wait, up to {{ e.batch }}, and marks them done in
+the transaction of the run. A user that turned off the emails of a
+notification gets none. At the first error of the SMTP server, the run
+stops, and the other notices wait for the next run. The emails have the
+default language of the app. `app/worker.py` runs the job.
+"""
+
+{% set ns = namespace(lines=["import datetime as dt", "import logging", "from email.message import EmailMessage", "from sqlalchemy import and_, select", "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker", "from app.core import jobs", "from app.core.config import Settings", "from app.core.mail import deliver_email, new_email", "from app.core.notifications import EMAILS, Notice, NoticeSetting, notice_text", py.from_import("app.features." ~ u.slice ~ ".models", [u.name])]) %}
+{% if i18n %}
+{% set ns.lines = ns.lines + ["from app.core.i18n import t"] %}
+{% endif %}
+{{ py.imports(ns.lines) }}
+
+logger = logging.getLogger("app.jobs")
+
+NAME = "{{ job.name }}"
+{{ job.schedule.code() }}
+"""The schedule of the job in UTC: `{{ job.schedule.expression }}`."""
+BATCH = {{ e.batch }}
+"""The highest count of emails of one run."""
+APP_TITLE = {{ py.string(app.title) }}
+"""The title of the app in the subjects."""
+{% if e.links %}
+LINKS: dict[str, tuple[str, str]] = {
+{% for entity, (path, param) in e.links.items() %}
+    {{ py.string(entity) }}: ({{ py.string(path) }}, {{ py.string(param) }}),
+{% endfor %}
+}
+"""The detail page of the records of each entity in the front end, and the parameter of the ID."""
+{% endif %}
+
+
+def notice_email(settings: Settings, notice: Notice, to: str) -> EmailMessage:
+    """Return the email of a notice: the text, the link to the record, and to the settings."""
+    text = notice_text(notice)
+    url = settings.front_end_url.rstrip("/")
+    lines = [text, ""]
+{% if e.links %}
+    link = LINKS.get(notice.entity)
+    if link is not None:
+        path, param = link
+        lines += [url + path.replace("{" + param + "}", str(notice.record_id)), ""]
+{% endif %}
+    lines += [{{ py.message("Turn off these emails on the page of the settings:") }}, f"{url}/notice-settings"]
+    return new_email(settings, to, f"{APP_TITLE}: {text}", "\n".join(lines) + "\n")
+
+
+def text_of(email: EmailMessage) -> str:
+    """Return the subject of an email, for the log of the development app."""
+    return str(email["Subject"])
+
+
+async def send_waiting(session: AsyncSession, settings: Settings) -> int:
+    """Send the emails of the oldest notices that wait, and mark them done. Return the count.
+
+    The notices of a notification without emails, and of a user that
+    turned off the emails of the notification, get no email.
+    """
+    statement = (
+        select(Notice, {{ u.name }}.{{ e.address }}, NoticeSetting.email)
+        .join({{ u.name }}, {{ u.name }}.id == Notice.user_id)
+        .outerjoin(
+            NoticeSetting,
+            and_(
+                NoticeSetting.user_id == Notice.user_id,
+                NoticeSetting.notification == Notice.notification,
+            ),
+        )
+        .where(Notice.email.is_(True))
+        .order_by(Notice.at, Notice.id)
+        .limit(BATCH)
+    )
+    sent = 0
+    for notice, to, on in (await session.execute(statement)).all():
+        if notice.notification in EMAILS and on is not False and to:
+            email = notice_email(settings, notice, to)
+            try:
+                delivered = await deliver_email(settings, email, "the emails of the notices")
+            except Exception:
+                logger.exception("The email of the notice %s failed. The others wait.", notice.id)
+                break
+            if not delivered:
+                logger.warning("The email of a notice to %s: %s", to, text_of(email))
+            sent += 1
+        notice.email = False
+    return sent
+
+
+async def run(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    now: dt.datetime,
+    window: dt.timedelta,
+) -> int:
+    """Run the job for the last time of its schedule in the window, if it has not run."""
+    time = SCHEDULE.last(now, window)
+    if time is None:
+        return 0
+
+    async def action(session: AsyncSession, _due: jobs.Due) -> None:
+        await send_waiting(session, settings)
+
+    return await jobs.run_due(sessions, NAME, [jobs.Due(None, time)], action)

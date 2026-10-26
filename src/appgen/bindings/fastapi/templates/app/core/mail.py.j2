@@ -1,38 +1,52 @@
-{{ trace_header(*py.message_elements) }}
-"""The delivery of the messages of the sign-in by SMTP (`auth.delivery: smtp`).
+{{ trace_header(*((py.message_elements | list) + (py.notice_emails.ids if py.notice_emails else []))) }}
+"""The delivery of {% if py.message_elements %}the messages of the sign-in{% endif %}{% if py.message_elements and py.notice_emails %} and of {% endif %}{% if py.notice_emails %}the emails of the notices (ADR 0044){% endif %} by
+SMTP (`auth.delivery: smtp`).
 
-The app sends each message as an email with the SMTP server of the
-settings `SMTP_*`, to the address of the user. `smtplib` blocks, so the
-delivery runs in a thread. Without `SMTP_HOST`, the development app writes
-the link to the log, and the production app gives an error (501).
+The app sends each email with the SMTP server of the settings `SMTP_*`,
+to the address of the user. `smtplib` blocks, so the delivery runs in a
+thread. Without `SMTP_HOST`, the development app writes a note to the
+log, and the production app gives an error{{ " (501 for a message of the sign-in)" if py.message_elements }}.
 """
 
 import asyncio
+{% if py.message_elements %}
 import logging
+{% endif %}
 import smtplib
 import ssl
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
 from app.core.config import Settings
+{% if py.message_elements %}
 from app.core.messages import Message
+{% endif %}
 
+{% if py.message_elements %}
 logger = logging.getLogger("app.auth")
 
+{% endif %}
 TIMEOUT_SECONDS = 10
 """The time that the app waits for each answer of the SMTP server."""
 
 
-def email_message(settings: Settings, message: Message) -> EmailMessage:
-    """Return the email of a message: from `SMTP_FROM` to the address of the user."""
+def new_email(settings: Settings, to: str, subject: str, text: str) -> EmailMessage:
+    """Return an email from `SMTP_FROM` to an address, with a subject and a plain text."""
     email = EmailMessage()
     email["From"] = settings.smtp_from
-    email["To"] = message.to
-    email["Subject"] = message.subject
+    email["To"] = to
+    email["Subject"] = subject
     email["Date"] = formatdate(localtime=False)
     email["Message-ID"] = make_msgid()
-    email.set_content(message.text)
+    email.set_content(text)
     return email
+{% if py.message_elements %}
+
+
+def email_message(settings: Settings, message: Message) -> EmailMessage:
+    """Return the email of a message: from `SMTP_FROM` to the address of the user."""
+    return new_email(settings, message.to, message.subject, message.text)
+{% endif %}
 
 
 def send_email(settings: Settings, email: EmailMessage) -> None:
@@ -52,13 +66,27 @@ def send_email(settings: Settings, email: EmailMessage) -> None:
         client.send_message(email)
 
 
-async def deliver_message(settings: Settings, message: Message) -> None:
-    """Send a message of the sign-in to a user by SMTP."""
+async def deliver_email(settings: Settings, email: EmailMessage, what: str) -> bool:
+    """Send an email by SMTP in a thread. `what` names the emails in the errors.
+
+    Return False without `SMTP_HOST` in the development app: the caller
+    writes a note to the log. Without `SMTP_HOST`, the production app gives
+    an error.
+    """
     if not settings.smtp_host:
         if settings.environment == "development":
-            logger.warning("The %s link of %s: %s", message.kind, message.to, message.link)
-            return
-        raise NotImplementedError("Set SMTP_HOST to send the messages of the sign-in.")
+            return False
+        raise NotImplementedError(f"Set SMTP_HOST to send {what}.")
     if not settings.smtp_from:
-        raise NotImplementedError("Set SMTP_FROM: the sender of the messages of the sign-in.")
-    await asyncio.to_thread(send_email, settings, email_message(settings, message))
+        raise NotImplementedError(f"Set SMTP_FROM: the sender of {what}.")
+    await asyncio.to_thread(send_email, settings, email)
+    return True
+{% if py.message_elements %}
+
+
+async def deliver_message(settings: Settings, message: Message) -> None:
+    """Send a message of the sign-in to a user by SMTP."""
+    email = email_message(settings, message)
+    if not await deliver_email(settings, email, "the messages of the sign-in"):
+        logger.warning("The %s link of %s: %s", message.kind, message.to, message.link)
+{% endif %}

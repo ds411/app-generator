@@ -5,14 +5,29 @@ after a change: for each notification of the change, it finds the users
 at the end of the receiver paths, and adds a notice for each one, with
 the values of the text. For each field with mentions (ADR 0043), it adds
 a notice for each user that the text mentions for the first time.
+
+The notices of a notification with `email: true` (ADR 0044) wait for the
+built-in job `notice_emails`: its route sends their emails with
+`src/shared/auth/mail.ts`.
 """
 
 from dataclasses import dataclass, field
 
 from appgen.bindings.nextjs.db import Table
+from appgen.bindings.nextjs.jobs import TsJob, TsSchedule
 from appgen.bindings.shared.auth import PathStep
-from appgen.bindings.shared.notices import MentionPlan, NoticePlan, NoticeReceiver
+from appgen.bindings.shared.notices import (
+    NOTICE_EMAILS_BATCH,
+    NOTICE_EMAILS_JOB,
+    NOTICE_EMAILS_SCHEDULE,
+    MentionPlan,
+    NoticePlan,
+    NoticeReceiver,
+    email_notifications,
+)
 from appgen.bindings.shared.typescript import ts_value
+from appgen.dsl.cron import parse_cron
+from appgen.dsl.model import AppDefinition
 from appgen.gen.naming import camel
 from appgen.gen.render import GenerationError
 
@@ -53,10 +68,24 @@ TABLE = "notices"
 """The table of the notices, as in the FastAPI app."""
 TABLE_CONST = "noticesTable"
 TABLE_MODULE = "notices"
+SETTINGS_TABLE = "notice_settings"
+"""The table of the settings of the emails (ADR 0044), in the module of the notices."""
+SETTINGS_CONST = "noticeSettingsTable"
 
 
-def check_notice_table(tables: dict[str, Table]) -> None:
-    """Raise GenerationError if a table of the app has the name or the module of the notices."""
+@dataclass(frozen=True, slots=True)
+class TsNoticeEmails:
+    """The emails of the notices (ADR 0044): the built-in job that sends them."""
+
+    job: TsJob
+    ids: list[str]
+    """The element IDs of the notifications with `email: true`, for the traces."""
+    batch: int = NOTICE_EMAILS_BATCH
+
+
+def check_notice_table(tables: dict[str, Table], emails: bool = False) -> None:
+    """Raise GenerationError if a table of the app has the name or the module of the notices,
+    or with `emails` the name of the table of the settings of the emails."""
     for table in tables.values():
         names = {table.name, *(j.name for j in table.join_tables)}
         if TABLE in names or table.const == TABLE_CONST or table.module == TABLE_MODULE:
@@ -64,6 +93,34 @@ def check_notice_table(tables: dict[str, Table]) -> None:
                 f"The entity '{table.entity}' has the table '{TABLE}', or its module, and the "
                 "notices need it. Give the entity another name or table."
             )
+        if emails and (SETTINGS_TABLE in names or table.const == SETTINGS_CONST):
+            raise GenerationError(
+                f"The entity '{table.entity}' has the table '{SETTINGS_TABLE}', and the emails "
+                "of the notices need it. Give the entity another name or table."
+            )
+
+
+def ts_notice_emails(definition: AppDefinition) -> TsNoticeEmails | None:
+    """Return the built-in job of the emails of the notices, or None without such emails.
+
+    Raise GenerationError if a job of the definition has the name of the built-in job.
+    """
+    emails = email_notifications(definition)
+    if not emails:
+        return None
+    if NOTICE_EMAILS_JOB in definition.jobs:
+        raise GenerationError(
+            f"The job '{NOTICE_EMAILS_JOB}' has the name of the built-in job of the emails of "
+            "the notices (ADR 0044). Give the job another name."
+        )
+    job = TsJob(
+        name=NOTICE_EMAILS_JOB,
+        id=emails[0].id,
+        description="Send the emails of the notices of the notifications with `email: true`.",
+        schedule=TsSchedule(parse_cron(NOTICE_EMAILS_SCHEDULE)),
+        builtin=True,
+    )
+    return TsNoticeEmails(job, [e.id for e in emails])
 
 
 def ts_notify(

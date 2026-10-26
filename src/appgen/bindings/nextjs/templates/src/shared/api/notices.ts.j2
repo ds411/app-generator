@@ -1,6 +1,16 @@
 {{ trace_header(*notice_ids(definition)) }}
 import { unwrap } from "./errors";
+{% if has_notice_emails(definition) %}
+import {
+  listNoticesAction,
+  noticeSettingsAction,
+  readAllNoticesAction,
+  readNoticeAction,
+  setNoticeEmailAction,
+} from "./notice-actions";
+{% else %}
 import { listNoticesAction, readAllNoticesAction, readNoticeAction } from "./notice-actions";
+{% endif %}
 import type { NoticeApi } from "./types";
 
 /** The listeners of the notices in this browser tab. */
@@ -35,4 +45,12 @@ export const notices: NoticeApi = {
       listeners.delete(listener);
     };
   },
+{% if has_notice_emails(definition) %}
+  async settings() {
+    return unwrap(await noticeSettingsAction());
+  },
+  async setEmail(notification, email) {
+    unwrap(await setNoticeEmailAction(notification, email));
+  },
+{% endif %}
 };

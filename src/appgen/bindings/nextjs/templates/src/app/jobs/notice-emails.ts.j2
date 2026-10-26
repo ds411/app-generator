@@ -1,0 +1,69 @@
+{% set e = nextjs.notice_emails %}
+{% set job = e.job %}
+{{ trace_header(*e.ids) }}
+import "server-only";
+
+import { noticeHref, noticeText } from "@/features/notices/model/notice-texts";
+import type { Notice } from "@/shared/api";
+import { type Email, sendEmail } from "@/shared/auth/mail";
+import { publicUrl } from "@/shared/auth/session";
+import { emailDone, waitingEmails } from "@/shared/db/notices";
+import { type JobResult, runDue, Schedule{{ ", span" if "span(" in job.schedule.code() }} } from "@/shared/lib/jobs";
+
+/**
+ * The built-in job `{{ job.name }}` (ADR 0044): the emails of the notices of the
+ * notifications with `email: true`.
+ *
+ * Each run sends the emails of the oldest notices that wait, up to {{ e.batch }},
+ * and marks them done. A user that turned off the emails of a notification
+ * gets none. At the first error of the SMTP server, the run stops, and the
+ * other notices wait for the next run. The emails have the default
+ * language of the app.
+ */
+
+const NAME = "{{ job.name }}";
+/** The schedule of the job in UTC: `{{ job.schedule.expression }}`. */
+{{ job.schedule.code() }}
+/** The highest count of emails of one run. */
+const BATCH = {{ e.batch }};
+/** The title of the app in the subjects. */
+const APP_TITLE = {{ app.title | tojson }};
+
+/** Return the email of a notice: its text, the link to its record, and the link to the settings. */
+function noticeEmail(notice: Notice, to: string): Email {
+  const text = noticeText(notice);
+  const url = publicUrl();
+  const href = noticeHref(notice);
+  const lines = [text, ""];
+  if (href !== null) {
+    lines.push(`${url}${href}`, "");
+  }
+  lines.push({{ tr(js("Turn off these emails on the page of the settings:")) }}, `${url}/notice-settings`);
+  return { to, subject: `${APP_TITLE}: ${text}`, text: `${lines.join("\n")}\n` };
+}
+
+/** Send the emails of the notices that wait, for the last time of the schedule in the window. */
+export async function {{ job.function }}(now: Date, windowMs: number): Promise<JobResult> {
+  const time = SCHEDULE.last(now, windowMs);
+  if (time === null) {
+    return { runs: 0, failed: 0 };
+  }
+  return runDue(NAME, [{ recordId: null, time }], async () => {
+    for (const { notice, to, send } of await waitingEmails(BATCH)) {
+      if (send && to) {
+        const email = noticeEmail(notice, to);
+        try {
+          if (!(await sendEmail(email, "the emails of the notices"))) {
+            console.warn(`The email of the notice ${notice.id} to ${to}: ${email.subject}`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(JSON.stringify({ level: "error", message: `The email of the notice ${notice.id} failed: ${message}`, job: NAME }));
+          // The other notices wait for the next run.
+          return;
+        }
+      }
+      await emailDone(notice.id);
+    }
+  });
+}

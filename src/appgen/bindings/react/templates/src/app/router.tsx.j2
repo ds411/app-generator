@@ -29,7 +29,7 @@ import { {{ share.view | pascal }}SharedView } from "@/widgets/{{ share.view | k
 
 {% endif %}
 {% if definition.auth %}
-import { {% if auth_pages.connections %}ConnectionsRoute, {% endif %}{% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}{% if auth_pages.second_factor %}, SecondFactorRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %}{% if auth_pages.verify_email %}, VerifyEmailRoute{% endif %} } from "./auth/require-auth";
+import { {% if auth_pages.connections %}ConnectionsRoute, {% endif %}{% if has_notice_emails(definition) %}NoticeSettingsRoute, {% endif %}{% if react.api and definition.auth.providers %}ProviderCallbackRoute, {% endif %}RequireAuth{% if auth_pages.password_reset %}, ResetPasswordRoute{% endif %}{% if auth_pages.second_factor %}, SecondFactorRoute{% endif %}, SignInRoute{% if definition.auth.sign_up %}, SignUpRoute{% endif %}{% if auth_pages.verify_email %}, VerifyEmailRoute{% endif %} } from "./auth/require-auth";
 {% endif %}
 {% if ui_plan.embedded_pages %}
 import { EmbedLayout } from "./layout/embed-layout";
@@ -75,6 +75,9 @@ export const router = createBrowserRouter([
 {% endfor %}
     ],
   },
+{% endif %}
+{% if has_notice_emails(definition) %}
+  { path: "/notice-settings", element: <NoticeSettingsRoute /> }, {{ trace((email_notifications(definition) | first).id) }}
 {% endif %}
 {% if ui_plan.embedded_pages %}
   {

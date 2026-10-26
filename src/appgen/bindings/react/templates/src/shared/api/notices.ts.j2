@@ -61,6 +61,15 @@ export const notices: NoticeApi = {
       listeners.delete(listener);
     };
   },
+{% if has_notice_emails(definition) %}
+  async settings() {
+    const items = (await apiRequest("GET", "/notices/settings")) as Record<string, unknown>[];
+    return items.map((item) => ({ notification: String(item.notification), email: item.email === true }));
+  },
+  async setEmail(notification, email) {
+    await apiRequest("PUT", `/notices/settings/${encodeURIComponent(notification)}`, { email });
+  },
+{% endif %}
 };
 {% else %}
 import { currentUserId, userLabel } from "@/shared/auth";
@@ -83,6 +92,16 @@ import { type Notice, type NoticeApi, NotFoundError } from "./types";
 type StoredNotice = Omit<Notice, "actor"> & { userId: string };
 
 const STORAGE_KEY = {{ (definition.app.name ~ ".notices") | tojson }};
+{% if has_notice_emails(definition) %}
+/** The key of the settings of the emails (ADR 0044): the choices of each user, by notification. */
+const SETTINGS_KEY = {{ (definition.app.name ~ ".notice-settings") | tojson }};
+/** The notifications with emails. The mock data sends no emails: the page keeps only the choices. */
+const EMAILS: readonly string[] = [
+{% for n in email_notifications(definition) %}
+  {{ n.name | tojson }}, {{ trace(n.id) }}
+{% endfor %}
+];
+{% endif %}
 
 /** The listeners of the notices in this browser tab. */
 const listeners = new Set<() => void>();
@@ -208,16 +227,35 @@ function own(id: string): StoredNotice {
   return notice;
 }
 
+{% if has_notice_emails(definition) %}
+type Settings = Record<string, Record<string, boolean>>;
+
+/** Return the choices of the users about the emails, by user and notification. */
+function loadSettings(): Settings {
+  try {
+    const text = window.sessionStorage.getItem(SETTINGS_KEY);
+    return text === null ? {} : (JSON.parse(text) as Settings);
+  } catch {
+    return {};
+  }
+}
+
+{% endif %}
+/** Return the signed-in user. As the servers do, the notices need a signed-in user. */
+function signedInUser(): string {
+  const userId = currentUserId();
+  if (userId === null) {
+    throw new Error({{ tr(js("The sign-in has ended. Sign in again.")) }});
+  }
+  return userId;
+}
+
 /** The notices of the signed-in user, with mock data. */
 export const notices: NoticeApi = {
   async list(query = {}) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const userId = currentUserId();
-    if (userId === null) {
-      // As the servers do, the list needs a signed-in user.
-      throw new Error({{ tr(js("The sign-in has ended. Sign in again.")) }});
-    }
+    const userId = signedInUser();
     const items = stored
       .filter((item) => item.userId === userId && (!query.unread || item.readAt === null))
       .reverse();
@@ -240,5 +278,24 @@ export const notices: NoticeApi = {
       listeners.delete(listener);
     };
   },
+{% if has_notice_emails(definition) %}
+  async settings() {
+    const choices = loadSettings()[signedInUser()] ?? {};
+    return EMAILS.map((notification) => ({ notification, email: choices[notification] ?? true }));
+  },
+  async setEmail(notification, email) {
+    const userId = signedInUser();
+    if (!EMAILS.includes(notification)) {
+      throw new NotFoundError("Notification", notification);
+    }
+    const settings = loadSettings();
+    settings[userId] = { ...settings[userId], [notification]: email };
+    try {
+      window.sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {
+      // Without the session storage, the choice does not stay.
+    }
+  },
+{% endif %}
 };
 {% endif %}

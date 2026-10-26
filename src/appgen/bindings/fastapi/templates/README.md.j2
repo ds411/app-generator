@@ -158,7 +158,7 @@ in UTC.
 | Job | When | What |
 | --- | ---- | ---- |
 {% for job in py.jobs.values() %}
-| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
+| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% elif job.builtin and job.name == "notice_emails" %}The emails of the notices of the notifications with `email: true` (built in){% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
 {% endfor %}
 
 - A run is for one record (or for none) and one time. The table
@@ -270,6 +270,17 @@ the change log.
 - A mention in a text with mentions is `@[<name>](<ID of the user>)`.
   The notice goes to each user that a new or a changed text mentions for
   the first time. A mention of an ID without a user gives no notice.
+{% endif %}
+{% if py.notice_emails %}
+- The notifications {% for name in py.notice_emails.names %}`{{ name }}`{{ ", " if not loop.last }}{% endfor %} also
+  send each notice by email. The job `notice_emails` of the worker sends
+  the emails that wait each minute, with the SMTP server of `SMTP_*`.
+  The links of an email (the record, and the page of the settings) start
+  with `FRONT_END_URL`.
+- `GET /notices/settings` gives the state of the emails of each
+  notification for the signed-in user. `PUT /notices/settings/{notification}`
+  with `{"email": false}` turns off the emails of a notification. The
+  front end has the page `/notice-settings`.
 {% endif %}
 
 {% endif %}
