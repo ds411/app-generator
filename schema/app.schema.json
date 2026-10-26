@@ -1638,6 +1638,17 @@
           "title": "Span",
           "type": "integer"
         },
+        "period_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "chart",
           "title": "Kind",
@@ -2232,6 +2243,17 @@
           ],
           "default": null
         },
+        "period": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DashboardPeriod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "widgets": {
           "additionalProperties": {
             "$ref": "#/$defs/appgen__dsl__ui__dashboards__Widget"
@@ -2248,6 +2270,29 @@
         "widgets"
       ],
       "title": "Dashboard",
+      "type": "object"
+    },
+    "DashboardPeriod": {
+      "additionalProperties": false,
+      "description": "The period of a dashboard: the user picks a range, and the widgets with a\n`period_field` show the records of the range.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/PeriodRange",
+          "default": "last_30_days"
+        },
+        "ranges": {
+          "items": {
+            "$ref": "#/$defs/PeriodRange"
+          },
+          "minItems": 1,
+          "title": "Ranges",
+          "type": "array"
+        }
+      },
+      "title": "DashboardPeriod",
       "type": "object"
     },
     "DateRangeFilter": {
@@ -4297,6 +4342,17 @@
           "title": "Span",
           "type": "integer"
         },
+        "period_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "list",
           "title": "Kind",
@@ -5219,6 +5275,24 @@
       "title": "PatternRule",
       "type": "object"
     },
+    "PeriodRange": {
+      "enum": [
+        "today",
+        "last_7_days",
+        "last_30_days",
+        "last_90_days",
+        "last_365_days",
+        "this_week",
+        "this_month",
+        "this_year",
+        "last_week",
+        "last_month",
+        "last_year",
+        "all",
+        "custom"
+      ],
+      "type": "string"
+    },
     "Placement": {
       "enum": [
         "page",
@@ -5921,6 +5995,17 @@
           "title": "Span",
           "type": "integer"
         },
+        "period_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "const": "stat",
           "title": "Kind",
@@ -5996,6 +6081,19 @@
             }
           ],
           "default": null
+        },
+        "compare": {
+          "anyOf": [
+            {
+              "const": "previous",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compare"
         }
       },
       "required": [

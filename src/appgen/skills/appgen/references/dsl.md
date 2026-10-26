@@ -1999,14 +1999,14 @@ ui:
 
 ### dashboards
 
-A dashboard has `title`, `description`, `grid`, and `widgets`. Each
-widget has `kind`, `label`, and `span`:
+A dashboard has `title`, `description`, `grid`, `period`, and
+`widgets`. Each widget has `kind`, `label`, and `span`:
 
 | Kind     | Keys                                                                      |
 | -------- | ------------------------------------------------------------------------- |
-| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`. |
-| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`. |
-| `list`   | `view`, `filter`, `sort`, `limit`, `link`.                                |
+| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`, `period_field`, `compare`. |
+| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, `period_field`. |
+| `list`   | `view`, `filter`, `sort`, `limit`, `link`, `period_field`.               |
 | `custom` | A generation gap.                                                         |
 
 The default `format` of a stat widget is the `format` of its field (for
@@ -2041,8 +2041,49 @@ A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are
 date values.
 
+A dashboard with `period` has a picker of a date range above its
+widgets ([ADR 0038](https://github.com/ds411/app-generator/blob/main/docs/adr/0038-dashboard-period.md)). `default` is the
+range of a new page (default `last_30_days`), and `ranges` are the
+ranges that the picker offers, in their order. The ranges are `today`,
+`last_7_days`, `last_30_days`, `last_90_days`, `last_365_days`,
+`this_week`, `this_month`, `this_year` (each to today), `last_week`,
+`last_month`, `last_year` (each the whole unit before), `all` (no
+limits), and `custom` (the user picks the first and the last day). The
+default `ranges` are `last_7_days`, `last_30_days`, `last_90_days`,
+`this_month`, `last_month`, `this_year`, and `all`. A week starts on
+the first day of the week of the locale of the selected language, else
+on Monday.
+
+A widget with `period_field` (a `date` or a `datetime` field of its
+entity, or of the entity of the view of a list widget) shows only the
+records whose value of that field is in the days of the range. A date
+and time is in the range of its day in UTC. The other widgets show all
+records. A stat widget with `compare: previous` also shows the change
+from the period of the same length before the range, as a percentage,
+for example `+12%` for the last 30 days against the 30 days before. A
+range without a first or a last day (`all`) has no change. The period
+needs a widget with `period_field`, and `period_field` needs the period
+of the dashboard. `appgen validate` reports the other cases.
+
+```yaml
+# in: ui.dashboards
+sales:
+  title: Sales
+  period: { default: last_30_days, ranges: [last_7_days, last_30_days, this_month, all, custom] }
+  widgets:
+    new_tasks:
+      kind: stat
+      entity: Task
+      period_field: due_date
+      compare: previous
+```
+
 The FastAPI binding computes each stat, chart, and list widget in the
-database, with one endpoint for each widget. A widget for that binding
+database, with one endpoint for each widget. The endpoint of a widget
+with `period_field` takes `start` and `end`, the first and the last day
+of the range. The React app with `x-react-data: api` sends them, and
+reads the value of the previous period of a `compare` from the same
+endpoint. A widget for that binding
 cannot read a computed field, because the database has no column for
 it.
 
@@ -2625,7 +2666,11 @@ use in the app does not show.
 - Date pickers: `Navigation bar`, `Go to the next month`,
   `Go to the previous month`, `Choose the month`, `Choose the year`,
   `Today, {date}`, `{date}, selected`.
-- Dashboards: `View all`, `No data yet`, `Other`, `None`.
+- Dashboards: `View all`, `No data yet`, `Other`, `None`, and the
+  period: `Period`, `Today`, `Last 7 days`, `Last 30 days`,
+  `Last 90 days`, `Last 365 days`, `This week`, `This month`,
+  `This year`, `Last week`, `Last month`, `Last year`, `All time`,
+  `Custom range`, `Pick the days`, `{change} from the previous period`.
 - The change log of a record (see [History](#history)): `History`,
   `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
   `Older`, `No changes yet.`, `The history did not load.`,

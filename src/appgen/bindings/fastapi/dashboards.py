@@ -47,6 +47,8 @@ PREFIX = "/dashboards"
 SLICE = "dashboards"
 """The slice of the dashboards in `app/features/`."""
 TEST_TODAY = dt.date(2026, 6, 15)
+TEST_PERIOD = (TEST_TODAY - dt.timedelta(days=29), TEST_TODAY)
+"""The first and the last day of the period that the generated tests send as `start` and `end`."""
 """The date that the generated tests send as `today`."""
 _MODULES = frozenset({"router", "schemas", "aggregates"})
 """The modules of the slice: a dashboard cannot have their names."""
@@ -120,6 +122,9 @@ class PyWidget:
     """The group key expression of a chart."""
     week: bool = False
     """True if a chart groups the dates by week: the endpoint takes `week_start`."""
+    period: tuple[str, bool] | None = None
+    """The column of the period field, and True for a date-time: the endpoint takes `start`
+    and `end`, the first and the last day of the period of the dashboard."""
     order: list[str] = field(default_factory=list[str])
     limit: int = 0
     test: WidgetTest | None = None
@@ -162,6 +167,8 @@ class PyWidget:
             params.append("today: Today = None")
         if self.week:
             params.append("week_start: WeekStart = 1")
+        if self.period is not None:
+            params += ["start: PeriodStart = None", "end: PeriodEnd = None"]
         head = f"async def {self.operation_id}("
         tail = f") -> {self.returns}:"
         one_line = head + ", ".join(params) + tail
@@ -191,6 +198,16 @@ class PyWidget:
             lines.append(render(Call("statement.outerjoin", (alias, condition)), 4, "statement = "))
         for condition in self.where:
             lines.append(render(Call("statement.where", (condition,)), 4, "statement = "))
+        if self.period is not None:
+            column, datetime = self.period
+            first = "day_start(start)" if datetime else "start"
+            last = ("<", "day_start(end, 1)") if datetime else ("<=", "end")
+            lines += [
+                "if start is not None:",
+                f"    statement = statement.where({column} >= {first})",
+                "if end is not None:",
+                f"    statement = statement.where({column} {last[0]} {last[1]})",
+            ]
         if self.scoped:
             lines.append(f"statement = {self.entity.snake}_repository.owned(statement, scope)")
         if self.kind == "stat":
@@ -286,6 +303,8 @@ class PyDashboard:
             helpers.add("Today")
         if any(w.week for w in self.widgets):
             helpers.add("WeekStart")
+        if any(w.period for w in self.widgets):
+            helpers |= {"PeriodEnd", "PeriodStart"}
         if helpers:
             lines.add(from_import("app.features.dashboards.aggregates", helpers))
         schemas = {w.returns for w in self.widgets if w.kind != "list"}
@@ -395,6 +414,10 @@ def _widget(
     builder = FilterBuilder(definition, result)
     for path, condition in widget.filter.items():
         builder.filter(path, condition)
+    if widget.period_field is not None:
+        path = builder.resolve(widget.period_field)
+        assert path.field is not None
+        result.period = (builder.column(path), path.field.type == "datetime")
     if isinstance(widget, StatWidget | ChartWidget):
         result.aggregate = widget.aggregate
         result.value = builder.aggregate(widget.aggregate, widget.field)
@@ -765,9 +788,17 @@ class _Tests(FilterValues):
 
     def plan(self) -> WidgetTest | None:
         paths: dict[str, list[TestValue]] = {}
-        failing: dict[str, TestValue] = {}
+        failing: dict[str, list[TestValue]] = {}
         now = False
-        for path_text, condition in self.source.filter.items():
+        record_filter = dict(self.source.filter)
+        period = self.source.period_field
+        if period is not None:
+            # The test sends the period: the records of the period pass, and the others fail.
+            if period in record_filter:
+                return None
+            first, last = (day.isoformat() for day in TEST_PERIOD)
+            record_filter[period] = {"gte": first, "lte": last}
+        for path_text, condition in record_filter.items():
             f = self.direct_field(path_text)
             if f is None:
                 return None
@@ -782,7 +813,9 @@ class _Tests(FilterValues):
             passing, fails = found
             if not passing or not fails:
                 return None
-            paths[f.attr], failing[f.attr] = passing, fails[0]
+            # A record before the period, and a record after it.
+            ends = [fails[0], fails[-1]] if path_text == period and len(fails) > 1 else fails[:1]
+            paths[f.attr], failing[f.attr] = passing, ends
             now = now or "now" in passing[0].code
         count = 3
         records: list[dict[str, str]] = []
@@ -790,10 +823,11 @@ class _Tests(FilterValues):
             records.append(
                 {attr: values[index % len(values)].code for attr, values in paths.items()}
             )
-        for attr, fail in failing.items():
-            record = {a: values[0].code for a, values in paths.items()}
-            record[attr] = fail.code
-            records.append(record)
+        for attr, fails in failing.items():
+            for fail in fails:
+                record = {a: values[0].code for a, values in paths.items()}
+                record[attr] = fail.code
+                records.append(record)
         test = WidgetTest(records, count, [], now=now)
         filled = self.fill(test, paths)
         if not filled or not self.unique_ok(test):

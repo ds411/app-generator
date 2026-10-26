@@ -6,6 +6,8 @@
 {% set functions = plan.widgets | selectattr("function") | list %}
 {% set lists = plan.widgets | selectattr("kind", "eq", "list") | list %}
 {% set tables = lists | selectattr("columns") | list %}
+{% set period = dashboard.period %}
+{% macro args(w) %}data{{ ", period" if w.takes_period }}{% endmacro %}
 {{ trace_header(element_id) }}
 "use client";
 
@@ -14,8 +16,12 @@
 {% if ns.icons %}
 import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% endif %}
+{% if period %}
+import { useState } from "react";
+{% endif %}
 
 {% set served = plan.widgets | selectattr("endpoint") | list %}
+{% set period_served = served | selectattr("endpoint.period") | list %}
 {% set related = served | selectattr("related") | list %}
 {% for entity in plan.entities %}
 {% if plan.server and entity not in plan.types %}
@@ -64,10 +70,14 @@ import { {{ fmt | join(", ") }} } from "@/shared/lib/format";
 {% if "pageHref(" in code %}
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
+{% if period %}
+{% set names = (["change"] if plan.compare else []) + (["inPeriod"] if "inPeriod(" in code else []) + ["periodOf"] + (["periodParams"] if period_served else []) + (["previousPeriod"] if plan.compare else []) + (["type Period"] if period_served or functions | selectattr("takes_period") | list else []) + ["type PeriodChoice"] %}
+import { {{ names | join(", ") }} } from "@/shared/lib/period";
+{% endif %}
 {% set query = [] %}
 {% if plan.entities and not plan.server %}{% set query = query + ["byId"] %}{% endif %}
 {% if "sortBy(" in code %}{% set query = query + ["sortBy"] %}{% endif %}
-{% if "today()" in code or served | selectattr("endpoint.today") | list %}{% set query = query + ["today"] %}{% endif %}
+{% if "today()" in code or served | selectattr("endpoint.today") | list or period %}{% set query = query + ["today"] %}{% endif %}
 {% if query %}
 import { {{ query | join(", ") }} } from "@/shared/lib/query";
 {% endif %}
@@ -77,6 +87,9 @@ import { Link } from "@/shared/lib/router";
 import { useResource } from "@/shared/lib/use-resource";
 {% if "chart" in plan.uses %}
 import { DashboardChart } from "@/shared/ui/dashboard-chart";
+{% endif %}
+{% if period %}
+import { PeriodPicker } from "@/shared/ui/period-picker";
 {% endif %}
 {% if tables %}
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
@@ -115,6 +128,9 @@ type Lookups = Record<string, never>;
 type DashboardData = {
 {% for w in served %}
   {{ w.function }}: {{ w.data }};
+{% if w.change %}
+  {{ w.function }}Previous: {{ w.data }};
+{% endif %}
 {% endfor %}
   lookups: Lookups;
 };
@@ -124,13 +140,21 @@ type DashboardData = {
 {% endfor %}
 
 /** Read the value of each widget from its endpoint, and the related records of the values. */
-async function load(): Promise<DashboardData> {
-  const [{% for w in served %}{{ w.function }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+async function load({{ "period: Period" if period_served }}): Promise<DashboardData> {
+{% if plan.compare %}
+  const previous = previousPeriod(period);
+{% endif %}
+  const [{% for w in served %}{{ w.function }}{{ ", " ~ w.function ~ "Previous" if w.change }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
 {% for w in served %}
 {% set items = (["today: today()"] if w.endpoint.today else []) + (["week_start: String(firstWeekday())"] if w.endpoint.week and i18n else []) %}
-{% set params = (", { " ~ items | join(", ") ~ " }") if items else "" %}
+{% set all = items + (["...periodParams(period)"] if w.endpoint.period else []) %}
+{% set params = (", periodParams(period)" if all == ["...periodParams(period)"] else ", { " ~ all | join(", ") ~ " }") if all else "" %}
 {% if w.kind == "stat" %}
     statValue({{ js(w.endpoint.path) }}{{ params }}),
+{% if w.change %}
+{% set before = items + ["...periodParams(previous)"] %}
+    previous ? statValue({{ js(w.endpoint.path) }}, {{ "periodParams(previous)" if before == ["...periodParams(previous)"] else "{ " ~ before | join(", ") ~ " }" }}) : null,
+{% endif %}
 {% elif w.kind == "chart" %}
     chartValues({{ js(w.endpoint.path) }}{{ params }}),
 {% else %}
@@ -151,7 +175,7 @@ async function load(): Promise<DashboardData> {
 {% else %}
   const lookups: Lookups = {};
 {% endif %}
-  return { {% for w in served %}{{ w.function }}, {% endfor %}lookups };
+  return { {% for w in served %}{{ w.function }}, {{ w.function ~ "Previous, " if w.change }}{% endfor %}lookups };
 }
 
 /** Load the data again after a change of the records. */
@@ -205,7 +229,7 @@ async function load(): Promise<DashboardData> {
 {% for w in functions %}
 
 /** {{ w.label }}. */
-function {{ w.function }}(data: DashboardData): {{ w.returns }} { {{ trace(w.element_id) }}
+function {{ w.function }}(data: DashboardData{{ ", period: Period" if w.takes_period }}): {{ w.returns }} { {{ trace(w.element_id) }}
 {% if "lookups." in (w.body | join(" ")) %}
   const { lookups } = data;
 {% endif %}
@@ -219,7 +243,19 @@ function {{ w.function }}(data: DashboardData): {{ w.returns }} { {{ trace(w.ele
 /** {{ dashboard.title }}{% if dashboard.description %}: {{ dashboard.description }}{% endif %} */
 {% endif %}
 export function {{ name | pascal }}Dashboard() {
+{% if period %}
+  const [choice, setChoice] = useState<PeriodChoice>({ range: {{ js(period.default) }}, custom: {} });
+  const period = periodOf(choice.range, today(), choice.custom);
+{% if plan.compare and not plan.server %}
+  const previous = previousPeriod(period);
+{% endif %}
+{% endif %}
+{% if period_served %}
+  // The API gives the values of the period: a new period loads them again, and shows the last values until then.
+  const resource = useResource([{{ js(name) }}, period.from, period.to].join(" "), () => load(period), subscribe, { keep: true });
+{% else %}
   const resource = useResource({{ js(name) }}, load{% if plan.entities %}, subscribe{% endif %});
+{% endif %}
 
 {{ m.states(plan, "widget") }}
 
@@ -230,9 +266,15 @@ export function {{ name | pascal }}Dashboard() {
   const { lookups } = data;
 {% endif %}
 {% for w in lists %}
-  const {{ w.function }}Rows = {{ w.function }}(data);
+  const {{ w.function }}Rows = {{ w.function }}({{ args(w) }});
 {% endfor %}
   return (
+{% if period %}
+    <div className="space-y-4">
+      <div className="flex justify-end"> {{ trace(period.id, jsx=True) }}
+        <PeriodPicker ranges={ {{- js(period.ranges) }}} value={choice} onChange={setChoice} />
+      </div>
+{% endif %}
     <div className={{ js(plan.grid) }}>{% if dashboard.grid %} {{ trace(dashboard.grid.id, jsx=True) }}{% endif %}
 
 {% if dashboard.grid %}
@@ -244,7 +286,10 @@ export function {{ name | pascal }}Dashboard() {
 {% if w.kind == "stat" %}
       <StatTile
         label={{ jsx_attr(w.label) }}
-        value={formatValue({{ w.function }}(data), {{ js(w.format) }}{% if w.currency %}, {{ js(w.currency) }}{% endif %})}
+        value={formatValue({{ w.function }}({{ args(w) }}), {{ js(w.format) }}{% if w.currency %}, {{ js(w.currency) }}{% endif %})}
+{% if w.change %}
+        change={ {{- w.change }}}
+{% endif %}
 {% if w.icon %}
         icon={ {{- w.icon | pascal }}Icon}
 {% endif %}
@@ -259,7 +304,7 @@ export function {{ name | pascal }}Dashboard() {
 {% else %}
       <WidgetCard title={{ jsx_attr(w.label) }}{% if w.href %} href={ {{- w.href }}}{% endif %} className={{ js(w.classes) }}> {{ trace(w.element_id, jsx=True) }}
 {% if w.kind == "chart" %}
-        <DashboardChart kind={{ js(w.chart) }} data={ {{- w.function }}(data)} valueLabel={{ jsx_attr(w.value_label) }}{% if plan.motion == "none" %} animate={false}{% endif %} />
+        <DashboardChart kind={{ js(w.chart) }} data={ {{- w.function }}({{ args(w) }})} valueLabel={{ jsx_attr(w.value_label) }}{% if plan.motion == "none" %} animate={false}{% endif %} />
 {% elif w.kind == "list" %}
 {% if w.sort_id %}
         {{ trace(w.sort_id, jsx=True) }}
@@ -318,5 +363,8 @@ export function {{ name | pascal }}Dashboard() {
 {% endif %}
 {% endfor %}
     </div>
+{% if period %}
+    </div>
+{% endif %}
   );
 }

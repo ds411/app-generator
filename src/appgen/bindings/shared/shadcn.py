@@ -221,6 +221,7 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "record_select": ("popover", "command"),
     "badge": ("badge",),
     "avatar": ("avatar",),
+    "period": ("select",),
 }
 
 

@@ -1,0 +1,79 @@
+{{ trace_header("app") }}
+"use client";
+
+{% set ns = namespace(custom=false) %}
+{% for name in ui_views.dashboards %}
+{% set period = ui_views.dashboard_plan(name).dashboard.period %}
+{% if period and "custom" in period.ranges %}{% set ns.custom = true %}{% endif %}
+{% endfor %}
+{% set custom = ns.custom %}
+import type { PeriodChoice, PeriodRange } from "@/shared/lib/period";
+{% if custom %}
+import { DateRangeFilter } from "@/shared/ui/filters/date-range-filter";
+{% endif %}
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+
+/** Return the name of a range. */
+function rangeLabel(range: PeriodRange): string {
+  switch (range) {
+    case "today":
+      return {{ tr(js("Today")) }};
+    case "last_7_days":
+      return {{ tr(js("Last 7 days")) }};
+    case "last_30_days":
+      return {{ tr(js("Last 30 days")) }};
+    case "last_90_days":
+      return {{ tr(js("Last 90 days")) }};
+    case "last_365_days":
+      return {{ tr(js("Last 365 days")) }};
+    case "this_week":
+      return {{ tr(js("This week")) }};
+    case "this_month":
+      return {{ tr(js("This month")) }};
+    case "this_year":
+      return {{ tr(js("This year")) }};
+    case "last_week":
+      return {{ tr(js("Last week")) }};
+    case "last_month":
+      return {{ tr(js("Last month")) }};
+    case "last_year":
+      return {{ tr(js("Last year")) }};
+    case "all":
+      return {{ tr(js("All time")) }};
+    case "custom":
+      return {{ tr(js("Custom range")) }};
+  }
+}
+
+/** The period of a dashboard: a choice of a range, and the days of a custom range. */
+export function PeriodPicker({
+  ranges,
+  value,
+  onChange,
+}: {
+  ranges: readonly PeriodRange[];
+  value: PeriodChoice;
+  onChange: (value: PeriodChoice) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={value.range} onValueChange={(range) => onChange({ ...value, range: range as PeriodRange })}>
+        <SelectTrigger size="sm" aria-label={{ "{" ~ tr(js("Period")) ~ "}" }} className="w-44">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {ranges.map((range) => (
+            <SelectItem key={range} value={range}>
+              {rangeLabel(range)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+{% if custom %}
+      {value.range === "custom" && (
+        <DateRangeFilter label={{ "{" ~ tr(js("Pick the days")) ~ "}" }} value={value.custom} onChange={(custom) => onChange({ ...value, custom })} />
+      )}
+{% endif %}
+    </div>
+  );
+}

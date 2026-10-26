@@ -1,0 +1,120 @@
+{{ trace_header("app") }}
+// The periods of the dashboards: the user picks a range, and the widgets
+// with a period field show the records of its days.
+
+{% if i18n %}
+import { firstWeekday } from "@/shared/lib/format";
+{% endif %}
+import type { DateRange } from "@/shared/lib/query";
+{% raw %}
+
+/** A range of a period: `this_*` ends today, and `last_week`, `last_month`, and `last_year` are the whole unit before. */
+export type PeriodRange =
+  | "today"
+  | "last_7_days"
+  | "last_30_days"
+  | "last_90_days"
+  | "last_365_days"
+  | "this_week"
+  | "this_month"
+  | "this_year"
+  | "last_week"
+  | "last_month"
+  | "last_year"
+  | "all"
+  | "custom";
+
+/** The first and the last day of a period (`YYYY-MM-DD`), or null for no limit. */
+export type Period = { from: string | null; to: string | null };
+
+/** The range that the user picks, and the days of a custom range. */
+export type PeriodChoice = { range: PeriodRange; custom: DateRange };
+{% endraw %}
+{% if not i18n %}
+
+/** The first day of the week: 1 is Monday (ISO 8601). */
+const firstWeekday = () => 1;
+{% endif %}
+{% raw %}
+
+/** Return the day `YYYY-MM-DD` of a number of days after a day. */
+function addDays(day: string, days: number): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Return the number of days from a day to a later day. */
+function daysBetween(first: string, last: string): number {
+  return Math.round((Date.parse(`${last}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / 86_400_000);
+}
+
+/** Return the first day of the week of a day. */
+function weekStart(day: string): string {
+  return addDays(day, -((new Date(`${day}T00:00:00Z`).getUTCDay() - firstWeekday() + 7) % 7));
+}
+
+/** Return the days of a range, from the day of today of the user. */
+export function periodOf(range: PeriodRange, today: string, custom: DateRange = {}): Period {
+  switch (range) {
+    case "today":
+      return { from: today, to: today };
+    case "last_7_days":
+      return { from: addDays(today, -6), to: today };
+    case "last_30_days":
+      return { from: addDays(today, -29), to: today };
+    case "last_90_days":
+      return { from: addDays(today, -89), to: today };
+    case "last_365_days":
+      return { from: addDays(today, -364), to: today };
+    case "this_week":
+      return { from: weekStart(today), to: today };
+    case "this_month":
+      return { from: `${today.slice(0, 7)}-01`, to: today };
+    case "this_year":
+      return { from: `${today.slice(0, 4)}-01-01`, to: today };
+    case "last_week": {
+      const first = addDays(weekStart(today), -7);
+      return { from: first, to: addDays(first, 6) };
+    }
+    case "last_month": {
+      const last = addDays(`${today.slice(0, 7)}-01`, -1);
+      return { from: `${last.slice(0, 7)}-01`, to: last };
+    }
+    case "last_year": {
+      const year = String(Number(today.slice(0, 4)) - 1).padStart(4, "0");
+      return { from: `${year}-01-01`, to: `${year}-12-31` };
+    }
+    case "all":
+      return { from: null, to: null };
+    case "custom":
+      return { from: custom.from ?? null, to: custom.to ?? null };
+  }
+}
+
+/** Return the period of the same length before a period, or null for a period without a first or a last day. */
+export function previousPeriod(period: Period): Period | null {
+  if (!period.from || !period.to) return null;
+  const days = daysBetween(period.from, period.to) + 1;
+  return { from: addDays(period.from, -days), to: addDays(period.from, -1) };
+}
+
+/** Return true if a date, or the day in UTC of a date and time, is in a period. */
+export function inPeriod(value: string | null | undefined, period: Period): boolean {
+  if (!period.from && !period.to) return true;
+  if (!value) return false;
+  const day = value.slice(0, 10);
+  return (!period.from || day >= period.from) && (!period.to || day <= period.to);
+}
+
+/** Return the change of a value from the value of the previous period, as a fraction, or null. */
+export function change(value: number | null, previous: number | null): number | null {
+  if (value === null || previous === null || previous === 0) return null;
+  return (value - previous) / Math.abs(previous);
+}
+
+/** Return the query parameters of a widget endpoint for a period: its first and its last day. */
+export function periodParams(period: Period): Record<string, string> {
+  return { ...(period.from ? { start: period.from } : {}), ...(period.to ? { end: period.to } : {}) };
+}
+{% endraw %}

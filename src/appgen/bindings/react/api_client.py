@@ -127,7 +127,9 @@ def api_entities(definition: AppDefinition) -> dict[str, ApiEntity]:
 def widget_endpoints(definition: AppDefinition) -> dict[str, WidgetEndpoint]:
     """Return the endpoint of each dashboard widget of the FastAPI app, by element ID."""
     return {
-        widget.id: WidgetEndpoint(dashboard.path + widget.path, widget.today, widget.week)
+        widget.id: WidgetEndpoint(
+            dashboard.path + widget.path, widget.today, widget.week, widget.period is not None
+        )
         for dashboard in python_app(definition).dashboards.values()
         for widget in dashboard.widgets
     }

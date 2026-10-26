@@ -94,6 +94,11 @@ class WidgetPlan:
     """The TypeScript of the known groups of a chart, in their order, or None."""
     interval: str | None = None
     """The interval of the groups of a chart of dates, for example `week`, or None."""
+    takes_period: bool = False
+    """True if the function of the widget takes the period: the widget filters its records by
+    the period field in the browser."""
+    change: str | None = None
+    """The TypeScript of the change of a stat from the previous period (`compare`), or None."""
     store: str | None = None
     """With the API client: the store of the records of a list widget, for example `taskApi`."""
 
@@ -128,11 +133,16 @@ class DashboardPlan:
     types: list[str] = field(default_factory=list[str])
     """With the API client: the entities whose types the code names, sorted by name."""
 
+    @property
+    def compare(self) -> bool:
+        """True if a stat widget shows the change from the previous period."""
+        return any(w.change for w in self.widgets)
+
     def code(self) -> str:
         """Return the TypeScript of the widgets, to find the helpers that they call."""
         parts: list[str] = []
         for widget in self.widgets:
-            parts += [*widget.body, widget.href or ""]
+            parts += [*widget.body, widget.href or "", widget.change or ""]
             parts += [c.cell for c in widget.columns]
             card = widget.card
             if card is not None:
@@ -246,16 +256,23 @@ def _read(ctx: ViewContext, entity: str, paths: list[str], entities: set[str]) -
 
 
 def _rows(
-    ctx: ViewContext, entity: str, record_filter: RecordFilter, entities: set[str]
+    ctx: ViewContext,
+    entity: str,
+    record_filter: RecordFilter,
+    entities: set[str],
+    period_field: str | None = None,
 ) -> list[str]:
-    """Return the lines that set `rows` to the records of an entity that pass a filter."""
-    _read(ctx, entity, list(record_filter), entities)
+    """Return the lines that set `rows` to the records of an entity that pass a filter, and
+    whose period field is in the period of the dashboard."""
+    _read(ctx, entity, [*record_filter, *([period_field] if period_field else [])], entities)
     source = f"data.records.{camel(entity)}"
     tests = [
         test
         for path, condition in record_filter.items()
         for test in _tests(ctx.value(entity, path), condition)
     ]
+    if period_field is not None:
+        tests.append(f"inPeriod({ctx.value(entity, period_field).expr}, period)")
     if not tests:
         return [f"const rows = {source};"]
     return [f"const rows = {source}.filter((row) => {' && '.join(tests)});"]
@@ -296,7 +313,11 @@ def _stat(
     widget: StatWidget,
     entities: set[str],
 ) -> None:
-    result.body = _rows(ctx, widget.entity, widget.filter, entities)
+    result.body = _rows(ctx, widget.entity, widget.filter, entities, widget.period_field)
+    result.takes_period = widget.period_field is not None
+    if widget.compare:
+        fn = result.function
+        result.change = f"change({fn}(data, period), previous && {fn}(data, previous))"
     if widget.field:
         _read(ctx, widget.entity, [widget.field], entities)
     result.body.append(
@@ -349,7 +370,8 @@ def _chart(
     entities: set[str],
 ) -> None:
     entity = widget.entity
-    result.body = _rows(ctx, entity, widget.filter, entities)
+    result.body = _rows(ctx, entity, widget.filter, entities, widget.period_field)
+    result.takes_period = widget.period_field is not None
     _read(ctx, entity, [widget.group_by, *([widget.field] if widget.field else [])], entities)
     group = ctx.value(entity, widget.group_by)
     total = _aggregate(ctx, entity, widget.aggregate, widget.field, "group")
@@ -422,7 +444,8 @@ def _list(
     entities.add(entity)
     entities.update(view_plan.lookups)
     result.view = widget.view
-    result.body = _rows(ctx, entity, widget.filter, entities)
+    result.body = _rows(ctx, entity, widget.filter, entities, widget.period_field)
+    result.takes_period = widget.period_field is not None
     sort: Sort | None = widget.sort or view.sort
     if sort is not None:
         _read(ctx, entity, [sort.field], entities)
@@ -457,6 +480,8 @@ def _server(
     list loads the related records of its records by ID.
     """
     result.endpoint = ctx.widgets[widget.id]
+    # The API gives the values of the period: the function does not take it.
+    result.takes_period = False
     data = f"data.{result.function}"
     if isinstance(widget, StatWidget | ChartWidget):
         # The dashboard loads again after a change of the records.
@@ -464,6 +489,8 @@ def _server(
     if isinstance(widget, StatWidget):
         result.data = "number | null"
         result.body = [f"return {data};"]
+        if widget.compare:
+            result.change = f"change({result.function}(data), {data}Previous)"
         return
     if isinstance(widget, ListWidget):
         view = _list_view(ctx.definition, widget.view)
