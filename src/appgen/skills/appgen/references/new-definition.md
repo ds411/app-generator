@@ -35,7 +35,7 @@ next step. One error can cause more errors later in the file.
 | -------------- | -------- | ---------------------------------------------------------- | ---------------------------------------------- |
 | `version`      | Yes      | The DSL version: `0`.                                      | Always.                                        |
 | `app`          | Yes      | `name` (`^[a-z][a-z0-9-]*$`), `title`, and `description`.  | Always.                                        |
-| `entities`     | Yes      | The data model: fields, relations, rules, and `crud`.      | Always.                                        |
+| `entities`     | Yes      | The data model: fields, relations, rules, `events`, and `crud`. | Always.                                   |
 | `operations`   | No       | Operations that `crud` does not give, for example `custom`. | The app has logic that is not CRUD.           |
 | `pages`        | No       | The routes of the front end, with their content.           | The app has a front end (`nextjs` or `react`). |
 | `ui`           | No       | Tokens, badges, layouts, menus, views, forms, dashboards, and defaults. | The pages show views, forms, or dashboards. |
@@ -214,6 +214,11 @@ generated app has a stub for it, and the check reports it in `gaps`.
   record (`unique`, `no_overlap`).
 - A `computed` field gets its value from other fields, for example
   `computed: hours(starts_at, ends_at) * room.hourly_rate`.
+- `events` run a custom operation of the entity after a record is
+  `created`, `changed` (optionally only for some `fields`), or
+  `deleted`, in the transaction of the change. A transition of a
+  workflow runs one with `run`. The operation has no required params
+  and calls no API.
 
 ## Operations
 

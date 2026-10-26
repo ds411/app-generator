@@ -15,6 +15,8 @@ class Transition(Element):
     to: MemberName
     """The value of the field after the change."""
     label: Text | None = None
+    run: MemberName | None = None
+    """A custom operation of the entity that runs after the transition (ADR 0031)."""
 
 
 class Workflow(Element):

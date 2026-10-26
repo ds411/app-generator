@@ -174,6 +174,7 @@ the React app.
 | `display_field` | No       | The field that names a record in lists and references.    |
 | `crud`          | No       | The CRUD shorthand: operations, views, and forms (see below). |
 | `rules`         | No       | Rules over more than one field or record (see [Entity rules](#entity-rules)). |
+| `events`        | No       | Custom operations that run after a record is created, changed, or deleted (see [Events](#events)). |
 
 ### The CRUD shorthand
 
@@ -420,6 +421,51 @@ Booking:
       scope: [room]
       message: The room has another booking at this time.
 ```
+
+### Events
+
+`events` maps a change of a record to a custom operation of the entity
+([ADR 0031](https://github.com/ds411/app-generator/blob/main/docs/adr/0031-events.md)). The app runs the operation after the
+change is in the database, in the transaction of the change, with the
+record. An error of the operation rolls back the change and the
+work of the operation.
+
+| Event     | The operation runs                                              |
+| --------- | --------------------------------------------------------------- |
+| `created` | After a new record is stored.                                   |
+| `changed` | After an update gives a new value to a stored field, or to one of `fields`. |
+| `deleted` | After a record is deleted. The operation gets the deleted record. |
+
+An event is the name of the operation, or a mapping with `operation`,
+`fields` (only for `changed`: the stored fields that the event
+watches), and `description`. A transition of a workflow can also run an
+operation (`run`, see [workflows](#workflows)).
+
+```yaml
+# example: room-booking
+# in: entities
+Booking:
+  events:
+    # A new time of a booking goes to the organizer.
+    changed: { operation: notify_organizer, fields: [starts_at, ends_at] }
+```
+
+- The operation is a custom operation of the same entity. The apps run
+  it without params, so each param of it is optional or has a default.
+  It calls no API (`apis`): a transaction is not the place for a call to
+  another service. Work that can wait belongs in a [job](#jobs).
+- Until the operation has its logic (a generation gap), its stub fails,
+  and so each change that starts the event fails.
+- The data access functions of the apps run the events, so the
+  generated operations and the custom operations both start them. A
+  change in the operation of an event starts no other event: the events
+  stop after one level. In the operation, a commit of a data access
+  function does not commit: the change that started the event commits.
+- A change outside these functions starts no event: SQL in a script, a
+  record that the database deletes with `on_delete: cascade`, and the
+  seed.
+- The FastAPI app runs the events. The Next.js app and the mock store
+  of the React app do not run them yet.
 
 ### Relations
 
@@ -745,7 +791,7 @@ workflows:
     initial: requested
     message: This change of the booking status is not allowed.
     transitions:
-      confirm: { from: [requested], to: confirmed, label: Confirm }
+      confirm: { from: [requested], to: confirmed, label: Confirm, run: notify_organizer }
       cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }
 ```
 
@@ -756,6 +802,10 @@ workflows:
   `to` is not in `from`.
 - `message` (optional) is the error message of a change that no
   transition allows.
+- `run` (optional) is a custom operation of `entity` that runs after the
+  transition, in its transaction, like an [event](#events). After an
+  update, the operations of the transitions run first, then the event
+  `changed`.
 - A change to the same state, and a change from or to no value, pass.
 
 The FastAPI app gives a 422 error, the Next.js app a `ValidationError`,

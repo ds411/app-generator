@@ -13,6 +13,7 @@ from appgen.dsl.auth import Auth
 from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
+from appgen.dsl.events import EventInput, EventName
 from appgen.dsl.jobs import Job
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
@@ -147,6 +148,10 @@ class Entity(Element):
         default=None, json_schema_extra=crud_schema
     )
     """The CRUD shorthand. The loader expands it to operations, views, and forms."""
+    events: dict[EventName, EventInput] = pydantic.Field(
+        default_factory=dict[EventName, EventInput]
+    )
+    """The custom operations that run after a record is created, changed, or deleted (ADR 0031)."""
 
     @property
     def stored_fields(self) -> dict[str, Field]:

@@ -171,6 +171,31 @@ in UTC.
   passes run, and 503 when they stop. 0 turns the endpoint off.
 
 {% endif %}
+{% if py.events %}
+## Events
+
+The repositories run a custom operation after a change of a record, in
+the transaction of the change (the `events` of the definition, and
+`run` on a transition):
+
+| Change | Operation |
+| ------ | --------- |
+{% for e in py.entity_order() %}
+{% for ev in e.events %}
+| {{ ev.summary(e.name) }} | `{{ ev.operation.name }}` |
+{% endfor %}
+{% endfor %}
+
+- The operation runs after the change is in the database. An error of
+  the operation rolls back the change. Until the operation has its
+  logic in `<operation>_ext.py`, each change that starts it fails (501).
+- In the operation, the repository functions do not commit, and a
+  change starts no other event.
+- The tests turn off the events, except the tests of
+  `tests/features/<slice>/test_events.py` and the tests with the mark
+  `events`.
+
+{% endif %}
 ## Production
 
 - Logs: the API writes one log line for each request, with the method,

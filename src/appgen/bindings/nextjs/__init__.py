@@ -536,6 +536,8 @@ BINDING = Binding(
         | {"job"}
         | {"storage"}
     ),
+    # The events of the Next.js app follow (#392).
+    excludes=frozenset({"event"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

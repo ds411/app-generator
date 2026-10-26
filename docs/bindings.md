@@ -519,6 +519,39 @@ app:
   `scripts/check-fastapi.sh`) adds the indexes to an app that exists on
   Postgres, and checks that the search of the projects uses its index.
 
+### The events of the FastAPI app
+
+The repository of an entity runs its `events` and the `run` operations
+of its transitions ([ADR 0031](adr/0031-events.md)), so that the
+generated operations and the custom operations both start them.
+
+- `add` (and so `create`) runs `on_created` after a flush of the new
+  record. `update` keeps the values of the watched fields in `before`,
+  and runs `on_changed` after a flush: first the operations of the
+  transitions of the change, then the operation of `changed` if a field
+  of `CHANGED_FIELDS` has a new value. `delete` runs `on_deleted` after
+  a flush of the delete.
+- Each of these functions imports the extension modules of the
+  operations (`<operation>_ext.py`) in its body, because these modules
+  can import the repository.
+- `run_event` in `app/core/db.py` runs an operation with the key
+  `appgen.event` in `session.info`. While the key is there, `commit()`
+  only flushes, and `run_event` runs no other operation: the events stop
+  after one level. An error leaves the transaction without a commit, so
+  the change and the work of the operation roll back.
+- The autouse fixture `turn_off_events` of `tests/conftest.py` replaces
+  `on_created`, `on_changed`, and `on_deleted` with functions that do
+  nothing, so that the generated tests of the other features do not
+  depend on the logic of the operations. The mark
+  `@pytest.mark.events` keeps the events of all entities, and
+  `@pytest.mark.events("Booking")` the events of one entity.
+- The generated tests in `tests/features/<slice>/test_events.py` replace
+  the operations with fakes, and check each kind of event: the record is
+  in the database (or deleted) at the time of the call, a failed
+  operation rolls back the change and a change of the operation, a
+  change of other fields or no change runs no `changed`, and a change in
+  the operation starts no event.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process

@@ -113,6 +113,11 @@ entities:
         end: ends_at
         scope: [room]
         message: The room has another booking at this time.
+    # The apps run these custom operations after a change of a booking,
+    # in the transaction of the change (ADR 0031).
+    events:
+      # A new time of a booking goes to the organizer.
+      changed: { operation: notify_organizer, fields: [starts_at, ends_at] }
 
 operations:
   cancel_booking:
@@ -126,6 +131,10 @@ operations:
     kind: custom
     entity: Booking
     description: Send the organizer a reminder of the booking.
+  notify_organizer:
+    kind: custom
+    entity: Booking
+    description: Tell the organizer that the booking is confirmed, or has a new time.
   expire_request:
     kind: custom
     entity: Booking
@@ -389,7 +398,8 @@ workflows:
     initial: requested
     message: This change of the booking status is not allowed.
     transitions:
-      confirm: { from: [requested], to: confirmed, label: Confirm }
+      # The confirmation goes to the organizer, in the transaction of the change.
+      confirm: { from: [requested], to: confirmed, label: Confirm, run: notify_organizer }
       cancel: { from: [requested, confirmed], to: cancelled, label: Cancel }
 
 # The members sign in with their email address and a password. Anyone

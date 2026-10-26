@@ -9,6 +9,7 @@ deterministic.
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from decimal import Decimal
@@ -25,6 +26,7 @@ from appgen.bindings.fastapi.pysource import (
     call,
     from_import,
     import_block,
+    literal,
     raise_problem,
     string,
 )
@@ -34,6 +36,7 @@ from appgen.bindings.fastapi.seed import python_seed
 from appgen.bindings.fastapi.webhooks import python_webhooks
 from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.access import RecordRule
+from appgen.dsl.events import EVENT_NAMES
 from appgen.dsl.expressions import (
     Binary,
     Call,
@@ -679,6 +682,72 @@ class PyWorkflow:
 
 
 @dataclass(slots=True)
+class PyEvent:
+    """An event of an entity, or a transition with `run` (ADR 0031).
+
+    The repository runs the custom operation of the event after the
+    change, in the transaction of the change.
+    """
+
+    kind: str
+    """`created`, `changed`, `deleted`, or `transition`."""
+    id: str
+    operation: PyOperation
+    attrs: list[str] = field(default_factory=list[str])
+    """`changed`: the attributes of the fields that the event watches."""
+    fields: list[str] | None = None
+    """`changed`: the names of `fields`, or None for all stored fields."""
+    workflow: PyWorkflow | None = None
+    """`transition`: the workflow of the transition."""
+    before: list[str] = field(default_factory=list[str])
+    """`transition`: the states before the transition."""
+    after: str = ""
+    """`transition`: the state after the transition."""
+    name: str = ""
+    """The name of the event, or of the transition."""
+
+    def summary(self, entity: str) -> str:
+        """Return the change that runs the operation, for the README."""
+        if self.kind == "created":
+            return f"A new {entity}"
+        if self.kind == "deleted":
+            return f"The delete of a {entity}"
+        if self.kind == "changed":
+            fields = ", ".join(f"`{name}`" for name in self.fields or [])
+            return f"A change of {fields} of a {entity}" if fields else f"A change of a {entity}"
+        assert self.workflow is not None
+        return f"The transition `{self.name}` of the workflow `{self.workflow.name}`"
+
+    @property
+    def module(self) -> str:
+        """The extension module of the operation, for example `notify_owner_ext`."""
+        return f"{self.operation.name}_ext"
+
+    @property
+    def function(self) -> str:
+        """The operation in its module, for example `notify_owner_ext.notify_owner`."""
+        return f"{self.module}.{self.operation.name}"
+
+    def call(self, indent: int) -> str:
+        """Return the statement that runs the operation on `record`, without params."""
+        args = ["session", self.function, "session", "record"]
+        if self.operation.params:
+            args.append(f"{self.operation.params_class}()")
+        return call("await ", "run_event", args, indent)
+
+    def condition(self) -> str:
+        """Return the condition of a transition: the state after it, and a state before it."""
+        assert self.workflow is not None
+        attr = self.workflow.attr
+        before = (
+            f'before["{attr}"] == {string(self.before[0])}'
+            if len(self.before) == 1
+            else f'before["{attr}"] in {_python_tuple(list[str | int | bool](self.before))}'
+        )
+        return f"record.{attr} == {string(self.after)} and {before}"
+
+
+@dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
 
@@ -820,6 +889,11 @@ class PyOwnerPath:
         value = current if rel.side == "fk" else f"[{current}]"
         lines.append(f'return {{"{key}": {value}}}')
         return lines
+
+
+def _varies(f: PyField) -> bool:
+    """Return true if the test sample of a field has another value for the next `n`."""
+    return re.search(r"\bn\b", f.sample) is not None
 
 
 def _python_tuple(values: list[str | int | bool]) -> str:
@@ -1009,6 +1083,9 @@ class PyEntity:
     """True if the app has translations: the messages go through `t` (ADR 0010)."""
     full_text: bool = False
     """True if `q` uses the full-text search of Postgres (`x-fastapi-search: fulltext`)."""
+    events: list[PyEvent] = field(default_factory=list[PyEvent])
+    """The events and the transitions with `run` (ADR 0031): created, changed, deleted, the
+    transitions."""
 
     @property
     def guard_module(self) -> str:
@@ -1202,6 +1279,173 @@ class PyEntity:
     def target(self, rel: PyRelation) -> PyEntity:
         return self.app_entities[rel.target]
 
+    @property
+    def created_event(self) -> PyEvent | None:
+        return next((e for e in self.events if e.kind == "created"), None)
+
+    @property
+    def changed_event(self) -> PyEvent | None:
+        return next((e for e in self.events if e.kind == "changed"), None)
+
+    @property
+    def deleted_event(self) -> PyEvent | None:
+        return next((e for e in self.events if e.kind == "deleted"), None)
+
+    @property
+    def update_events(self) -> list[PyEvent]:
+        """The events of an update, in the order of the runs: the transitions, then `changed`."""
+        changed = self.changed_event
+        return [e for e in self.events if e.kind == "transition"] + ([changed] if changed else [])
+
+    @property
+    def before_attrs(self) -> list[str]:
+        """The attributes that an update reads before the change: workflows and `changed`."""
+        attrs = [w.attr for w in self.workflows]
+        changed = self.changed_event
+        for attr in changed.attrs if changed else []:
+            if attr not in attrs:
+                attrs.append(attr)
+        return attrs
+
+    def before_code(self) -> str:
+        """Return the statement of `update` that keeps the values before the change."""
+        return _braces("before = ", [f'"{a}": record.{a}' for a in self.before_attrs], 4)
+
+    def changed_constant_code(self) -> str:
+        """Return the constant with the attributes that the event `changed` watches."""
+        changed = self.changed_event
+        assert changed is not None
+        return literal(changed.attrs, "CHANGED_FIELDS = ")
+
+    def event_import(self, events: list[PyEvent]) -> str:
+        """Return the import of the extension modules of the operations of some events."""
+        return from_import(f"app.features.{self.slice}", {e.module for e in events})
+
+    def event_test_changes(self) -> list[str]:
+        """The fields of a change that runs `changed` in the tests, or none if no change can.
+
+        The tests change all fields to the values of other valid input,
+        so that the rules of the entity hold. The workflow fields keep
+        their state.
+        """
+        changed = self.changed_event
+        if changed is None:
+            return []
+        fields = [f for f in self._test_fields() if f.attr not in self._workflow_attrs()]
+        if not any(f.attr in changed.attrs and _varies(f) for f in fields):
+            return []
+        return [f.name for f in fields]
+
+    def event_test_others(self) -> list[str]:
+        """The fields of a change that does not run `changed` with `fields`, for the tests.
+
+        They are the other fields that the rules of the entity do not read.
+        """
+        changed = self.changed_event
+        if changed is None or len(changed.attrs) == len(self.fields):
+            return []
+        ruled = {a for r in self.rules for a in (r.field, r.other, r.start, r.end, *r.scope)}
+        return [
+            f.name
+            for f in self._test_fields()
+            if f.attr not in changed.attrs
+            and f.attr not in ruled
+            and f.attr not in self._workflow_attrs()
+            and _varies(f)
+        ]
+
+    @property
+    def event_operations(self) -> list[PyOperation]:
+        """The operations of the events, each one time, in the order of the events."""
+        found: dict[str, PyOperation] = {}
+        for event in self.events:
+            found.setdefault(event.operation.name, event.operation)
+        return list(found.values())
+
+    @property
+    def event_hooks(self) -> list[str]:
+        """The functions of the repository that run the events."""
+        hooks = [("on_created", self.created_event), ("on_deleted", self.deleted_event)]
+        hooks.insert(1, ("on_changed", self.update_events[0] if self.update_events else None))
+        return [name for name, event in hooks if event is not None]
+
+    def event_test_field(self) -> PyField:
+        """A field that the change of the test of `changed` changes, and the event watches."""
+        changed = self.changed_event
+        assert changed is not None
+        names = self.event_test_changes()
+        return next(
+            f for f in self.fields if f.name in names and f.attr in changed.attrs and _varies(f)
+        )
+
+    def transition_calls(self, event: PyEvent) -> list[str]:
+        """The operations that the test of a transition expects, in order.
+
+        They are the operations of the transitions of the same change, and
+        of `changed` if it watches the field of the workflow.
+        """
+        assert event.workflow is not None
+        before, attr = event.before[0], event.workflow.attr
+        names = [
+            e.operation.name
+            for e in self.update_events
+            if e.kind == "transition"
+            and e.workflow is event.workflow
+            and before in e.before
+            and e.after == event.after
+        ]
+        changed = self.changed_event
+        if changed is not None and attr in changed.attrs:
+            names.append(changed.operation.name)
+        return names
+
+    @property
+    def loop_event(self) -> PyEvent | None:
+        """The event of the test that a change in an operation starts no event."""
+        if self.created_event or self.deleted_event:
+            return self.created_event or self.deleted_event
+        return self.changed_event if self.event_test_changes() else None
+
+    @property
+    def event_test_sets_state(self) -> bool:
+        """True if a test of a transition sets the state of a record in the database first."""
+        return any(e.workflow is not None and e.before[0] != e.workflow.start for e in self.events)
+
+    def event_test_imports(self) -> str:
+        """Return the import block of the tests of the events."""
+        sqlalchemy = {"func", "select"} | ({"update"} if self.event_test_sets_state else set[str]())
+        schemas = {f"{self.name}Create"} if self.created_event else set[str]()
+        if self.update_events:
+            schemas.add(f"{self.name}Update")
+        factories = {f"make_{self.snake}"}
+        if self.created_event or self.event_test_changes():
+            factories.add(f"{self.snake}_input")
+        lines = {
+            "from collections.abc import Awaitable, Callable",
+            "from typing import Any",
+            "from uuid import UUID",
+            "import pytest",
+            from_import("sqlalchemy", sqlalchemy),
+            "from sqlalchemy.ext.asyncio import AsyncSession",
+            from_import(
+                f"app.features.{self.slice}",
+                {f"{op.name}_ext" for op in self.event_operations} | {"repository"},
+            ),
+            f"from app.features.{self.slice}.models import {self.name}",
+            from_import("tests.factories", factories),
+        }
+        if schemas:
+            lines.add(from_import(f"app.features.{self.slice}.schemas", schemas))
+        if self.files and self.deleted_event:
+            lines |= {"from pathlib import Path", "from app.core.storage import FolderStorage"}
+        return import_block(lines)
+
+    def _test_fields(self) -> list[PyField]:
+        return [f for f in self.fields if not f.translatable and f.type not in ("file", "image")]
+
+    def _workflow_attrs(self) -> set[str]:
+        return {w.attr for w in self.workflows}
+
     def repository_imports(self) -> str:
         """Return the import block of the repository module of the slice."""
         lines: set[str] = {
@@ -1213,11 +1457,14 @@ class PyEntity:
             from_import(
                 f"app.features.{self.slice}.schemas",
                 {f"{self.name}Create", f"{self.name}Update"}
-                | ({f"{self.name}Read"} if self.hides else set[str]()),
+                | ({f"{self.name}Read"} if self.hides else set[str]())
+                | {e.operation.params_class for e in self.events if e.operation.params},
             ),
             f"from app.features.{self.slice}.validation_ext import validate",
         }
-        core = {"commit"} | ({"flush"} if self.scoped else set[str]())
+        core = {"commit"} | ({"flush"} if self.scoped or self.events else set[str]())
+        if self.events:
+            core.add("run_event")
         if self.fk_relations:
             core.add("ensure_exists")
         if self.m2m_relations:
@@ -1596,6 +1843,11 @@ class PyApp:
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
 
     @property
+    def events(self) -> bool:
+        """True if an entity has an event, or a transition has `run` (ADR 0031)."""
+        return any(e.events for e in self.entities.values())
+
+    @property
     def full_text(self) -> bool:
         """True if the list endpoints use the full-text search of Postgres."""
         return self.search_config is not None
@@ -1717,6 +1969,10 @@ class PyApp:
         """Return a text as a Python string literal, with the quotes of the Ruff formatter."""
         return string(value)
 
+    def literal(self, value: Any, prefix: str = "", indent: int = 0) -> str:
+        """Return a JSON value as a Python literal, in the format of the Ruff formatter."""
+        return literal(value, prefix, indent)
+
     def message(self, text: str) -> str:
         """Return a message without values: a call of `t` with translations, else a literal."""
         return f"t({string(text)})" if self.translated else string(text)
@@ -1810,6 +2066,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         users = entities[auth.user_entity]
         by_name = {f.name: f for f in users.fields}
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
+    _events(definition, entities, operations)
     _record_rules(definition, entities)
     search_config = _search_config(definition)
     for entity in entities.values():
@@ -2256,6 +2513,45 @@ def _workflows(definition: AppDefinition, entities: dict[str, PyEntity]) -> None
                 entity=py_entity.snake,
             )
         )
+
+
+def _events(
+    definition: AppDefinition, entities: dict[str, PyEntity], operations: dict[str, PyOperation]
+) -> None:
+    """Add the events and the transitions with `run` to the entities (ADR 0031)."""
+    for name, entity in definition.entities.items():
+        py_entity = entities[name]
+        attrs = {f.name: f.attr for f in py_entity.fields}
+        events = sorted(entity.events.items(), key=lambda item: EVENT_NAMES.index(item[0]))
+        for kind, event in events:
+            watched = event.fields if kind == "changed" and event.fields else list(attrs)
+            py_entity.events.append(
+                PyEvent(
+                    kind=kind,
+                    id=event.id,
+                    operation=operations[event.operation],
+                    attrs=[attrs[n] for n in watched] if kind == "changed" else [],
+                    fields=event.fields,
+                    name=kind,
+                )
+            )
+    for workflow in definition.workflows.values():
+        py_entity = entities[workflow.entity]
+        py_workflow = next(w for w in py_entity.workflows if w.id == workflow.id)
+        for transition_name, transition in workflow.transitions.items():
+            if transition.run is None:
+                continue
+            py_entity.events.append(
+                PyEvent(
+                    kind="transition",
+                    id=transition.id,
+                    operation=operations[transition.run],
+                    workflow=py_workflow,
+                    before=list(transition.from_),
+                    after=transition.to,
+                    name=transition_name,
+                )
+            )
 
 
 def _later_sample(f: PyField) -> None:
