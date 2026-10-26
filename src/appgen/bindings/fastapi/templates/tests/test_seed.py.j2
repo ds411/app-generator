@@ -4,8 +4,14 @@
 {% set remove = py_seed.remove %}
 """The seed (ADR 0021): the first run adds all records, and a second run adds no record."""
 
+{% if py_seed.files %}
+import base64
+from pathlib import Path
+{% endif %}
 {% if change %}
 from uuid import UUID
+{% endif %}
+{% if change or py_seed.files %}
 
 {% endif %}
 import pytest
@@ -18,6 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import Base, make_engine, make_sessions
 from app.core.seed import seed_database
+{% if py_seed.files %}
+from app.core.seed_files import SEED_FILES
+from app.core.storage import FolderStorage
+{% endif %}
 
 pytestmark = pytest.mark.anyio
 
@@ -93,4 +103,28 @@ async def test_a_second_seed_adds_a_deleted_seed_record_and_keeps_a_change(
     assert added == {{ 1 if remove else 0 }}
     assert value == {{ change.value | tojson }}
     assert counts == COUNTS
+{% endif %}
+{% if py_seed.files %}
+
+
+{{ trace(py.storage.id) }}
+async def test_the_seed_saves_the_files_of_the_new_seed_records(
+    migrated_url: str, session: AsyncSession, tmp_path: Path
+) -> None:
+    storage = FolderStorage(tmp_path)
+    engine = make_engine(migrated_url)
+    try:
+        async with make_sessions(engine)() as seed_session:
+            await seed_database(seed_session{{ ", PASSWORD" if password }}, storage=storage)
+            saved = [await storage.read(seed_file.key) for seed_file in SEED_FILES]
+            for seed_file in SEED_FILES:
+                await storage.delete(seed_file.key)
+            await seed_database(seed_session{{ ", PASSWORD" if password }}, storage=storage)
+            again = [await storage.read(seed_file.key) for seed_file in SEED_FILES]
+    finally:
+        await engine.dispose()
+
+    assert saved == [base64.b64decode(seed_file.content) for seed_file in SEED_FILES]
+    # The second seed adds no record, so it saves no file.
+    assert again == [None] * len(SEED_FILES)
 {% endif %}

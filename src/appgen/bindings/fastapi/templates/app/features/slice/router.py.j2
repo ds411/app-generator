@@ -17,3 +17,14 @@ router.include_router({{ op.module }}.router)
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if e.file_endpoints %}
+{% for f in e.files %}
+{{ trace(f.id) }}
+{% endfor %}
+{% set dependencies = e.file_dependencies() %}
+{% if dependencies %}
+router.include_router(files.router, dependencies=[{{ dependencies | join(", ") }}])
+{% else %}
+router.include_router(files.router)
+{% endif %}
+{% endif %}

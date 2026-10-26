@@ -9,6 +9,9 @@ dependencies = [
     "aiosqlite>=0.22",
     "alembic>=1.20",
     "asyncpg>=0.32",
+{% if py.storage and py.storage.s3 %}
+    "boto3>=1.43",
+{% endif %}
     "fastapi[standard]>=0.161,<0.162",
 {% if py_apis or py.providers %}
     "httpx>=0.28",
@@ -26,10 +29,16 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28",
+{% if py.storage and py.storage.s3 %}
+    "moto[s3]>=5.2",
+{% endif %}
     "pyright>=1.1.414",
     "pytest>=9.1",
     "ruff>=0.17",
     "testcontainers[postgres]>=4.14",
+{% if py.storage and py.storage.s3 %}
+    "types-boto3-lite[s3]>=1.43",
+{% endif %}
 ]
 
 [tool.uv]

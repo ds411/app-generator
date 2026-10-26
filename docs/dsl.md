@@ -336,6 +336,31 @@ entities:
 - For more files of one record, use a `one_to_many` relation to an
   entity with a file field, for example `Attachment`.
 
+The FastAPI app keeps the file of a record in a JSON column, and has
+these endpoints for each file field:
+
+- `PUT <path>/{id}/<field>` uploads the file, with a multipart body that
+  has the file in the part `file`, and returns the record. A new file
+  replaces the old one. `DELETE <path>/{id}/<field>` deletes the file.
+  The operation IDs are `upload_<entity>_<field>` and
+  `delete_<entity>_<field>`, for example `upload_task_screenshot`.
+- The endpoints need the permission of the update operation of the
+  entity, else of its create operation, and the record rules of a change
+  apply. An entity without both has no endpoints for its files: only
+  the seed gives them.
+- A file that is larger than `max_size` gives 413, and a type that the
+  field does not allow gives 415. The app takes the type from the first
+  bytes of a PNG, JPEG, GIF, WebP, or PDF file, else from the part.
+- A read gives the file as `name`, `size`, `type` (the media type), and
+  `url`. The URL is a signed link to the app (`/file-links/<token>`) that
+  works without a sign-in, so that an `<img src>` shows the image. It
+  ends after `STORAGE_LINK_SECONDS`.
+- The delete of a record deletes its files. The files of the records
+  that the database deletes with `on_delete: cascade` stay in the
+  storage.
+- A seed record with a file gets the file in the storage when the seed
+  adds the record.
+
 ### Entity rules
 
 `rules` is a mapping from rule name to rule. A rule checks more than
@@ -578,9 +603,17 @@ storage:
 
 With the kind `s3`, the apps keep the files in the folder while the
 variable of the bucket has no value, for example on the machine of a
-developer and in the tests. A variable cannot be a variable that the
-apps use for their own settings, or a variable of an API. The variables
-of the keys cannot start with `NEXT_PUBLIC_` or `VITE_`.
+developer and in the tests. The default folder is `uploads`. A variable
+cannot be a variable that the apps use for their own settings, or a
+variable of an API. The variables of the keys cannot start with
+`NEXT_PUBLIC_` or `VITE_`.
+
+The FastAPI app has two more settings for the signed links of the files:
+`STORAGE_LINK_SECRET`, the key that signs the links (a long random text,
+the same in all processes; without it, each process signs with a random
+key), and `STORAGE_LINK_SECONDS`, the time that a link works (default
+3600). The links start with `PUBLIC_URL`, else with the URL of the
+request.
 
 ## operations
 
@@ -2049,8 +2082,9 @@ to translate one. The rules and the workflows give their own messages.
 
 - The titles of the problem details: `Bad Request`, `Unauthorized`,
   `Forbidden`, `Not Found`, `Method Not Allowed`, `Conflict`,
-  `Unprocessable Content`, `Too Many Requests`, `Internal Server Error`,
-  `Not Implemented`, `Bad Gateway`, `Service Unavailable`.
+  `Content Too Large`, `Unsupported Media Type`, `Unprocessable Content`,
+  `Too Many Requests`, `Internal Server Error`, `Not Implemented`,
+  `Bad Gateway`, `Service Unavailable`.
 - The errors of the input: `The request is not valid.`, and for each
   value `Enter a value.`, `Use {count} or more characters.`,
   `Use {count} or fewer characters.`, `Use {count} or more.`,
@@ -2121,6 +2155,9 @@ to translate one. The rules and the workflows give their own messages.
   `The signature of the webhook is not valid.`,
   `The body of the webhook is not valid JSON.`,
   `The webhook has no event ID.`.
+- The files of the file fields: `The file is larger than {size}.`,
+  `The type {type} is not allowed. Use one of: {types}.`, and for a link
+  that is not valid `The link is not valid, or has ended.`.
 
 ## Extension keys
 

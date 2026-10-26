@@ -48,18 +48,35 @@ PERMISSIONS: dict[str, frozenset[str]] = {
 }
 """The operations of each role. `*` stands for all operations."""
 {% set widgets = py.dashboards.values() | map(attribute="widgets") | sum(start=[]) | selectattr("protected") | list %}
-{% if widgets %}
+{% set needs = py.needs %}
+{% if needs %}
 NEEDS: dict[str, str] = {
-{% for w in widgets %}
-    {{ trace(w.id) }}
-    "{{ w.operation_id }}": "{{ w.permission }}",
+{% for operation_id, permission, element_id in needs %}
+    {{ trace(element_id) }}
+    "{{ operation_id }}": "{{ permission }}",
 {% endfor %}
 }
+{% if widgets and needs | length > widgets | length %}
+"""The endpoints that need the permission of an operation, and the operation of each.
+
+A dashboard widget needs the list operation of its entity. A widget of an
+entity without a list operation needs its own operation ID, which only `*`
+gives. The upload and the delete of a file need the update operation of
+the entity, else its create operation (ADR 0027).
+"""
+{% elif widgets %}
 """The endpoints of the dashboard widgets, and the operation that each needs.
 
 A widget needs the list operation of its entity. A widget of an entity
 without a list operation needs its own operation ID, which only `*` gives.
 """
+{% else %}
+"""The endpoints of the files, and the operation that each needs.
+
+The upload and the delete of a file need the update operation of the
+entity, else its create operation (ADR 0027).
+"""
+{% endif %}
 {% endif %}
 
 
@@ -72,7 +89,7 @@ def allows(role: object, operation: str) -> bool:
 async def check_access(request: Request, user: CurrentUser) -> None:
     """Give a 403 error if the role of the signed-in user may not call the operation."""
     operation = getattr(request.scope.get("route"), "operation_id", None)
-{% if widgets %}
+{% if needs %}
     if operation is not None:
         operation = NEEDS.get(str(operation), str(operation))
 {% endif %}

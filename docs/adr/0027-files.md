@@ -135,9 +135,15 @@ file in their code, as text (Base64). A seed file can have 1 MB or less.
   permission of the update operation of the entity (else of the create
   operation), and the record rules of the change apply (ADR 0025). The
   read schema gives the name, the size, the type, and a URL of the file.
-  The URL is a signed link to the app, which ends after a time, so an
-  `<img src>` works without the bearer token. The app gives the link
-  only with a read of the record, so the access rules of the read apply.
+  The URL is a signed link to the app (`/file-links/<token>`, an
+  HMAC-SHA256 signature with `STORAGE_LINK_SECRET`), which ends after a
+  time (`STORAGE_LINK_SECONDS`), so an `<img src>` works without the
+  bearer token. The end of a link is a multiple of 5 minutes, so that a
+  browser can cache the file. The app gives the link only with a read of
+  the record, so the access rules of the read apply. The response of a
+  link has `X-Content-Type-Options: nosniff` and a content security
+  policy with `sandbox`, so that a file cannot run scripts. The S3
+  storage uses boto3 in worker threads.
 - Next.js: the server actions of the forms take the files in their
   form data. A route handler gives a file. It checks the session and the
   access rules of the record, as a read does.

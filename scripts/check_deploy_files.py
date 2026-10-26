@@ -4,8 +4,9 @@ The FastAPI and the Next.js bindings write the files of each deployment
 target of the key `x-fastapi-deploy` or `x-nextjs-deploy` (ADR 0013):
 `deploy/kubernetes/` (Kustomize) and `deploy/knative/` (a Knative Service
 that Google Cloud Run accepts). The script generates the two examples
-with both targets, one with the Redis store of the rate limit, and
-checks each file of `deploy/`:
+with both targets, one with the Redis store of the rate limit (and for
+FastAPI, tests/fixtures/files.yaml with the files in a bucket and in a
+folder), and checks each file of `deploy/`:
 
 - A Kubernetes object: the JSON schema of the Kubernetes API, strict, so
   that an unknown field is an error (yannh/kubernetes-json-schema).
@@ -54,17 +55,29 @@ from appgen.bindings.nextjs import model as nextjs
 from appgen.dsl import load_definition_text
 from appgen.gen import find_binding, generate
 
-EXAMPLES = {
+EXAMPLES: dict[str, tuple[tuple[str, dict[str, str], dict[str, str]], ...]] = {
     binding: (
-        ("project-tracker", {model.DEPLOY_KEY: "[kubernetes, knative]"}),
+        ("examples/project-tracker/app.yaml", {model.DEPLOY_KEY: "[kubernetes, knative]"}, {}),
         (
-            "room-booking",
+            "examples/room-booking/app.yaml",
             {model.DEPLOY_KEY: "[kubernetes, knative]", model.RATE_LIMIT_STORE_KEY: "redis"},
+            {},
         ),
     )
     for binding, model in (("fastapi", fastapi), ("nextjs", nextjs))
 }
-"""The examples of each binding, and the keys that the script adds to their `app` section."""
+# The files of the file fields (ADR 0027) in an S3 bucket, and in a folder.
+FILES = "tests/fixtures/files.yaml"
+EXAMPLES["fastapi"] += (
+    (FILES, {fastapi.DEPLOY_KEY: "[kubernetes, knative]"}, {}),
+    (
+        FILES,
+        {fastapi.DEPLOY_KEY: "[kubernetes, knative]"},
+        {"  kind: s3\n  bucket_env: LIBRARY_BUCKET\n": "  kind: local\n"},
+    ),
+)
+"""The definitions of each binding, the keys that the script adds to their `app` section, and
+the texts that it replaces."""
 NEXTJS_SERVER_SETTINGS = {"HOSTNAME", "PORT"}
 """The settings that the standalone server of Next.js reads, not the code of the app."""
 KUBERNETES_SCHEMAS = "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master"
@@ -201,18 +214,24 @@ def check_cloud_run(path: str, content: str) -> None:
         raise CheckError(f"Cloud Run does not accept {path}:\n  " + "\n  ".join(problem))
 
 
-def check(binding: str, example: str, keys: dict[str, str]) -> None:
-    source = Path("examples") / example / "app.yaml"
+def check(binding: str, example: str, keys: dict[str, str], changes: dict[str, str]) -> None:
+    source = Path(example)
     text = source.read_text()
     lines = "".join(f"  {key}: {value}\n" for key, value in keys.items())
     text, count = re.subn(r"(?m)^app:\n", f"app:\n{lines}", text, count=1)
     if count != 1:
         raise CheckError(f"{source} has no 'app:' line.")
+    for old, new in changes.items():
+        if old not in text:
+            raise CheckError(f"{source} has no text {old!r}.")
+        text = text.replace(old, new)
     # The path of the example, so that the loader finds the OpenAPI documents of `apis`.
     result = generate(load_definition_text(text, str(source)), find_binding(binding))
     files = {f.path: f.content for f in result.files}
     deploy = sorted(path for path in files if path.startswith("deploy/"))
-    log(f"{example} with {', '.join(f'{k}: {v}' for k, v in keys.items())}: {len(deploy)} files")
+    keys_text = ", ".join(f"{k}: {v}" for k, v in keys.items())
+    changed = f" and {len(changes)} changed texts" if changes else ""
+    log(f"{example} with {keys_text}{changed}: {len(deploy)} files")
     known = settings(binding, files)
     targets: dict[str, set[str]] = {}
     for path in deploy:
@@ -245,8 +264,8 @@ def main() -> int:
     parser.add_argument("binding", choices=sorted(EXAMPLES))
     binding = parser.parse_args().binding
     try:
-        for example, keys in EXAMPLES[binding]:
-            check(binding, example, keys)
+        for example, keys, changes in EXAMPLES[binding]:
+            check(binding, example, keys, changes)
     except (CheckError, OSError, subprocess.CalledProcessError) as error:
         print(f"deploy-files: failed: {error}", file=sys.stderr)
         return 1

@@ -1,0 +1,177 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set f = e.files[0] %}
+{% set url = e.path ~ f.path %}
+{% set id_url = 'f"' ~ (url | replace("{id}", "{record.id}")) ~ '"' %}
+{% set sample_name, sample_type, sample_content = f.sample %}
+{% set delete_ops = e.operations | selectattr("kind", "eq", "delete") | list %}
+{% set delete_op = delete_ops[0] if delete_ops else none %}
+{% set uses_png = e.files | map(attribute="sample") | map("last") | select("eq", "PNG") | list %}
+"""The tests of the files of the entity {{ e.name }} (ADR 0027): the upload, the link, and the delete."""
+
+{% set lines = [
+    "import time",
+    "from pathlib import Path",
+    "from uuid import uuid4",
+    "import pytest",
+    "from httpx import AsyncClient",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from app.core.storage import FileLinks, FileRule",
+    "from app.features." ~ e.slice ~ " import files",
+    "from tests.factories import make_" ~ e.snake,
+    "from tests.problems import assert_problem",
+] %}
+{% if uses_png %}
+{% set lines = lines + ["import base64"] %}
+{% endif %}
+{{ py.imports(lines) }}
+
+pytestmark = pytest.mark.anyio
+{% if uses_png %}
+
+PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP4//8/AAX+Av4zEpUUAAAAAElFTkSuQmCC"
+)
+"""An image of one pixel."""
+{% endif %}
+SAMPLE = ({{ py.string(sample_name) }}, {{ sample_content }}, {{ py.string(sample_type) }})
+"""A file that the field `{{ f.name }}` allows: the name, the content, and the media type."""
+
+
+def stored_files(folder: Path) -> list[Path]:
+    """Return the files in the folder of the storage."""
+    return sorted(path for path in folder.rglob("*") if path.is_file())
+
+
+{{ trace(f.id) }}
+async def test_an_upload_stores_the_file_and_gives_a_link(
+    client: AsyncClient, session: AsyncSession, files_folder: Path
+) -> None:
+    record = await make_{{ e.snake }}(session)
+
+    response = await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    assert response.status_code == 200, response.text
+    value = response.json()[{{ py.string(f.name) }}]
+    assert (value["name"], value["size"], value["type"]) == (SAMPLE[0], len(SAMPLE[1]), SAMPLE[2])
+    assert [path.read_bytes() for path in stored_files(files_folder)] == [SAMPLE[1]]
+    linked = await client.get(value["url"])
+    assert linked.status_code == 200
+    assert linked.content == SAMPLE[1]
+    assert linked.headers["content-type"].startswith(SAMPLE[2])
+    assert linked.headers["x-content-type-options"] == "nosniff"
+
+
+{{ trace(f.id) }}
+async def test_a_new_file_replaces_the_old_file(
+    client: AsyncClient, session: AsyncSession, files_folder: Path
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    first = await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    second = await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    assert second.status_code == 200, second.text
+    assert first.json()[{{ py.string(f.name) }}]["url"] != second.json()[{{ py.string(f.name) }}]["url"]
+    assert len(stored_files(files_folder)) == 1
+
+
+{{ trace(f.id) }}
+async def test_a_delete_removes_the_file(
+    client: AsyncClient, session: AsyncSession, files_folder: Path
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    response = await client.delete({{ id_url }})
+
+    assert response.status_code == 200, response.text
+    assert response.json()[{{ py.string(f.name) }}] is None
+    assert stored_files(files_folder) == []
+{% if delete_op %}
+
+
+{{ trace(delete_op.id) }}
+async def test_the_delete_of_a_record_removes_its_files(
+    client: AsyncClient, session: AsyncSession, files_folder: Path
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    response = await client.delete(f"{{ e.path ~ delete_op.path | replace("{id}", "{record.id}") }}")
+
+    assert response.status_code == 204, response.text
+    assert stored_files(files_folder) == []
+{% endif %}
+
+
+{{ trace(f.id) }}
+async def test_a_file_that_is_too_large_gives_413(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    monkeypatch.setattr(files, "{{ f.rule }}", FileRule(max_size=4, types=files.{{ f.rule }}.types))
+
+    response = await client.put({{ id_url }}, files={"file": SAMPLE})
+
+    assert_problem(response, 413)
+{% if f.rejected_type %}
+
+
+{{ trace(f.id) }}
+async def test_a_type_that_the_field_does_not_allow_gives_415(
+    client: AsyncClient, session: AsyncSession, files_folder: Path
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    other = ("page.html", b"<script>alert(1)</script>", {{ py.string(f.rejected_type) }})
+
+    response = await client.put({{ id_url }}, files={"file": other})
+
+    assert_problem(response, 415)
+    assert stored_files(files_folder) == []
+{% endif %}
+
+
+{{ trace(f.id) }}
+async def test_an_upload_to_a_record_that_does_not_exist_gives_404(client: AsyncClient) -> None:
+    response = await client.put(f"{{ url | replace("{id}", "{uuid4()}") }}", files={"file": SAMPLE})
+
+    assert_problem(response, 404)
+
+
+{{ trace(py.storage.id) }}
+async def test_a_link_that_has_ended_or_changed_gives_404(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    uploaded = (await client.put({{ id_url }}, files={"file": SAMPLE})).json()
+    await session.refresh(record)
+    stored = record.{{ f.attr }}
+    assert stored is not None
+    ended = FileLinks(b"test-secret", 60, "http://test").url(stored, now=time.time() - 3600)
+    changed = uploaded[{{ py.string(f.name) }}]["url"][:-4] + "AAAA"
+
+    for url in (ended, changed):
+        assert_problem(await client.get(url), 404)
+{% if e.files | length > 1 %}
+
+
+@pytest.mark.parametrize(
+    ("path", "sample"),
+    [
+{% for other in e.files[1:] %}
+{% set o_name, o_type, o_content = other.sample %}
+        {{ trace(other.id) }}
+        ({{ py.string(other.path | replace("/{id}", "")) }}, ({{ py.string(o_name) }}, {{ o_content }}, {{ py.string(o_type) }})),
+{% endfor %}
+    ],
+)
+async def test_each_file_field_takes_a_file(
+    client: AsyncClient, session: AsyncSession, path: str, sample: tuple[str, bytes, str]
+) -> None:
+    record = await make_{{ e.snake }}(session)
+
+    response = await client.put(f"{{ e.path }}/{record.id}{path}", files={"file": sample})
+
+    assert response.status_code == 200, response.text
+{% endif %}

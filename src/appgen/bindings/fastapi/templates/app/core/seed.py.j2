@@ -13,6 +13,9 @@ start at the same time do not fail. `app/core/seed_data.py` holds the
 rows.
 """
 
+{% if py_seed.files %}
+import base64
+{% endif %}
 from uuid import UUID
 
 from sqlalchemy import Insert, Table, func, select, update
@@ -24,13 +27,34 @@ from app.core.auth import Credential, hash_password
 {% endif %}
 from app.core.db import Base
 from app.core.seed_data import JOINS, TABLES, Row
+{% if py_seed.files %}
+from app.core.seed_files import SEED_FILES
+{% endif %}
+{% if py.storage %}
+from app.core.storage import Storage
+{% endif %}
 
 
-{% if password %}
+{% if password and py.storage %}
+async def seed_database(
+    session: AsyncSession, password: str = "", storage: Storage | None = None
+) -> int:
+    """Add the seed records, and return the number of records that the seed adds.
+
+    With a password, each new seed user can sign in with this password.
+    With a storage, the seed saves the files of the new seed records in it.
+    """
+{% elif password %}
 async def seed_database(session: AsyncSession, password: str = "") -> int:
     """Add the seed records, and return the number of records that the seed adds.
 
     With a password, each new seed user can sign in with this password.
+    """
+{% elif py.storage %}
+async def seed_database(session: AsyncSession, storage: Storage | None = None) -> int:
+    """Add the seed records, and return the number of records that the seed adds.
+
+    With a storage, the seed saves the files of the new seed records in it.
     """
 {% else %}
 async def seed_database(session: AsyncSession) -> int:
@@ -74,9 +98,23 @@ async def seed_database(session: AsyncSession) -> int:
         await session.execute(_insert_or_skip(session, table), credentials)
 {% endif %}
     await session.commit()
+{% if py_seed.files %}
+    if storage is not None:
+        await _save_files(storage, added)
+{% endif %}
     return count
 
 
+{% if py_seed.files %}
+async def _save_files(storage: Storage, added: dict[str, set[UUID]]) -> None:
+    """Save the files of the new seed records in the storage, after the commit."""
+    for seed_file in SEED_FILES:
+        table, record_id = seed_file.key.split("/")[:2]
+        if UUID(record_id) in added.get(table, set[UUID]()):
+            await storage.save(seed_file.key, base64.b64decode(seed_file.content), seed_file.type)
+
+
+{% endif %}
 async def _count(session: AsyncSession, table: Table) -> int:
     return await session.scalar(select(func.count()).select_from(table)) or 0
 

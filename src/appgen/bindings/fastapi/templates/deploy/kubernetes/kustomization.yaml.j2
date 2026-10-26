@@ -21,6 +21,9 @@ resources:
 {% if py.jobs %}
   - worker.yaml
 {% endif %}
+{% if py.storage and not py.storage.s3 %}
+  - files-volume.yaml
+{% endif %}
 
 # Set the registry and the tag of the image that you push.
 images:

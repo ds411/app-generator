@@ -213,10 +213,19 @@ async def update(session: AsyncSession, record: {{ e.name }}, data: {{ e.name }}
     return await get(session, record.id)
 
 
+{% if e.files %}
+async def delete(session: AsyncSession, record: {{ e.name }}, storage: Storage) -> None:
+    """Delete a record, and then its files (ADR 0027)."""
+    {{ e.files_statement() }}
+    await session.delete(record)
+    await commit(session)
+    await delete_files(storage, files)
+{% else %}
 async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
     """Delete a record."""
     await session.delete(record)
     await commit(session)
+{% endif %}
 
 
 {% if e.check_rules %}

@@ -27,6 +27,10 @@ FROM ${PYTHON_IMAGE}
 RUN useradd --system --uid 10001 --no-create-home app
 WORKDIR /app
 COPY --from=build --chown=app:app /app /app
+{% if py.storage %}
+# The folder of the files of the file fields: a volume keeps the files.
+RUN install -d -o app -g app /app/uploads
+{% endif %}
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
 USER app

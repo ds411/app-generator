@@ -65,6 +65,11 @@ BINDING = Binding(
                 "secret.example.env",
             )
         ),
+        Output(
+            template="deploy/kubernetes/files-volume.yaml.j2",
+            path="deploy/kubernetes/files-volume.yaml",
+            when="'kubernetes' in py.deploy and py.storage and not py.storage.s3",
+        ),
         *(
             Output(
                 template=f"deploy/knative/{name}.j2",
@@ -112,6 +117,12 @@ BINDING = Binding(
         Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
         Output(template="app/core/schemas.py.j2", path="app/core/schemas.py"),
         Output(template="app/core/types.py.j2", path="app/core/types.py"),
+        Output(template="app/core/storage.py.j2", path="app/core/storage.py", when="py.storage"),
+        Output(
+            template="app/core/seed_files.py.j2",
+            path="app/core/seed_files.py",
+            when="py_seed.files",
+        ),
         Output(template="app/core/i18n.py.j2", path="app/core/i18n.py", when="i18n"),
         Output(template="app/core/auth.py.j2", path="app/core/auth.py", when="definition.auth"),
         Output(template="app/cli.py.j2", path="app/cli.py"),
@@ -213,6 +224,12 @@ BINDING = Binding(
             extension=True,
         ),
         Output(
+            template="app/features/slice/files.py.j2",
+            path=_SLICE + "/files.py",
+            for_each="entity",
+            when="py.entity(name).file_endpoints",
+        ),
+        Output(
             template="app/features/slice/validation_ext.py.j2",
             path=_SLICE + "/validation_ext.py",
             for_each="entity",
@@ -279,6 +296,12 @@ BINDING = Binding(
             path=_TESTS + "/test_translations.py",
             for_each="entity",
             when="py.entity(name).translatable and i18n_test",
+        ),
+        Output(
+            template="tests/features/slice/test_files.py.j2",
+            path=_TESTS + "/test_files.py",
+            for_each="entity",
+            when="py.entity(name).file_endpoints",
         ),
         Output(
             template="tests/features/slice/test_list_query.py.j2",
@@ -399,6 +422,9 @@ BINDING = Binding(
             path="tests/jobs/test_{{ name }}.py",
             for_each="job",
         ),
+        Output(
+            template="tests/test_storage.py.j2", path="tests/test_storage.py", when="py.storage"
+        ),
     ),
     covers=frozenset(
         {"app", "entity", "field", "relation", "operation", "param"}
@@ -411,6 +437,7 @@ BINDING = Binding(
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
         | {"job"}
+        | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),

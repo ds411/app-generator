@@ -16,7 +16,9 @@ from appgen.gen.generator import generate
 ROOT = Path(__file__).parent.parent
 EXAMPLE = ROOT / "examples" / "project-tracker" / "app.yaml"
 ROOM_BOOKING = ROOT / "examples" / "room-booking" / "app.yaml"
-TITLES = {HTTPStatus(s).phrase for s in (400, 401, 403, 404, 405, 409, 422, 500, 501, 502)}
+TITLES = {
+    HTTPStatus(s).phrase for s in (400, 401, 403, 404, 405, 409, 413, 415, 422, 500, 501, 502)
+}
 """The titles of the problem details that the API gives, as `t(HTTPStatus(status).phrase)`."""
 
 
@@ -265,7 +267,18 @@ def definition_messages(definition: AppDefinition) -> set[str]:
 def test_the_docs_list_the_messages_of_the_api() -> None:
     texts = set(TITLES)
     security = load_definition(ROOT / "tests" / "fixtures" / "account-security.yaml")
-    for definition in (load_definition(EXAMPLE), room_booking_in_two_languages(), security):
+    files_path = ROOT / "tests" / "fixtures" / "files.yaml"
+    languages = dedent(
+        """\
+        translations:
+          default: en
+          languages:
+            en: { label: English }
+            de: { label: Deutsch }
+        """
+    )
+    files = load_definition_text(files_path.read_text() + languages, str(files_path))
+    for definition in (load_definition(EXAMPLE), room_booking_in_two_languages(), security, files):
         texts |= api_texts(files_of(definition)) - definition_messages(definition)
     docs = (ROOT / "docs" / "dsl.md").read_text(encoding="utf-8")
     section = docs[docs.index("### Messages of the FastAPI app") :]

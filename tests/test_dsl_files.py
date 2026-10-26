@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from appgen.bindings import fastapi, minimal, nextjs, react
+from appgen.bindings import minimal, nextjs, react
 from appgen.dsl import load_definition_text, validate_definition
 from appgen.dsl.schema import json_schema
 from appgen.dsl.storage import (
@@ -372,7 +372,7 @@ def test_the_manifest_records_the_hash_of_each_seed_file(tmp_path: Path) -> None
     assert result.documents["files/login.png"] == file.hash
 
 
-@pytest.mark.parametrize("binding", [fastapi.BINDING, nextjs.BINDING, react.BINDING])
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING])
 def test_a_binding_without_file_fields_stops(binding: object) -> None:
     from appgen.gen import Binding
 

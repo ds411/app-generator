@@ -1,0 +1,84 @@
+{{ trace_header(element_id) }}
+{% set e = py.entity(name) %}
+{% set scope = e.file_scope %}
+{% set sarg = ", scope" if scope and e.scoped else "" %}
+"""The files of the entity {{ e.name }} (ADR 0027): the upload and the delete of each file.
+
+The endpoints need the permission of the operation `{{ e.file_permission.name }}`{% if scope %}, and the
+record rules of a change apply (ADR 0025){% endif %}. A new file replaces the old one.
+"""
+
+{{ e.file_imports() }}
+
+router = APIRouter(prefix="{{ e.path }}")
+{% if scope %}
+
+Scope = Annotated[RecordScope | None, Depends(scope_of("change"))]
+"""The records that the request may change (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% for f in e.files %}
+
+{{ trace(f.id) }}
+{{ f.rule_call() }}
+"""The largest file{{ " and the media types" if f.media_types }} of the field `{{ f.name }}`."""
+{% endfor %}
+{% for f in e.files %}
+
+
+{{ trace(f.id) }}
+@router.put(
+    "{{ f.path }}",
+    responses=problem_responses(404, 413, 415, 422),
+    summary="Upload {{ e.snake | replace('_', ' ') }} {{ f.name | replace('_', ' ') }}",
+    operation_id="{{ f.upload_operation }}",
+)
+async def {{ f.upload_operation }}(
+    id: UUID,
+    file: UploadFile,
+    session: SessionDep,
+    storage: StorageDep,
+{% if scope %}
+    scope: Scope,
+{% endif %}
+) -> {{ e.name }}Read:
+    """Upload the file of the field `{{ f.name }}` of a record. It replaces the old file."""
+    record = await repository.get(session, id{{ sarg }})
+    stored = await upload(storage, file, {{ f.rule }}, f"{{ e.table }}/{id}/{{ f.name }}")
+    await replace_file(session, storage, record, "{{ f.attr }}", stored)
+{% if e.hides and scope %}
+    result = {{ e.name }}Read.model_validate(await repository.get(session, id))
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
+    return {{ e.name }}Read.model_validate(await repository.get(session, id))
+{% endif %}
+
+
+{{ trace(f.id) }}
+@router.delete(
+    "{{ f.path }}",
+    responses=problem_responses(404, 422),
+    summary="Delete {{ e.snake | replace('_', ' ') }} {{ f.name | replace('_', ' ') }}",
+    operation_id="{{ f.delete_operation }}",
+)
+{% if scope %}
+async def {{ f.delete_operation }}(
+    id: UUID,
+    session: SessionDep,
+    storage: StorageDep,
+    scope: Scope,
+) -> {{ e.name }}Read:
+{% else %}
+{{ py.call("async def ", f.delete_operation, ["id: UUID", "session: SessionDep", "storage: StorageDep"], 0, " -> " ~ e.name ~ "Read:") }}
+{% endif %}
+    """Delete the file of the field `{{ f.name }}` of a record."""
+    record = await repository.get(session, id{{ sarg }})
+    await replace_file(session, storage, record, "{{ f.attr }}", None)
+{% if e.hides and scope %}
+    result = {{ e.name }}Read.model_validate(await repository.get(session, id))
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
+    return {{ e.name }}Read.model_validate(await repository.get(session, id))
+{% endif %}
+{% endfor %}

@@ -40,6 +40,8 @@ RESERVED_ENV_NAMES = frozenset(
         "PUBLIC_URL",
         "RATE_LIMIT_PER_MINUTE",
         "SEED_PASSWORD",
+        "STORAGE_LINK_SECONDS",
+        "STORAGE_LINK_SECRET",
         "TEST_DATABASE_URL",
     }
 )

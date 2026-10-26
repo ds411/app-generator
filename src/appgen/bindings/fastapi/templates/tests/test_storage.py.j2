@@ -1,0 +1,133 @@
+{{ trace_header(py.storage.id) }}
+{% set st = py.storage %}
+"""The tests of the storage of the files (ADR 0027): the {{ "folder, the bucket" if st.s3 else "folder" }}, the types, and the links."""
+
+from pathlib import Path
+
+import pytest
+{% if st.s3 %}
+from moto import mock_aws
+{% endif %}
+
+from app.core.config import Settings
+from app.core.storage import (
+{% if st.s3 %}
+    BucketStorage,
+{% endif %}
+    FileLinks,
+    FileRule,
+    FolderStorage,
+    file_name,
+    make_storage,
+    media_type_of,
+    size_text,
+)
+from app.core.types import StoredFile
+
+pytestmark = pytest.mark.anyio
+
+STORED = StoredFile(key="notes/1/file/abc", name="notes.txt", size=5, type="text/plain")
+
+
+async def test_the_folder_saves_reads_and_deletes_a_file(tmp_path: Path) -> None:
+    storage = FolderStorage(tmp_path)
+
+    await storage.save("notes/1/file/abc", b"hello", "text/plain")
+
+    assert await storage.read("notes/1/file/abc") == b"hello"
+    await storage.delete("notes/1/file/abc")
+    assert await storage.read("notes/1/file/abc") is None
+    await storage.delete("notes/1/file/abc")
+
+
+async def test_a_key_cannot_leave_the_folder(tmp_path: Path) -> None:
+    storage = FolderStorage(tmp_path / "files")
+
+    with pytest.raises(ValueError):
+        await storage.read("../secret.txt")
+{% if st.s3 %}
+
+
+async def test_the_bucket_saves_reads_and_deletes_a_file() -> None:
+    with mock_aws():
+        settings = Settings(
+            {{ st.setting("bucket_env") }}="test-files",
+            {{ st.setting("region_env") }}="us-east-1",
+            {{ st.setting("endpoint_env") }}="",
+            {{ st.setting("access_key_env") }}="test",
+            {{ st.setting("secret_key_env") }}="test",
+        )
+        storage = make_storage(settings)
+        assert isinstance(storage, BucketStorage)
+        storage.client.create_bucket(Bucket="test-files")
+
+        await storage.save("notes/1/file/abc", b"hello", "text/plain")
+
+        assert await storage.read("notes/1/file/abc") == b"hello"
+        await storage.delete("notes/1/file/abc")
+        assert await storage.read("notes/1/file/abc") is None
+
+
+def test_without_a_bucket_the_files_go_to_the_folder(tmp_path: Path) -> None:
+    settings = Settings({{ st.setting("bucket_env") }}="", {{ st.setting("folder_env") }}=str(tmp_path))
+
+    assert isinstance(make_storage(settings), FolderStorage)
+{% else %}
+
+
+def test_the_storage_is_the_folder_of_the_settings(tmp_path: Path) -> None:
+    storage = make_storage(Settings({{ st.setting("folder_env") }}=str(tmp_path)))
+
+    assert isinstance(storage, FolderStorage)
+    assert storage.folder == tmp_path.resolve()
+{% endif %}
+
+
+@pytest.mark.parametrize(
+    ("content", "given", "expected"),
+    [
+        (b"\x89PNG\r\n\x1a\n...", "text/plain", "image/png"),
+        (b"%PDF-1.7", None, "application/pdf"),
+        (b"RIFF\x0c\x00\x00\x00WEBPVP8 ", "image/png", "image/webp"),
+        (b"<html></html>", "image/png", "application/octet-stream"),
+        (b"a,b", "text/csv; charset=utf-8", "text/csv"),
+        (b"data", None, "application/octet-stream"),
+    ],
+)
+def test_the_first_bytes_give_the_media_type_of_a_known_file(
+    content: bytes, given: str | None, expected: str
+) -> None:
+    assert media_type_of(content, given) == expected
+
+
+def test_a_rule_allows_its_types_and_their_groups() -> None:
+    rule = FileRule(max_size=10, types=("image/*", "application/pdf"))
+
+    assert rule.allows("image/png") and rule.allows("application/pdf")
+    assert not rule.allows("text/html")
+    assert FileRule(max_size=10).allows("text/html")
+
+
+def test_the_name_of_an_upload_has_no_folders() -> None:
+    assert file_name("C:\\Users\\me\\photo.png") == "photo.png"
+    assert file_name("../../etc/passwd") == "passwd"
+    assert file_name(None) == "file"
+
+
+def test_a_size_has_a_unit() -> None:
+    assert [size_text(n) for n in (512, 1536, 5 * 1024 * 1024)] == ["512 B", "1.5 KB", "5 MB"]
+
+
+def test_a_link_opens_until_it_ends() -> None:
+    links = FileLinks(b"secret", 600, "http://test")
+    token = links.url(STORED, now=1000.0).removeprefix("http://test/file-links/")
+
+    found = links.open(token, now=1000.0)
+
+    assert found is not None
+    assert (found.key, found.name, found.type) == ("notes/1/file/abc", "notes.txt", "text/plain")
+    assert found.expires == 1800
+    assert links.open(token, now=1800.0) is None
+    assert FileLinks(b"other", 600).open(token, now=1000.0) is None
+    assert links.open(token[:-2] + "xx", now=1000.0) is None
+    assert links.open("not-a-token", now=1000.0) is None

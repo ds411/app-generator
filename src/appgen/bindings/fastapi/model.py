@@ -32,7 +32,6 @@ from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_que
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
 from appgen.bindings.fastapi.webhooks import python_webhooks
-from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.i18n import i18n_plan
 from appgen.dsl.access import RecordRule
 from appgen.dsl.expressions import (
@@ -46,6 +45,7 @@ from appgen.dsl.expressions import (
 )
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
+from appgen.dsl.storage import FILE_TYPES, format_size, type_allows
 from appgen.gen.naming import constant, kebab, pascal, snake
 from appgen.gen.render import GenerationError
 
@@ -102,6 +102,18 @@ SEARCH_CONFIGS = {
 """The text search configuration of Postgres for each language (ISO 639-1)."""
 
 _INT32 = 2**31 - 1
+_FILE_SAMPLES = (
+    ("image/png", "sample.png", "PNG"),
+    ("application/pdf", "sample.pdf", 'b"%PDF-1.7\\n%%EOF\\n"'),
+    ("text/plain", "sample.txt", 'b"A sample text."'),
+    ("image/jpeg", "sample.jpg", 'b"\\xff\\xd8\\xff\\xe0 sample"'),
+    ("image/gif", "sample.gif", 'b"GIF89a sample"'),
+    ("image/webp", "sample.webp", 'b"RIFF\\x0c\\x00\\x00\\x00WEBPVP8 "'),
+)
+"""The files of the generated tests of the file fields: the media type, the name, and the
+content as Python (`PNG` is a constant of the test module: an image of one pixel)."""
+_OTHER_TYPES = ("text/html", "application/x-appgen-test", "image/x-appgen-test")
+"""The media types of the generated tests of a type that a file field does not allow."""
 _ON_DELETE = {"restrict": "RESTRICT", "cascade": "CASCADE", "set_null": "SET NULL"}
 _ORDERED_TYPES = frozenset({"string", "integer", "decimal", "date", "datetime", "email", "url"})
 _FILTER_TYPES = frozenset(
@@ -318,6 +330,90 @@ def _declare(attr: str, type_: str, default: str | None, args: list[str]) -> str
     if default is not None:
         args = [f"default={default}", *args]
     return call(f"{attr}: {type_} = ", "Field", args)
+
+
+@dataclass(frozen=True, slots=True)
+class PyFile:
+    """A file field of an entity (ADR 0027): a JSON column, and the endpoints of its file."""
+
+    name: str
+    """The name in the definition: the column name and the JSON name."""
+    attr: str
+    """The Python attribute name."""
+    id: str
+    entity: str
+    """The snake case name of the entity, for example `task`."""
+    max_size: int
+    """The largest file, in bytes."""
+    media_types: tuple[str, ...]
+    """The media types that the field allows, for example `image/*`. Empty: all types."""
+    docs: list[tuple[str, str]]
+    """The `title` and the `description` of the field, as the arguments of `pydantic.Field`."""
+
+    @property
+    def aliased(self) -> bool:
+        return self.attr != self.name
+
+    @property
+    def rule(self) -> str:
+        """The name of the module constant of the rule of the file, for example `SCREENSHOT`."""
+        return constant(self.name)
+
+    @property
+    def path(self) -> str:
+        """The path of the endpoints in the slice, for example `/{id}/screenshot`."""
+        return "/{id}/" + kebab(self.name)
+
+    @property
+    def upload_operation(self) -> str:
+        return f"upload_{self.entity}_{self.name}"
+
+    @property
+    def delete_operation(self) -> str:
+        return f"delete_{self.entity}_{self.name}"
+
+    @property
+    def size_text(self) -> str:
+        """The largest file as a short text, for example `5 MB`."""
+        return format_size(self.max_size)
+
+    @property
+    def sample(self) -> tuple[str, str, str]:
+        """A valid file for the tests: the name, the media type, and the content (Python)."""
+        for media_type, name, content in _FILE_SAMPLES:
+            if type_allows(self.media_types, media_type):
+                return name, media_type, content
+        media_type = self.media_types[0].replace("/*", "/x-sample")
+        return "sample.bin", media_type, 'b"A sample file."'
+
+    @property
+    def rejected_type(self) -> str | None:
+        """A media type that the field does not allow, for the tests, or None."""
+        return next((t for t in _OTHER_TYPES if not type_allows(self.media_types, t)), None)
+
+    def rule_call(self) -> str:
+        """Return the constant of the rule of the file, for example `SCREENSHOT = FileRule(...)`."""
+        args = [f"max_size={self.max_size}"]
+        if self.media_types:
+            args.append(f"types={_python_tuple(list[str | int | bool](self.media_types))}")
+        return call(f"{self.rule} = ", "FileRule", args, 0)
+
+    def column(self) -> str:
+        """Return the declaration of the model attribute: the JSON value of the stored file."""
+        args = [f'"{self.name}"'] if self.aliased else []
+        args.append("JSON_TYPE")
+        return call(f"{self.attr}: Mapped[StoredFile | None] = ", "mapped_column", args)
+
+    def migration_column(self) -> str:
+        """Return the `sa.Column` of the field in the migration."""
+        args = [f'"{self.name}"', _MIGRATION_TYPES["JSON_TYPE"], "nullable=True"]
+        return call("", "sa.Column", args, 8, ",")
+
+    def declaration(self) -> str:
+        """Return the declaration of the field in the read schema."""
+        args = [f'alias="{self.name}"'] if self.aliased else []
+        args += [f"{k}={v}" for k, v in self.docs]
+        return _declare(self.attr, "FileRead | None", None, args)
 
 
 @dataclass(slots=True)
@@ -888,6 +984,9 @@ class PyEntity:
     plural_label: str
     description: str | None
     fields: list[PyField]
+    """The stored fields without the file fields."""
+    files: list[PyFile] = field(default_factory=list[PyFile])
+    """The file fields (ADR 0027)."""
     relations: list[PyRelation] = field(default_factory=list[PyRelation])
     operations: list[PyOperation] = field(default_factory=list[PyOperation])
     join_tables: list[PyJoinTable] = field(default_factory=list[PyJoinTable])
@@ -976,6 +1075,57 @@ class PyEntity:
     @property
     def custom_operations(self) -> list[PyOperation]:
         return [o for o in self.operations if o.custom]
+
+    @property
+    def file_permission(self) -> PyOperation | None:
+        """The operation whose permission the endpoints of the files need (ADR 0027).
+
+        It is the update operation of the entity, else its create operation.
+        Without both, the files have no endpoints: only the seed sets them.
+        """
+        for kind in ("update", "create"):
+            found = next((op for op in self.operations if op.kind == kind), None)
+            if found is not None:
+                return found
+        return None
+
+    @property
+    def file_endpoints(self) -> bool:
+        """True if the slice has the endpoints of its files: `files.py`."""
+        return bool(self.files) and self.file_permission is not None
+
+    @property
+    def file_scope(self) -> bool:
+        """True if the endpoints of the files use the record rules of a change (ADR 0025)."""
+        permission = self.file_permission
+        return permission is not None and permission.protected and (self.scoped or bool(self.hides))
+
+    def files_statement(self) -> str:
+        """Return the statement of the repository that keeps the files of a record to delete."""
+        items = [f"record.{f.attr}" for f in self.files]
+        line = f"files = [{', '.join(items)}]"
+        if 4 + len(line) <= LINE_LENGTH:
+            return line
+        return "files = [\n" + "".join(f"        {item},\n" for item in items) + "    ]"
+
+    def file_imports(self) -> str:
+        """Return the import block of the module of the endpoints of the files."""
+        lines = {
+            "from uuid import UUID",
+            from_import(
+                "fastapi",
+                {"APIRouter", "UploadFile"} | ({"Depends"} if self.file_scope else set[str]()),
+            ),
+            "from app.core.db import SessionDep",
+            "from app.core.errors import problem_responses",
+            "from app.core.storage import FileRule, StorageDep, replace_file, upload",
+            f"from app.features.{self.slice} import repository",
+            f"from app.features.{self.slice}.schemas import {self.name}Read",
+        }
+        if self.file_scope:
+            lines.add("from typing import Annotated")
+            lines.add("from app.core.access import RecordScope, scope_of")
+        return import_block(lines)
 
     @property
     def translatable(self) -> list[PyField]:
@@ -1095,6 +1245,8 @@ class PyEntity:
         if self.owner_path is not None:
             for model in self.owner_path.models(self):
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
+        if self.files:
+            lines.add("from app.core.storage import Storage, delete_files")
         i18n = {"t"} if self.translated else set[str]()
         if self.translatable:
             i18n.add("store_translations")
@@ -1181,21 +1333,37 @@ class PyEntity:
             lines.add("from app.core.i18n import TRANSLATIONS, show_translations")
         return import_block(lines)
 
+    def file_dependencies(self) -> list[str]:
+        """Return the dependencies of the endpoints of the files in the router of the slice.
+
+        They need the user of the operation whose permission they need, and
+        they return the record, as a change does.
+        """
+        permission = self.file_permission
+        if permission is None:
+            return []
+        dependencies = [f"Depends({self.guard})"] if permission.protected else []
+        if self.translations_query:
+            dependencies.append("Depends(translations_query)")
+        return dependencies
+
     def router_imports(self) -> str:
         """Return the import block of the router module of the slice."""
         lines = {"from fastapi import APIRouter"}
         dependencies = {d for o in self.operations for d in self.router_dependencies(o)}
+        dependencies |= set(self.file_dependencies() if self.file_endpoints else [])
         if dependencies:
             lines.discard("from fastapi import APIRouter")
             lines.add("from fastapi import APIRouter, Depends")
-        if any(o.protected for o in self.operations):
+        if f"Depends({self.guard})" in dependencies:
             lines.add(f"from app.core.{self.guard_module} import {self.guard}")
         if "Depends(translations_query)" in dependencies:
             lines.add("from app.core.i18n import translations_query")
-        if self.operations:
-            lines.add(
-                from_import(f"app.features.{self.slice}", {o.module for o in self.operations})
-            )
+        modules = {o.module for o in self.operations}
+        if self.file_endpoints:
+            modules.add("files")
+        if modules:
+            lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)
 
     @property
@@ -1208,7 +1376,7 @@ class PyEntity:
         """Return the import block of the models module of the slice."""
         types = {f.model_type for f in self.fields} | {c.type for c in self.computed}
         sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
-        if self.translatable:
+        if self.translatable or self.files:
             sa_types.add("JSON_TYPE")
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
@@ -1246,6 +1414,8 @@ class PyEntity:
         lines.add(from_import("app.core.db", core))
         if self.computed:
             lines.add("from app.core import compute")
+        if self.files:
+            lines.add("from app.core.types import StoredFile")
         if field_enums:
             lines.add(from_import(f"app.features.{self.slice}.enums", field_enums))
         block = import_block(lines)
@@ -1299,6 +1469,7 @@ class PyEntity:
         declarations += [
             f.translations_declaration(m) for f in self.translatable for m in ("create", "read")
         ]
+        declarations += [f.declaration() for f in self.files]
         pydantic = {"Field"} if any("Field(" in d for d in declarations) else set[str]()
         for name in ("AwareDatetime", "EmailStr", "JsonValue"):
             if name in types:
@@ -1328,6 +1499,8 @@ class PyEntity:
             lines.add(from_import("app.core.i18n", i18n))
         if "UrlStr" in types:
             lines.add("from app.core.types import UrlStr")
+        if self.files:
+            lines.add("from app.core.storage import FileRead")
         if self.enums:
             lines.add(from_import(f"app.features.{self.slice}.enums", {e.name for e in self.enums}))
         for rel in self.embedded:
@@ -1355,6 +1528,30 @@ class PyProvider:
     """With `create_users` and `access`: the role of a new user."""
     claims: list[tuple[PyField, str]]
     """With `create_users`: the fields of a new user, and the claims that give their values."""
+
+
+@dataclass(frozen=True, slots=True)
+class PyStorage:
+    """The storage of the files of the file fields (ADR 0027), with the names of its settings.
+
+    The name of each setting is its environment variable in lower case,
+    for example `storage_folder` for `STORAGE_FOLDER`.
+    """
+
+    id: str
+    kind: str
+    """`local` (a folder) or `s3` (an S3-compatible service, else the folder)."""
+    variables: dict[str, str]
+    """The environment variable of each key of the section `storage`, for example
+    `{"folder_env": "STORAGE_FOLDER"}`."""
+
+    def setting(self, key: str) -> str:
+        """Return the setting of a key, for example `storage_folder` for `folder_env`."""
+        return self.variables[key].lower()
+
+    @property
+    def s3(self) -> bool:
+        return self.kind == "s3"
 
 
 @dataclass(slots=True)
@@ -1395,6 +1592,8 @@ class PyApp:
     """The text search configuration of Postgres with `x-fastapi-search: fulltext`, else None."""
     jobs: dict[str, PyJob] = field(default_factory=dict[str, PyJob])
     """The jobs that the worker runs (ADR 0029), by name."""
+    storage: PyStorage | None = None
+    """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
 
     @property
     def full_text(self) -> bool:
@@ -1442,6 +1641,39 @@ class PyApp:
         return any(e.translatable for e in self.entities.values())
 
     @property
+    def file_entities(self) -> list[PyEntity]:
+        """The entities with file fields (ADR 0027), in source order."""
+        return [e for e in self.entity_order() if e.files]
+
+    @property
+    def file_slices(self) -> list[PyEntity]:
+        """The entities with the endpoints of their files, in source order."""
+        return [e for e in self.entity_order() if e.file_endpoints]
+
+    @property
+    def needs(self) -> list[tuple[str, str, str]]:
+        """The endpoints that need the permission of an operation, with the element of each.
+
+        A dashboard widget needs the list operation of its entity. The
+        endpoints of a file field need the update operation of the entity,
+        else its create operation (ADR 0027).
+        """
+        found = [
+            (w.operation_id, w.permission, w.id)
+            for d in self.dashboards.values()
+            for w in d.widgets
+            if w.protected
+        ]
+        for entity in self.file_slices:
+            permission = entity.file_permission
+            if permission is None or not permission.protected:
+                continue
+            for f in entity.files:
+                found.append((f.upload_operation, permission.name, f.id))
+                found.append((f.delete_operation, permission.name, f.id))
+        return found
+
+    @property
     def openapi_schemas(self) -> list[tuple[str, str]]:
         """The schemas that the endpoints use, with the ID of their element, in a fixed order."""
         found: dict[str, str] = {}
@@ -1455,6 +1687,8 @@ class PyApp:
                 found[op.params_class] = op.id
             if op.returns:
                 found[f"{op.returns}Read"] = self.entities[op.returns].id
+            if entity.files and op.kind in ("create", "read", "update", "list"):
+                found.setdefault("FileRead", entity.files[0].id)
         for dashboard in self.dashboards.values():
             for widget in dashboard.widgets:
                 if widget.kind == "stat":
@@ -1611,6 +1845,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         auth=auth is not None,
         search_config=search_config,
         jobs=_jobs(definition, entities, operations),
+        storage=_storage(definition, entities),
     )
 
 
@@ -1626,6 +1861,26 @@ def _jobs(
                     "jobs. Give it another table with x-fastapi-table."
                 )
     return python_jobs(definition, entities, operations)
+
+
+def _storage(definition: AppDefinition, entities: dict[str, PyEntity]) -> PyStorage | None:
+    """Return the storage of the files, or None without `storage`.
+
+    Raise GenerationError if the operation ID of an endpoint of a file is
+    the name of an operation.
+    """
+    for entity in entities.values():
+        for f in entity.files if entity.file_endpoints else []:
+            for operation_id in (f.upload_operation, f.delete_operation):
+                if operation_id in definition.operations:
+                    raise GenerationError(
+                        f"The endpoint of the file field '{entity.name}.{f.name}' has the "
+                        f"operation ID '{operation_id}' of an operation. Rename the operation."
+                    )
+    storage = definition.storage
+    if storage is None:
+        return None
+    return PyStorage(id=storage.id, kind=storage.kind, variables=dict(storage.variables))
 
 
 def _search_config(definition: AppDefinition) -> str | None:
@@ -1899,6 +2154,20 @@ def _entity(name: str, entity: Entity) -> PyEntity:
         fields=[
             _field(field_name, f, f"{name}{pascal(field_name)}", table)
             for field_name, f in entity.stored_fields.items()
+            if f.type not in FILE_TYPES
+        ],
+        files=[
+            PyFile(
+                name=field_name,
+                attr=attribute(field_name),
+                id=f.id,
+                entity=snake(name),
+                max_size=f.size_limit,
+                media_types=tuple(f.media_types),
+                docs=_constraints(f),
+            )
+            for field_name, f in entity.stored_fields.items()
+            if f.type in FILE_TYPES
         ],
     )
 
@@ -2498,7 +2767,7 @@ def _check_names(entity: PyEntity) -> None:
             )
         names[name] = owner
 
-    modules = {"enums", "models", "repository", "router", "schemas", "validation_ext"}
+    modules = {"enums", "files", "models", "repository", "router", "schemas", "validation_ext"}
     for op in entity.operations:
         if op.module in modules or op.name in modules:
             raise GenerationError(
@@ -2507,6 +2776,8 @@ def _check_names(entity: PyEntity) -> None:
             )
     for f in entity.fields:
         claim(f.attr, f"the field '{f.name}'")
+    for file in entity.files:
+        claim(file.attr, f"the field '{file.name}'")
     for rel in entity.relations:
         claim(rel.attr, f"the relation '{rel.name}'")
         if rel.fk_attr:
@@ -2522,7 +2793,6 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
     translations. `i18n_test` has the values of the test of the languages.
     `py_seed` has the rows of the seed (ADR 0021).
     """
-    reject_file_fields(definition, "fastapi")
     apis = python_apis(definition)
     plan = i18n_plan(definition)
     py = python_app(definition)

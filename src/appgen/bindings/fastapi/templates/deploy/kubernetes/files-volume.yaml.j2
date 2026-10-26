@@ -1,0 +1,13 @@
+{{ trace_header(py.storage.id) }}
+# The volume of the files of the file fields. All replicas of the API
+# use it, so it needs the access mode ReadWriteMany, for example a volume
+# of NFS or of a cloud file service. Set the storage class and the size.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ app.name }}-files
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 10Gi

@@ -4,6 +4,9 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
+{% if py.storage %}
+from pathlib import Path
+{% endif %}
 
 import pytest
 from alembic import command
@@ -96,23 +99,50 @@ async def session(migrated_url: str) -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
+{% if py.storage %}
+{% set st = py.storage %}
+@pytest.fixture
+def files_folder(tmp_path: Path) -> Path:
+    """The folder of the files of the file fields: a new folder for each test."""
+    return tmp_path / "files"
+
+
+@pytest.fixture
+def settings(migrated_url: str, files_folder: Path) -> Settings:
+    """The settings of the app in the tests: the test database, and the folder of the files."""
+    return Settings(
+        database_url=migrated_url,
+{% if definition.auth %}
+        auth_secret="test-secret",
+{% endif %}
+        {{ st.setting("folder_env") }}=str(files_folder),
+{% if st.s3 %}
+        {{ st.setting("bucket_env") }}="",
+{% endif %}
+        storage_link_secret="test-secret",
+    )
+
+
+{% endif %}
+{% set app_settings = "settings" if py.storage else ("Settings(database_url=migrated_url, auth_secret=\"test-secret\")" if definition.auth else "Settings(database_url=migrated_url)") %}
+{% set url_arg = "settings: Settings" if py.storage else "migrated_url: str" %}
 {% if definition.auth %}
 @pytest.fixture
-async def anonymous_client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+{{ py.call("async def ", "anonymous_client", [url_arg, "session: AsyncSession"], 0, " -> AsyncIterator[AsyncClient]:") }}
     """An HTTP client that calls the app in the same process, without a signed-in user."""
-    app = create_app(Settings(database_url=migrated_url, auth_secret="test-secret"))
+    app = create_app({{ app_settings }})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await app.state.engine.dispose()
 
 
 @pytest.fixture
-async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+{{ py.call("async def ", "client", [url_arg, "session: AsyncSession"], 0, " -> AsyncIterator[AsyncClient]:") }}
     """An HTTP client that calls the app in the same process, as a signed-in user.
 
     The tests of the operations do not test the sign-in: `tests/test_auth.py` does.
     """
-    app = create_app(Settings(database_url=migrated_url, auth_secret="test-secret"))
+    app = create_app({{ app_settings }})
     app.dependency_overrides[current_user] = lambda: None
 {% if definition.access %}
     app.dependency_overrides[check_access] = lambda: None
@@ -125,9 +155,9 @@ async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[Asyn
     await app.state.engine.dispose()
 {% else %}
 @pytest.fixture
-async def client(migrated_url: str, session: AsyncSession) -> AsyncIterator[AsyncClient]:
+{{ py.call("async def ", "client", [url_arg, "session: AsyncSession"], 0, " -> AsyncIterator[AsyncClient]:") }}
     """An HTTP client that calls the app in the same process, with the test database."""
-    app = create_app(Settings(database_url=migrated_url))
+    app = create_app({{ app_settings }})
 {% for api in py_apis.values() %}
     app.dependency_overrides[{{ api.dependency }}] = {{ api.mock_dependency }}
 {% endfor %}

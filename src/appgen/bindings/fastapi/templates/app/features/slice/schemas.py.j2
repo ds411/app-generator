@@ -79,6 +79,10 @@ class {{ e.name }}Read(ReadModel):
     {{ f.translations_declaration("read") }}
 {% endif %}
 {% endfor %}
+{% for f in e.files %}
+    {{ trace(f.id) }}
+    {{ f.declaration() }}
+{% endfor %}
 {% for c in e.computed %}
     {{ trace(c.id) }}
     {{ c.attr }}: {{ c.type }} | None

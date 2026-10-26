@@ -105,10 +105,52 @@ class Settings(BaseSettings):
     {{ w.secret_setting }}: str = ""
     """The secret of the signatures of the webhook `{{ w.name }}`: `{{ w.secret_env }}`."""
 {% endfor %}
-{% if py.providers %}
+{% if py.storage %}
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("folder_env") }}: str = "uploads"
+{% if py.storage.s3 %}
+    """The folder of the files of the file fields while `{{ py.storage.variables["bucket_env"] }}` has no value
+    (`{{ py.storage.variables["folder_env"] }}`)."""
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("bucket_env") }}: str = ""
+    """The bucket of the files in an S3-compatible service (`{{ py.storage.variables["bucket_env"] }}`). Empty: the
+    folder."""
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("region_env") }}: str = ""
+    """The region of the bucket (`{{ py.storage.variables["region_env"] }}`). Empty: the region of the AWS
+    configuration of the machine."""
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("endpoint_env") }}: str = ""
+    """The URL of an S3-compatible service (`{{ py.storage.variables["endpoint_env"] }}`), for example
+    `http://localhost:9000`. Empty: Amazon S3."""
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("access_key_env") }}: str = ""
+    """The access key ID of the bucket (`{{ py.storage.variables["access_key_env"] }}`). Empty: the AWS
+    configuration of the machine, for example its role."""
+    {{ trace(py.storage.id) }}
+    {{ py.storage.setting("secret_key_env") }}: str = ""
+    """The secret access key of the bucket (`{{ py.storage.variables["secret_key_env"] }}`). Keep it out of the
+    code."""
+{% else %}
+    """The folder of the files of the file fields (`{{ py.storage.variables["folder_env"] }}`)."""
+{% endif %}
+    storage_link_secret: str = ""
+    """The secret key that signs the links of the files: a long random text. Empty: each
+    process signs with a random key, so a link works only in its process."""
+    storage_link_seconds: int = 3600
+    """The time that a link of a file works, in seconds."""
+{% endif %}
+{% if py.providers or py.storage %}
     public_url: str = ""
+{% if py.providers %}
     """The URL of the API for the browsers, for example `https://api.example.com`. The
     providers send the users back to it. Empty: the URL of each request."""
+{% else %}
+    """The URL of the API for the browsers, for example `https://api.example.com`. The
+    links of the files start with it. Empty: the URL of each request."""
+{% endif %}
+{% endif %}
+{% if py.providers %}
 {% for p in py.providers %}
     {{ trace(p.id) }}
     {{ p.name }}_issuer: str = {{ p.issuer | tojson }}
