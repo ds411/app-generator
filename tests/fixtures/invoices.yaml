@@ -4,6 +4,8 @@
 # The seed records get the numbers in their order. The amounts are in the
 # currency of the customer (`currency_field`). The invoice feed and the
 # line cards show the next page at their end (`pagination.mode: scroll`).
+# The charts of the dashboard group the dates by day, week, and year
+# (`interval`).
 # scripts/check-nextjs.sh, scripts/check-react.sh, and
 # scripts/check-fastapi.sh generate and check the apps of this
 # definition, and scripts/sequence_test.py creates invoices in the
@@ -34,6 +36,7 @@ entities:
         unique: true
         sequence: { start: 1001, prefix: INV-, width: 4 }
       issued_on: { type: date, required: true }
+      paid_at: { type: datetime }
       total:
         type: decimal
         min: 0
@@ -68,7 +71,7 @@ seed:
       globex: { name: Globex, currency: eur }
   Invoice:
     records:
-      first: { issued_on: 2026-01-15, total: 1200, customer: acme }
+      first: { issued_on: 2026-01-15, paid_at: "2026-01-20T10:00:00Z", total: 1200, customer: acme }
       second: { issued_on: 2026-02-01, total: 80.5, customer: globex }
     mock: 4
 
@@ -108,6 +111,27 @@ ui:
           group_by: customer.currency
           aggregate: sum
           field: total
+        by_day:
+          kind: chart
+          chart: bar
+          label: Invoices by day
+          entity: Invoice
+          group_by: issued_on
+          interval: day
+        paid_by_week:
+          kind: chart
+          chart: line
+          label: Payments by week
+          entity: Invoice
+          group_by: paid_at
+          interval: week
+        by_year:
+          kind: chart
+          chart: bar
+          label: Invoices by year
+          entity: Invoice
+          group_by: issued_on
+          interval: year
 
 pages:
   overview: { path: /, title: Overview, content: { dashboard: overview } }

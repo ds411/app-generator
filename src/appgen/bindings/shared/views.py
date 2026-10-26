@@ -291,6 +291,8 @@ class WidgetEndpoint:
     """The path, for example `/dashboards/overview/open-tasks`."""
     today: bool = False
     """True if the endpoint takes `today`: the filter of the widget has `$today`."""
+    week: bool = False
+    """True if the endpoint takes `week_start`: a chart groups the dates by week."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -754,8 +756,9 @@ class ViewContext:
         """Return the runtime parts that the views need, for the outputs and shadcn/ui.
 
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
-        `date_range`, `select`, `multi_select`), and the value components
-        (`badge`, `avatar`, `formatted`).
+        `date_range`, `select`, `multi_select`), the value components
+        (`badge`, `avatar`, `formatted`), and the charts (`chart`, and
+        `dates` for a chart of dates).
         """
         found: set[str] = set()
         values = {"badge", "avatar", "formatted", "file"}
@@ -782,7 +785,7 @@ class ViewContext:
         for name in self.dashboards:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
-            found |= dashboard.uses & {"chart"}
+            found |= dashboard.uses & {"chart", "dates"}
             for widget in dashboard.widgets:
                 found |= {c for col in widget.columns for c in _value_parts(col.cell)}
                 card = widget.card

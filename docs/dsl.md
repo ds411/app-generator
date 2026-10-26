@@ -1989,7 +1989,7 @@ widget has `kind`, `label`, and `span`:
 | Kind     | Keys                                                                      |
 | -------- | ------------------------------------------------------------------------- |
 | `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`. |
-| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `aggregate`, `field`, `filter`, `badge`. |
+| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`. |
 | `list`   | `view`, `filter`, `sort`, `limit`, `link`.                                |
 | `custom` | A generation gap.                                                         |
 
@@ -2001,6 +2001,25 @@ currency of each record. A stat widget needs a filter on one currency,
 for example `filter: { customer.currency: eur }`, and shows the sum in
 that currency. A chart widget needs the same filter, or a `group_by` of
 the currency field. `appgen validate` reports the other cases.
+
+A chart of a `date` or a `datetime` field groups the records by
+`interval`: `day`, `week`, `month` (the default), or `year`. A week
+starts on the first day of the week of the locale of the selected
+language (see [translations](#translations)), else on Monday. A date and
+time is in the interval of its day in UTC. The chart shows each interval
+from the first date to the last date, also the intervals without
+records, and then the records without a date (`None`). Only a chart of
+dates takes `interval`.
+
+```yaml
+# in: ui.dashboards.overview.widgets
+tasks_by_week:
+  kind: chart
+  chart: line
+  entity: Task
+  group_by: due_date
+  interval: week
+```
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are

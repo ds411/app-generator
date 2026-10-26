@@ -733,6 +733,15 @@ def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterat
         return
     types = frozenset({"enum", *DATE_TYPES, *SINGLE_KINDS})
     yield from _check_suits(widget, "group_by", "A chart group", target, types)
+    if "interval" in widget.model_fields_set and target.type not in DATE_TYPES:
+        yield _error(
+            "invalid-option",
+            f"'interval' is only for a chart group of a date, but '{widget.group_by}' has the "
+            f"type '{target.type}'.",
+            widget,
+            at="interval",
+            hint="Remove the key 'interval', or group by a date or a date-time field.",
+        )
     if widget.badge is not None and target.type == "enum":
         yield from _check_badge_ref(definition, widget, widget.badge, target)
 

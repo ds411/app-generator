@@ -1658,6 +1658,17 @@
         "group_by": {
           "$ref": "#/$defs/FieldPath"
         },
+        "interval": {
+          "default": "month",
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "year"
+          ],
+          "title": "Interval",
+          "type": "string"
+        },
         "aggregate": {
           "$ref": "#/$defs/Aggregate",
           "default": "count"

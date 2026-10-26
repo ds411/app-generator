@@ -8,9 +8,10 @@
 // dashboards read all records and apply these functions in the browser.
 {% endraw %}
 {% endif %}
-{% if i18n %}
+{% set dates = "dates" in ui_views.features %}
+{% if i18n and dates %}
 
-import { dateTimeFormat } from "@/shared/lib/format";
+import { dateTimeFormat, firstWeekday } from "@/shared/lib/format";
 {% endif %}
 {% raw %}
 export type FilterOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
@@ -88,23 +89,11 @@ export function aggregate(values: unknown[], kind: Exclude<Aggregate, "count">):
   }
 }
 
-{% endraw %}
-{% if i18n %}
-/** The format of a month, in the locale of the selected language. */
-const monthFormat = () => dateTimeFormat({ month: "short", year: "numeric" });
-{% else %}
-const monthFormat = new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" });
-{% endif %}
-{% raw %}
-function groupLabel(key: string): string {
-  return /^\d{4}-\d{2}$/.test(key) ? monthFormat{% endraw %}{{ "()" if i18n }}{% raw %}.format(new Date(`${key}-01T00:00:00`)) : key;
-}
-
 /**
  * Return the value of each group of records. With known groups, the chart
  * shows them in their order, also without records, and the records of
  * other groups count as "Other". Without known groups, the chart shows the
- * groups of the records, sorted by key (a month `YYYY-MM` shows as a month).
+ * groups of the records, sorted by key.
  */
 export function groupRows<T>(
   rows: T[],
@@ -129,9 +118,140 @@ export function groupRows<T>(
   }
   return [...byKey.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, items]) => ({ key: key || "none", label: key ? groupLabel(key) : {% endraw %}{{ text("None") }}{% raw %}, value: valueOf(items) }));
+    .map(([key, items]) => ({ key: key || "none", label: key || {% endraw %}{{ text("None") }}{% raw %}, value: valueOf(items) }));
 }
 {% endraw %}
+{% if dates %}
+
+/** The interval of the groups of a chart of dates. */
+export type Interval = "day" | "week" | "month" | "year";
+
+{% if i18n %}
+// The formats of the intervals, in the locale of the selected language.
+const dayFormat = () => dateTimeFormat({ day: "numeric", month: "short", year: "numeric" });
+const monthFormat = () => dateTimeFormat({ month: "short", year: "numeric" });
+const yearFormat = () => dateTimeFormat({ year: "numeric" });
+{% else %}
+// The formats of the intervals.
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
+const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" });
+const YEAR_FORMAT = new Intl.DateTimeFormat(undefined, { year: "numeric" });
+const dayFormat = () => DAY_FORMAT;
+const monthFormat = () => MONTH_FORMAT;
+const yearFormat = () => YEAR_FORMAT;
+
+/** The first day of the week: 1 is Monday (ISO 8601). */
+const firstWeekday = () => 1;
+{% endif %}
+{% raw %}
+
+/** Return the date of a key: a day `YYYY-MM-DD`, a month `YYYY-MM`, or a year `YYYY`. */
+function keyDate(key: string, utc: boolean): Date {
+  const day = key.length === 4 ? `${key}-01-01` : key.length === 7 ? `${key}-01` : key;
+  return new Date(`${day}T00:00:00${utc ? "Z" : ""}`);
+}
+
+/** Return the day `YYYY-MM-DD` of a number of days after a day. */
+function addDays(day: string, days: number): string {
+  const date = keyDate(day, true);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Return the key of the interval of a date or a date and time: the day
+ * `YYYY-MM-DD`, the first day of the week, the month `YYYY-MM`, or the year
+ * `YYYY`. A date and time gives the interval of its day in UTC.
+ */
+export function intervalKey(value: string | null | undefined, interval: Interval): string | null {
+  if (!value) return null;
+  const day = value.slice(0, 10);
+  switch (interval) {
+    case "day":
+      return day;
+    case "week":
+      return addDays(day, -((keyDate(day, true).getUTCDay() - firstWeekday() + 7) % 7));
+    case "month":
+      return day.slice(0, 7);
+    case "year":
+      return day.slice(0, 4);
+  }
+}
+
+/** Return the key of the next interval. */
+function nextKey(key: string, interval: Interval): string {
+  const date = keyDate(key, true);
+  switch (interval) {
+    case "day":
+      return addDays(key, 1);
+    case "week":
+      return addDays(key, 7);
+    case "month":
+      date.setUTCMonth(date.getUTCMonth() + 1);
+      return date.toISOString().slice(0, 7);
+    case "year":
+      date.setUTCFullYear(date.getUTCFullYear() + 1);
+      return date.toISOString().slice(0, 4);
+  }
+}
+
+/** Return the label of an interval: the day, the days of the week, the month, or the year. */
+function intervalLabel(key: string, interval: Interval): string {
+  const date = keyDate(key, false);
+  switch (interval) {
+    case "day":
+      return dayFormat().format(date);
+    case "week":
+      return dayFormat().formatRange(date, new Date(date.getFullYear(), date.getMonth(), date.getDate() + 6));
+    case "month":
+      return monthFormat().format(date);
+    case "year":
+      return yearFormat().format(date);
+  }
+}
+
+/**
+ * Return the chart data of each interval from the first to the last key,
+ * also of the intervals without a value, then the value of the records
+ * without a date ("None"). `values` maps the key of each interval to its
+ * value, and "" to the value of the records without a date.
+ */
+function intervalData(values: ReadonlyMap<string, number>, interval: Interval, empty: number): ChartDatum[] {
+  const keys = [...values.keys()].filter(Boolean).sort();
+  const first = keys[0];
+  const last = keys[keys.length - 1];
+  const result: ChartDatum[] = [];
+  if (first !== undefined && last !== undefined) {
+    for (let key = first; key <= last; key = nextKey(key, interval)) {
+      result.push({ key, label: intervalLabel(key, interval), value: values.get(key) ?? empty });
+    }
+  }
+  const none = values.get("");
+  if (none !== undefined) result.push({ key: "none", label: {% endraw %}{{ text("None") }}{% raw %}, value: none });
+  return result;
+}
+
+/**
+ * Return the value of each interval of the records of a chart of dates:
+ * each day, week, month, or year from the first to the last date, also
+ * without records, then the records without a date ("None").
+ */
+export function intervalRows<T>(
+  rows: T[],
+  dateOf: (row: T) => string | null | undefined,
+  valueOf: (group: T[]) => number,
+  interval: Interval,
+): ChartDatum[] {
+  const byKey = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = intervalKey(dateOf(row), interval) ?? "";
+    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
+  const values = new Map([...byKey.entries()].map(([key, items]) => [key, valueOf(items)]));
+  return intervalData(values, interval, valueOf([]));
+}
+{% endraw %}
+{% endif %}
 {% if ui_views.widgets %}
 
 /**
@@ -156,8 +276,21 @@ export function chartGroups(
   }
   return [...byKey.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => ({ key: key || "none", label: key ? groupLabel(key) : {{ text("None") }}, value }));
+    .map(([key, value]) => ({ key: key || "none", label: key || {{ text("None") }}, value }));
 }
+{% if dates %}
+
+/**
+ * Return the chart data of the groups of the API of a chart of dates: the
+ * same intervals as `intervalRows`, also the intervals without records.
+ */
+export function chartIntervals(
+  values: readonly { key: string | null; value: number | null }[],
+  interval: Interval,
+): ChartDatum[] {
+  return intervalData(new Map(values.map((item) => [item.key ?? "", item.value ?? 0])), interval, 0);
+}
+{% endif %}
 
 /** Return the known groups of a chart of a relation: the related records of the groups of the API. */
 export function recordGroups<T extends { id: string }>(
