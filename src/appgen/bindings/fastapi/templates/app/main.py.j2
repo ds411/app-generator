@@ -34,7 +34,7 @@ from app.core.live import BROKER_KEY, Broker, end_streams_on_exit
 from app.core.live import router as live_router
 {% endif %}
 from app.core.logging import RequestLogMiddleware, configure_logging
-{% if py.notifications %}
+{% if py.notices %}
 from app.core.notices import router as notices_router
 {% endif %}
 {% if py.providers %}
@@ -208,10 +208,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     {{ trace(py.storage.id) }}
     app.include_router(storage_router)
 {% endif %}
-{% for id in py.notification_ids %}
+{% for id in py.notice_ids %}
     {{ trace(id) }}
 {% endfor %}
-{% if py.notifications %}
+{% if py.notices %}
     app.include_router(notices_router)
 {% endif %}
 {% for id in py.live_ids %}

@@ -1,4 +1,4 @@
-{{ trace_header(*py.notification_ids) }}
+{{ trace_header(*py.notice_ids) }}
 {% set u = py.entity(definition.auth.user_entity) %}
 """The notices of the users (ADR 0041): who gets a notice when a record changes, and its text.
 
@@ -9,6 +9,12 @@ notices, after the events and the change log, so that the generated and
 the custom operations both add them. A notice keeps the values of its
 text from the time of the change, and the text has the language of the
 request that lists it (`app/core/notices.py`).
+{% if py.mentions %}
+
+A `text` field with mentions (ADR 0043) gives a notice to each user that
+a new or a changed text mentions for the first time. A mention is
+`@[<name>](<ID of the user>)`.
+{% endif %}
 """
 
 import datetime as dt
@@ -30,14 +36,26 @@ from app.core.i18n import t
 {% endif %}
 from app.core.schemas import ReadModel
 
+{% if py.mentions %}
+MENTION = "@mention"
+"""The notification of the mentions: a notification of the definition has no `@`."""
+{% endif %}
 TEXTS: dict[str, str] = {
 {% for n in py.notifications %}
     {{ trace(n.id) }}
     {{ py.string(n.name) }}: {{ py.string(n.text) }},
 {% endfor %}
+{% if py.mentions %}
+    MENTION: "You are mentioned in {record}.",
+{% endif %}
 }
 """The text of each notification, by name: a name in braces is a value of the record."""
 _VALUE = re.compile(r"\{(\w+)\}")
+{% if py.mentions %}
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_MENTION = re.compile(r"@\[([^\[\]\n]+)\]\((" + _UUID + r")\)")
+"""A mention of a user in a text: the name and the ID of the user."""
+{% endif %}
 
 
 class Notice(Base):
@@ -183,6 +201,36 @@ def add_notices(
     return notices
 
 
+{% if py.mentions %}
+def mentioned(text: str | None) -> list[UUID]:
+    """Return the IDs of the users that a text mentions, each one time, in their order."""
+    return list(dict.fromkeys(UUID(match[2]) for match in _MENTION.finditer(text or "")))
+
+
+async def add_mentions(
+    session: AsyncSession,
+    users: InstrumentedAttribute[UUID],
+    entity: str,
+    record_id: UUID,
+    record: str,
+    text: str | None,
+    before: str | None,
+) -> list[Notice]:
+    """Add a notice for each user that a text mentions and the text before did not.
+
+    `users` is the ID column of the users: a mention of an ID without a
+    user gives no notice. The user that made the change gets none.
+    """
+    old = set(mentioned(before))
+    new = [user for user in mentioned(text) if user not in old]
+    if not new:
+        return []
+    found = set(await session.scalars(select(users).where(users.in_(new))))
+    users_found = [user for user in new if user in found]
+    return add_notices(session, MENTION, entity, record_id, users_found, {"record": record})
+
+
+{% endif %}
 def notice_text(notice: Notice) -> str:
     """Return the text of a notice in the language of the request, with its values.
 

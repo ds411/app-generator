@@ -55,9 +55,15 @@ const {{ const }}: PathStep[] = [
 
 {% endfor %}
 /**
+{% if notify.notices %}
  * Add the notices of a change of {{ type }} (ADR 0041): for each notification
  * of the change, a notice for each user at the end of its receiver paths,
  * with the values of its text.
+{% endif %}
+{% if notify.mentions %}
+ * {{ "Add a" if not notify.notices else "Also add a" }} notice for each user that a text with mentions
+ * mentions for the first time (ADR 0043).
+{% endif %}
  */
 async function {{ var }}Notify(tx: Database, row: Row, before: Row | undefined): Promise<void> {
   const id = String(row.id);
@@ -74,6 +80,9 @@ async function {{ var }}Notify(tx: Database, row: Row, before: Row | undefined):
 {% endfor %}
     });
   }
+{% endfor %}
+{% for element_id, call in notify.mentions %}
+  {{ call }}; {{ trace(element_id) }}
 {% endfor %}
 }
 

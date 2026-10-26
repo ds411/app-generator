@@ -135,6 +135,9 @@ class Field(Element):
     sequence: Sequence | None = None
     """`string` and `integer` fields: a new record gets the next number of a database
     sequence. The inputs and the forms do not have the field."""
+    mentions: bool = False
+    """`text` fields: the text can mention users with `@` (ADR 0043). A user that a new or a
+    changed text mentions for the first time gets a notice."""
 
     @property
     def is_file(self) -> bool:

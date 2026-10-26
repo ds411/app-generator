@@ -1,4 +1,4 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 {% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
 import { index, jsonb, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 

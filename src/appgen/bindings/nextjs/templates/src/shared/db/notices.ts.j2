@@ -1,4 +1,4 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 {% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
 import "server-only";
 
@@ -7,6 +7,9 @@ import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import { type ListResult, type Notice, NotFoundError } from "@/shared/api";
+{% if has_mentions(definition) %}
+import { mentionedIds } from "@/shared/lib/mentions";
+{% endif %}
 
 import { actingUserId } from "./acting-user";
 import { type Database, getDb } from "./client";
@@ -102,6 +105,31 @@ export async function addNotices(
     .values(ids.map((userId) => ({ userId, notification, entity, recordId, actorId, values, at })));
 }
 
+{% if has_mentions(definition) %}
+/**
+ * Add a notice for each user that a text mentions and the text before did
+ * not (ADR 0043), in the transaction of a change. A mention of an ID
+ * without a user gives no notice.
+ */
+export async function addMentions(
+  tx: Database,
+  entity: string,
+  recordId: string,
+  record: string,
+  text: unknown,
+  before: unknown,
+): Promise<void> {
+  const old = new Set(mentionedIds(before));
+  const ids = mentionedIds(text).filter((id) => !old.has(id));
+  if (ids.length === 0) {
+    return;
+  }
+  const rows = await tx.select({ id: {{ users.const }}.id }).from({{ users.const }}).where(inArray({{ users.const }}.id, ids));
+  const found = new Set(rows.map((row) => row.id));
+  await addNotices(tx, "@mention", entity, recordId, ids.filter((id) => found.has(id)), { record });
+}
+
+{% endif %}
 type NoticeRow = typeof noticesTable.$inferSelect;
 
 /** The query of the notices of a user: only the unread notices, and the page. */

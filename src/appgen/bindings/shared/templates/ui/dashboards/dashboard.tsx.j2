@@ -113,6 +113,9 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% if "<FormattedValue" in render %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
 {% endif %}
+{% if "<MentionText" in render %}
+import { MentionText } from "@/shared/ui/values/mention-text";
+{% endif %}
 {% set file_names = (["FileLink"] if "<FileLink" in render else []) + (["ImageValue"] if "<ImageValue" in render else []) %}
 {% if file_names %}
 import { {{ file_names | join(", ") }} } from "@/shared/ui/values/file-value";

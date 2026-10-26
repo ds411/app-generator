@@ -38,7 +38,7 @@
 {% set share = shares.get(name) %}
 {% set share_guard = share and not react.api and share.update not in definition.auth.public_operations %}
 {# The notices of the changes (ADR 0041): with mock data, the store adds them. #}
-{% set notify = mock_notify(notice_plans(definition, name)) if not react.api else none %}
+{% set notify = mock_notify(notice_plans(definition, name), mention_plans(definition, name), definition.auth.user_entity if definition.auth else "") if not react.api else none %}
 {% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards or share_guard else []) + (["userLabel"] if history_users else []) %}
 {% set typed = not react.api and not has_files and not history and not notify and not share %}
 {% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
@@ -231,8 +231,8 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% endif %}
 {% if notify %}
 
-// The notices of the changes of {{ type }} (ADR 0041): the store adds them
-// after the events and the change log.
+// The notices of the changes of {{ type }} (ADR 0041) and of the mentions
+// (ADR 0043): the store adds them after the events and the change log.
 {{ var }}Api.withNotices((record, before) => {
 {% for notice in notify.notices %}
   if ({{ notice.condition }}) { {{ trace(notice.id, scope="begin") }}
@@ -249,6 +249,9 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
     addNotices({{ ts_value(notice.name) }}, {{ ts_value(name) }}, record.id, {{ notice.users }}, {});
 {% endif %}
   } {{ trace(notice.id, scope="end") }}
+{% endfor %}
+{% for id, call in notify.mentions %}
+  {{ call }}; {{ trace(id) }}
 {% endfor %}
 });
 {% endif %}

@@ -272,7 +272,23 @@ def _form_components(definition: AppDefinition, form: Form, server: bool = False
         names.update(_WIDGET_COMPONENTS.get(widget or "custom", ()))
         if widget == "number" and _has_format(definition, form.entity, name, params):
             names.add("input-group")
+        if widget != "custom" and _has_mentions(definition, form.entity, name, params):
+            # The widget of the mentions is a text area (ADR 0043).
+            names.add("textarea")
     return names
+
+
+def _has_mentions(
+    definition: AppDefinition, entity: str, name: str, params: dict[str, Field] | None
+) -> bool:
+    """Return True if a field of a form is a text with mentions and the app has a sign-in."""
+    if definition.auth is None or (params is not None and name in params):
+        return False
+    try:
+        member = resolve_path(definition, entity, name).member
+    except FieldPathError:
+        return False
+    return isinstance(member, Field) and member.mentions
 
 
 def _has_format(

@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 {% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
-{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history or py.notifications %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history or py.notices %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -186,7 +186,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_history_entries_record_id", "history_entries", ["record_id"])
 {% endif %}
-{% if py.notifications %}
+{% if py.notices %}
 {% set u = py.entity(definition.auth.user_entity) %}
     op.create_table(
         "notices",
@@ -264,7 +264,7 @@ def downgrade() -> None:
 {% if py.snapshots %}
     op.drop_table("stat_snapshots")
 {% endif %}
-{% if py.notifications %}
+{% if py.notices %}
     op.drop_index("ix_notices_user_id", table_name="notices")
     op.drop_table("notices")
 {% endif %}

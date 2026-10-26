@@ -1,4 +1,4 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 {% set links = notice_links(definition) %}
 import type { Notice } from "@/shared/api";
 {% if links %}
@@ -11,6 +11,10 @@ const texts: Readonly<Record<string, string>> = {
 {% for name, notification in definition.notifications.items() %}
   {{ name | tojson }}: {{ text(notification.text) }}, {{ trace(notification.id) }}
 {% endfor %}
+{% if has_mentions(definition) %}
+  // A mention of the user in a text (ADR 0043).
+  "@mention": {{ text("You are mentioned in {record}.") }},
+{% endif %}
 };
 {% if links %}
 

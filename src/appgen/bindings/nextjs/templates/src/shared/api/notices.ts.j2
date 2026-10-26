@@ -1,4 +1,4 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 import { unwrap } from "./errors";
 import { listNoticesAction, readAllNoticesAction, readNoticeAction } from "./notice-actions";
 import type { NoticeApi } from "./types";

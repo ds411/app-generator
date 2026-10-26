@@ -216,7 +216,7 @@ entities:
 | Type       | Meaning                              | Options                               |
 | ---------- | ------------------------------------ | ------------------------------------- |
 | `string`   | A short line of text.                | `min_length`, `max_length`, `pattern` |
-| `text`     | Long text with line breaks.          | `min_length`, `max_length`            |
+| `text`     | Long text with line breaks.          | `min_length`, `max_length`, `mentions` |
 | `integer`  | A whole number.                      | `min`, `max`                          |
 | `decimal`  | An exact decimal number.             | `min`, `max`, `precision`, `scale`    |
 | `boolean`  | True or false.                       |                                       |
@@ -268,6 +268,9 @@ language of `translations` (see
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
 A `point` field holds a place on the earth (see [Point fields](#point-fields)).
+
+`mentions: true` lets a `text` field mention users with `@` (see
+[Mentions](#mentions)).
 
 `sequence` gives a `string` or an `integer` field the next number of a
 sequence (see [Sequence numbers](#sequence-numbers)).
@@ -1520,6 +1523,37 @@ notifications:
   marks it read, and opens the detail page of its record: the first
   page with a detail view of the entity and one parameter in its path.
   "Mark all read" marks all notices of the user read.
+
+### Mentions
+
+A `text` field with `mentions: true` can mention users
+([ADR 0043](adr/0043-mentions.md)). It needs `auth`: the users are the
+records of the user entity. A computed or a translatable text cannot
+have mentions.
+
+```yaml
+# example: room-booking
+# in: entities.Booking.fields
+notes: { type: text, max_length: 2000, mentions: true }
+```
+
+- A mention in the stored text is `@[<display value>](<ID of the
+  user>)`: for example `@[Ann Lee]`, and then the ID of the user in
+  parentheses. The display value has no brackets and no line breaks. A client of the
+  API writes a mention in the same form.
+- The widget of the field in a form is a text area. After `@` at the
+  start of a word, a list suggests the users whose display value has
+  the text after the `@`, and a choice puts the mention into the text.
+  The list needs the permission of the list of the user entity, as a
+  relation field to the user entity does.
+- The views show a mention as `@` and the display value, with a link to
+  the first page with a detail view of the user entity, if one exists.
+- A create or a change of a record gives a notice to each user that the
+  new text mentions and the text before did not: the built-in
+  notification `@mention`, with the text "You are mentioned in
+  {record}." (the display value of the record). The user that made the
+  change, and an ID without a user, get no notice. The text of the
+  notice is a key of the [translations](#translations).
 
 ## apis
 

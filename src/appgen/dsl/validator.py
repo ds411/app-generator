@@ -462,6 +462,8 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 yield from _check_point_field(entity_name, entity, field)
             if field.sequence is not None:
                 yield from _check_sequence(field, field.sequence)
+            if field.mentions:
+                yield from _check_mentions(definition, field)
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
@@ -472,6 +474,7 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 "filter",
                 "sequence",
                 "currency_field",
+                "mentions",
             ):
                 if getattr(param, key):
                     yield _error(
@@ -558,6 +561,32 @@ def _check_currency_field(
             at="currency_field",
             hint="Use the codes in lower case as the values, for example 'eur' and 'usd'.",
         )
+
+
+def _check_mentions(definition: AppDefinition, field: Field) -> Iterator[Diagnostic]:
+    """A text with mentions names the users of `auth`, and the users write it (ADR 0043)."""
+    if field.type != "text":
+        return  # `_check_field` reports the type.
+    if definition.auth is None:
+        yield _error(
+            "invalid-option",
+            "The mentions of a text name users, so they need the section 'auth'.",
+            field,
+            at="mentions",
+            hint="Add the section 'auth', or remove 'mentions'.",
+        )
+    for key, why in (
+        ("computed", "the apps compute the value"),
+        ("translatable", "a mention gives one notice, not one notice for each language"),
+    ):
+        if getattr(field, key):
+            yield _error(
+                "invalid-option",
+                f"A text with mentions cannot be {key}: {why}.",
+                field,
+                at="mentions",
+                hint=f"Remove 'mentions', or remove '{key}'.",
+            )
 
 
 def _check_sequence(field: Field, sequence: Sequence) -> Iterator[Diagnostic]:
@@ -3457,6 +3486,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "currency": NUMBER_TYPES,
         "currency_field": NUMBER_TYPES,
         "translatable": {"string", "text"},
+        "mentions": {"text"},
         "max_size": FILE_TYPES,
         "types": FILE_TYPES,
     }
