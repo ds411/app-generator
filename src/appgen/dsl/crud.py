@@ -210,11 +210,15 @@ def _table(entity: str, data: dict[str, object]) -> dict[str, object]:
 
 def _detail(entity: str, data: dict[str, object]) -> dict[str, object]:
     names = [*_fields(data), *_relations(data, _SINGLE_KINDS)]
-    return {
+    view: dict[str, object] = {
         "kind": "detail",
         "entity": entity,
         "sections": {"details": {"fields": names, "columns": 2}},
     }
+    if data.get("history") not in (None, False):
+        # The change log of the record (ADR 0040), with its restore.
+        view["tabs"] = {"history": {"label": "History", "icon": "history", "history": True}}
+    return view
 
 
 def _form(entity: str, data: dict[str, object], operation: str) -> dict[str, object]:

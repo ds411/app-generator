@@ -592,6 +592,14 @@ def _check_detail(definition: AppDefinition, entity: str, view: DetailView) -> I
         sections += tab.sections.values()
         if tab.relation is not None and tab.view is not None:
             yield from _check_related_tab(definition, entity, tab.relation, tab.view, tab)
+        if tab.history and definition.entities[entity].history is None:
+            yield _error(
+                "invalid-option",
+                f"The tab shows the change log, but the entity '{entity}' keeps none.",
+                tab,
+                at="history",
+                hint=f"Add 'history: true' to the entity '{entity}'.",
+            )
     for section in sections:
         yield from _check_paths(definition, section, "fields", entity, section.fields)
 

@@ -1,5 +1,6 @@
 {{ trace_header("app") }}
 {% set translatable = i18n and i18n.translatable %}
+{% set history = has_history(definition) %}
 {% set storage = definition.storage %}
 {% set transactions = nextjs.jobs or lines_ops %}
 import "server-only";
@@ -35,6 +36,9 @@ import {
   type FileValue,
 {% endif %}
   type Filter,
+{% if history %}
+  type HistoryAction,
+{% endif %}
   type ListQuery,
   type ListResult,
   NotFoundError,
@@ -58,6 +62,9 @@ import { deleteFiles, type StoredFile } from "@/shared/storage";
 
 {% endif %}
 import { {{ "checkAtEnd, " if nextjs.total_rules and transactions }}type Database, getDb{{ ", runEvent" if nextjs.events }} } from "./client";
+{% if history %}
+import { addEntry, type HistoryMember, snapshot } from "./history";
+{% endif %}
 
 type Row = Record<string, unknown>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -187,6 +194,14 @@ export type RepositoryOptions<T> = {
   noOverlap?: OverlapRule[];
   /** The workflows of the entity. A change that no transition allows gives a ValidationError. */
   workflows?: Workflow[];
+{% if history %}
+  /**
+   * The fields and the relations that the change log keeps (ADR 0040): the
+   * name in the app definition, and the key of the row. Without them, the
+   * entity keeps no change log.
+   */
+  history?: HistoryMember[];
+{% endif %}
 {% if nextjs.events %}
   /** The events of the entity. An error of an operation rolls back the change. */
   events?: Events<T>;
@@ -330,6 +345,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
   private readonly compare: CompareRule[];
   private readonly noOverlap: OverlapRule[];
   private readonly workflows: Workflow[];
+{% if history %}
+  private readonly history: HistoryMember[];
+{% endif %}
 {% if nextjs.events %}
   private readonly events: Events<T>;
 {% endif %}
@@ -358,6 +376,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.compare = options.compare ?? [];
     this.noOverlap = options.noOverlap ?? [];
     this.workflows = options.workflows ?? [];
+{% if history %}
+    this.history = options.history ?? [];
+{% endif %}
 {% if nextjs.events %}
     this.events = options.events ?? {};
 {% endif %}
@@ -487,31 +508,60 @@ export class Repository<T extends EntityRecord, TInput extends object>
       const created = this.events.created;
       if (created !== undefined && (await this.runEvents(tx, record as T, [created]))) {
         // The operation of the event can change the record.
+{% if history %}
+        await this.log(tx, String(row.id), "created", undefined);
+{% endif %}
         return this.reread(tx, String(row.id));
       }
+{% endif %}
+{% if history %}
+      await this.log(tx, String(row.id), "created", undefined);
 {% endif %}
       return record as T;
     });
   }
 
-{% if record_rules %}
+{% if record_rules and history %}
+  /**
+   * Change a record. With a scope, the record must be in the scope before
+   * and after the change. The entry of the change log has the action
+   * `action` (ADR 0040).
+   */
+  async update(
+    id: string,
+    patch: Partial<TInput>,
+    scope: RecordScope | null = null,
+    action: HistoryAction = "changed",
+  ): Promise<T> {
+    const where = this.byId(id, scope);
+{% elif record_rules %}
   /** Change a record. With a scope, the record must be in the scope before and after the change. */
   async update(id: string, patch: Partial<TInput>, scope: RecordScope | null = null): Promise<T> {
     const where = this.byId(id, scope);
+{% elif history %}
+  /** Change a record. The entry of the change log has the action `action` (ADR 0040). */
+  async update(id: string, patch: Partial<TInput>, action: HistoryAction = "changed"): Promise<T> {
+    const where = eq(this.table.id, id);
 {% else %}
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     const where = eq(this.table.id, id);
 {% endif %}
     return getDb().transaction(async (tx) => {
+{% set reads_history = " || this.history.length > 0" if history else "" %}
 {% if translatable %}
-      const reads = this.workflows.length > 0 || this.translatable.length > 0{{ " || this.events.changed !== undefined" if nextjs.events }};
+      const reads = this.workflows.length > 0 || this.translatable.length > 0{{ " || this.events.changed !== undefined" if nextjs.events }}{{ reads_history }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(
         before[0] ? { ...patch, ...storeTranslations(before[0], patch, this.translatable) } : patch,
       );
 {% elif nextjs.events %}
-      // The workflows and the event `changed` compare the record before and after the change.
-      const reads = this.workflows.length > 0 || this.events.changed !== undefined;
+      // The workflows{{ ", the change log," if history }} and the event `changed` compare the record before and after the change.
+      const reads = this.workflows.length > 0 || this.events.changed !== undefined{{ reads_history }};
+      const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
+      const values = this.toRow(patch);
+{% elif history %}
+      // The workflows and the change log compare the record before and after the change.
+      const reads = this.workflows.length > 0{{ reads_history }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(patch);
 {% else %}
@@ -537,8 +587,14 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.events %}
       if (await this.runEvents(tx, record as T, this.changeEvents(before[0], rows[0] as Row))) {
         // The operations of the events can change the record.
+{% if history %}
+        await this.log(tx, id, action, before[0]);
+{% endif %}
         return this.reread(tx, id);
       }
+{% endif %}
+{% if history %}
+      await this.log(tx, id, action, before[0]);
 {% endif %}
       return record as T;
     });
@@ -554,15 +610,33 @@ export class Repository<T extends EntityRecord, TInput extends object>
   async remove(id: string): Promise<void> {
 {% set where = "eq(this.table.id, id)" %}
 {% endif %}
-{% if nextjs.events %}
+{% if nextjs.events or history %}
+{% if nextjs.events and history %}
+    const deleted = this.events.deleted;
+    if (deleted !== undefined || this.history.length > 0) {
+      // The operation of the event and the change log get the record, in the transaction of the delete.
+{% elif nextjs.events %}
     const deleted = this.events.deleted;
     if (deleted !== undefined) {
       // The operation of the event gets the record, in the transaction of the delete.
+{% else %}
+    if (this.history.length > 0) {
+      // The change log gets the record, in the transaction of the delete.
+{% endif %}
       {{ "const removed: Row[] = " if storage }}await getDb().transaction(async (tx) => {
         const rows: Row[] = await tx.select().from(this.table).where({{ where }}).limit(1);
+{% if nextjs.events %}
         const [record] = await this.toRecords(tx, this.found(rows, id));
+{% else %}
+        this.found(rows, id);
+{% endif %}
         await tx.delete(this.table).where(eq(this.table.id, id));
-        await this.runEvents(tx, record as T, [deleted]);
+{% if nextjs.events %}
+        await this.runEvents(tx, record as T, {{ "deleted === undefined ? [] : [deleted]" if history else "[deleted]" }});
+{% endif %}
+{% if history %}
+        await this.log(tx, id, "deleted", rows[0]);
+{% endif %}
 {% if storage %}
         return rows;
 {% endif %}
@@ -681,6 +755,23 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const rows: Row[] = await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
     const [record] = await this.toRecords(tx, this.found(rows, id));
     return record as T;
+  }
+{% endif %}
+{% if history %}
+
+  /**
+   * Add the entry of a change of a record to the change log (ADR 0040):
+   * the values before the change, and the values of the row as the
+   * transaction has it now, after the events.
+   */
+  private async log(tx: Transaction, id: string, action: HistoryAction, before: Row | undefined): Promise<void> {
+    if (this.history.length === 0) {
+      return;
+    }
+    const rows: Row[] =
+      action === "deleted" ? [] : await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+    const old = before === undefined ? null : snapshot(before, this.history);
+    await addEntry(tx, this.entity, id, action, old, rows[0] === undefined ? null : snapshot(rows[0], this.history));
   }
 {% endif %}
 

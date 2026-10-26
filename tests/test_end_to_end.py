@@ -23,12 +23,11 @@ runner = CliRunner()
 # app has no pages and no UI, and a front-end app has no webhooks. The
 # front ends keep the change log later (#399).
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": ["history"],
+    "nextjs": [],
     "react": [
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
-        "history",
         "job",
         "webhook",
     ],

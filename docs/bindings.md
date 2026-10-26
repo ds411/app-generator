@@ -872,6 +872,52 @@ lines in one request ([ADR 0035](adr/0035-lines.md)).
   planned cost before the save, saves, and finds the lines when the
   form opens again, in both front ends.
 
+### The change log of the Next.js app and of the React app
+
+The front ends keep the `history` of an entity with the same entries as
+the FastAPI app ([ADR 0040](adr/0040-history.md)), and show them in a
+tab of a detail view with `history: true`.
+
+- The Next.js app has the table `history_entries`
+  (`src/shared/db/schema/history-entries.ts`), with the same columns as
+  the FastAPI app, and the helpers in `src/shared/db/history.ts`. The
+  repository of the entity has the option `history`: the name in the
+  definition and the key of each kept field or relation
+  (`<entity>HistoryMembers`). `create`, `update`, and `remove` add the
+  entries in their transaction, after the events. A change without a
+  new value adds no entry.
+- With `auth`, `runAction` runs the action with `asUser()`, so that the
+  entries have the signed-in user. The page of the entries gives the
+  display value of each user, or the user name.
+- The server actions `list<Entity>HistoryAction` (the access of the
+  read) and `restore<Entity>HistoryEntryAction` (the access of the
+  update) give the entries and the restore. The restore checks the old
+  values with the patch schema, and calls `update` with the action
+  `restored`. A translatable field gets the value of the default
+  language. The patch schema has no fields with a sequence, so a
+  restore keeps their numbers.
+- The mock store of the React app keeps the entries in memory, until
+  the page reloads (`history()` in
+  `src/entities/<entity>/api/<entity>-api.ts`). With `auth`, an entry
+  has the mock user. With access, the entries need the read operation,
+  and a restore the update operation. With the FastAPI app
+  (`x-react-data: api`), the HTTP store reads the endpoints of the
+  FastAPI app. `inTransaction` of the mock store (ADR 0035) also
+  removes the entries of a failed change.
+- `<entity>History` of `@/entities/<entity>` is a `HistoryApi`:
+  `list(id, page)` and `restore(id, entryId)`. The component
+  `HistoryList` (`src/shared/ui/history-list.tsx`) shows a page of the
+  entries, the newest first: the action, the user, the time, and the
+  old and the new value of each field, in the format of the field. A
+  relation shows the display value of its record. An amount in the
+  currency of its record (`currency_field`) shows as a number, because
+  the currency can change. An entry of a change
+  has the button "Restore" if the user may call the update operation.
+- The UI test `ui-tests/tests/history.spec.ts` changes the title of a
+  task of the project tracker in both front ends, sees the entry in the
+  tab "History", and restores the old title. `scripts/api_client_test.py`
+  does the same with the FastAPI app.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

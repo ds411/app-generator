@@ -775,7 +775,10 @@ class ViewContext:
                     found.add("multi_select" if f.multiple else f.kind)
         for name in self.detail_views:
             found.add("detail")
-            found |= self.detail_plan(name).uses & values
+            detail = self.detail_plan(name)
+            found |= detail.uses & values
+            if any(tab.history for tab in detail.tabs):
+                found.add("history")
         for name, kind in self.api_views.items():
             api_plan = self.api_view_plan(name)
             found.add(kind)
@@ -1787,6 +1790,11 @@ def view_rules() -> tuple[Output, ...]:
                 ("lib/badges.ts.j2", "src/shared/config/badges.ts", "ui_views.runtime"),
                 ("ui/actions.tsx.j2", "src/shared/ui/actions.tsx", "ui_views.runtime"),
                 ("ui/view-state.tsx.j2", "src/shared/ui/view-state.tsx", "ui_views.runtime"),
+                (
+                    "ui/history-list.tsx.j2",
+                    "src/shared/ui/history-list.tsx",
+                    "'history' in ui_views.features",
+                ),
                 (
                     "ui/list-pagination.tsx.j2",
                     "src/shared/ui/list-pagination.tsx",

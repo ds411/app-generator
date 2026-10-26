@@ -2439,7 +2439,7 @@
     },
     "DetailTab": {
       "additionalProperties": false,
-      "description": "A tab of a detail view: sections, a list of related records, or a gap.",
+      "description": "A tab of a detail view: sections, a list of related records, the change log, or a gap.",
       "patternProperties": {
         "^x-": {}
       },
@@ -2497,6 +2497,11 @@
             }
           ],
           "default": null
+        },
+        "history": {
+          "default": false,
+          "title": "History",
+          "type": "boolean"
         },
         "custom": {
           "default": false,

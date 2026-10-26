@@ -5,7 +5,8 @@
 {% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | rejectattr("1.lines") | list %}
 {% set lists = inverse_lists(definition, name) %}
 {% set files = element.file_fields if definition.storage else {} %}
-{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) %}
+{% set history = element.history %}
+{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + (["createHistoryApi"] if history else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type HistoryApi"] if history else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) %}
 import { {{ api_names | join(", ") }} } from "@/shared/api";
 
 import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
@@ -13,9 +14,15 @@ import {
   create{{ type }}Action,
   get{{ type }}Action,
   list{{ type }}Action,
+{% if history %}
+  list{{ type }}HistoryAction,
+{% endif %}
   remove{{ type }}Action,
 {% if files %}
   remove{{ type }}FileAction,
+{% endif %}
+{% if history %}
+  restore{{ type }}HistoryEntryAction,
 {% endif %}
   update{{ type }}Action,
 {% if files %}
@@ -37,6 +44,14 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = createEntity
 export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = createFileApi({{ ts_value(name) }}, {
   upload: upload{{ type }}FileAction,
   remove: remove{{ type }}FileAction,
+});
+{% endif %}
+{% if history %}
+
+/** The change log of {{ type }} (ADR 0040): the entries of a record, and a restore. */
+export const {{ var }}History: HistoryApi<{{ type }}> = createHistoryApi({{ ts_value(name) }}, { {{ trace(history.id) }}
+  list: list{{ type }}HistoryAction,
+  restore: restore{{ type }}HistoryEntryAction,
 });
 {% endif %}
 {% for op_name, op in ops %}

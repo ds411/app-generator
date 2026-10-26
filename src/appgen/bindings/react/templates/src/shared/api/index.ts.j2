@@ -35,6 +35,11 @@ export type {
 {% endif %}
   Filter,
   FilterOp,
+{% if has_history(definition) %}
+  HistoryAction,
+  HistoryApi,
+  HistoryEntry,
+{% endif %}
   ListQuery,
   ListResult,
   Search,

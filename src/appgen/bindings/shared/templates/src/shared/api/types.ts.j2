@@ -51,6 +51,35 @@ export interface EntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInp
   subscribe(listener: () => void): () => void;
 }
 
+{% if has_history(definition) %}
+/** The kind of change of an entry of the change log (ADR 0040). */
+export type HistoryAction = "created" | "changed" | "deleted" | "restored";
+
+/**
+ * An entry of the change log of a record (ADR 0040): the old and the new
+ * value of each changed field, by its name in the app definition.
+ */
+export type HistoryEntry = {
+  id: string;
+  action: HistoryAction;
+  /** The ID of the signed-in user of the change, or null. */
+  userId: string | null;
+  /** The display value of the user, or null. */
+  user: string | null;
+  /** The time of the change (ISO 8601). */
+  at: string;
+  changes: Record<string, { old: unknown; new: unknown }>;
+};
+
+/** The change log of the records of an entity (ADR 0040). */
+export interface HistoryApi<T extends EntityRecord> {
+  /** Return a page of the entries of a record, the newest first. */
+  list(id: string, page?: { page: number; pageSize: number }): Promise<ListResult<HistoryEntry>>;
+  /** Give the fields of the entry of a change their old values back. Return the changed record. */
+  restore(id: string, entryId: string): Promise<T>;
+}
+
+{% endif %}
 {% if definition.storage %}
 /** A file of a record (ADR 0027): the name, the size in bytes, the media type, and the URL of the file. */
 export type FileValue = {

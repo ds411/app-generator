@@ -75,7 +75,14 @@ The dependency of the signed-in user puts the ID of the user in the
 session of the request, and the entry takes it from there. A change
 without a request, for example in a job, has no user.
 
-The Next.js app and the UI of the front ends follow in their own story.
+The Next.js app keeps the same table, and its repositories add the
+entries in the transaction of the change, with the signed-in user of
+the server action. The mock store of the React app keeps the entries
+in memory, and the React app with the FastAPI app reads the endpoints.
+A tab of a detail view with `history: true` shows the entries, and a
+restore button on the entry of a change if the user may call the
+update operation. The CRUD detail view of an entity with `history` has
+this tab.
 
 ## Consequences
 

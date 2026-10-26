@@ -403,6 +403,25 @@ delete of a record deletes its files. The files of the records that the
 database deletes with `on_delete: cascade` stay in the storage.
 
 {% endif %}
+{% if nextjs.history %}
+## Change log
+
+The repositories keep a change log of these entities in the table
+`history_entries`: an entry for each create, change, and delete of a
+record, with the user, the time, and the old and the new values.
+
+{% for entity_name, entity in definition.entities.items() if entity.history %}
+- `{{ entity_name }}`: {% for member in entity.history_members %}`{{ member }}`{{ ", " if not loop.last }}{% endfor %}.
+{% endfor %}
+
+`<entity>History` of `@/entities/<entity>` gives the entries of a record
+(the access of the read) and a restore (the access of the update). A
+restore gives the fields of the entry of a change their old values
+back, with the checks of an update, and adds an entry `restored`. A
+change outside the repositories adds no entry: SQL in a script, a
+delete of the database (`on_delete: cascade`), and the seed.
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 

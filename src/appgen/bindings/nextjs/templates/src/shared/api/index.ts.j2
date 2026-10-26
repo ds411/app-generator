@@ -1,9 +1,6 @@
 {{ trace_header("app") }}
-{% if definition.storage %}
-export { createEntityApi, createFileApi, type EntityActions, type FileActions, notifyChange } from "./client";
-{% else %}
-export { createEntityApi, type EntityActions, notifyChange } from "./client";
-{% endif %}
+{% set client_names = ["createEntityApi"] + (["createFileApi"] if definition.storage else []) + (["createHistoryApi"] if has_history(definition) else []) + ["type EntityActions"] + (["type FileActions"] if definition.storage else []) + (["type HistoryActions"] if has_history(definition) else []) + ["notifyChange"] %}
+export { {{ client_names | join(", ") }} } from "./client";
 export {
   type ActionError,
   type ActionResult,
@@ -20,6 +17,11 @@ export type {
 {% endif %}
   Filter,
   FilterOp,
+{% if has_history(definition) %}
+  HistoryAction,
+  HistoryApi,
+  HistoryEntry,
+{% endif %}
   ListQuery,
   ListResult,
   Search,

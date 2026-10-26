@@ -720,7 +720,9 @@ ui:
             screenshot: { title: Screenshot, fields: [screenshot] }
             project: { title: Project, fields: [project, project.owner, project.due_date], columns: 3 }
         comments: { label: Comments, icon: message-square, relation: comments, view: comment_table }
-        activity: { label: Activity, icon: history, custom: true }
+        # The change log of the task (ADR 0040), with a restore of each change.
+        history: { label: History, icon: history, history: true }
+        activity: { label: Activity, icon: activity, custom: true }
       actions:
         edit: { kind: form, form: edit_task, label: Edit, icon: pencil }
         assign: { kind: form, form: assign_task, label: Assign, icon: user-plus, variant: outline }
@@ -1194,6 +1196,7 @@ translations:
         Budget lines: Budgetzeilen
         Budget of active projects: Budget der aktiven Projekte
         Change or reset the filters.: Ändern Sie die Filter, oder setzen Sie sie zurück.
+        Changed: Geändert
         Clear: Leeren
         Clear the filter: Filter leeren
         Clear the selection: Auswahl aufheben
@@ -1209,11 +1212,13 @@ translations:
         Create a project to plan your work.: Legen Sie ein Projekt an, um Ihre Arbeit zu planen.
         Create project: Projekt anlegen
         Create task: Aufgabe anlegen
+        Created: Angelegt
         Ctrl K: Strg K
         Dark: Dunkel
         Delete the comment?: Kommentar löschen?
         Delete the project?: Projekt löschen?
         Delete the task?: Aufgabe löschen?
+        Deleted: Gelöscht
         Description: Beschreibung
         Details: Details
         Displays the mobile sidebar.: Zeigt die mobile Seitenleiste.
@@ -1234,6 +1239,7 @@ translations:
         Find a page by its title.: Suchen Sie eine Seite nach ihrem Titel.
         First page: Erste Seite
         Go to the start page: Zur Startseite
+        History: Verlauf
         Item: Posten
         Language: Sprache
         Last page: Letzte Seite
@@ -1250,10 +1256,12 @@ translations:
         Move to: Verschieben nach
         Name: Name
         name@example.com: name@beispiel.de
+        Newer: Neuere
         Next page: Nächste Seite
         Next public holidays: Nächste Feiertage
         Nationwide: Landesweit
         'No': Nein
+        No changes yet.: Noch keine Änderungen.
         No comments yet: Noch keine Kommentare
         No data yet: Noch keine Daten
         No lines yet.: Noch keine Zeilen.
@@ -1267,6 +1275,8 @@ translations:
         'Not implemented yet: {element}': 'Noch nicht umgesetzt: {element}'
         Note: Notiz
         Notifications: Benachrichtigungen
+        Older: Ältere
+        Only the entry of a change has old values to restore.: Nur der Eintrag einer Änderung hat alte Werte zum Wiederherstellen.
         Open hours by person: Offene Stunden pro Person
         Open tasks: Offene Aufgaben
         Other: Andere
@@ -1277,6 +1287,11 @@ translations:
         Person: Person
         Pick a date: Datum wählen
         Plan projects, split them into tasks, and assign the tasks to people.: Planen Sie Projekte, teilen Sie sie in Aufgaben auf, und weisen Sie die Aufgaben Personen zu.
+        Restore: Wiederherstellen
+        Restored: Wiederhergestellt
+        The history did not load.: Der Verlauf wurde nicht geladen.
+        The old values are back.: Die alten Werte sind zurück.
+        The restore did not succeed.: Die Wiederherstellung ist fehlgeschlagen.
         '{entity} {id} does not exist.': '{entity} {id} gibt es nicht.'
         The input is not valid.: Die Eingabe ist nicht gültig.
         The lines did not load.: Die Zeilen wurden nicht geladen.

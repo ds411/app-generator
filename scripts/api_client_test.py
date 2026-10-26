@@ -37,11 +37,14 @@ that the two generated apps work together:
    file to the file endpoint of the FastAPI app, and the detail view
    shows the image from its signed link. Then the form removes it
    (ADR 0027).
-9. Call the endpoint of an operation of the exposed APIs
-   `exchange_rates` and `finance` (`expose: true`) in the FastAPI app:
-   the app must call the mock server with the API key, or with an
-   OAuth 2.0 token and the cookie parameter, and give the example
-   answer.
+9. Change the title of the task with the API, open the tab "History" of
+   the task, and restore the old title: the React app reads the change
+   log from the FastAPI app (ADR 0040).
+10. Call the endpoint of an operation of the exposed APIs
+    `exchange_rates` and `finance` (`expose: true`) in the FastAPI app:
+    the app must call the mock server with the API key, or with an
+    OAuth 2.0 token and the cookie parameter, and give the example
+    answer.
 
 Run it from the repository root:
 
@@ -478,6 +481,51 @@ function check(ok, message) {
   process.exit(1);
 });
 """
+# Open the tab "History" of a task that the API changed, and restore the
+# old title (ADR 0040): the React app reads the change log from the
+# FastAPI app. The argument is a JSON object with the URLs, the ID of the
+# task, and the old and the new title.
+HISTORY_CHECK = """
+const { existsSync } = require("node:fs");
+const { chromium } = require(require.resolve("@playwright/test", { paths: ["ui-tests"] }));
+const timeout = 30000;
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+(async () => {
+  const test = JSON.parse(process.argv[1]);
+  const system = "/opt/pw-browsers/chromium";
+  let executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    executablePath = existsSync(system) ? system : undefined;
+  }
+  const browser = await chromium.launch({ executablePath });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${test.web}/tasks/${test.task}`);
+    await page.getByRole("tab", { name: "History", exact: true }).click({ timeout });
+    const entry = page.locator("li[data-action=changed]", { hasText: test.title }).first();
+    await entry.waitFor({ timeout });
+    const restored = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/restore") &&
+        response.request().method() === "POST",
+      { timeout },
+    );
+    await entry.getByRole("button", { name: "Restore", exact: true }).click();
+    const response = await restored;
+    check(response.status() === 200, `The restore gave the status ${response.status()}.`);
+    await page.locator("li[data-action=restored]").first().waitFor({ timeout });
+    const record = await (await fetch(`${test.api}/tasks/${test.task}`)).json();
+    check(record.title === test.old, `The task has the title ${record.title}, not ${test.old}.`);
+  } finally {
+    await browser.close();
+  }
+})().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+"""
 SCREENSHOT = (
     "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAARklEQVR42u3WsQ0AIAgEQJZxMsd2A93BuACWxoJLvvyEq4"
     "BofaUZc6d53Q8gIKByoF+Db30gIKB6IJsaCAjIP+R0AAEVBx0soKK1++CmdgAAAABJRU5ErkJggg=="
@@ -809,6 +857,17 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     files = {"api": API_URL, "web": WEB_URL, "task": created_task["id"], "png": SCREENSHOT}
     log(f"open {WEB_URL}/tasks/{created_task['id']}, and upload and remove a screenshot")
     run("node", "-e", FILE_CHECK, json.dumps(files))
+    renamed = "API task, renamed"
+    request("PATCH", f"{API_URL}/tasks/{created_task['id']}", {"title": renamed})
+    history = {
+        "api": API_URL,
+        "web": WEB_URL,
+        "task": created_task["id"],
+        "title": renamed,
+        "old": task["title"],
+    }
+    log("change the title of the task with the API, and restore it in its history tab")
+    run("node", "-e", HISTORY_CHECK, json.dumps(history))
     check_exposed_api(mock)
 
 

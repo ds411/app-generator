@@ -1,0 +1,189 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useState } from "react";
+import { toast } from "sonner";
+
+import type { EntityRecord, HistoryApi, HistoryEntry } from "@/shared/api";
+{% if definition.access %}
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
+import { type Format, formatValue } from "@/shared/lib/format";
+import { useResource } from "@/shared/lib/use-resource";
+import { Button } from "@/shared/ui/button";
+import { ViewLoading, ViewMessage } from "@/shared/ui/view-state";
+
+/** A field of the change log (ADR 0040): its label, and the format of its values. */
+export type HistoryField = { label: string; format?: Format; currency?: string };
+
+/** Return the display value of a related record, by its ID. */
+export type RecordText = (id: string) => Promise<string>;
+
+export type HistoryListProps<T extends EntityRecord> = {
+  history: HistoryApi<T>;
+  /** The ID of the record. */
+  id: string;
+  /** The fields of the change log, by their names in the app definition. */
+  fields: Readonly<Record<string, HistoryField>>;
+  /** The display values of the related records of the relations, by the name of the relation. */
+  records?: Readonly<Record<string, RecordText>>;
+  /** The update operation of the entity: a change has a restore if the user may call it. */
+  restore?: string;
+  /** Load the entries again after a change of the records. */
+  subscribe?: (listener: () => void) => () => void;
+};
+
+/** The count of the entries on a page. */
+const PAGE_SIZE = 20;
+
+type Page = { entries: HistoryEntry[]; total: number; texts: Map<string, string> };
+
+/** Return the display values of the related records of the entries: the key is `<relation>:<id>`. */
+async function recordTexts(
+  entries: readonly HistoryEntry[],
+  records: Readonly<Record<string, RecordText>>,
+): Promise<Map<string, string>> {
+  const wanted = new Map<string, [RecordText, string]>();
+  for (const entry of entries) {
+    for (const [name, change] of Object.entries(entry.changes)) {
+      const text = records[name];
+      for (const value of [change.old, change.new]) {
+        if (text !== undefined && typeof value === "string") wanted.set(`${name}:${value}`, [text, value]);
+      }
+    }
+  }
+  const texts = new Map<string, string>();
+  await Promise.all(
+    [...wanted].map(async ([key, [text, id]]) => {
+      try {
+        texts.set(key, await text(id));
+      } catch {
+        // A deleted record shows its ID.
+      }
+    }),
+  );
+  return texts;
+}
+
+/**
+ * The change log of a record (ADR 0040): the entries, the newest first,
+ * with the user, the time, and the old and the new value of each changed
+ * field. A change has a restore, which gives the fields their old values
+ * back.
+ */
+export function HistoryList<T extends EntityRecord>({ history, id, fields, records = {}, restore, subscribe }: HistoryListProps<T>) {
+  const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const resource = useResource(
+    `history:${id}:${page}`,
+    async (): Promise<Page> => {
+      const result = await history.list(id, { page, pageSize: PAGE_SIZE });
+      return { entries: result.items, total: result.total, texts: await recordTexts(result.items, records) };
+    },
+    subscribe,
+    { keep: true },
+  );
+{% if definition.access %}
+  const { canCall } = useAccess(); {{ trace(definition.access.id) }}
+  const canRestore = restore !== undefined && canCall(restore);
+{% else %}
+  const canRestore = restore !== undefined;
+{% endif %}
+
+  if (resource.status === "loading") {
+    return <ViewLoading indicator="skeleton" shape="detail" rows={3} />;
+  }
+  if (resource.status === "error") {
+    return <ViewMessage tone="error" title={{ '{' ~ tr(js("The history did not load.")) ~ '}' }} />;
+  }
+  const { entries, total, texts } = resource.data;
+  if (entries.length === 0) {
+    return <ViewMessage title={{ '{' ~ tr(js("No changes yet.")) ~ '}' }} />;
+  }
+
+  const actions: Record<HistoryEntry["action"], string> = {
+    created: {{ tr(js("Created")) }},
+    changed: {{ tr(js("Changed")) }},
+    deleted: {{ tr(js("Deleted")) }},
+    restored: {{ tr(js("Restored")) }},
+  };
+
+  /** Return a value of a field as text. An empty value is a dash. */
+  const display = (name: string, value: unknown): string => {
+    const text = texts.get(`${name}:${String(value)}`);
+    if (text !== undefined) return text;
+    const field = fields[name];
+    const formatted =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? JSON.stringify(value)
+        : formatValue(value, field?.format, field?.currency);
+    return formatted === "" ? "—" : formatted;
+  };
+
+  const restoreEntry = async (entry: HistoryEntry) => {
+    setBusy(true);
+    try {
+      await history.restore(id, entry.id);
+      toast.success({{ tr(js("The old values are back.")) }});
+      resource.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The restore did not succeed.")) }});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  return (
+    <div className="space-y-4">
+      <ol className="space-y-3" aria-label={{ '{' ~ tr(js("History")) ~ '}' }}>
+        {entries.map((entry) => (
+          <li key={entry.id} className="space-y-2 rounded-lg border p-4" data-action={entry.action}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 text-sm">
+                <span className="font-medium">{actions[entry.action]}</span>
+                {entry.user !== null && <span className="text-muted-foreground"> · {entry.user}</span>}
+                <span className="text-muted-foreground"> · {formatValue(entry.at, "datetime")}</span>
+              </div>
+              {canRestore && (entry.action === "changed" || entry.action === "restored") && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void restoreEntry(entry)}>
+                  {{ jsx_text("Restore") }}
+                </Button>
+              )}
+            </div>
+            <dl className="grid gap-1 text-sm sm:grid-cols-[minmax(8rem,auto)_1fr] sm:gap-x-4">
+              {Object.entries(entry.changes).map(([name, change]) => (
+                <div key={name} className="contents">
+                  <dt className="text-muted-foreground">{fields[name]?.label ?? name}</dt>
+                  <dd className="min-w-0 break-words">
+                    {entry.action === "created" ? (
+                      display(name, change.new)
+                    ) : entry.action === "deleted" ? (
+                      display(name, change.old)
+                    ) : (
+                      <>
+                        <span className="text-muted-foreground line-through">{display(name, change.old)}</span>
+                        {" → "}
+                        <span>{display(name, change.new)}</span>
+                      </>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+      {pages > 1 && (
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            {{ jsx_text("Newer") }}
+          </Button>
+          <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+            {{ jsx_text("Older") }}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
