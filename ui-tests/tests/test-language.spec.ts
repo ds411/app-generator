@@ -2,7 +2,12 @@
 // (ADR 0010). scripts/translation_test.py generates the project tracker
 // with a test language that changes each text to ⟦text⟧, and runs this
 // file. A text without ⟦ that is not a value of the records does not go
-// through `t`. Without the test language, the tests skip.
+// through `t`. The test language is from right to left: no page is wider
+// than the window, and one page of each kind looks like its approved
+// screenshot. Without the test language, the tests skip.
+import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import { type ExpectedPage, expected, pathPattern, UNKNOWN_ID } from "./expected";
@@ -15,6 +20,7 @@ const MARK = "⟦";
 const ATTRIBUTES = ["aria-label", "aria-description", "aria-roledescription", "aria-valuetext", "alt", "title", "placeholder"];
 /** The today of the browser: the center of the mock and seed dates (BASE_DATE). */
 const TODAY = new Date("2026-01-05T12:00:00Z");
+const SCREENSHOTS = fileURLToPath(new URL(`../screenshots/${expected.binding}/`, import.meta.url));
 
 test.skip(!language, "The app has no test language.");
 // The test language has the Japanese locale: its dates and numbers have
@@ -58,6 +64,11 @@ async function samplePath(page: Page, target: ExpectedPage): Promise<string> {
   const parent = target.path.slice(0, target.path.indexOf("/{")) || "/";
   const href = await firstRecordLink(page, parent, pathPattern(target.path));
   return href ?? target.path.replace(/\{[^}]+\}/g, UNKNOWN_ID);
+}
+
+/** Return the width of the content of a page that is outside the window, in pixels. */
+async function overflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
 /** Open the first date picker in an element, and return the texts of its calendar. */
@@ -107,9 +118,21 @@ for (const target of expected.pages) {
     await page.clock.setFixedTime(TODAY);
     await page.goto(await samplePath(page, target));
     await expect(page.locator("html")).toHaveAttribute("lang", language.locale);
+    await expect(page.locator("html")).toHaveAttribute("dir", language.direction);
     await page.waitForLoadState("networkidle");
     await expect(page.locator("h1").first()).toBeVisible();
     expect(await untranslated(page.locator("body"))).toEqual([]);
+    // A layout that does not follow the direction can push a part out of the window.
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    if (language.screenshots.includes(target.name)) {
+      // Compare the page with its approved screenshot in
+      // ui-tests/approved/<binding>/<direction>/ (see CONTRIBUTING.md).
+      mkdirSync(`${SCREENSHOTS}${language.direction}`, { recursive: true });
+      await page.screenshot({ path: `${SCREENSHOTS}${language.direction}/${target.name}.png`, fullPage: true });
+      await expect(page).toHaveScreenshot([expected.binding, language.direction, `${target.name}.png`], {
+        fullPage: true,
+      });
+    }
 
     // The search, the menu of the first record, and the first form of the page.
     const search = page.getByRole("button", { name: new RegExp(`^${MARK}Search pages`) });

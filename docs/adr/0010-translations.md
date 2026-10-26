@@ -146,6 +146,9 @@ and data in modules, for example the badge sets and the page titles.
   Monday.
 - The test language has the Japanese locale, so a date or number that
   does not use the locale shows Latin letters, and the UI test finds it.
+  It is from right to left, so the UI test finds a page that is wider
+  than the window, and compares one page of each kind with an approved
+  screenshot of the layout from right to left.
 - A new fixed text in a template must use a text helper, else it shows
   in the default language. `scripts/untranslated_text.mjs` finds such a
   text in the code, and the test language finds it on the pages.
