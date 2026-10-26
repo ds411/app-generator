@@ -9,9 +9,13 @@
 # (scripts/check_shared_rate_limit.py), and the deployment files of each
 # target against their schemas (scripts/check_deploy_files.py). Then
 # generate tests/fixtures/seed-data.yaml, and run lint, type check,
-# appgen check, and the seed test (scripts/seed_test.py) on it. Last,
+# appgen check, and the seed test (scripts/seed_test.py) on it. Then
 # generate tests/fixtures/webhooks.yaml, and run lint, type check, build,
 # appgen check, and the webhook test (scripts/webhook_test.py) on it.
+# Last, generate tests/fixtures/jobs.yaml with the hand-written operations
+# of tests/fixtures/jobs-extensions/nextjs/, and run lint, type check,
+# appgen check, and the test of the routes of the jobs with a fixed clock
+# (scripts/jobs_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -36,20 +40,23 @@ set -eu
 definition=examples/project-tracker/app.yaml
 root=$(pwd)
 
-# The app of the seed data fixture (ADR 0021), in a temporary folder.
+# The apps of the seed data fixture (ADR 0021) and of the jobs fixture
+# (ADR 0029), in temporary folders.
 seed_definition=tests/fixtures/seed-data.yaml
 seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-seed.XXXXXX")
 # The app of the webhooks fixture (ADR 0028), in a temporary folder.
 webhooks_definition=tests/fixtures/webhooks.yaml
 webhooks_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-webhooks.XXXXXX")
+jobs_definition=tests/fixtures/jobs.yaml
+jobs_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-jobs.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$jobs_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$jobs_out"' EXIT
 fi
 
 step() {
@@ -142,5 +149,23 @@ uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
 
 step "webhook test"
 uv run --locked scripts/webhook_test.py "$webhooks_definition" --app "$webhooks_out"
+
+step "generate $jobs_definition in $jobs_out"
+cp -R tests/fixtures/jobs-extensions/nextjs/. "$jobs_out"/
+uv run --locked appgen generate "$jobs_definition" -b nextjs -o "$jobs_out" >/dev/null
+(
+    cd "$jobs_out"
+    step "pnpm install (jobs)"
+    pnpm install --silent
+    step "pnpm lint (jobs)"
+    pnpm --silent lint
+    step "pnpm typecheck (jobs)"
+    pnpm --silent typecheck
+)
+step "appgen check (jobs)"
+uv run --locked appgen check "$jobs_definition" "$jobs_out"
+
+step "jobs test"
+uv run --locked scripts/jobs_test.py --app "$jobs_out"
 
 step "passed"

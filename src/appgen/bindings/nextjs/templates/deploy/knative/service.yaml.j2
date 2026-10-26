@@ -53,6 +53,11 @@ spec:
             # Cloud Run adds the address of the client to the end of X-Forwarded-For.
             - name: RATE_LIMIT_TRUSTED_HOPS
               value: "1"
+{% if nextjs.jobs %}
+            # A call of the route of a job runs the times of the last minutes.
+            - name: JOBS_WINDOW_MINUTES
+              value: "60"
+{% endif %}
 {% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email)) %}
             # The URL of the app for the browsers.
             - name: PUBLIC_URL
@@ -97,6 +102,14 @@ spec:
                 secretKeyRef:
                   name: {{ name }}-database-url
                   key: latest
+{% if nextjs.jobs %}
+            # The secret of the routes of the jobs (jobs.yaml, or Cloud Scheduler).
+            - name: JOBS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-jobs-secret
+                  key: latest
+{% endif %}
 {% if nextjs.redis %}
             - name: RATE_LIMIT_STORE_URL
               valueFrom:

@@ -1,3 +1,3 @@
 {{ trace_header("app") }}
-export { getDb, type Database } from "./client";
+export { getDb, type Database{{ ", inTransaction" if nextjs.jobs }} } from "./client";
 export * from "./schema";

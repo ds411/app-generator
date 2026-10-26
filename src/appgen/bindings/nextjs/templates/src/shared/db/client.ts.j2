@@ -1,18 +1,35 @@
 {{ trace_header("app") }}
 import "server-only";
 
+{% if nextjs.jobs %}
+import { AsyncLocalStorage } from "node:async_hooks";
+
+{% endif %}
 import { connect, type Database } from "./connect";
 
 export { type Database, usesPglite } from "./connect";
 
 const globalForDb = globalThis as unknown as { appgenDb?: Database };
+{% if nextjs.jobs %}
+
+/** The transaction of the work in `inTransaction()`. */
+const ambient = new AsyncLocalStorage<Database>();
+{% endif %}
 
 /**
  * Return the database client. It connects on the first call, so that
  * `next build` needs no database. In development, the client survives
- * hot reloads.
+ * hot reloads.{% if nextjs.jobs %} In the work of `inTransaction()`, it returns the
+ * transaction.{% endif %}
+
  */
 export function getDb(): Database {
+{% if nextjs.jobs %}
+  const transaction = ambient.getStore();
+  if (transaction) {
+    return transaction;
+  }
+{% endif %}
   if (!globalForDb.appgenDb) {
     const url = process.env.DATABASE_URL;
     if (!url) {
@@ -24,3 +41,15 @@ export function getDb(): Database {
   }
   return globalForDb.appgenDb;
 }
+{% if nextjs.jobs %}
+
+/**
+ * Run work in one transaction, for example a run of a job (ADR 0029). In
+ * the work, `getDb()` returns the transaction, so the repositories write
+ * in it too: a transaction of a repository becomes a savepoint. An error
+ * rolls back all the writes of the work.
+ */
+export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
+  return getDb().transaction((transaction) => ambient.run(transaction, work));
+}
+{% endif %}

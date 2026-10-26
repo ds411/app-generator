@@ -550,6 +550,44 @@ the API. Compose starts it as the service `worker`.
   the filter does not run, that a change of the date field gives a new
   run, and that a failed run is in the log and runs again.
 
+### The jobs of the Next.js app
+
+The Next.js app has no worker process. It runs each job of the
+definition in the route `POST /api/jobs/<job>`
+([ADR 0029](adr/0029-jobs.md)), and a scheduler calls the routes.
+
+- Each job is a module in `src/app/jobs/`: its schedule or the offset of
+  its date field, the filter of its records (`where`, a Drizzle
+  condition), the runs that are due at a time (`due`), and
+  `run<Job>(now, windowMs)`. A job with an entity calls its custom
+  operation (`src/features/<operation>/api/<operation>.ext.ts`) on each
+  record, with the default values of the params. A job without an
+  entity calls the function of its extension file
+  `src/app/jobs/<job>.ext.ts`, a generation gap.
+- `src/shared/lib/jobs.ts` has the cron schedules, `runDue`, and
+  `handleJob`. `runDue` inserts the row of each run in the table
+  `job_runs` (the same table and keys as in the FastAPI app) before it
+  starts the run, so two calls never start the same run. The work of a
+  run and its state `done` are in one transaction: `inTransaction()` of
+  `@/shared/db` makes `getDb()` return the transaction, so the
+  repositories in the operation write in it. A failed run rolls back,
+  goes into the log as a JSON line with `job`, `record_id`, and `due`,
+  and runs again at the next call while its time is in the window.
+- `handleJob` checks the header `Authorization: Bearer <JOBS_SECRET>`
+  (else 401), runs the job for the times of the last
+  `JOBS_WINDOW_MINUTES` (60), and gives `{ job, now, runs, failed }`,
+  with the status 500 when a run failed. With `JOBS_FIXED_CLOCK=true`,
+  the parameter `now` sets the time of the call.
+- The deployment files have a CronJob (a curl image) for each job with a
+  schedule, and one each minute for the jobs with `at`:
+  `deploy/kubernetes/jobs.yaml` and `deploy/knative/jobs.yaml`. On Cloud
+  Run, Cloud Scheduler calls the routes (the README of the app has the
+  commands). Compose starts the service `jobs`, which calls each route
+  each minute.
+- `scripts/jobs_test.py` calls the route handlers of
+  `tests/fixtures/jobs.yaml` with a fixed clock and PGlite, with the
+  hand-written operations of `tests/fixtures/jobs-extensions/nextjs/`.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

@@ -1,12 +1,14 @@
-"""The jobs: the cron expressions, the offsets, the checks, and the FastAPI worker (ADR 0029)."""
+"""The jobs: the cron expressions, the offsets, the checks, the FastAPI worker, and the
+Next.js routes (ADR 0029)."""
 
 import datetime as dt
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
+import yaml
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs
 from appgen.dsl import load_definition, load_definition_text, validate_definition
 from appgen.dsl.cron import CronError, parse_cron
 from appgen.dsl.jobs import parse_offset
@@ -273,3 +275,84 @@ def test_a_job_cannot_have_the_name_of_a_module_or_a_table() -> None:
     table = BASE.replace("  Task:\n", "  Task:\n    x-fastapi-table: job_runs\n")
     with pytest.raises(GenerationError, match="job_runs"):
         files_of(table + JOBS)
+
+
+def nextjs_files(text: str) -> dict[str, str]:
+    definition = load_definition_text(text, "app.yaml")
+    return {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+
+
+def test_the_nextjs_app_has_a_module_and_a_route_for_each_job() -> None:
+    files = nextjs_files(BASE + JOBS)
+    for name, module in (("reminder", "reminder"), ("cleanup", "cleanup"), ("digest", "digest")):
+        assert f"// @trace jobs.{name} file" in files[f"src/app/jobs/{module}.ts"]
+        route = files[f"app/api/jobs/{name}/route.ts"]
+        assert f'return handleJob(request, "{name}", run{name.title()});' in route
+    assert "src/app/jobs/digest.ext.ts" in files
+    assert "src/app/jobs/reminder.ext.ts" not in files
+    reminder = files["src/app/jobs/reminder.ts"]
+    assert "const OFFSET_MS = -7_200_000;" in reminder
+    assert 'return eq(taskTable.status, "open");' in reminder
+    assert "await remind(record, remindParamsSchema.parse({}));" in reminder
+    # The field `due_at` is not required: the runs leave out the records without a value.
+    assert "row.value === null ? [] :" in reminder
+    cleanup = files["src/app/jobs/cleanup.ts"]
+    assert "  minutes: [0, 15, 30, 45]," in cleanup
+    assert "const today = dateOf(now);" in cleanup
+    assert "return lt(taskTable.dueOn, today);" in cleanup
+    assert 'export * from "./job-runs";' in files["src/shared/db/schema/index.ts"]
+    assert 'pgTable("job_runs", {' in files["src/shared/db/schema/job-runs.ts"]
+    assert "export async function inTransaction<T>(" in files["src/shared/db/client.ts"]
+    assert "  jobs:\n" in files["compose.yaml"]
+    assert "JOBS_SECRET=" in files["deploy/kubernetes/secret.example.env"]
+    assert "  - jobs.yaml\n" in files["deploy/kubernetes/kustomization.yaml"]
+
+
+def test_the_nextjs_app_calls_the_routes_with_cron_jobs() -> None:
+    files = nextjs_files(BASE + JOBS)
+    documents = [d for d in yaml.safe_load_all(files["deploy/kubernetes/jobs.yaml"]) if d]
+    schedules = {d["metadata"]["name"]: d["spec"]["schedule"] for d in documents}
+    # One CronJob for each job with a schedule, and one each minute for the jobs with `at`.
+    assert schedules == {
+        "tracker-web-cleanup": "*/15 * * * *",
+        "tracker-web-digest": "0 0 * * *",
+        "tracker-web-each-minute": "* * * * *",
+    }
+    container = documents[2]["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    assert "for job in reminder; do" in container["args"][0]
+    assert '"http://tracker-web/api/jobs/$job"' in container["args"][0]
+    assert container["env"][0]["valueFrom"]["secretKeyRef"]["key"] == "JOBS_SECRET"
+
+
+def test_the_nextjs_app_without_jobs_has_no_routes_of_jobs() -> None:
+    files = nextjs_files(BASE)
+    assert not [path for path in files if "jobs" in path or "job-runs" in path]
+    assert "AsyncLocalStorage" not in files["src/shared/db/client.ts"]
+    assert "JOBS_" not in files["compose.yaml"] + files[".env.example"]
+
+
+def test_the_name_of_a_cron_job_fits_in_kubernetes() -> None:
+    long = BASE.replace("name: tracker", "name: a-tracker-with-a-very-long-name")
+    text = long + "jobs:\n  a_job_with_a_long_name_too: { schedule: '@daily' }\n"
+    files = nextjs_files(text)
+    names = [
+        d["metadata"]["name"] for d in yaml.safe_load_all(files["deploy/kubernetes/jobs.yaml"]) if d
+    ]
+    assert len(names) == 1 and len(names[0]) <= 52
+    assert names[0].startswith("a-tracker-with-a-very-long-name-web-a-job")
+
+
+def test_the_nextjs_room_booking_app_sends_a_reminder_a_day_before_each_booking() -> None:
+    files = {f.path: f.content for f in generate(load_definition(EXAMPLE), nextjs.BINDING).files}
+    reminder = files["src/app/jobs/booking-reminder.ts"]
+    assert "const OFFSET_MS = -86_400_000;" in reminder
+    assert "await remindOrganizer(record);" in reminder
+    assert "// @trace:gap jobs.weekly_report file" in files["src/app/jobs/weekly-report.ext.ts"]
+    assert "src/app/jobs/expire-requests.ext.ts" not in files
+
+
+def test_a_nextjs_table_cannot_have_the_name_of_the_table_of_the_runs() -> None:
+    # The entity JobRuns has the table `job_runs` and the const `jobRunsTable`.
+    text = (BASE + JOBS).replace("Task", "JobRuns")
+    with pytest.raises(GenerationError, match="job_runs"):
+        nextjs_files(text)

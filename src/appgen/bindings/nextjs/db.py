@@ -657,47 +657,51 @@ def _ts_object(entries: list[tuple[str, str]]) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class _Call:
+class TsCall:
     """A call of a TypeScript function or method, for example `eq(a, b)`."""
 
     name: str
-    args: list[_Code]
+    args: list[TsCode]
 
 
 @dataclass(frozen=True, slots=True)
-class _Chain:
+class TsChain:
     """A chain of method calls, for example `getDb().select(...).from(...)`."""
 
     base: str
-    calls: list[_Call]
+    calls: list[TsCall]
 
 
-type _Code = str | _Call | _Chain
+type TsCode = str | TsCall | TsChain
 
 _LINE_LENGTH = 110
 
 
-def _inline(code: _Code) -> str:
+def _inline(code: TsCode) -> str:
     if isinstance(code, str):
         return code
-    if isinstance(code, _Chain):
+    if isinstance(code, TsChain):
         return code.base + "".join(f".{_inline(call)}" for call in code.calls)
     return f"{code.name}({', '.join(_inline(arg) for arg in code.args)})"
 
 
-def _format(code: _Code, indent: int) -> str:
-    """Return an expression on one line if it fits, else with one part on each line."""
+def format_ts(code: TsCode, indent: int, prefix: str = "", suffix: str = "") -> str:
+    """Return an expression on one line if it fits, else with one part on each line.
+
+    `prefix` and `suffix` are the text of the line before and after the
+    expression, for example `return ` and `;`.
+    """
     one = _inline(code)
-    if isinstance(code, str) or indent + len(one) <= _LINE_LENGTH:
-        return one
+    if isinstance(code, str) or indent + len(prefix + one + suffix) <= _LINE_LENGTH:
+        return prefix + one + suffix
     pad = " " * indent
-    if isinstance(code, _Chain):
-        lines = [code.base]
+    if isinstance(code, TsChain):
+        lines = [prefix + code.base]
         for call in code.calls:
-            lines.append(f"{pad}  .{_format(call, indent + 2)}")
-        return "\n".join(lines)
-    body = "".join(f"{pad}  {_format(arg, indent + 2)},\n" for arg in code.args)
-    return f"{code.name}(\n{body}{pad})"
+            lines.append(f"{pad}  .{format_ts(call, indent + 2)}")
+        return "\n".join(lines) + suffix
+    body = "".join(f"{pad}  {format_ts(arg, indent + 2)},\n" for arg in code.args)
+    return f"{prefix}{code.name}(\n{body}{pad}){suffix}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -722,47 +726,47 @@ def belongs_to(steps: Sequence[PathStep], tables: dict[str, Table], indent: int)
     operators: set[str] = set()
     used: set[str] = set()
 
-    def ids(index: int) -> _Code:
+    def ids(index: int) -> TsCode:
         """The subquery of the IDs of the records of step `index` that belong to the user."""
         step, table = steps[index], tables[steps[index].entity]
         if step.many:
             join = next(item for item in table.lists if item.element_id == step.element_id)
             used.add(join.join_const)
-            return _Chain(
+            return TsChain(
                 "getDb()",
                 [
-                    _Call("select", [f"{{ id: {join.join_const}.{join.owner_key} }}"]),
-                    _Call("from", [join.join_const]),
-                    _Call("where", [target(index, f"{join.join_const}.{join.target_key}")]),
+                    TsCall("select", [f"{{ id: {join.join_const}.{join.owner_key} }}"]),
+                    TsCall("from", [join.join_const]),
+                    TsCall("where", [target(index, f"{join.join_const}.{join.target_key}")]),
                 ],
             )
         used.add(table.const)
-        return _Chain(
+        return TsChain(
             "getDb()",
             [
-                _Call("select", [f"{{ id: {table.const}.id }}"]),
-                _Call("from", [table.const]),
-                _Call("where", [condition(index)]),
+                TsCall("select", [f"{{ id: {table.const}.id }}"]),
+                TsCall("from", [table.const]),
+                TsCall("where", [condition(index)]),
             ],
         )
 
-    def target(index: int, column: str) -> _Code:
+    def target(index: int, column: str) -> TsCode:
         """The condition of a column with the ID of the target of step `index`."""
         if index == len(steps) - 1:
             operators.add("eq")
-            return _Call("eq", [column, "user"])
+            return TsCall("eq", [column, "user"])
         operators.add("inArray")
-        return _Call("inArray", [column, ids(index + 1)])
+        return TsCall("inArray", [column, ids(index + 1)])
 
-    def condition(index: int) -> _Code:
+    def condition(index: int) -> TsCode:
         """The condition of the records of the entity of step `index`."""
         step, table = steps[index], tables[steps[index].entity]
         used.add(table.const)
         if step.many:
             operators.add("inArray")
-            return _Call("inArray", [f"{table.const}.id", ids(index)])
+            return TsCall("inArray", [f"{table.const}.id", ids(index)])
         column = next(c for c in table.columns if c.element_id == step.element_id)
         return target(index, f"{table.const}.{column.key}")
 
-    code = _format(condition(0), indent)
+    code = format_ts(condition(0), indent)
     return OwnerCondition(code, sorted(operators), sorted(used))

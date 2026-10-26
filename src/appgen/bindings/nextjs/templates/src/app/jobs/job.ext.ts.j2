@@ -1,0 +1,22 @@
+{{ trace_header(element_id) }}
+{% set job = nextjs.jobs[name] %}
+import "server-only";
+
+/**
+ * The logic of the job `{{ job.name }}`, for a time of its schedule
+ * `{{ job.schedule.expression }}` (UTC).
+{% if job.description %}
+ *
+ * {{ job.description | trim | wordwrap(72, wrapstring="\n * ") }}
+{% endif %}
+ *
+ * The function runs in the transaction of the run: the repositories in
+ * `@/entities/<entity>/server` read and change the data in it. An error
+ * rolls back the changes, and the next call of the route tries the run
+ * again, while the time is in the window of the jobs (JOBS_WINDOW_MINUTES).
+ */
+export async function {{ job.ext_function }}(_time: Date): Promise<void> {
+  // TODO(appgen): write the logic of the job {{ job.name }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+  throw new Error("Not implemented yet: {{ element_id }}");
+}

@@ -8,6 +8,8 @@ same app. Change them here, and check the example app with
 NODE_VERSION = "24"
 """The major version of the Node.js Docker image."""
 PNPM_VERSION = "10.28.0"
+CURL_VERSION = "8.20.0"
+"""The version of the curl Docker image of the schedulers of the jobs (ADR 0029)."""
 
 DEPENDENCIES: dict[str, str] = {
     "@electric-sql/pglite": "0.5.8",

@@ -19,6 +19,9 @@ resources:
   - deployment.yaml
   - service.yaml
   - migrate-job.yaml
+{% if nextjs.jobs %}
+  - jobs.yaml
+{% endif %}
 
 # Set the registry and the tag of the image that you push.
 images:

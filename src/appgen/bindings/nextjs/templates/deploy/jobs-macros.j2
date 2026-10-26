@@ -1,0 +1,77 @@
+{#- The CronJobs that call the routes of the jobs (ADR 0029). `url` is the
+    address of the app in the cluster, and the secret has JOBS_SECRET. -#}
+{% macro cron_jobs(url, secret_name, secret_key) %}
+{% for cron in nextjs.cron_jobs %}
+---
+{% for id in cron.ids %}
+{{ trace(id) }}
+{% endfor %}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ cron.name }}
+  labels:
+    app.kubernetes.io/component: jobs
+spec:
+  schedule: {{ cron.schedule | tojson }}
+  timeZone: Etc/UTC
+  # A late call runs the same runs, so a call can start up to 5 minutes late.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No retry: the next call tries a failed run again.
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: jobs
+        spec:
+          restartPolicy: Never
+          # The user curl_user of the image.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: call
+              image: curlimages/curl:{{ nextjs.curl_version }}
+              # curl reads the secret from the environment, so that the
+              # secret is not in the arguments of the process.
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  status=0
+                  for job in {{ cron.jobs | join(" ") }}; do
+                    curl --fail-with-body --silent --show-error --max-time 840 \
+                      --variable %JOBS_SECRET \
+                      --expand-header "Authorization: Bearer {{ "{{JOBS_SECRET}}" }}" \
+                      --request POST "{{ url }}/api/jobs/$job" || status=1
+                    echo
+                  done
+                  exit $status
+              env:
+                - name: JOBS_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ secret_name }}
+                      key: {{ secret_key }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi
+{% endfor %}
+{% endmacro %}
