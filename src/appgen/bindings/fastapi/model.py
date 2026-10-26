@@ -17,6 +17,8 @@ from typing import Any, cast
 from appgen.bindings.fastapi.dashboards import TEST_TODAY, PyDashboard, python_dashboards
 from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import mocks_imports, py_features, python_apis
+from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
+from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.pysource import (
     LINE_LENGTH,
@@ -1391,6 +1393,8 @@ class PyApp:
     """True if the app has the sign-in (`auth`)."""
     search_config: str | None = None
     """The text search configuration of Postgres with `x-fastapi-search: fulltext`, else None."""
+    jobs: dict[str, PyJob] = field(default_factory=dict[str, PyJob])
+    """The jobs that the worker runs (ADR 0029), by name."""
 
     @property
     def full_text(self) -> bool:
@@ -1606,7 +1610,22 @@ def python_app(definition: AppDefinition) -> PyApp:
         access=definition.access is not None,
         auth=auth is not None,
         search_config=search_config,
+        jobs=_jobs(definition, entities, operations),
     )
+
+
+def _jobs(
+    definition: AppDefinition, entities: dict[str, PyEntity], operations: dict[str, PyOperation]
+) -> dict[str, PyJob]:
+    """Return the jobs. Raise GenerationError if an entity has the table of the job runs."""
+    if definition.jobs:
+        for entity in entities.values():
+            if entity.table == JOBS_TABLE:
+                raise GenerationError(
+                    f"The entity '{entity.name}' has the table '{JOBS_TABLE}' of the runs of the "
+                    "jobs. Give it another table with x-fastapi-table."
+                )
+    return python_jobs(definition, entities, operations)
 
 
 def _search_config(definition: AppDefinition) -> str | None:

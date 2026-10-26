@@ -1,0 +1,90 @@
+{{ trace_header("app") }}
+"""The tests of the worker: a pass runs each job, and the health endpoint shows the passes."""
+
+import datetime as dt
+import logging
+
+import httpx
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.config import Settings
+from app.worker import JOBS, Health, Job, main, run_jobs, serve_health
+
+pytestmark = pytest.mark.anyio
+
+NOW = dt.datetime(2026, 6, 15, 12, tzinfo=dt.UTC)
+
+
+def fake_job(name: str, called: list[str], *, fails: bool = False) -> Job:
+    """Return a job that records its name and its time, and runs one run (or fails)."""
+
+    async def run(
+        sessions: async_sessionmaker[AsyncSession],
+        settings: Settings,
+        now: dt.datetime,
+        window: dt.timedelta,
+    ) -> int:
+        called.append(f"{name} {now.isoformat()}")
+        if fails:
+            raise RuntimeError(f"The job {name} fails.")
+        return 1
+
+    return run
+
+
+async def test_a_pass_runs_each_job_at_its_time(
+    monkeypatch: pytest.MonkeyPatch,
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    called: list[str] = []
+    for name in JOBS:
+        monkeypatch.setitem(JOBS, name, fake_job(name, called))
+
+    assert await run_jobs(sessions, settings, NOW) == len(JOBS)
+
+    assert called == [f"{name} {NOW.isoformat()}" for name in JOBS]
+
+
+async def test_a_failed_job_does_not_stop_the_other_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    called: list[str] = []
+    first = next(iter(JOBS))
+    for name in JOBS:
+        monkeypatch.setitem(JOBS, name, fake_job(name, called, fails=name == first))
+
+    with caplog.at_level(logging.ERROR, logger="app.worker"):
+        assert await run_jobs(sessions, settings, NOW) == len(JOBS) - 1
+
+    assert len(called) == len(JOBS)
+    assert [r.__dict__.get("job") for r in caplog.records if r.name == "app.worker"] == [first]
+
+
+async def test_the_health_endpoint_tells_if_the_passes_run() -> None:
+    health = Health(60)
+    server = await serve_health(health, 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with httpx.AsyncClient() as client:
+            alive = await client.get(f"http://127.0.0.1:{port}/health")
+            health.last -= health.limit + 1
+            stalled = await client.get(f"http://127.0.0.1:{port}/health")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert alive.status_code == 200
+    assert alive.json() == {"status": "ok"}
+    assert stalled.status_code == 503
+
+
+def test_the_time_of_a_pass_needs_one_pass() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["--now", NOW.isoformat()])
+
+    assert error.value.code == 2

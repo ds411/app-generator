@@ -122,6 +122,39 @@ operations:
     params:
       reason: { type: text, max_length: 500 }
     returns: Booking
+  remind_organizer:
+    kind: custom
+    entity: Booking
+    description: Send the organizer a reminder of the booking.
+  expire_request:
+    kind: custom
+    entity: Booking
+    description: Cancel a request that nobody confirmed before its start.
+
+# The jobs run on a schedule, or at the time of a date field. The FastAPI
+# app runs them in its worker process.
+jobs:
+  # One day before each confirmed booking starts, the organizer gets a
+  # reminder.
+  booking_reminder:
+    description: Remind the organizer one day before the booking starts.
+    entity: Booking
+    at: starts_at
+    offset: -24h
+    filter: { status: confirmed }
+    operation: remind_organizer
+  # Each hour, the requests that started without a confirmation expire.
+  expire_requests:
+    description: Cancel the requests that started without a confirmation.
+    schedule: "0 * * * *"
+    entity: Booking
+    filter: { status: requested, starts_at: { lt: $now } }
+    operation: expire_request
+  # Each Monday at 07:00 UTC, the admins get a report of the week. The
+  # code of the report is hand-written.
+  weekly_report:
+    description: Send the admins a report of the bookings of the week.
+    schedule: "0 7 * * 1"
 
 pages:
   dashboard:

@@ -1,4 +1,5 @@
 {{ trace_header("app") }}
+{% import "deploy/knative/macros.j2" as m with context %}
 # A Knative Service of the API. Google Cloud Run accepts the same file.
 # Run the migrations first (README.md, section "Production"), then:
 #   kubectl apply -f deploy/knative/service.yaml               (Knative)
@@ -31,122 +32,7 @@ spec:
             - name: http1
               containerPort: 8000
           env:
-            # The settings that are not secret (see app/core/config.py).
-            - name: LOG_LEVEL
-              value: INFO
-            - name: LOG_JSON
-              value: "true"
-{% if py.redis %}
-            # The limit of all instances with RATE_LIMIT_STORE_URL, else of each instance.
-            - name: RATE_LIMIT_PER_MINUTE
-              value: "600"
-            # true: give 503 when Redis is not available. false: let the requests through.
-            - name: RATE_LIMIT_FAIL_CLOSED
-              value: "false"
-{% else %}
-            # The limit of each instance: the API allows this number times the instances.
-            - name: RATE_LIMIT_PER_MINUTE
-              value: "600"
-{% endif %}
-            - name: CORS_ORIGINS
-              value: "[]"
-{% if definition.auth and definition.auth.password_reset %}
-            # The page of the front end that sets a new password with a reset link.
-            - name: PASSWORD_RESET_URL
-              value: https://app.example.com/reset-password
-{% endif %}
-{% if definition.auth and definition.auth.sign_up and definition.auth.sign_up.verify_email %}
-            # The page of the front end that confirms an email address with a link.
-            - name: EMAIL_VERIFY_URL
-              value: https://app.example.com/verify-email
-{% endif %}
-{% if py.smtp %}
-            # The SMTP server of the messages of the sign-in.
-            - name: SMTP_HOST
-              value: smtp.example.com
-            - name: SMTP_PORT
-              value: "587"
-            - name: SMTP_USERNAME
-              value: no-reply@example.com
-            - name: SMTP_FROM
-              value: no-reply@example.com
-            - name: SMTP_TLS
-              value: starttls
-{% endif %}
-{% for api in py_apis.values() %}
-            {{ trace(api.id) }}
-            - name: {{ api.url_env }}
-              value: {{ api.base_url | tojson }}
-{% if api.client_id_env %}
-            - name: {{ api.client_id_env }}
-              value: ""
-{% endif %}
-{% endfor %}
-{% if py.providers %}
-            # The URL of the API for the browsers: the providers send the users back to it.
-            - name: PUBLIC_URL
-              value: https://api.example.com
-{% for p in py.providers %}
-            {{ trace(p.id) }}
-            - name: {{ p.name | upper }}_ISSUER
-              value: {{ p.issuer | tojson }}
-            - name: {{ p.client_id_env }}
-              value: ""
-{% endfor %}
-{% endif %}
-            # The secrets. In Cloud Run, `name` is a secret of Secret Manager
-            # and `key` its version. In Knative, `name` is a Kubernetes Secret
-            # and `key` the key of the value in it.
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-database-url
-                  key: latest
-{% if py.redis %}
-            - name: RATE_LIMIT_STORE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-rate-limit-store-url
-                  key: latest
-{% endif %}
-{% if definition.auth %}
-            - name: AUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-auth-secret
-                  key: latest
-{% endif %}
-{% if py.smtp %}
-            - name: SMTP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-smtp-password
-                  key: latest
-{% endif %}
-{% for api in py_apis.values() if api.secret_env %}
-            {{ trace(api.id) }}
-            - name: {{ api.secret_env }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-{{ api.secret_env | lower | replace("_", "-") }}
-                  key: latest
-{% endfor %}
-{% for w in py_webhooks.values() %}
-            {{ trace(w.id) }}
-            - name: {{ w.secret_env }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-{{ w.secret_env | lower | replace("_", "-") }}
-                  key: latest
-{% endfor %}
-{% for p in py.providers %}
-            {{ trace(p.id) }}
-            - name: {{ p.client_secret_env }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ app.name }}-{{ p.client_secret_env | lower | replace("_", "-") }}
-                  key: latest
-{% endfor %}
+{{ m.env().rstrip() }}
           resources:
             limits:
               cpu: "1"

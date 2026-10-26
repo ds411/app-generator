@@ -426,6 +426,8 @@ BINDING = Binding(
         | {"api", "api_operation"}
         | {"entity_seed", "seed_record"}
     ),
+    # The jobs of the Next.js app follow (#391).
+    excludes=frozenset({"job"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

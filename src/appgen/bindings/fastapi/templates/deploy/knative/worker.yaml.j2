@@ -1,0 +1,58 @@
+{{ trace_header("app") }}
+{% import "deploy/knative/macros.j2" as m with context %}
+# A Knative Service of the worker of the jobs (`python -m app.worker`).
+# Google Cloud Run accepts the same file. Run the migrations first
+# (README.md, section "Production"), then:
+#   kubectl apply -f deploy/knative/worker.yaml               (Knative)
+#   gcloud run services replace deploy/knative/worker.yaml    (Cloud Run)
+# The worker gets no requests: the port serves only its health check.
+# The table job_runs locks each run, so a second instance during a
+# deployment does not run a job two times.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: {{ app.name }}-worker
+spec:
+  template:
+    metadata:
+      annotations:
+        # Always 1 instance, also without requests.
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        # Cloud Run: the CPU also runs between requests, so that the passes run.
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containers:
+        - name: worker
+          # The image of service.yaml.
+          image: registry.example.com/{{ app.name }}-api:0.1.0
+          command: ["python", "-m", "app.worker"]
+          ports:
+            - name: http1
+              # WORKER_PORT: the health endpoint of the worker.
+              containerPort: 8001
+          env:
+{{ m.env().rstrip() }}
+            # The passes of the worker: the time between two passes, and the
+            # window of the runs that a pass catches up.
+            - name: JOBS_INTERVAL_SECONDS
+              value: "60"
+            - name: JOBS_WINDOW_MINUTES
+              value: "60"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          # /health gives 503 when the passes stop. The liveness probe then
+          # restarts the instance.
+          startupProbe:
+            httpGet:
+              path: /health
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3

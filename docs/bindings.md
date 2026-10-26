@@ -500,6 +500,45 @@ app:
   `scripts/check-fastapi.sh`) adds the indexes to an app that exists on
   Postgres, and checks that the search of the projects uses its index.
 
+### The worker of the FastAPI app
+
+The FastAPI app runs the `jobs` of the definition in a worker process
+([ADR 0029](adr/0029-jobs.md)): `python -m app.worker`, from the image of
+the API. Compose starts it as the service `worker`.
+
+- Each job is a module in `app/jobs/`: its schedule or the field of
+  `at` and the offset, the filter of its records (`where`), the runs
+  that are due at a time (`due`), and `run`. A job with an entity calls
+  its custom operation (`app/features/<slice>/<operation>_ext.py`) on
+  each record. A job without an entity calls the function of its
+  extension file `app/jobs/<job>_ext.py`, a generation gap.
+- `app/core/jobs.py` has the table `job_runs`, the cron schedules, and
+  `run_due`: it inserts the row of each run before it starts the run, so
+  two workers never start the same run. A worker takes a failed run
+  again, or a run whose lock (10 minutes) ended. The work of a run and
+  its state `done` are in one transaction. A failed run rolls back, and
+  goes into the log of `app.jobs` with the keys `job`, `record_id`, and
+  `due`.
+- `app/worker.py` runs a pass of all jobs each `JOBS_INTERVAL_SECONDS`
+  (60). Each pass looks back over `JOBS_WINDOW_MINUTES` (60) for the
+  times that are not done. A failed job does not stop the other jobs.
+  The worker stops at SIGTERM or SIGINT after the current pass.
+- `GET /health` on `WORKER_PORT` (8001) gives 200 while the passes run,
+  and 503 when no pass ends for 3 intervals (at least 5 minutes). The
+  liveness probes of the deployment files use it.
+- `python -m app.worker --once --now 2026-06-15T12:00:00Z` runs one pass
+  at a fixed time.
+- The deployment files have a worker: a Deployment with 2 replicas in
+  `deploy/kubernetes/worker.yaml`, and a Knative Service with one
+  instance and the CPU also between requests (for Cloud Run) in
+  `deploy/knative/worker.yaml`.
+- The generated tests in `tests/jobs/` run each job with a fixed clock.
+  They replace the operation (or the function of the extension file)
+  with a fake, and check that each run runs one time, also with two
+  workers at the same time, that a record of another time or outside
+  the filter does not run, that a change of the date field gives a new
+  run, and that a failed run is in the log and runs again.
+
 ## Shared templates
 
 The Next.js and the React bindings share templates in

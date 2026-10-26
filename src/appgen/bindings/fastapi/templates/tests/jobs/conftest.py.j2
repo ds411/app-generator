@@ -1,0 +1,26 @@
+{{ trace_header("app") }}
+"""The fixtures of the tests of the jobs: the sessions and the settings of a worker."""
+
+from collections.abc import AsyncIterator
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.config import Settings
+from app.core.db import make_engine, make_sessions
+
+
+@pytest.fixture
+async def sessions(
+    migrated_url: str, session: AsyncSession
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """The sessions of a worker, on the test database. `session` empties the tables after a test."""
+    engine = make_engine(migrated_url)
+    yield make_sessions(engine)
+    await engine.dispose()
+
+
+@pytest.fixture
+def settings(migrated_url: str) -> Settings:
+    """The settings of a worker, with the test database."""
+    return Settings(database_url=migrated_url)

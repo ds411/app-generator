@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     """True: give 503 when the Redis of the rate limit is not available. False: log a
     warning, and let the request through."""
 {% endif %}
+{% if py.jobs %}
+    jobs_interval_seconds: float = 60
+    """The time between two passes of the worker over the jobs, in seconds."""
+    jobs_window_minutes: int = 60
+    """A pass runs the times of the jobs in the last minutes that are not done. A longer
+    window catches up after a longer stop of the workers."""
+    worker_port: int = 8001
+    """The port of the health endpoint of the worker (`GET /health`). 0: no endpoint."""
+{% endif %}
 {% if definition.auth %}
     auth_secret: str = ""
     """The secret key that signs the sign-in tokens: a long random text (`AUTH_SECRET`)."""

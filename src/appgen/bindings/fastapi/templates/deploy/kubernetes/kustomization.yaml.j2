@@ -18,6 +18,9 @@ resources:
   - deployment.yaml
   - service.yaml
   - migrate-job.yaml
+{% if py.jobs %}
+  - worker.yaml
+{% endif %}
 
 # Set the registry and the tag of the image that you push.
 images:

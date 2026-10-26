@@ -1,0 +1,55 @@
+{{ trace_header("app") }}
+# The worker of the jobs (`python -m app.worker`). The table job_runs
+# locks each run, so each run runs one time, also with 2 replicas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app.name }}-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: {{ app.name }}-api
+          command: ["python", "-m", "app.worker"]
+          ports:
+            # WORKER_PORT: the health endpoint of the worker.
+            - name: health
+              containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: {{ app.name }}-config
+            - secretRef:
+                name: {{ app.name }}-secret
+          # /health gives 503 when the passes stop. The liveness probe then
+          # restarts the container.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

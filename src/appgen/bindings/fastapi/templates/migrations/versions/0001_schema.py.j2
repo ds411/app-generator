@@ -129,10 +129,29 @@ def upgrade() -> None:
 {% endfor %}
     )
 {% endfor %}
+{% if py.jobs %}
+    op.create_table(
+        "job_runs",
+        sa.Column("key", sa.String(length=200), nullable=False),
+        sa.Column("job", sa.String(length=63), nullable=False),
+        sa.Column("record_id", sa.Uuid(), nullable=True),
+        sa.Column("due", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("status", sa.String(length=10), nullable=False),
+        sa.Column("attempts", sa.Integer(), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("locked_until", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint("key", name="pk_job_runs"),
+    )
+{% endif %}
 
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
+{% if py.jobs %}
+    op.drop_table("job_runs")
+{% endif %}
 {% if py_webhooks %}
     op.drop_table("webhook_events")
 {% endif %}

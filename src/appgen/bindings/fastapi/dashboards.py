@@ -24,7 +24,7 @@ coverage (ADR 0006).
 import datetime as dt
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -385,7 +385,7 @@ def _widget(
     )
     result.scoped = result.protected and entity.scoped
     result.hides = result.protected and isinstance(widget, ListWidget) and bool(entity.hides)
-    builder = _Builder(definition, result)
+    builder = FilterBuilder(definition, result)
     for path, condition in widget.filter.items():
         builder.filter(path, condition)
     if isinstance(widget, StatWidget | ChartWidget):
@@ -404,21 +404,43 @@ def _widget(
     return result
 
 
-class _Builder:
-    """Builds the joins, the conditions, and the expressions of a widget."""
+class FilterTarget(Protocol):
+    """A widget or a job: the joins and the conditions of its filter go into it."""
 
-    def __init__(self, definition: AppDefinition, widget: PyWidget) -> None:
+    id: str
+    entity: PyEntity
+    joins: dict[str, tuple[str, str]]
+    """The aliases of the joined entities: the class and the join condition."""
+    where: list[Expr]
+    today: bool
+    """True if a condition uses `day`, the date of `$today`."""
+    now: bool
+    """True if a condition uses `moment`, the time of `$now`."""
+
+
+class FilterBuilder:
+    """Builds the joins, the conditions, and the expressions of a widget or of a job.
+
+    A condition of `$today` uses the variable `day`, and a condition of
+    `$now` on a date-time field uses `moment`. The code of the widget or of
+    the job sets them.
+    """
+
+    def __init__(
+        self, definition: AppDefinition, widget: FilterTarget, what: str = "widget"
+    ) -> None:
         self.definition = definition
         self.widget = widget
         self.entity = widget.entity
+        self.what = what
 
     def resolve(self, path: str) -> PyPath:
         resolved = resolve_path(self.entity, path)
         if resolved.computed:
             raise GenerationError(
-                f"The widget '{self.widget.id}' reads the computed field '{path}'. The FastAPI "
-                "app computes the widgets in the database, and a computed field has no column. "
-                "Use a stored field."
+                f"The {self.what} '{self.widget.id}' reads the computed field '{path}'. The "
+                f"FastAPI app reads the records of a {self.what} in the database, and a computed "
+                "field has no column. Use a stored field."
             )
         return resolved
 
@@ -613,57 +635,19 @@ def _is_day(value: JsonValue) -> bool:
     return value == "$today" or (isinstance(value, str) and len(value) == 10)
 
 
-class _Tests:
-    """Plans the records of the generated test of a widget, or None if it cannot."""
+class FilterValues:
+    """Finds the values of the fields of a test record that pass or fail a filter.
 
-    def __init__(
-        self,
-        definition: AppDefinition,
-        widget: PyWidget,
-        source: StatWidget | ChartWidget | ListWidget,
-    ) -> None:
+    `today` is the date of `$today` (and of `$now` on a date field) in the
+    test. A value of `$now` on a date-time field is the days after the
+    variable `now` of the test.
+    """
+
+    def __init__(self, definition: AppDefinition, entity: PyEntity, today: dt.date) -> None:
         self.definition = definition
-        self.widget = widget
-        self.source = source
-        self.entity = widget.entity
-        self.fields = definition.entities[self.entity.name].fields
-
-    def plan(self) -> WidgetTest | None:
-        paths: dict[str, list[TestValue]] = {}
-        failing: dict[str, TestValue] = {}
-        now = False
-        for path_text, condition in self.source.filter.items():
-            f = self.direct_field(path_text)
-            if f is None:
-                return None
-            conditions: dict[str, JsonValue] = (
-                condition
-                if isinstance(condition, dict)
-                else {"in" if isinstance(condition, list) else "eq": condition}
-            )
-            found = self.values(f, conditions)
-            if found is None:
-                return None
-            passing, fails = found
-            if not passing or not fails:
-                return None
-            paths[f.attr], failing[f.attr] = passing, fails[0]
-            now = now or "now" in passing[0].code
-        count = 3
-        records: list[dict[str, str]] = []
-        for index in range(count):
-            records.append(
-                {attr: values[index % len(values)].code for attr, values in paths.items()}
-            )
-        for attr, fail in failing.items():
-            record = {a: values[0].code for a, values in paths.items()}
-            record[attr] = fail.code
-            records.append(record)
-        test = WidgetTest(records, count, [], now=now)
-        filled = self.fill(test, paths)
-        if not filled or not self.unique_ok(test):
-            return None
-        return test
+        self.entity = entity
+        self.fields = definition.entities[entity.name].fields
+        self.today = today
 
     def direct_field(self, path_text: str) -> PyField | None:
         """Return the field of a path without hops whose type a test can give values, or None."""
@@ -701,9 +685,9 @@ class _Tests:
         if isinstance(operand, list):
             return [self.operand(f, o) for o in operand]
         if operand == "$now":
-            return 0 if f.type == "datetime" else TEST_TODAY
+            return 0 if f.type == "datetime" else self.today
         if operand == "$today":
-            return TEST_TODAY
+            return self.today
         if f.type == "date" or (f.type == "datetime" and _is_day(operand)):
             return dt.date.fromisoformat(str(operand))
         if f.type == "datetime":
@@ -744,7 +728,58 @@ class _Tests:
                 return None
 
     def day(self, operand: JsonValue) -> dt.date:
-        return TEST_TODAY if operand in ("$today", "$now") else dt.date.fromisoformat(str(operand))
+        return self.today if operand in ("$today", "$now") else dt.date.fromisoformat(str(operand))
+
+
+class _Tests(FilterValues):
+    """Plans the records of the generated test of a widget, or None if it cannot."""
+
+    def __init__(
+        self,
+        definition: AppDefinition,
+        widget: PyWidget,
+        source: StatWidget | ChartWidget | ListWidget,
+    ) -> None:
+        super().__init__(definition, widget.entity, TEST_TODAY)
+        self.widget = widget
+        self.source = source
+
+    def plan(self) -> WidgetTest | None:
+        paths: dict[str, list[TestValue]] = {}
+        failing: dict[str, TestValue] = {}
+        now = False
+        for path_text, condition in self.source.filter.items():
+            f = self.direct_field(path_text)
+            if f is None:
+                return None
+            conditions: dict[str, JsonValue] = (
+                condition
+                if isinstance(condition, dict)
+                else {"in" if isinstance(condition, list) else "eq": condition}
+            )
+            found = self.values(f, conditions)
+            if found is None:
+                return None
+            passing, fails = found
+            if not passing or not fails:
+                return None
+            paths[f.attr], failing[f.attr] = passing, fails[0]
+            now = now or "now" in passing[0].code
+        count = 3
+        records: list[dict[str, str]] = []
+        for index in range(count):
+            records.append(
+                {attr: values[index % len(values)].code for attr, values in paths.items()}
+            )
+        for attr, fail in failing.items():
+            record = {a: values[0].code for a, values in paths.items()}
+            record[attr] = fail.code
+            records.append(record)
+        test = WidgetTest(records, count, [], now=now)
+        filled = self.fill(test, paths)
+        if not filled or not self.unique_ok(test):
+            return None
+        return test
 
     def fill(self, test: WidgetTest, paths: dict[str, list[TestValue]]) -> bool:
         """Give the passing records the values of the aggregate, the group, or the sort.

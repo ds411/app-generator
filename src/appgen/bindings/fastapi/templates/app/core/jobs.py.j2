@@ -1,0 +1,188 @@
+{{ trace_header("app") }}
+"""The runs of the jobs (ADR 0029): the table `job_runs`, the lock of each run, and the schedules.
+
+A run of a job is for one record (or for none) and one time. Its key is
+the job, the record, and the time in UTC, for example
+`booking_reminder:<id>:2026-06-14T12:00:00Z`. A worker inserts the row of
+a run before it starts the run, and the key is the primary key: so two
+workers never start the same run, also on two machines. A run that
+failed, or whose worker stopped (the lock ends after `LEASE`), runs again
+at the next pass of a worker, while its time is in the window of the jobs.
+"""
+
+import datetime as dt
+import logging
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import String, Text, and_, or_, update
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base, Timestamp
+
+logger = logging.getLogger("app.jobs")
+
+LEASE = dt.timedelta(minutes=10)
+"""How long a run stays locked to its worker. After that, another worker can take the run."""
+ERROR_LENGTH = 2000
+"""The maximum length of the error of a failed run in the table."""
+
+
+class JobRun(Base):
+    """A run of a job: the job, the record, the time, and the state of the run."""
+
+    __tablename__ = "job_runs"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    """The job, the record (or `-`), and the time of the run in UTC."""
+    job: Mapped[str] = mapped_column(String(63))
+    record_id: Mapped[UUID | None]
+    """The record of the run, or None for a job without an entity."""
+    due: Mapped[dt.datetime] = mapped_column(Timestamp)
+    """The time of the run: a time of the schedule, or the time of the record."""
+    status: Mapped[str] = mapped_column(String(10))
+    """`running`, `done`, or `failed`."""
+    attempts: Mapped[int]
+    started_at: Mapped[dt.datetime] = mapped_column(Timestamp)
+    locked_until: Mapped[dt.datetime] = mapped_column(Timestamp)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(Timestamp)
+    error: Mapped[str | None] = mapped_column(Text)
+    """The error of the last attempt of a failed run."""
+
+
+@dataclass(frozen=True, slots=True)
+class Due:
+    """A run that is due: its record (None for a job without an entity) and its time."""
+
+    record_id: UUID | None
+    time: dt.datetime
+
+    def key(self, job: str) -> str:
+        """Return the key of the run of a job, the same in the FastAPI and the Next.js apps."""
+        record = str(self.record_id) if self.record_id is not None else "-"
+        return f"{job}:{record}:{self.time.astimezone(dt.UTC):%Y-%m-%dT%H:%M:%SZ}"
+
+
+@dataclass(frozen=True, slots=True)
+class Schedule:
+    """A cron schedule in UTC, with the values that each field allows."""
+
+    expression: str
+    minutes: frozenset[int]
+    hours: frozenset[int]
+    days: frozenset[int]
+    months: frozenset[int]
+    weekdays: frozenset[int]
+    """The days of the week: 0 is Sunday."""
+    either_day: bool = False
+    """True if the expression limits both day fields: a day matches when one of them matches."""
+
+    def matches(self, time: dt.datetime) -> bool:
+        """Return True if the schedule runs at the minute of a time."""
+        time = time.astimezone(dt.UTC)
+        if time.minute not in self.minutes or time.hour not in self.hours:
+            return False
+        if time.month not in self.months:
+            return False
+        day, weekday = time.day in self.days, time.isoweekday() % 7 in self.weekdays
+        return (day or weekday) if self.either_day else (day and weekday)
+
+    def last(self, now: dt.datetime, window: dt.timedelta) -> dt.datetime | None:
+        """Return the last time of the schedule at or before `now` in the window, or None."""
+        time = now.astimezone(dt.UTC).replace(second=0, microsecond=0)
+        while time > now - window:
+            if self.matches(time):
+                return time
+            time -= dt.timedelta(minutes=1)
+        return None
+
+
+type Action = Callable[[AsyncSession, Due], Awaitable[None]]
+"""The work of one run, in the session of the run. The worker commits the session after it."""
+
+
+def utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+async def run_due(
+    sessions: async_sessionmaker[AsyncSession],
+    job: str,
+    runs: Iterable[Due],
+    action: Action,
+) -> int:
+    """Run each run that no other worker has, one after the other. Return the count of the runs.
+
+    Each run has its own transaction: the work and the state `done` are
+    stored together. A failed run rolls back its work, gets the state
+    `failed`, and goes into the log with the job and the record.
+    """
+    count = 0
+    for due in runs:
+        key = due.key(job)
+        async with sessions() as session:
+            if not await _claim(session, key, job, due):
+                continue
+        async with sessions() as session:
+            try:
+                # The first write of the transaction, so that SQLite locks the database for it.
+                await _set(session, key, status="done", finished_at=utc_now())
+                await action(session, due)
+                await session.commit()
+            except Exception as error:
+                await session.rollback()
+                record = str(due.record_id) if due.record_id is not None else "-"
+                logger.exception(
+                    "The job %s failed for the record %s at %s.",
+                    job,
+                    record,
+                    due.time.isoformat(),
+                    extra={"job": job, "record_id": record, "due": due.time.isoformat()},
+                )
+                message = f"{type(error).__name__}: {error}"[:ERROR_LENGTH]
+                async with sessions() as failed:
+                    await _set(failed, key, status="failed", finished_at=utc_now(), error=message)
+                    await failed.commit()
+                continue
+        count += 1
+    return count
+
+
+async def _claim(session: AsyncSession, key: str, job: str, due: Due) -> bool:
+    """Lock a run for this worker. Return False if the run is done, or if another worker has it."""
+    now = utc_now()
+    lock: dict[str, Any] = {
+        "status": "running",
+        "started_at": now,
+        "locked_until": now + LEASE,
+        "finished_at": None,
+        "error": None,
+    }
+    row = {"key": key, "job": job, "record_id": due.record_id, "due": due.time, "attempts": 1}
+    if session.get_bind().dialect.name == "postgresql":
+        insert = postgresql.insert(JobRun).values(**row, **lock).on_conflict_do_nothing()
+    else:
+        insert = sqlite.insert(JobRun).values(**row, **lock).on_conflict_do_nothing()
+    claimed = await session.scalar(insert.returning(JobRun.key))
+    if claimed is None:
+        free = or_(
+            JobRun.status == "failed",
+            and_(JobRun.status == "running", JobRun.locked_until < now),
+        )
+        statement = (
+            update(JobRun)
+            .where(JobRun.key == key, free)
+            .values(attempts=JobRun.attempts + 1, **lock)
+            .returning(JobRun.key)
+        )
+        claimed = await session.scalar(statement)
+    await session.commit()
+    return claimed is not None
+
+
+async def _set(session: AsyncSession, key: str, **values: Any) -> None:
+    await session.execute(update(JobRun).where(JobRun.key == key).values(**values))

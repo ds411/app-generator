@@ -73,6 +73,14 @@ BINDING = Binding(
             )
             for name in ("service.yaml", "migrate-job.yaml")
         ),
+        *(
+            Output(
+                template=f"deploy/{target}/worker.yaml.j2",
+                path=f"deploy/{target}/worker.yaml",
+                when=f"'{target}' in py.deploy and py.jobs",
+            )
+            for target in ("kubernetes", "knative")
+        ),
         Output(template="dockerignore.j2", path=".dockerignore"),
         Output(template="package.py.j2", path="app/__init__.py"),
         Output(template="app/main.py.j2", path="app/main.py"),
@@ -234,6 +242,17 @@ BINDING = Binding(
             for_each="dashboard",
             when="name in py.dashboards",
         ),
+        Output(template="app/core/jobs.py.j2", path="app/core/jobs.py", when="py.jobs"),
+        Output(template="package.py.j2", path="app/jobs/__init__.py", when="py.jobs"),
+        Output(template="app/jobs/job.py.j2", path="app/jobs/{{ name }}.py", for_each="job"),
+        Output(
+            template="app/jobs/job_ext.py.j2",
+            path="app/jobs/{{ name }}_ext.py",
+            for_each="job",
+            when="py.jobs[name].gap",
+            extension=True,
+        ),
+        Output(template="app/worker.py.j2", path="app/worker.py", when="py.jobs"),
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
         Output(template="tests/test_migrations.py.j2", path="tests/test_migrations.py"),
@@ -368,6 +387,18 @@ BINDING = Binding(
         Output(template="tests/test_logging.py.j2", path="tests/test_logging.py"),
         Output(template="tests/test_rate_limit.py.j2", path="tests/test_rate_limit.py"),
         Output(template="tests/test_i18n.py.j2", path="tests/test_i18n.py", when="i18n"),
+        Output(template="package.py.j2", path="tests/jobs/__init__.py", when="py.jobs"),
+        Output(template="tests/jobs/conftest.py.j2", path="tests/jobs/conftest.py", when="py.jobs"),
+        Output(
+            template="tests/jobs/test_worker.py.j2",
+            path="tests/jobs/test_worker.py",
+            when="py.jobs",
+        ),
+        Output(
+            template="tests/jobs/test_job.py.j2",
+            path="tests/jobs/test_{{ name }}.py",
+            for_each="job",
+        ),
     ),
     covers=frozenset(
         {"app", "entity", "field", "relation", "operation", "param"}
@@ -379,6 +410,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
+        | {"job"}
     ),
     excludes=frozenset({"page", "ui"}),
     gap_rule=Output(template="gap.md.j2", path="gaps/{{ element_id }}.md"),
