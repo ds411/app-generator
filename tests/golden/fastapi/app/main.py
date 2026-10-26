@@ -16,6 +16,7 @@ from app.core.health import router as health_router
 from app.core.logging import RequestLogMiddleware, configure_logging
 from app.core.rate_limit import RateLimiter, RateLimitMiddleware
 from app.core.seed import seed_database
+from app.extensions.routers_ext import ROUTERS
 
 # @trace entities.Project
 from app.features.projects.router import router as projects_router
@@ -71,6 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(projects_router)
     # @trace entities.Task
     app.include_router(tasks_router)
+    # The hand-written routers come after the generated routers.
+    for router in ROUTERS:
+        app.include_router(router)
     return app
 
 

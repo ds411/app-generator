@@ -75,6 +75,12 @@ BINDING = Binding(
         Output(template="dockerignore.j2", path=".dockerignore"),
         Output(template="package.py.j2", path="app/__init__.py"),
         Output(template="app/main.py.j2", path="app/main.py"),
+        Output(template="package.py.j2", path="app/extensions/__init__.py"),
+        Output(
+            template="app/extensions/routers_ext.py.j2",
+            path="app/extensions/routers_ext.py",
+            extension=True,
+        ),
         Output(template="package.py.j2", path="app/core/__init__.py"),
         Output(template="alembic.ini.j2", path="alembic.ini"),
         Output(template="migrations/env.py.j2", path="migrations/env.py"),
