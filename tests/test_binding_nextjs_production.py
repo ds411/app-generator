@@ -125,7 +125,9 @@ def test_the_memory_store_gives_the_same_app_as_no_key(
 
 def test_the_kubernetes_files_are_the_default_target(result: GenerationResult) -> None:
     files = _files(result)
-    assert {path for path in files if path.startswith("deploy/")} == KUBERNETES
+    # The project tracker keeps its files in a volume (ADR 0027).
+    volume = "deploy/kubernetes/files-volume.yaml"
+    assert {path for path in files if path.startswith("deploy/")} == KUBERNETES | {volume}
     deployment = files["deploy/kubernetes/deployment.yaml"]
     assert "name: project-tracker-web\n" in deployment
     assert "runAsUser: 1000\n" in deployment and "readOnlyRootFilesystem: true" in deployment

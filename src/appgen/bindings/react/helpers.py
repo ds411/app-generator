@@ -5,6 +5,7 @@ and the values of `context()` to the context of all templates. The
 helpers are deterministic: they read only the definition.
 """
 
+import base64
 import re
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -12,9 +13,8 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
-from appgen.bindings.shared.auth import auth_pages, record_rules
+from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rules
 from appgen.bindings.shared.events import has_events, ts_events
-from appgen.bindings.shared.files import reject_file_fields
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -62,15 +62,35 @@ def route_params(path: str) -> list[str]:
 
 
 def mock_records(definition: AppDefinition) -> dict[str, list[dict[str, Any]]]:
-    """Return the mock records of each entity, with the keys of the TypeScript types."""
+    """Return the mock records of each entity, with the keys of the TypeScript types.
+
+    A file of a seed record (ADR 0027) is a `FileValue` with a `data:` URL
+    of its content, so that the app shows it without a server.
+    """
     data = mock_data(definition)
     result: dict[str, list[dict[str, Any]]] = {}
     for entity_name, entity in definition.entities.items():
         keys = {m.name: m.key for m in members(entity_name, entity)}
-        result[entity_name] = [
-            {"id": record["id"]} | {keys[k]: v for k, v in record.items() if k in keys}
-            for record in data[entity_name]
-        ]
+        seed = definition.seed.get(entity_name)
+        seed_records = list(seed.records.values()) if seed is not None else []
+        records: list[dict[str, Any]] = []
+        for index, record in enumerate(data[entity_name]):
+            values = dict(record)
+            files = seed_records[index].files if index < len(seed_records) else {}
+            for name, seed_file in files.items():
+                content = seed_file.content or b""
+                media_type = seed_file.media_type or "application/octet-stream"
+                encoded = base64.b64encode(content).decode()
+                values[name] = {
+                    "name": seed_file.name,
+                    "size": len(content),
+                    "type": media_type,
+                    "url": f"data:{media_type};base64,{encoded}",
+                }
+            records.append(
+                {"id": record["id"]} | {keys[k]: v for k, v in values.items() if k in keys}
+            )
+        result[entity_name] = records
     return result
 
 
@@ -118,7 +138,6 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
-    reject_file_fields(definition, "react")
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}
@@ -182,5 +201,6 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "route_path": route_path,
     "route_params": route_params,
     "ts_events": ts_events,
+    "kind_operations": kind_operations,
     **TYPESCRIPT_HELPERS,
 }

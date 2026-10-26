@@ -87,6 +87,7 @@ def test_the_fsd_layers_are_in_src_and_the_routes_in_app(result: GenerationResul
         "app/(app-shell)/tasks/page.tsx",
         "app/(embed)/embed/holidays/page.tsx",
         "app/(embed)/layout.tsx",
+        "app/files/task/[id]/[field]/route.ts",
         "app/health/route.ts",
         "app/layout.tsx",
         "app/not-found.tsx",

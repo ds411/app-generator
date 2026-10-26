@@ -10,7 +10,7 @@ import pytest
 from appgen.bindings import nextjs
 from appgen.bindings.nextjs.model import UPLOAD_MARGIN
 from appgen.dsl import AppDefinition, load_definition, load_definition_text
-from appgen.gen import GenerationError, generate
+from appgen.gen import generate
 
 ROOT = Path(__file__).parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "files.yaml"
@@ -154,20 +154,6 @@ def test_the_seed_saves_the_files_of_the_seed_records(library: dict[str, str]) -
 def test_a_definition_without_seed_files_has_no_seed_file_module(issues: dict[str, str]) -> None:
     assert "src/shared/db/seed-files.ts" not in issues
     assert "storage" not in issues["src/shared/db/seed.ts"]
-
-
-def test_the_forms_and_the_views_do_not_show_files_yet() -> None:
-    text = BASE + dedent(
-        """\
-        pages:
-          issues: { path: /issues, title: Issues, content: { view: issue_table } }
-        ui:
-          views:
-            issue_table: { kind: table, entity: Issue, columns: { screenshot: {} } }
-        """
-    )
-    with pytest.raises(GenerationError, match="The views do not show 'image' fields yet"):
-        generate(load_definition_text(text, "app.yaml"), nextjs.BINDING)
 
 
 def test_the_storage_is_an_element_that_the_binding_covers() -> None:

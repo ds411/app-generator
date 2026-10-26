@@ -72,6 +72,8 @@ operations:
 
 pages:
   documents: { path: /documents, title: Documents, content: { view: document_table } }
+  covers: { path: /covers, title: Covers, content: { view: document_cards } }
+  document: { path: "/documents/{id}", title: Document, entity: Document, content: { view: document_detail } }
   people: { path: /people, title: People, content: { view: person_table } }
 
 ui:
@@ -80,14 +82,55 @@ ui:
       kind: table
       entity: Document
       columns:
-        title: {}
-        owner: {}
+        cover: {}
+        title: { link: document }
+        scan: {}
+        owner: { format: avatar }
+      actions:
+        new_document: { kind: form, form: new_document, label: New document, icon: plus }
+      row_actions:
+        edit: { kind: form, form: edit_document, label: Edit, icon: pencil }
+    document_cards:
+      kind: cards
+      entity: Document
+      card:
+        title: title
+        image: cover
+        fields: [scan]
+        footer: [owner.avatar]
+    document_detail:
+      kind: detail
+      entity: Document
+      header: { title: title, subtitle: owner }
+      sections:
+        files: { title: Files, fields: [cover, scan, owner.avatar], columns: 3 }
+      actions:
+        edit: { kind: form, form: edit_document, label: Edit, icon: pencil }
     person_table:
       kind: table
       entity: Person
       columns:
+        avatar: { format: avatar }
         name: {}
         email: {}
+        role: {}
+  forms:
+    new_document:
+      entity: Document
+      operation: create_document
+      fields:
+        title: {}
+        owner: {}
+        scan: {}
+        cover: { rules: { required: { message: Select a cover image. } } }
+    edit_document:
+      entity: Document
+      operation: update_document
+      mode: sheet
+      fields:
+        title: {}
+        scan: { help: A PDF file or an image. }
+        cover: {}
 
 seed:
   Person:

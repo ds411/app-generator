@@ -11,6 +11,8 @@
 {% set choices = ("source={" ~ f.source ~ "}") if f.source else ("options={" ~ options ~ "}") %}
 {% if f.widget == "custom" %}
 <{{ f.gap_name }} id={{ id }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value ?? {{ f.empty }})} disabled={busy} />
+{%- elif f.kind == "file" %}
+<FileInput id={{ id }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} rule={ {{- f.key | snake | upper }}_FILE_RULE} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.kind == "many" %}
 <RelationMultiSelect id={{ id }}{{ placeholder }} {{ choices }} value={values.{{ f.key }}} onChange={(value) => change({{ js(f.key) }}, value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.kind == "one" and f.widget != "select" and f.widget != "radio" %}

@@ -1438,6 +1438,17 @@
           ],
           "default": null
         },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "fields": {
           "items": {
             "$ref": "#/$defs/FieldPath"
@@ -6988,6 +6999,7 @@
         "date",
         "datetime",
         "relation",
+        "file",
         "custom"
       ],
       "type": "string"

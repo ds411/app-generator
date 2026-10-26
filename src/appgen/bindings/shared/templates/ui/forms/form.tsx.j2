@@ -29,6 +29,9 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
 import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
 {% endif %}
+{% if plan.files %}
+import type { FileValue } from "@/shared/api";
+{% endif %}
 {% if plan.scoped %}
 import { useAccess } from "@/shared/lib/access";
 import { {{ "fixedValue, " if plan.fixed }}type RecordScope } from "@/shared/lib/permissions";
@@ -75,6 +78,9 @@ import { DateInput } from "@/shared/ui/form-widgets/date-input";
 {% if "datetime" in widgets %}
 import { DateTimeInput } from "@/shared/ui/form-widgets/date-time-input";
 {% endif %}
+{% if plan.file_imports %}
+import { {{ plan.file_imports | join(", ") }} } from "@/shared/ui/form-widgets/file-input";
+{% endif %}
 {% if "number_format" in widgets %}
 import { NumberInput } from "@/shared/ui/form-widgets/number-input";
 {% endif %}
@@ -102,6 +108,11 @@ type RouteParams = Readonly<Record<string, string | undefined>>;
 {% for f in plan.fields if f.options and not f.target %}
 
 const {{ f.key | snake | upper }}_OPTIONS = {{ f.options }};
+{% endfor %}
+{% for f in plan.files %}
+
+/** The largest file and the media types of the field {{ f.name }}. */
+const {{ f.key | snake | upper }}_FILE_RULE = {{ f.file_rule }};
 {% endfor %}
 {% if plan.lookups %}
 
@@ -161,10 +172,10 @@ function initialValues({{ "record" if "record" in initial_code else "_record" }}
   };
 }
 
-/** The input of the operation: an empty value is null, or no value. */
+/** The input of the operation: an empty value is null, or no value.{{ " The files are not in the input." if plan.files }} */
 function toInput(values: Values) {
   return {
-{% for f in plan.fields %}
+{% for f in plan.fields if f.kind != "file" %}
     {{ f.key }}: {{ f.to_input }},
 {% if f.languages %}
     {{ f.translations_key }}: {{ f.translations_input }},
@@ -221,6 +232,21 @@ function validate(values: Values): { input?: ReturnType<typeof SCHEMA.parse>; er
   return { input: result.data, errors };
 }
 
+{% if plan.files %}
+/** Upload the new files of the record, and delete the files that the user removed. */
+async function saveFiles(id: string, values: Values{{ ", record: " ~ plan.type ~ " | undefined" if plan.kind == "update" }}): Promise<void> {
+{% for f in plan.files %}
+  if (values.{{ f.key }} instanceof File) {
+    await {{ plan.entity | camel }}Files.upload(id, {{ js(f.key) }}, values.{{ f.key }});
+{% if plan.kind == "update" %}
+  } else if (values.{{ f.key }} === null && record?.{{ f.key }}) {
+    await {{ plan.entity | camel }}Files.remove(id, {{ js(f.key) }});
+{% endif %}
+  }
+{% endfor %}
+}
+
+{% endif %}
 export type {{ c }}Props = {
 {% if uses_record %}
   /** The record that the form {{ "edits" if plan.kind == "update" else "runs the operation on" }}. */
@@ -273,7 +299,15 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
 {% endif %}
     setBusy(true);
     try {
-      {{ "const result = " if plan.navigate and "result" in plan.navigate }}await {{ plan.call }};
+      {{ "const result = " if (plan.navigate and "result" in plan.navigate) or plan.files }}await {{ plan.call }};
+{% if plan.files %}
+      try {
+        await saveFiles(result.id, values{{ ", record" if plan.kind == "update" }});
+      } catch (error) {
+        // The record is saved: the form closes, and the message tells about the file.
+        toast.error(submitErrors(error)._form);
+      }
+{% endif %}
 {% if on_success and on_success.toast %}
       toast.success({{ tr(js(on_success.toast)) }}); {{ trace(on_success.id) }}
 {% elif on_success %}

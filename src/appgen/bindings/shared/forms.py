@@ -7,6 +7,11 @@ relations as a value or `null`, many-to-many relations as a list of IDs,
 and booleans. On submit, the form turns the values into the input of its
 operation, checks the input with the zod schema of the entity slice and
 with the rules of the form, and calls the operation.
+
+A file field (ADR 0027) keeps the file of the record (`FileValue`), a
+new `File`, or `null`. The input of the operation has no files: after
+the operation, the form uploads the new files and deletes the removed
+files with the file API of the entity (`<entity>Files`).
 """
 
 from collections.abc import Callable
@@ -20,15 +25,15 @@ from appgen.bindings.shared.typescript import Member, members, translations_key
 from appgen.bindings.shared.ui import css_class_var, js
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl.model import AppDefinition, Field, Operation
+from appgen.dsl.storage import format_size
 from appgen.dsl.ui.common import Grid
 from appgen.dsl.ui.fields import FieldTarget, default_widget, resolve_path
 from appgen.dsl.ui.forms import CompareRule, CustomRule, Form, FormField
 from appgen.gen.binding import Output
-from appgen.gen.naming import camel, kebab, pascal
-from appgen.gen.render import GenerationError
+from appgen.gen.naming import camel, kebab, pascal, snake
 
 type ValueKind = Literal[
-    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json"
+    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json", "file"
 ]
 
 _KINDS: dict[str, ValueKind] = {
@@ -129,6 +134,8 @@ class FieldPlan:
     """For a translatable field: the TypeScript initial values of the other languages."""
     translations_input: str = ""
     """For a translatable field: the TypeScript input of the values of all languages."""
+    file_rule: str | None = None
+    """For a file field: the TypeScript rule of the files, `{ maxSize, types }`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +200,19 @@ class FormPlan:
     """True if a default reads a path parameter of the page."""
     widgets: set[str] = field(default_factory=set[str])
     """The widgets that the form uses."""
+
+    @property
+    def files(self) -> list[FieldPlan]:
+        """Return the file fields of the form, which upload their files after the operation."""
+        return [f for f in self.fields if f.kind == "file"]
+
+    @property
+    def file_imports(self) -> list[str]:
+        """Return the names that the form imports from the module of the file widget."""
+        names = ["FileInput"] if any(f.widget != "custom" for f in self.files) else []
+        if any("fileAllowed(" in check.condition for f in self.files for check in f.checks):
+            names.append("fileAllowed")
+        return names
 
     @property
     def owner(self) -> FieldPlan | None:
@@ -290,6 +310,11 @@ class FormContext:
         """Return True if a form has a relation field."""
         return any(f.target for name in self.names for f in self.plan(name).fields)
 
+    @property
+    def files(self) -> bool:
+        """Return True if a form has a file field."""
+        return any(self.plan(name).files for name in self.names)
+
 
 def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPlan:
     assert definition.ui is not None
@@ -364,6 +389,8 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         entity_names = [op, schema, f"type {type_name}"]
         if operation.kind == "create":
             entity_names.append(f"type {type_name}Input")
+        if any(f.kind == "file" for f in fields):
+            entity_names.insert(1, f"{camel(entity)}Files")
         call = (
             f"{op}(input as {type_name}Input)"
             if operation.kind == "create"
@@ -404,7 +431,7 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         loose=loose,
         rules=rules,
         grid=_grid(form.grid),
-        schema=f"{schema}.pick({{ {', '.join(f'{key}: true' for key in _input_keys(fields))} }})",
+        schema=_schema(schema, _input_keys(fields)),
         input_type=input_type,
         call=call,
         imports=imports,
@@ -505,9 +532,7 @@ def _value_field(
     name: str, key: str, form_field: FormField, value: Field, widget: str
 ) -> FieldPlan:
     if value.is_file:
-        raise GenerationError(
-            f"The forms do not take '{value.type}' fields yet: '{value.id}' in '{form_field.id}'."
-        )
+        return _file_field(name, key, form_field, value, widget)
     kind = _KINDS[value.type]
     if kind == "text":
         value_type = "string"
@@ -550,6 +575,41 @@ def _value_field(
     return plan
 
 
+def _file_field(name: str, key: str, form_field: FormField, value: Field, widget: str) -> FieldPlan:
+    """Return the plan of a file field: the widget checks the size and the type of a new file."""
+    types = value.media_types
+    rule = f"{snake(key).upper()}_FILE_RULE"
+    plan = FieldPlan(
+        name=name,
+        key=key,
+        element_id=form_field.id,
+        widget=widget,
+        label=form_field.label or value.label or label(name),
+        kind="file",
+        value_type="File | FileValue | null",
+        empty="null",
+        required_message="Select a file.",
+        file_rule=f"{{ maxSize: {value.size_limit}, types: {js(types)} }}",
+    )
+    new = f"values.{key} instanceof File"
+    plan.checks.append(
+        Check(
+            f"{new} && values.{key}.size > {rule}.maxSize",
+            f"The file is larger than {format_size(value.size_limit)}.",
+            value.id,
+        )
+    )
+    if types:
+        plan.checks.append(
+            Check(
+                f"{new} && !fileAllowed(values.{key}, {rule}.types)",
+                f"Select a file of a type that the field allows: {', '.join(types)}.",
+                value.id,
+            )
+        )
+    return plan
+
+
 def _widget_options(plan: FieldPlan, form_field: FormField) -> None:
     plan.placeholder = form_field.placeholder
     plan.help = form_field.help
@@ -574,6 +634,8 @@ def _to_input(plan: FieldPlan, nullable: bool, required: bool) -> str:
 
 def _initial(plan: FieldPlan, default: Any, update: bool, member: Member | None) -> str:
     """Return the initial value: the record, the form default, the field default, or empty."""
+    if plan.kind == "file":
+        return f"record ? (record.{plan.key} ?? null) : null" if update else "null"
     fallback = plan.empty
     if isinstance(default, str) and default.startswith("$route."):
         param = default.removeprefix("$route.")
@@ -620,13 +682,21 @@ def _translations(definition: AppDefinition, plan: FieldPlan, update: bool) -> N
 
 
 def _input_keys(fields: list[FieldPlan]) -> list[str]:
-    """Return the keys of the input of the fields: a translatable field has two keys."""
+    """Return the keys of the input of the fields: a translatable field has two keys, and a file
+    field none."""
     keys: list[str] = []
     for f in fields:
+        if f.kind == "file":
+            continue
         keys.append(f.key)
         if f.translations_key:
             keys.append(f.translations_key)
     return keys
+
+
+def _schema(schema: str, keys: list[str]) -> str:
+    """Return the zod schema of the input of the fields: the keys of the schema of the entity."""
+    return f"{schema}.pick({{ {', '.join(f'{key}: true' for key in keys)} }})"
 
 
 def _literal(plan: FieldPlan, value: Any) -> str:
@@ -801,6 +871,7 @@ def form_rules() -> tuple[Output, ...]:
                 ("date-time-input", "'datetime' in ui_forms.widgets"),
                 ("number-input", "'number_format' in ui_forms.widgets"),
                 ("relation-select", "ui_forms.relations"),
+                ("file-input", "ui_forms.files"),
             )
         ),
         Output(

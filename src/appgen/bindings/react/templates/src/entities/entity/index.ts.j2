@@ -8,6 +8,9 @@ export {
 {% if react.api %}
   {{ var }}Options,
 {% endif %}
+{% if element.file_fields and definition.storage and (api_entities[name].files if react.api else true) %}
+  {{ var }}Files,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

@@ -1,6 +1,18 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
+{% if definition.storage %}
+import {
+  type EntityApi,
+  type EntityRecord,
+  type FileApi,
+  type Filter,
+  type ListQuery,
+  type ListResult,
+  NotFoundError,
+} from "./types";
+{% else %}
 import { type EntityApi, type EntityRecord, type Filter, type ListQuery, type ListResult, NotFoundError } from "./types";
+{% endif %}
 
 /** The JSON names of an entity in the API. */
 export type ApiShape = {
@@ -195,6 +207,31 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     };
   }
 
+{% if definition.storage %}
+  /**
+   * Return the upload and the delete of the files of the file fields
+   * (ADR 0027): `PUT` and `DELETE <path>/{id}/<field>`. `paths` gives the
+   * last part of the path of each field. The upload sends the file in the
+   * part `file` of a multipart body.
+   */
+  {{ trace(definition.storage.id) }}
+  files<TField extends string>(paths: Readonly<Record<TField, string>>): FileApi<T, TField> {
+    const send = async (method: string, id: string, field: TField, body?: FormData): Promise<T> => {
+      const record = this.fromJson(await this.request(method, id, body, `/${paths[field]}`));
+      this.notify();
+      return record;
+    };
+    return {
+      upload: (id, field, file) => {
+        const body = new FormData();
+        body.set("file", file);
+        return send("PUT", id, field, body);
+      },
+      remove: (id, field) => send("DELETE", id, field),
+    };
+  }
+
+{% endif %}
   /** Call the endpoint of a custom operation, for example `/{id}/cancel`, with the JSON params. */
   async call(method: string, suffix: string, id: string, params: object): Promise<unknown> {
     const result = await this.request(method, id, params, suffix);

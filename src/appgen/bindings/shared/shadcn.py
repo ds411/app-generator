@@ -46,6 +46,7 @@ _WIDGET_COMPONENTS: dict[str, tuple[str, ...]] = {
     "date": ("popover", "calendar"),
     "datetime": ("popover", "calendar", "input"),
     "relation": ("popover", "command", "badge"),
+    "file": ("button",),
     "custom": (),
 }
 # A form in `page` mode without a page that shows it opens in a dialog.

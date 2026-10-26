@@ -87,9 +87,11 @@ FORMAT_TYPES: dict[str, frozenset[str] | None] = {
     "badge": frozenset({"enum"}),
     "email": frozenset({"email"}),
     "url": frozenset({"url"}),
-    "avatar": SINGLE_KINDS,
+    "avatar": SINGLE_KINDS | {"image"},
 }
 """The field types (and relation kinds) that each column format suits. None: all."""
+
+IMAGE_TYPES = frozenset({"image"})
 
 MANY_KINDS = frozenset({"one_to_many", "many_to_many"})
 STRING_TYPES = frozenset({"string", "text", "email", "url"})
@@ -718,6 +720,10 @@ def _check_card(definition: AppDefinition, entity: str, card: Card) -> Iterator[
     yield from _check_paths(definition, card, "footer", entity, card.footer)
     if card.badge is not None:
         yield from _check_badge_field(definition, entity, card.badge)
+    if card.image is not None:
+        target = yield from _resolve(definition, card, "image", entity, card.image)
+        if target is not None:
+            yield from _check_suits(card, "image", "A card image", target, IMAGE_TYPES)
 
 
 def _check_badge_field(

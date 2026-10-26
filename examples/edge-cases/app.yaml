@@ -12,6 +12,9 @@ app:
   title: Edge Cases
   x-icon: flask
 
+# The files of the file fields go to an S3 bucket, else to a folder.
+storage: { kind: s3, folder_env: SAMPLE_FILES, bucket_env: SAMPLE_BUCKET }
+
 entities:
   Sample:
     description: One field of each type.
@@ -36,6 +39,8 @@ entities:
         values: ["on", "off", standby]
         default: standby
       payload: { type: json, default: { tags: [a, b], nested: { ok: true } }, x-widget: code }
+      attachment: { type: file, max_size: 512KB, types: [application/pdf, "text/*"] }
+      photo: { type: image, types: [image/png] }
 
   # Each relation kind, with and without an inverse.
   Owner:

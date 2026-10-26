@@ -10,7 +10,19 @@ import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/p
 
 {% endif %}
 import { applyQuery } from "./query";
+{% if definition.storage %}
+import {
+  type EntityApi,
+  type EntityRecord,
+  type FileApi,
+  type FileValue,
+  type ListQuery,
+  type ListResult,
+  NotFoundError,
+} from "./types";
+{% else %}
 import { type EntityApi, type EntityRecord, type ListQuery, type ListResult, NotFoundError } from "./types";
+{% endif %}
 
 /** A workflow on an enum field: the allowed changes of the field. */
 export type Workflow = {
@@ -88,6 +100,46 @@ export class TransitionError extends Error {
   }
 }
 
+{% if definition.storage %}
+/** The largest file, in bytes, and the media types of a file field (ADR 0027). Empty types: all types. */
+export type FileRule = { maxSize: number; types: readonly string[] };
+
+/** A file that the rule of its field does not allow. */
+export class FileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FileError";
+  }
+}
+
+/** Return a size as a short text with a unit, for example `5 MB` or `1.5 KB`. */
+function sizeText(size: number): string {
+  const units: [string, number][] = [
+    ["GB", 1024 ** 3],
+    ["MB", 1024 ** 2],
+    ["KB", 1024],
+  ];
+  for (const [unit, factor] of units) {
+    if (size >= factor) {
+      return `${(size / factor).toFixed(1).replace(/\.0$/, "")} ${unit}`;
+    }
+  }
+  return `${size} B`;
+}
+
+/** Throw a FileError if the rule does not allow a file: the size, and the type or its group, for example `image/*`. */
+function checkFile(file: File, rule: FileRule): void {
+  if (file.size > rule.maxSize) {
+    throw new FileError({{ js_format("The file is larger than {size}.", size="sizeText(rule.maxSize)") }});
+  }
+  const type = file.type.toLowerCase() || "application/octet-stream";
+  const group = type.split("/")[0];
+  if (rule.types.length > 0 && !rule.types.some((item) => item === type || item === `${group}/*`)) {
+    throw new FileError({{ js_format("The type {type} is not allowed. Use one of: {types}.", type="type", types='rule.types.join(", ")') }});
+  }
+}
+
+{% endif %}
 /** The time that each call waits, so that the UI shows its loading states. */
 export const MOCK_LATENCY_MS = 250;
 
@@ -236,6 +288,42 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       this.listeners.delete(listener);
     };
   }
+{% if definition.storage %}
+
+  /**
+   * Return the upload and the delete of the files of the file fields
+   * (ADR 0027). The store checks a file with the rule of its field, and
+   * keeps it in the browser tab (an object URL) until the page reloads.
+   * `guard` checks the access first.
+   */
+  {{ trace(definition.storage.id) }}
+  files<TField extends string>(rules: Readonly<Record<TField, FileRule>>, guard?: () => void): FileApi<T, TField> {
+    const change = async (id: string, field: TField, value: FileValue | null): Promise<T> => {
+      await wait();
+{% if record_rules %}
+      const before = this.find(id, "change");
+{% else %}
+      const before = this.find(id);
+{% endif %}
+      const record = { ...before, [field]: value } as T;
+      this.records = this.records.map((item) => (item.id === id ? record : item));
+      this.notify();
+      return this.show(record);
+    };
+    return {
+      upload: (id, field, file) => {
+        guard?.();
+        checkFile(file, rules[field]);
+        const type = file.type || "application/octet-stream";
+        return change(id, field, { name: file.name, size: file.size, type, url: URL.createObjectURL(file) });
+      },
+      remove: (id, field) => {
+        guard?.();
+        return change(id, field, null);
+      },
+    };
+  }
+{% endif %}
 
   /**
    * Check the workflows of the entity. `before` is undefined for a new

@@ -382,6 +382,27 @@ The Next.js app keeps the file of a record in a `jsonb` column too:
   definition with `storage` can start with `/files/`.
 - The delete of a record and the seed work as in the FastAPI app.
 
+The front ends (React and Next.js) show and upload the files:
+
+- A form field of a file field gets the widget `file`: a drop zone and a
+  button that opens the file dialog, with the current file, a preview of
+  an image, and a button that removes the file. The form checks the size
+  and the type of the new file. It saves the record first, and then
+  uploads the new files and deletes the removed files with
+  `<entity>Files`. The create and the update operations take no file.
+- A view shows an `image` field as an image: small in a table column,
+  large in a detail section. It shows a `file` field as a link with the
+  name and the size of the file. The format `avatar` shows an image in a
+  circle, with the initials of the record when it has no image. The
+  format `text` shows the name of the file. A view does not sort by a
+  file field.
+- A card of a `cards` view can show an `image` field at its top (`image`).
+- The React app with mock data keeps a new file in the browser (an object
+  URL) until the page loads again. Its seed files are `data:` URLs in the
+  mock data. With the data source `api`, it sends the files to the
+  endpoints of the FastAPI app.
+- The sign-up form cannot ask for a file field.
+
 ### Entity rules
 
 `rules` is a mapping from rule name to rule. A rule checks more than
@@ -1431,7 +1452,8 @@ A column has `field` (default: the column name), `label`, `format`,
 formats are `text`, `number`, `currency`, `percent`, `date`,
 `datetime`, `relative_time`, `boolean`, `badge`, `email`, `url`, and
 `avatar`. The default format is the `format` of the field, else a
-format for the field type.
+format for the field type. `avatar` is for a relation (the initials of
+the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), or `date_range` (`field`). All
@@ -1455,8 +1477,9 @@ ui:
 ```
 
 **Card list** (`kind: cards`): `card` (`title`, `subtitle`, `badge`,
-`fields`, `footer`), `grid`, and the `sort`, `filters`, `pagination`,
-and `row_actions` of a table.
+`fields`, `footer`, `image`), `grid`, and the `sort`, `filters`,
+`pagination`, and `row_actions` of a table. The card `image` is an
+`image` field: the cover image at the top of the card.
 
 **Board** (`kind: board`): `group_by` (an `enum` field), `columns` (a
 mapping from enum value to `label`, `color`, and `limit`), `card`, and
@@ -1601,9 +1624,9 @@ A form field has `widget`, `label`, `placeholder`, `help`, `span`,
 `rows`, `step`, `options`, and `rules` (`required`, `min_length`,
 `max_length`, `pattern`, `min`, `max`, each with `value` and
 `message`). The widgets are `text`, `textarea`, `number`, `select`,
-`radio`, `checkbox`, `switch`, `date`, `datetime`, `relation`, and
-`custom` (a generation gap). The default widget comes from the field
-type.
+`radio`, `checkbox`, `switch`, `date`, `datetime`, `relation`, `file`
+(for a `file` or an `image` field), and `custom` (a generation gap).
+The default widget comes from the field type.
 
 ```yaml
 ui:
@@ -2232,6 +2255,9 @@ use in the app does not show.
   `Select records`, `Clear`, `Remove {label}`, `Pick a date`, `Time`,
   `Command Palette`, `Search for a command to run...`, and the label of
   the input of a language of a translatable field, `{field} ({language})`.
+- The file widget of the forms: `Drop a file here, or`, `Select a file`,
+  `Select another file`, `Remove the file`,
+  `Types: {types}. Largest file: {size}.`, `Largest file: {size}.`.
 - The messages of the form fields: `Enter a value.`, `Select a value.`,
   `Enter a whole number.`, `Enter a valid email address.`,
   `Enter a valid URL.`, `Use the correct format.`,
@@ -2250,8 +2276,9 @@ use in the app does not show.
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.
-- The messages of an upload of a file (the server actions of the
-  Next.js app): `Select a file.`, `The file is larger than {size}.`,
+- The messages of an upload of a file (the mock data of the React app,
+  and the server actions of the Next.js app): `Select a file.`,
+  `The file is larger than {size}.`,
   `The type {type} is not allowed. Use one of: {types}.`.
 - The rate limit of the Next.js app:
   `Send not more than {limit} requests in each minute.`, and with the

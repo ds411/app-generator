@@ -368,6 +368,7 @@ BINDING = Binding(
         | {"api", "api_operation"}
         | {"entity_seed", "seed_record"}
         | {"event"}
+        | {"storage"}
     ),
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
     excludes=frozenset(

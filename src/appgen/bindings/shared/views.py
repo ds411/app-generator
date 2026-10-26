@@ -35,6 +35,7 @@ from appgen.dsl.expressions import (
     parse_expression,
 )
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.common import (
     Action,
     FormAction,
@@ -88,6 +89,8 @@ _DEFAULT_FORMATS = {
     "datetime": "datetime",
     "enum": "text",
     "json": "text",
+    "file": "file",
+    "image": "image",
 }
 DEFAULT_PAGE_SIZE = 20
 _BOARD_AREA_CLASSES = "w-full min-w-0"
@@ -138,6 +141,8 @@ class Value:
     """The target entity of a relation."""
     currency: str | None = None
     """The ISO 4217 code of a `currency` value, or None for the default currency."""
+    name_expr: str = '""'
+    """For a file field: the text of the record that has the file, for an avatar."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +234,8 @@ class CardPlan:
     subtitle: str | None = None
     badge: str | None = None
     badge_id: str | None = None
+    image: str | None = None
+    """The JSX of the cover image, of `row`, or None."""
     fields: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """The label and the JSX of each field."""
     footer: list[str] = field(default_factory=list[str])
@@ -408,6 +415,7 @@ class ViewPlan:
         card = self.card
         if card is not None:
             parts += [card.title, card.href or "", card.subtitle or "", card.badge or ""]
+            parts += [card.image or ""]
             parts += [jsx for _, jsx in card.fields] + card.footer
         actions = [*self.actions, *self.row_actions, *self.bulk_actions]
         parts += [(a.href or "") + (a.run or "") + (a.navigate_to or "") for a in actions]
@@ -743,7 +751,7 @@ class ViewContext:
         (`badge`, `avatar`, `formatted`).
         """
         found: set[str] = set()
-        values = {"badge", "avatar", "formatted"}
+        values = {"badge", "avatar", "formatted", "file"}
         for name, kind in self.list_views.items():
             plan = self.view_plan(name)
             found.add(kind)
@@ -800,6 +808,7 @@ class ViewContext:
         expr = row
         current = entity
         segments = path.split(".")
+        record_optional = optional
         for segment in segments[:-1]:
             relation = definition.entities[current].relations[segment]
             key = f"{expr}{'?.' if optional else '.'}{camel(segment)}Id"
@@ -812,12 +821,20 @@ class ViewContext:
         member = target.member
         member_label = label(last)
         if isinstance(member, Field):
-            if member.is_file:
-                raise GenerationError(
-                    f"The views do not show '{member.type}' fields yet: '{member.id}'."
-                )
             member_label = member.label or member_label
             raw = f"{expr}{dot}{camel(last)}"
+            if member.is_file:
+                return self._file_value(
+                    entity,
+                    target.entity,
+                    segments,
+                    member,
+                    member_label,
+                    raw,
+                    fmt,
+                    row,
+                    record_optional,
+                )
             if member.computed is not None:
                 raw = self.computed_expr(target.entity, member, expr, optional)
             if fmt is None and badge is None:
@@ -886,6 +903,44 @@ class ViewContext:
             sort_expr=text,
             format=fmt or "text",
             target=target_entity,
+        )
+
+    def _file_value(
+        self,
+        entity: str,
+        holder: str,
+        segments: list[str],
+        member: Field,
+        member_label: str,
+        raw: str,
+        fmt: str | None,
+        row: str,
+        optional: bool,
+    ) -> Value:
+        """Return the value of a file field (ADR 0027): a `FileValue`, or null.
+
+        The default format shows an image of an `image` field, and a link to
+        the file of a `file` field. `avatar` shows the image in an avatar,
+        and `text` shows the name of the file.
+        """
+        name = f'String({raw}?.name ?? "")'
+        display = definition_display(self.definition.entities[holder])
+        display_member = self.definition.entities[holder].fields.get(display)
+        owner = '""'
+        if display_member is None or not display_member.is_file:
+            display_path = ".".join([*segments[:-1], display])
+            owner = self.value(entity, display_path, row=row, optional=optional).text_expr
+        return Value(
+            path=".".join(segments),
+            label=member_label,
+            kind="field",
+            type=member.type,
+            expr=raw,
+            key_expr=raw,
+            text_expr=name,
+            sort_expr=name,
+            format=fmt if fmt in ("text", "avatar") else member.type,
+            name_expr=owner,
         )
 
     def computed_expr(self, entity: str, member: Field, row: str, optional: bool) -> str:
@@ -1074,8 +1129,21 @@ class ViewContext:
             ]
         return server
 
-    def jsx(self, value: Value, plan: UsesParts, avatar: bool = False) -> str:
-        """Return the JSX that shows a value of `row`, and note the components it needs."""
+    def jsx(self, value: Value, plan: UsesParts, avatar: bool = False, large: bool = False) -> str:
+        """Return the JSX that shows a value of `row`, and note the components it needs.
+
+        `large` shows an image larger, for example in a detail view.
+        """
+        if value.type in FILE_TYPES and value.format != "text":
+            # A card footer shows an image as an avatar, with the name of its record.
+            if value.format == "avatar" or (avatar and not large and value.type == "image"):
+                plan.uses.add("avatar")
+                return f"<AvatarValue name={{{value.name_expr}}} image={{{value.expr}?.url}} />"
+            plan.uses.add("file")
+            if value.format == "image":
+                size = ' size="lg"' if large else ""
+                return f"<ImageValue file={{{value.expr}}}{size} />"
+            return f"<FileLink file={{{value.expr}}} />"
         if value.format == "badge":
             plan.uses.add("badge")
             badge = f"badges.{value.badge}" if value.badge else "undefined"
@@ -1084,7 +1152,7 @@ class ViewContext:
             plan.uses.add("avatar")
             return f"<AvatarValue name={{{value.text_expr}}} />"
         plan.uses.add("formatted")
-        if value.kind in ("one", "many"):
+        if value.kind in ("one", "many") or value.type in FILE_TYPES:
             return f"<FormattedValue value={{{value.text_expr}}} />"
         fmt = value.format if value.format != "avatar" else "text"
         currency = f" currency={js(value.currency)}" if value.currency else ""
@@ -1135,7 +1203,8 @@ class ViewContext:
                     value=value,
                     header=column.label or value.label,
                     cell=cell,
-                    sortable=column.sortable,
+                    # A file has no order.
+                    sortable=column.sortable and value.type not in FILE_TYPES,
                     classes=" ".join(c for c in (align, hide) if c),
                     width=css_var(column.width) if column.width else None,
                 )
@@ -1157,7 +1226,7 @@ class ViewContext:
             plan.uses.add("link")
         title = (
             title_value.text_expr
-            if title_value.kind != "field"
+            if title_value.kind != "field" or title_value.type in FILE_TYPES
             else f'String({title_value.expr} ?? "")'
         )
         result = CardPlan(element_id=card.id if card else None, title=f"{{{title}}}", href=href)
@@ -1169,6 +1238,10 @@ class ViewContext:
             value = self.value(view.entity, card.badge.field, "badge", card.badge.badge)
             result.badge = self.jsx(value, plan)
             result.badge_id = card.badge.id
+        if card.image:
+            value = self.value(view.entity, card.image)
+            plan.uses.add("file")
+            result.image = f'<ImageValue file={{{value.expr}}} size="cover" />'
         for path in card.fields:
             value = self.value(view.entity, path)
             result.fields.append((value.label, self.jsx(value, plan)))
@@ -1236,7 +1309,7 @@ class ViewContext:
         display = definition_display(self.definition.entities[view.entity])
         paths = [card.title if card and card.title else display]
         if card is not None:
-            paths += [p for p in (card.subtitle,) if p]
+            paths += [p for p in (card.subtitle, card.image) if p]
             paths += [card.badge.field] if card.badge else []
             paths += [*card.fields, *card.footer]
         if isinstance(view, BoardView):
@@ -1535,8 +1608,13 @@ class ViewContext:
 
 def _value_parts(code: str) -> set[str]:
     """Return the value components that JSX code uses."""
-    names = {"badge": "<BadgeValue", "avatar": "<AvatarValue", "formatted": "<FormattedValue"}
-    return {part for part, tag in names.items() if tag in code}
+    names = {
+        "badge": ("<BadgeValue",),
+        "avatar": ("<AvatarValue",),
+        "formatted": ("<FormattedValue",),
+        "file": ("<ImageValue", "<FileLink"),
+    }
+    return {part for part, tags in names.items() if any(tag in code for tag in tags)}
 
 
 def _badge_name(camel_name: str | None, sets: dict[str, BadgeSet]) -> str | None:
@@ -1687,6 +1765,7 @@ def view_rules() -> tuple[Output, ...]:
                         ("values", "badge-value", "'badge' in ui_views.features"),
                         ("values", "avatar-value", "'avatar' in ui_views.features"),
                         ("values", "formatted-value", "'formatted' in ui_views.features"),
+                        ("values", "file-value", "'file' in ui_views.features"),
                         ("filters", "search-filter", "'search' in ui_views.features"),
                         ("filters", "boolean-filter", "'boolean' in ui_views.features"),
                         ("filters", "date-range-filter", "'date_range' in ui_views.features"),

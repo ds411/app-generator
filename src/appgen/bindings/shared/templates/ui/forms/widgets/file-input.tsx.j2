@@ -1,0 +1,150 @@
+{{ trace_header("app") }}
+{% set next = binding.name == "nextjs" %}
+"use client";
+
+import { FileIcon, UploadIcon, XIcon } from "lucide-react";
+import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+
+import type { FileValue } from "@/shared/api";
+import { fileSize } from "@/shared/lib/format";
+import { cn } from "@/shared/lib/utils";
+import { Button } from "@/shared/ui/button";
+
+/** The largest file, in bytes, and the media types of a file field. Empty types: all types. */
+export type FileRule = { maxSize: number; types: readonly string[] };
+
+/** Return true if the types allow the type of a file: the type, or its group, for example `image/*`. */
+export function fileAllowed(file: File, types: readonly string[]): boolean {
+  const type = file.type.toLowerCase();
+  const group = type.split("/")[0];
+  return types.length === 0 || types.some((item) => item === type || item === `${group}/*`);
+}
+
+/** Return the URL of the preview of an image: the stored file, or a new file in the browser. */
+function usePreview(value: File | FileValue | null): string | null {
+  const local = useMemo(
+    () => (value instanceof File && value.type.startsWith("image/") ? URL.createObjectURL(value) : null),
+    [value],
+  );
+  useEffect(() => {
+    return () => {
+      if (local) URL.revokeObjectURL(local);
+    };
+  }, [local]);
+  if (value instanceof File) return local;
+  return value?.type.startsWith("image/") ? value.url : null;
+}
+
+/**
+ * The widget of a file field: drop a file on it, or select one. It shows
+ * the name and the size of the file, and a preview of an image. The value
+ * is the file of the record, a new file, or null.
+ */
+export function FileInput({
+  id,
+  value,
+  onChange,
+  rule,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  value: File | FileValue | null;
+  onChange: (value: File | FileValue | null) => void;
+  rule: FileRule;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const preview = usePreview(value);
+
+  const pick = (files: FileList | null) => {
+    const file = files?.[0];
+    if (file) onChange(file);
+  };
+
+  const drop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    if (!disabled) pick(event.dataTransfer.files);
+  };
+
+  return (
+    <div className="space-y-2">
+      {value && (
+        <div className="flex items-center gap-3 rounded-md border p-2">
+          {preview ? (
+{% if next %}
+            // A new file has a URL of the browser (`blob:`), which the image optimizer cannot read.
+            // eslint-disable-next-line @next/next/no-img-element
+{% endif %}
+            <img src={preview} alt="" className="size-12 shrink-0 rounded-sm border bg-muted object-cover" />
+          ) : (
+            <FileIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+          )}
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="truncate font-medium">{value.name}</p>
+            <p className="text-xs text-muted-foreground tabular-nums">{fileSize(value.size)}</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => onChange(null)}
+            disabled={disabled}
+            aria-label={{ jsx_attr("Remove the file") }}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      )}
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (!disabled) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={drop}
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-dashed px-3 py-2.5 text-sm text-muted-foreground transition-colors",
+          dragging && "border-primary bg-primary/5",
+          invalid && "border-destructive",
+          disabled && "opacity-50",
+        )}
+      >
+        <UploadIcon aria-hidden className="size-4 shrink-0" />
+        <span>{{ jsx_text("Drop a file here, or") }}</span>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          aria-invalid={invalid}
+          onClick={() => input.current?.click()}
+        >
+          {value ? {{ tr(js("Select another file")) }} : {{ tr(js("Select a file")) }}}
+        </Button>
+        <span className="w-full text-xs">
+          {rule.types.length > 0
+            ? {{ js_format("Types: {types}. Largest file: {size}.", types='rule.types.join(", ")', size="fileSize(rule.maxSize)") }}
+            : {{ js_format("Largest file: {size}.", size="fileSize(rule.maxSize)") }}}
+        </span>
+        <input
+          ref={input}
+          type="file"
+          accept={rule.types.join(",") || undefined}
+          tabIndex={-1}
+          aria-hidden
+          className="sr-only"
+          disabled={disabled}
+          onChange={(event) => {
+            pick(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+    </div>
+  );
+}
