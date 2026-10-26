@@ -928,8 +928,14 @@ jobs:
 - `filter` (optional) selects the records: the filter syntax of the
   [dashboards](#dashboards). `$now` is the time when the app runs the
   job, and `$today` its date in UTC.
-- A job without `entity` has a `schedule`, and no `at`, `filter`, or
-  `operation`.
+- `user` names the user of each record: a `many_to_one` or `one_to_one`
+  relation of `entity` to the user entity of `auth`, or `id` when
+  `entity` is the user entity. A job whose operation calls an API with
+  the authorization code flow needs it: the clients send the token of
+  this user ([ADR 0033](https://github.com/ds411/app-generator/blob/main/docs/adr/0033-api-connections.md)). A run for a
+  record whose user has no connection to the API does nothing.
+- A job without `entity` has a `schedule`, and no `at`, `filter`,
+  `operation`, or `user`.
 
 A run is for one job, one record (or none), and one time. The apps keep
 the runs in the table `job_runs`, with a key of the job, the record, and
@@ -982,7 +988,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, and the optional `scopes` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
 | `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
@@ -993,7 +999,8 @@ apis:
 - Each operation ID must exist in the document, and must be a valid ID
   segment (letters, digits, and `_`).
 - The clients support an API key in a header or a query parameter, a
-  bearer token, and OAuth 2.0 with the client credentials flow.
+  bearer token, and OAuth 2.0 with the client credentials flow or the
+  authorization code flow.
 - They send path, query, header, and cookie parameters. A cookie
   parameter is a text, a number, or a boolean, and goes in the header
   `Cookie`.
@@ -1035,6 +1042,37 @@ apis:
       scopes: [budgets:read]
     expose: true
     operations: [getBudget]
+```
+
+- With the authorization code flow (`flow: authorizationCode`, the
+  default when the scheme has only this flow), the app calls the API in
+  the name of a user ([ADR 0033](https://github.com/ds411/app-generator/blob/main/docs/adr/0033-api-connections.md)): a user
+  connects an account of the service, and the client sends the access
+  token of this user. The app needs `auth`, and no public operation can
+  call the API. Each scope must be a scope of the flow. The authorization
+  URL and the token URL can be paths under the base URL of the API. The
+  FastAPI app has the routes of the flow under `/auth/connections/<api>`
+  (in kebab case), and keeps the tokens of each user in the table
+  `api_connections`, encrypted with a key from `AUTH_SECRET`. The client
+  gets a new access token with the refresh token a little before the
+  token ends, and one time after an answer with the status 401. A custom
+  operation gets the client of the signed-in user, and gives 409 when
+  the user has no connection. A job names the user of each record in
+  `user`. The Next.js binding does not generate the flow yet.
+
+```yaml
+# not valid alone: the definition is tests/fixtures/api-connections.yaml.
+apis:
+  calendar:
+    document: api-connections/calendar.openapi.yaml
+    base_url_env: CALENDAR_API_URL
+    security:
+      scheme: oauth
+      flow: authorizationCode
+      client_id_env: CALENDAR_CLIENT_ID
+      client_secret_env: CALENDAR_CLIENT_SECRET
+      scopes: [events:read]
+    operations: [listEvents]
 ```
 
 - The client has only the selected operations and the schemas that they
@@ -2369,6 +2407,15 @@ to translate one. The rules and the workflows give their own messages.
 - The endpoints of the exposed APIs:
   `The API {api} answered with the status {status}.`,
   `The API {api} gave no valid answer.`.
+- The connections of the users to the APIs with the authorization code
+  flow: `Connect an account of the API {api} first.`,
+  `The server has no client ID or client secret for the API {api}.`,
+  `The authorization server gave the error '{error}'.`,
+  `The callback has no code. Connect the account again.`,
+  `The authorization server did not accept the code. Connect the account again.`,
+  `The token endpoint of the API {api} did not answer correctly.`,
+  `The state of the callback is not correct. Connect the account again.`,
+  `The connection failed.`.
 - The webhooks: `The server has no secret for the webhook {name}.`,
   `The signature of the webhook is not valid.`,
   `The body of the webhook is not valid JSON.`,

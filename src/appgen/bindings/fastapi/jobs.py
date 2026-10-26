@@ -97,11 +97,16 @@ class PyJobClient:
     param: str
     """The variable of the client, and the parameter of the operation."""
     client: str
-    """The class of the client."""
+    """The class of the client, or the function that gives a client with the token of a user."""
     args: list[str]
     """The arguments of the client from the settings."""
     module: str
     """The package of the API in `app/integrations/`."""
+    api: str = ""
+    """The name of the API in the definition."""
+    user: str | None = None
+    """The authorization code flow: the expression of the ID of the user, for example
+    `record.owner_id` (ADR 0033)."""
 
 
 @dataclass(slots=True)
@@ -268,7 +273,14 @@ class PyJob:
         lines |= {
             f"from app.integrations.{c.module}.client import {c.client}" for c in self.clients
         }
+        if self.user_clients:
+            lines.add("from app.core.connections import connected")
         return import_block(lines)
+
+    @property
+    def user_clients(self) -> list[PyJobClient]:
+        """The clients that send the token of the user of the record (ADR 0033)."""
+        return [c for c in self.clients if c.user is not None]
 
     def test_imports(self) -> str:
         """Return the import block of the generated tests of the job."""
@@ -395,6 +407,13 @@ def python_jobs(
             result.operation = operations[job.operation]
             for api in (apis[a] for a in result.operation.apis):
                 client = PyJobClient(api.param, api.client, api.settings_args(), api.module)
+                if api.user:
+                    # The client sends the token of the user of the record (ADR 0033).
+                    user = f"record.{_user_attr(entity, job.user)}"
+                    args = ["settings", "sessions", user]
+                    client = PyJobClient(
+                        api.param, api.client_for, args, api.module, api.name, user
+                    )
                 result.clients.append(client)
             if job.at is not None:
                 result.at = next(f for f in entity.fields if f.name == job.at)
@@ -406,6 +425,16 @@ def python_jobs(
             result.test = _test(definition, result, job.filter)
         found[name] = result
     return found
+
+
+def _user_attr(entity: PyEntity, user: str | None) -> str:
+    """Return the attribute of a record with the ID of the user of a job: `id` for the user
+    entity, else the foreign key of the relation. The validator checks the relation."""
+    if user is None or user == "id":
+        return "id"
+    relation = next(r for r in entity.relations if r.name == user)
+    assert relation.fk_attr is not None
+    return relation.fk_attr
 
 
 def _test(

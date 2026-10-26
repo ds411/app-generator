@@ -65,6 +65,14 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[{{ record_type }}]:
 {% endif %}
 
     monkeypatch.setattr({{ target }}, "{{ function }}", fake)
+{% if e and job.user_clients %}
+
+    async def connected(*args: object) -> bool:
+        return True
+
+    # Each user has a connection to the APIs with the authorization code flow.
+    monkeypatch.setattr({{ job.module }}, "connected", connected)
+{% endif %}
 {% if e and not t %}
     monkeypatch.setattr({{ job.module }}, "where", select_all)
 {% endif %}

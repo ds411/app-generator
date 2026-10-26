@@ -59,6 +59,9 @@ _PART_KEYWORDS = (
     ("header", "headers"),
     ("cookie", "cookies"),
 )
+USER_TOKEN = "user-token"
+"""The access token of a user in the generated tests of the clients of the authorization code
+flow."""
 _FILE_SAMPLE = {"name": "example.txt", "content": EXAMPLE_TEXT}
 """The sample of a file of a multipart form, as `ApiFile` validates it."""
 
@@ -416,7 +419,8 @@ class PyApi:
     secret_setting: str | None
     secret_env: str | None
     credential: str | None
-    """`header`, `query`, `bearer`, or `oauth2`."""
+    """`header`, `query`, `bearer`, `oauth2` (the client credentials flow), or `user` (the
+    authorization code flow: the token of a user, ADR 0033)."""
     credential_name: str | None
     """The name of the header or the query parameter of an API key."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
@@ -429,9 +433,28 @@ class PyApi:
     """OAuth 2.0: the attribute of the settings with the client ID."""
     client_id_env: str | None = None
     token_url: str = ""
-    """OAuth 2.0: the token URL of the client credentials flow. A path is under the base URL."""
+    """OAuth 2.0: the token URL of the flow. A path is under the base URL."""
     scopes: tuple[str, ...] = ()
     """OAuth 2.0: the scopes of the access token."""
+    authorization_url: str = ""
+    """The authorization code flow: the page where the user allows the access."""
+    refresh_url: str = ""
+    """The authorization code flow: the URL that gives a new access token for a refresh token."""
+
+    @property
+    def user(self) -> bool:
+        """True for the authorization code flow: the client sends the token of a user."""
+        return self.credential == "user"
+
+    @property
+    def client_for(self) -> str:
+        """The function that returns a client with the token of a user (ADR 0033)."""
+        return f"{self.module}_client_for"
+
+    @property
+    def connection_name(self) -> str:
+        """The name of the API in the paths of the connections, for example `exchange-rates`."""
+        return kebab(self.name)
 
     @property
     def dependency(self) -> str:
@@ -504,9 +527,18 @@ class PyApi:
             "from typing import Annotated",
             "from fastapi import Depends, Request",
             "from app.core.config import Settings",
-            from_import("app.integrations.http", http),
             *_std_imports(text),
         ]
+        if self.user:
+            http.add("TokenSource")
+            lines += [
+                "from uuid import UUID",
+                "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
+                "from app.core.auth import CurrentUser",
+                "from app.core.connections import UserToken, require_connection",
+                "from app.core.db import SessionDep",
+            ]
+        lines.append(from_import("app.integrations.http", http))
         if any(m.json_result or m.json_body for m in self.methods):
             lines += ["import httpx", "import pydantic"]
         else:
@@ -572,6 +604,8 @@ class PyApi:
         http = {"DEFAULT_TIMEOUT", "ApiError"}
         if self.credential == "oauth2":
             http.add("clear_tokens")
+        if self.user:
+            http.add("StaticToken")
         if re.search(r"\bApiFile\b", text):
             http.add("ApiFile")
         lines = [
@@ -604,6 +638,8 @@ class PyApi:
 
     def _arguments(self) -> list[str]:
         args = [json.dumps(self.test_url)]
+        if self.user:
+            return [*args, f"token=StaticToken({json.dumps(USER_TOKEN)})"]
         if self.credential == "oauth2":
             args.append('"client"')
         if self.credential:
@@ -652,11 +688,12 @@ class PyApi:
 
 
 def py_features(apis: dict[str, PyApi]) -> frozenset[str]:
-    """Return what the HTTP client of the app needs for these APIs: `oauth2`, `files`."""
+    """Return what the HTTP client of the app needs for these APIs: `oauth2` (the client
+    credentials flow), `user` (the authorization code flow), `files`."""
     found: set[str] = set()
     for api in apis.values():
-        if api.credential == "oauth2":
-            found.add("oauth2")
+        if api.credential in ("oauth2", "user"):
+            found.add(api.credential)
         if "ApiFile" in api.client_types or any(
             "ApiFile" in f.type for m in api.models for f in m.fields or []
         ):
@@ -687,7 +724,14 @@ def mocks_imports(apis: dict[str, PyApi]) -> list[str]:
     ]
     for api in apis.values():
         lines.append(f"from app.integrations.{api.module}.client import {api.client}")
+    if any(api.user for api in apis.values()):
+        lines.append("from app.integrations.http import StaticToken")
     return lines
+
+
+def python_connections(apis: dict[str, PyApi]) -> list[PyApi]:
+    """Return the APIs with the authorization code flow: the users connect their accounts."""
+    return [api for api in apis.values() if api.user]
 
 
 def _api(name: str, api: Api) -> PyApi:
@@ -701,6 +745,9 @@ def _api(name: str, api: Api) -> PyApi:
     credential: str | None = None
     if scheme is not None:
         credential = {"http": "bearer", "oauth2": "oauth2"}.get(scheme.type, scheme.location)
+    code = scheme.authorization_code if scheme is not None and api.user_flow else None
+    if code is not None:
+        credential = "user"
     security = api.security
     secret_env = security.secret_env if security else None
     client_id_env = security.client_id_env if security else None
@@ -724,6 +771,10 @@ def _api(name: str, api: Api) -> PyApi:
         token_url=(scheme.token_url or "") if scheme is not None else "",
         scopes=tuple(security.scopes) if security else (),
     )
+    if code is not None:
+        py.token_url = code.token_url
+        py.authorization_url = code.authorization_url
+        py.refresh_url = code.refresh_url or code.token_url
     types = _Types(spec.schemas)
     for named in spec.schemas:
         py.models.append(types.model(named))

@@ -12,6 +12,7 @@ from appgen.dsl import AppDefinition, load_definition, load_definition_text
 from appgen.dsl.openapi import (
     EXAMPLE_TEXT,
     ArraySchema,
+    AuthorizationCodeFlow,
     ObjectSchema,
     Ref,
     ScalarSchema,
@@ -298,7 +299,7 @@ def test_a_form_body_is_an_object_and_a_simple_form_has_no_files(
     assert spec.operations[0].body is None
 
 
-def test_the_reader_gives_the_client_credentials_flow_of_an_oauth_scheme(tmp_path: Path) -> None:
+def test_the_reader_gives_the_flows_of_an_oauth_scheme(tmp_path: Path) -> None:
     schemes = read_document(write_document(tmp_path, DOCUMENT)).security_schemes
 
     oauth, login = schemes["oauth"], schemes["login"]
@@ -306,7 +307,28 @@ def test_the_reader_gives_the_client_credentials_flow_of_an_oauth_scheme(tmp_pat
     assert (oauth.token_url, oauth.scopes) == ("/oauth/token", ("files:read", "files:write"))
     assert oauth.supported
     assert login.token_url is None
-    assert not login.supported
+    # The authorization code flow calls the API in the name of a user (ADR 0033).
+    assert login.supported
+    assert login.authorization_code == AuthorizationCodeFlow(
+        authorization_url="https://files.example.com/authorize",
+        token_url="https://files.example.com/token",
+        refresh_url=None,
+        scopes=(),
+    )
+
+
+def test_an_oauth_scheme_without_a_supported_flow_is_unsuitable(tmp_path: Path) -> None:
+    document = copy.deepcopy(DOCUMENT)
+    document["components"]["securitySchemes"]["legacy"] = {
+        "type": "oauth2",
+        "flows": {"implicit": {"authorizationUrl": "https://files.example.com/a", "scopes": {}}},
+    }
+    security = OAUTH.replace("scheme: oauth", "scheme: legacy")
+
+    [diagnostic] = validate_definition(definition(tmp_path, FILES + security, document))
+
+    assert (diagnostic.code, diagnostic.element_id) == ("unsuitable-security", "apis.files")
+    assert "Its flows are 'implicit'." in diagnostic.message
 
 
 def test_the_operations_of_the_example_need_no_hand_written_code(tmp_path: Path) -> None:
@@ -334,9 +356,9 @@ def test_the_operations_of_the_example_need_no_hand_written_code(tmp_path: Path)
             "has no scope 'files:raed'",
         ),
         (
-            OAUTH.replace("scheme: oauth", "scheme: login"),
+            OAUTH.replace("scheme: oauth", "scheme: login").replace("[files:read]", "[]"),
             "unsuitable-security",
-            "Its flows are 'authorizationCode'.",
+            "needs the sign-in of the users ('auth')",
         ),
         (OAUTH.replace("FILES_CLIENT_ID", "FILES_API_URL"), "duplicate-name", "FILES_API_URL"),
         (

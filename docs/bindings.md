@@ -456,6 +456,22 @@ an email makes a ticket, and a reply counts on the ticket of the email
 that it answers. `scripts/inbound_email_test.py` sends emails in the
 format of Mailgun, Postmark, and SendGrid to the built apps.
 
+### Connections of the users to the APIs
+
+A custom operation that calls an API with the authorization code flow
+([ADR 0033](adr/0033-api-connections.md)) gets the client of the
+signed-in user in its extension file, and a job gets the client of the
+user of the record. The function calls the client as for another API:
+the client reads the access token of the user in the table
+`api_connections` (`app/core/connections.py`), and gets a new token when
+the token ends. A request raises `NotConnectedError` (409) when the user
+has no connection. The fixture `tests/fixtures/api-connections.yaml`
+has hand-written logic in `tests/fixtures/api-connections/extensions/`
+that counts the events of the calendar of a user.
+`scripts/api_connection_test.py` connects a user at the mock OAuth
+server of `scripts/mock_api.py`, and checks the calls of the operation,
+of the job, and the refresh of a token.
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration

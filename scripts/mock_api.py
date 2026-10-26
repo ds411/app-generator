@@ -15,8 +15,17 @@ so on), and an operation of the API needs a token that the server gave
 and did not revoke (`MockApi.revoke`, or `POST /_revoke`), else it gets
 the status 401.
 
+An API with the authorization code flow (ADR 0033) also gets the page of
+its authorization URL. The page allows the access at once: it sends the
+browser back to the `redirect_uri` with a code and the `state`. The token
+endpoint changes a code for an access token and a refresh token
+(`mock-refresh-1`, and so on), and a refresh token for a new access
+token. It checks the client (HTTP Basic), the redirect URI, and the PKCE
+verifier of the code, and answers a wrong grant with 400 `invalid_grant`.
+
 `GET /_requests` gives the recorded requests as JSON: the API, the
-operation ID (`token` for a token request), the method, the path under
+operation ID (`token` for a token request, `authorize` for the page of the
+authorization URL), the method, the path under
 the base URL, the query, the headers (with lower case names), and the
 fields of a form body (`form`) and the files of a multipart form
 (`files`: the file name, the media type, and the content as text).
@@ -31,9 +40,11 @@ The other check scripts start it in a thread with `MockApi`.
 """
 
 import argparse
+import base64
 import contextlib
 import email.parser
 import email.policy
+import hashlib
 import json
 import re
 import sys
@@ -42,7 +53,7 @@ import urllib.parse
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Self
+from typing import Self, cast
 
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.openapi import EXAMPLE_TEXT
@@ -109,9 +120,38 @@ def token_paths(definition: AppDefinition) -> dict[str, str]:
         if api.security is None or document is None:
             continue
         scheme = document.security_schemes.get(api.security.scheme)
-        if scheme is not None and scheme.type == "oauth2" and (scheme.token_url or "")[:1] == "/":
-            found[name] = scheme.token_url or ""
+        if scheme is None or scheme.type != "oauth2":
+            continue
+        code = scheme.authorization_code
+        url = code.token_url if api.user_flow and code is not None else scheme.token_url
+        if (url or "")[:1] == "/":
+            found[name] = url or ""
     return found
+
+
+def authorization_paths(definition: AppDefinition) -> dict[str, str]:
+    """Return the path of the authorization URL of each API with the authorization code flow
+    and an authorization URL that is a path, under the base URL of the API."""
+    found: dict[str, str] = {}
+    for name, api in definition.apis.items():
+        document = api.openapi
+        if not api.user_flow or api.security is None or document is None:
+            continue
+        scheme = document.security_schemes.get(api.security.scheme)
+        code = scheme.authorization_code if scheme is not None else None
+        if code is not None and code.authorization_url[:1] == "/":
+            found[name] = code.authorization_url
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class Code:
+    """A code of the authorization code flow, with the values that its grant must have."""
+
+    api: str
+    redirect_uri: str
+    challenge: str
+    """The PKCE challenge (S256) of the code."""
 
 
 class MockApi:
@@ -125,10 +165,16 @@ class MockApi:
         self.definition = definition
         self.routes = routes(definition)
         self.token_paths = token_paths(definition)
+        self.authorization_paths = authorization_paths(definition)
         self.requests: list[dict[str, object]] = []
         self.tokens: list[str] = []
         """The tokens that the token endpoints gave, in order."""
         self.revoked: set[str] = set()
+        self.codes: dict[str, Code] = {}
+        """The codes of the authorization code flow that no grant used."""
+        self.code_count = 0
+        self.refresh_tokens: list[str] = []
+        """The refresh tokens that the token endpoints gave, in order."""
         self._lock = threading.Lock()
         mock = self
 
@@ -167,6 +213,63 @@ class MockApi:
         with self._lock:
             self.tokens.append(f"mock-token-{len(self.tokens) + 1}")
             return self.tokens[-1]
+
+    def authorize(self, api: str, query: dict[str, list[str]]) -> str | None:
+        """Return the redirect of the page of the authorization URL: the redirect URI with a new
+        code and the state, or None if the request is not correct."""
+        values = {name: items[0] for name, items in query.items()}
+        redirect_uri = values.get("redirect_uri", "")
+        if (
+            values.get("response_type") != "code"
+            or values.get("client_id") != CLIENT_ID
+            or values.get("code_challenge_method") != "S256"
+            or not redirect_uri.startswith(("http://", "https://"))
+        ):
+            return None
+        with self._lock:
+            self.code_count += 1
+            code = f"mock-code-{self.code_count}"
+            self.codes[code] = Code(api, redirect_uri, values.get("code_challenge", ""))
+        separator = "&" if "?" in redirect_uri else "?"
+        answer = {"code": code, "state": values.get("state", "")}
+        return f"{redirect_uri}{separator}{urllib.parse.urlencode(answer)}"
+
+    def grant(
+        self, api: str, form: dict[str, list[str]], authorization: str | None
+    ) -> tuple[int, dict[str, object]]:
+        """Return the status and the answer of the token endpoint of an API for a grant."""
+        values = {name: items[0] for name, items in form.items()}
+        kind = values.get("grant_type", "client_credentials")
+        if kind == "client_credentials":
+            return 200, self._tokens()
+        basic = base64.b64encode(f"{CLIENT_ID}:{SECRET}".encode()).decode()
+        if authorization != f"Basic {basic}":
+            return 401, {"error": "invalid_client"}
+        if kind == "authorization_code":
+            with self._lock:
+                code = self.codes.pop(values.get("code", ""), None)
+            verifier = values.get("code_verifier", "")
+            digest = hashlib.sha256(verifier.encode()).digest()
+            challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            if (
+                code is None
+                or code.api != api
+                or code.redirect_uri != values.get("redirect_uri")
+                or code.challenge != challenge
+            ):
+                return 400, {"error": "invalid_grant"}
+            with self._lock:
+                self.refresh_tokens.append(f"mock-refresh-{len(self.refresh_tokens) + 1}")
+                refresh = self.refresh_tokens[-1]
+            return 200, self._tokens() | {"refresh_token": refresh}
+        if kind == "refresh_token":
+            with self._lock:
+                known = values.get("refresh_token") in self.refresh_tokens
+            return (200, self._tokens()) if known else (400, {"error": "invalid_grant"})
+        return 400, {"error": "unsupported_grant_type"}
+
+    def _tokens(self) -> dict[str, object]:
+        return {"access_token": self.issue(), "token_type": "Bearer", "expires_in": 3600}
 
     def accepts(self, authorization: str | None) -> bool:
         """Return True for the header `Authorization` with a token that the server gave and did
@@ -250,6 +353,7 @@ class _Handler(BaseHTTPRequestHandler):
         api, _, rest = url.path.lstrip("/").partition("/")
         path = "/" + rest
         token = self.command == "POST" and mock.token_paths.get(api) == path
+        authorize = self.command == "GET" and mock.authorization_paths.get(api) == path
         route = next(
             (
                 r
@@ -258,19 +362,31 @@ class _Handler(BaseHTTPRequestHandler):
             ),
             None,
         )
+        operation = route.operation_id if route else None
         entry: dict[str, object] = {
             "api": api,
-            "operation_id": "token" if token else route.operation_id if route else None,
+            "operation_id": "token" if token else "authorize" if authorize else operation,
             "method": self.command,
             "path": path,
             "query": urllib.parse.parse_qs(url.query),
             "headers": {name.lower(): value for name, value in self.headers.items()},
         }
-        entry.update(_form(self.headers.get("Content-Type") or "", content))
+        form = _form(self.headers.get("Content-Type") or "", content)
+        entry.update(form)
         mock.record(entry)
         if token:
-            answer = {"access_token": mock.issue(), "token_type": "Bearer", "expires_in": 3600}
-            self._send(200, answer)
+            fields = cast(dict[str, list[str]], form.get("form", {}))
+            self._send(*mock.grant(api, fields, self.headers.get("Authorization")))
+        elif authorize:
+            location = mock.authorize(api, urllib.parse.parse_qs(url.query))
+            if location is None:
+                self._send(400, {"error": "invalid_request"})
+            else:
+                self.send_response(302)
+                self._cors()
+                self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
         elif route is None:
             self._send(404, {"detail": f"The mock has no operation for {self.command} {url.path}."})
         elif route.secured and not mock.accepts(self.headers.get("Authorization")):

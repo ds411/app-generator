@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# An API with the authorization code flow of OAuth 2.0 (ADR 0033): a user
+# connects an account of a calendar service, and the app calls the API
+# with the access token of the user. The custom operation sync_calendar
+# counts the events of the signed-in user, and the job nightly_sync
+# counts the events of the owner of each calendar. The hand-written
+# logic is in tests/fixtures/api-connections/extensions/.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition, and
+# scripts/api_connection_test.py connects a user at the mock server.
+version: 0
+
+app:
+  name: calendar-sync
+  title: Calendar Sync
+  description: The events of the calendars of the users.
+
+auth:
+  user_entity: User
+  username_field: email
+  sign_up:
+    fields: [name, email]
+
+entities:
+  User:
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+    relations:
+      calendars: { kind: one_to_many, target: Calendar, inverse: owner }
+
+  Calendar:
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      events: { type: integer, default: 0 }
+    relations:
+      owner: { kind: many_to_one, target: User, required: true, inverse: calendars }
+
+operations:
+  list_calendars: { kind: list, entity: Calendar }
+  create_calendar: { kind: create, entity: Calendar }
+  read_calendar: { kind: read, entity: Calendar }
+  sync_calendar:
+    kind: custom
+    entity: Calendar
+    description: Count the events of the calendar of the user.
+    apis: [calendar]
+
+apis:
+  calendar:
+    document: api-connections/calendar.openapi.yaml
+    base_url_env: CALENDAR_API_URL
+    security:
+      scheme: oauth
+      flow: authorizationCode
+      client_id_env: CALENDAR_CLIENT_ID
+      client_secret_env: CALENDAR_CLIENT_SECRET
+      scopes: [events:read]
+    operations: [listEvents]
+
+jobs:
+  nightly_sync:
+    description: Count the events of each calendar each night, with the token of its owner.
+    schedule: "0 2 * * *"
+    entity: Calendar
+    operation: sync_calendar
+    user: owner

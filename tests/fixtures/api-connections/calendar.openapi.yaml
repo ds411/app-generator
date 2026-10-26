@@ -1,0 +1,61 @@
+# The OpenAPI document of a calendar service: the app reads the events of
+# a user with the access token of the user. The scheme has the
+# authorization code flow of OAuth 2.0. The URLs of the flow are paths
+# under the base URL, so that the mock server of the checks serves them
+# (scripts/mock_api.py).
+openapi: 3.0.3
+info:
+  title: Calendar API
+  version: "1.0"
+  description: The events of the calendars of the users.
+servers:
+  - url: https://calendar.example.com/api
+security:
+  - oauth: [events:read]
+paths:
+  /events:
+    get:
+      operationId: listEvents
+      summary: List the events of the user.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of events.
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: The events.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventList" }
+              example:
+                items:
+                  - { id: ev-1, title: Planning, starts_at: "2026-06-15T09:00:00Z" }
+                  - { id: ev-2, title: Review, starts_at: "2026-06-15T14:00:00Z" }
+        "401": { description: The access token is missing or not valid. }
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: /oauth/authorize
+          tokenUrl: /oauth/token
+          scopes:
+            events:read: Read the events.
+            events:write: Change the events.
+  schemas:
+    EventList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+    Event:
+      type: object
+      required: [id, title, starts_at]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        starts_at: { type: string, format: date-time }

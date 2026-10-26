@@ -1,0 +1,568 @@
+{{ trace_header(*(py_connections | map(attribute="id"))) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+"""The connections of the users to the APIs with the authorization code flow (ADR 0033).
+
+A user connects an account of a third-party service, and the app calls
+the API of the service with the access token of the user. `POST
+/auth/connections/<api>` gives the URL of the page where the signed-in
+user allows the access. The authorization server sends the browser back
+to `GET /auth/connections/<api>/callback` with a code. The app changes
+the code for the tokens of the user (with PKCE), and keeps them in the
+table `api_connections`, encrypted with a key from `AUTH_SECRET`.
+
+A client of the API reads the access token of the user (`UserToken`), and
+gets a new access token with the refresh token a little before the token
+ends, or after an answer with the status 401.
+
+The signed `state` of the flow holds the user, a nonce, and the page to go
+back to (`return_to`, a page of a front end in `CORS_ORIGINS`). The PKCE
+verifier is an HMAC of the nonce, so no URL has it. With `return_to`, the
+callback sends the browser back to the page with `#connected=<api>` or
+`#error=...` in the fragment of the URL. Without `return_to`, the callback
+returns the connection as JSON.
+"""
+
+{{ py.imports(
+    ["import asyncio", "import base64", "import datetime as dt", "import hashlib", "import hmac",
+     "import secrets", "import time",
+     "from collections.abc import AsyncIterator",
+     "from dataclasses import dataclass",
+     "from typing import Annotated, Any, Literal",
+     "from urllib.parse import quote, urlencode, urlsplit",
+     "from uuid import UUID, uuid4",
+     "import httpx",
+     "from cryptography.exceptions import InvalidTag",
+     "from cryptography.hazmat.primitives.ciphers.aead import AESGCM",
+     "from fastapi import APIRouter, Depends, Query, Request, Response",
+     "from fastapi.responses import RedirectResponse",
+     "from pydantic import BaseModel, Field",
+     py.from_import("sqlalchemy", ["BigInteger", "DateTime", "ForeignKey", "String", "Text", "UniqueConstraint", "func", "select"]),
+     "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
+     "from sqlalchemy.orm import Mapped, mapped_column",
+     "from app.core.auth import CurrentUser, sign, signing_key, unsign",
+     "from app.core.config import Settings",
+     "from app.core.db import Base, SessionDep, commit",
+     "from app.core.errors import ProblemError, problem_responses",
+     "from app.integrations.http import ApiError"]
+    + (["from app.core.i18n import t"] if py.translated else [])
+) }}
+
+FLOW_SECONDS = 600
+"""The time that a user has to allow the access at the authorization server."""
+EARLY_SECONDS = 30
+"""A client gets a new access token this time before the token ends."""
+
+ApiName = Literal[{{ py_connections | map(attribute="connection_name") | map("tojson") | join(", ") }}]
+"""The APIs with the authorization code flow, in the paths of the connections."""
+NAMES: dict[str, str] = {
+{% for api in py_connections %}
+    {{ api.connection_name | tojson }}: {{ api.name | tojson }},
+{% endfor %}
+}
+"""The name of each API in the definition, by its name in the paths."""
+TITLES: dict[str, str] = {
+{% for api in py_connections %}
+    {{ api.name | tojson }}: {{ api.title | tojson }},
+{% endfor %}
+}
+"""The title of each API, by its name in the definition."""
+
+
+@dataclass(frozen=True, slots=True)
+class OAuthApp:
+    """The client of the app at the authorization server of an API, with its settings."""
+
+    api: str
+    """The name of the API in the definition."""
+    base_url: str
+    authorization_url: str
+    token_url: str
+    refresh_url: str
+    client_id: str
+    client_secret: str
+    scopes: tuple[str, ...]
+
+    def url(self, value: str) -> str:
+        """Return a URL of the flow. A path is under the base URL of the API."""
+        return self.base_url.rstrip("/") + value if value.startswith("/") else value
+
+    def check(self) -> None:
+        """Give 500 if the server has no client ID or no client secret for the API."""
+        if not self.client_id or not self.client_secret:
+            {{ py.problem(500, "The server has no client ID or client secret for the API {api}.", 12, api="self.api") }}
+
+
+def oauth_app(settings: Settings, api: str) -> OAuthApp:
+    """Return the client of the app at the authorization server of an API."""
+    apps = {
+{% for api in py_connections %}
+        {{ trace(api.id) }}
+        {{ api.name | tojson }}: OAuthApp(
+            api={{ api.name | tojson }},
+            base_url=settings.{{ api.url_setting }},
+            authorization_url={{ api.authorization_url | tojson }},
+            token_url={{ api.token_url | tojson }},
+            refresh_url={{ api.refresh_url | tojson }},
+            client_id=settings.{{ api.client_id_setting }},
+            client_secret=settings.{{ api.secret_setting }},
+            scopes=({{ api.scopes | map("tojson") | join(", ") }}{{ "," if api.scopes | length == 1 }}),
+        ),
+{% endfor %}
+    }
+    return apps[api]
+
+
+class ApiConnection(Base):
+    """The tokens of a user for an API, encrypted with a key from `AUTH_SECRET`."""
+
+    __tablename__ = "api_connections"
+    __table_args__ = (UniqueConstraint("user_id", "api", name="uq_api_connections_user_id_api"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("{{ u.table }}.id", ondelete="CASCADE"))
+    api: Mapped[str] = mapped_column(String(100))
+    """The name of the API in the definition."""
+    access_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text)
+    """The refresh token, or None if the authorization server gave none."""
+    expires_at: Mapped[int | None] = mapped_column(BigInteger)
+    """The time (in seconds) at which the access token ends, or None if the server gave no time."""
+    scope: Mapped[str] = mapped_column(Text)
+    """The scopes that the user allowed, with spaces between."""
+    connected_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class NotConnectedError(ProblemError):
+    """The user has no connection to an API (409): the user connects an account first."""
+
+    def __init__(self, api: str) -> None:
+{% if py.translated %}
+        super().__init__(409, t("Connect an account of the API {api} first.", api=api))
+{% else %}
+        super().__init__(409, f"Connect an account of the API {api} first.")
+{% endif %}
+        self.api = api
+
+
+class GrantError(Exception):
+    """The token endpoint did not accept the code or the refresh token (400 or 401)."""
+
+
+class TokenAnswer(BaseModel):
+    """The answer of the token endpoint of an API (RFC 6749, section 5.1)."""
+
+    access_token: str
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    scope: str | None = None
+
+
+def encryption_key(settings: Settings) -> bytes:
+    """Return the key of the tokens: an HMAC of `AUTH_SECRET`. Give 500 without it."""
+    if not settings.auth_secret:
+        raise ProblemError(500, {{ py.message("The server has no AUTH_SECRET.") }})
+    return hmac.new(settings.auth_secret.encode(), b"api-connections", hashlib.sha256).digest()
+
+
+def seal(key: bytes, value: str, context: str) -> str:
+    """Return a token encrypted with AES-256-GCM.
+
+    The context (the API, the user, and the column) is part of the check:
+    a value is valid only in its own row and column.
+    """
+    nonce = secrets.token_bytes(12)
+    box = AESGCM(key).encrypt(nonce, value.encode(), context.encode())
+    return base64.urlsafe_b64encode(nonce + box).decode()
+
+
+def unseal(key: bytes, sealed: str, context: str) -> str | None:
+    """Return the token of a sealed value, or None if the value or the key is not correct."""
+    try:
+        data = base64.urlsafe_b64decode(sealed)
+        return AESGCM(key).decrypt(data[:12], data[12:], context.encode()).decode()
+    except ValueError, InvalidTag:
+        return None
+
+
+def _context(connection: ApiConnection, column: str) -> str:
+    return f"{connection.api}.{connection.user_id}.{column}"
+
+
+def store(key: bytes, connection: ApiConnection, answer: TokenAnswer) -> None:
+    """Keep the tokens of an answer of the token endpoint in a connection."""
+    connection.access_token = seal(key, answer.access_token, _context(connection, "access_token"))
+    if answer.refresh_token is not None:
+        # Without a new refresh token, the old one stays valid (RFC 6749, section 6).
+        connection.refresh_token = seal(
+            key, answer.refresh_token, _context(connection, "refresh_token")
+        )
+    expires_in = answer.expires_in
+    connection.expires_at = int(time.time()) + expires_in if expires_in is not None else None
+    if answer.scope is not None:
+        connection.scope = answer.scope
+
+
+async def find_connection(
+    session: AsyncSession, api: str, user_id: UUID, *, lock: bool = False
+) -> ApiConnection | None:
+    """Return the connection of a user to an API, or None. `lock` locks the row (Postgres)."""
+    statement = select(ApiConnection).where(
+        ApiConnection.api == api, ApiConnection.user_id == user_id
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return await session.scalar(statement)
+
+
+async def connected(session: AsyncSession, api: str, user_id: UUID | None) -> bool:
+    """Return True if the user has a connection to the API."""
+    return user_id is not None and await find_connection(session, api, user_id) is not None
+
+
+async def require_connection(session: AsyncSession, api: str, user_id: UUID) -> None:
+    """Give 409 if the user has no connection to the API."""
+    if not await connected(session, api, user_id):
+        raise NotConnectedError(api)
+
+
+async def request_tokens(
+    http: httpx.AsyncClient, app: OAuthApp, url: str, data: dict[str, str]
+) -> TokenAnswer:
+    """Send a grant to the token endpoint of an API, and return the tokens.
+
+    The app authenticates with HTTP Basic. Raise GrantError if the endpoint
+    does not accept the grant (400 or 401), and ApiError for another error.
+    """
+    app.check()
+    # RFC 6749: the client ID and the secret of the basic scheme are URL encoded.
+    auth = (quote(app.client_id, safe=""), quote(app.client_secret, safe=""))
+    headers = {"Accept": "application/json"}
+    response = await http.post(app.url(url), data=data, auth=auth, headers=headers)
+    if response.status_code in (400, 401):
+        raise GrantError(response.text)
+    if response.is_error:
+        raise ApiError(app.api, response.status_code, response.text)
+    try:
+        return TokenAnswer.model_validate(response.json())
+    except ValueError as error:
+        message = "The token answer has no access_token."
+        raise ApiError(app.api, response.status_code, message) from error
+
+
+_LOCKS: dict[tuple[str, UUID], tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+
+def _lock(api: str, user_id: UUID) -> asyncio.Lock:
+    """Return the lock of the tokens of a user in the event loop that runs."""
+    loop = asyncio.get_running_loop()
+    found = _LOCKS.get((api, user_id))
+    if found is None or found[0] is not loop:
+        found = (loop, asyncio.Lock())
+        _LOCKS[(api, user_id)] = found
+    return found[1]
+
+
+class UserToken:
+    """The access tokens of a user for an API: the token source of a client.
+
+    The source reads the tokens of the user in the table `api_connections`.
+    When the access token ends, or the API does not accept it, the source
+    gets a new access token with the refresh token. Two requests at the
+    same time for a user wait for the same new token. If the token endpoint
+    does not accept the refresh token, the source deletes the connection,
+    and the user connects the account again.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        api: str,
+        sessions: async_sessionmaker[AsyncSession],
+        user_id: UUID | None,
+    ) -> None:
+        self.settings = settings
+        self.api = api
+        self.sessions = sessions
+        self.user_id = user_id
+        self._rejected: str | None = None
+
+    async def get(self, http: httpx.AsyncClient) -> str:
+        """Return the access token of the user. Raise NotConnectedError without a connection."""
+        if self.user_id is None:
+            raise NotConnectedError(self.api)
+        key = encryption_key(self.settings)
+        async with self.sessions() as session:
+            token = self._usable(key, await find_connection(session, self.api, self.user_id))
+        if token is not None:
+            return token
+        async with _lock(self.api, self.user_id):
+            return await self._refresh(http, key, self.user_id)
+
+    def reset(self, token: str) -> None:
+        """Forget a token that the API did not accept, so that `get` gets a new token."""
+        self._rejected = token
+
+    def _usable(self, key: bytes, connection: ApiConnection | None) -> str | None:
+        """Return the access token of a connection, or None if it ended or was rejected."""
+        if connection is None:
+            raise NotConnectedError(self.api)
+        token = unseal(key, connection.access_token, _context(connection, "access_token"))
+        ends = connection.expires_at
+        if token == self._rejected or (ends is not None and time.time() >= ends - EARLY_SECONDS):
+            return None
+        return token
+
+    async def _refresh(self, http: httpx.AsyncClient, key: bytes, user_id: UUID) -> str:
+        async with self.sessions() as session:
+            connection = await find_connection(session, self.api, user_id, lock=True)
+            if connection is None:
+                raise NotConnectedError(self.api)
+            token = self._usable(key, connection)
+            if token is not None:
+                # Another request got a new token first.
+                return token
+            answer = await self._grant(http, key, connection)
+            if answer is None:
+                # The user connects the account again.
+                await session.delete(connection)
+                await session.commit()
+                raise NotConnectedError(self.api)
+            store(key, connection, answer)
+            await session.commit()
+        self._rejected = None
+        return answer.access_token
+
+    async def _grant(
+        self, http: httpx.AsyncClient, key: bytes, connection: ApiConnection
+    ) -> TokenAnswer | None:
+        """Return new tokens for the refresh token, or None if the endpoint does not accept it."""
+        sealed = connection.refresh_token
+        refresh = unseal(key, sealed, _context(connection, "refresh_token")) if sealed else None
+        if refresh is None:
+            return None
+        app = oauth_app(self.settings, self.api)
+        data = {"grant_type": "refresh_token", "refresh_token": refresh}
+        try:
+            return await request_tokens(http, app, app.refresh_url, data)
+        except GrantError:
+            return None
+
+
+async def connection_client() -> AsyncIterator[httpx.AsyncClient]:
+    """The HTTP client for the requests to the token endpoints. The tests replace it."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        yield client
+
+
+ConnectionClient = Annotated[httpx.AsyncClient, Depends(connection_client)]
+
+
+class ConnectionStart(BaseModel):
+    """The start of a connection."""
+
+    return_to: str | None = Field(default=None, max_length=2000)
+    """A page of a front end in `CORS_ORIGINS`: the callback sends the browser back to it."""
+
+
+class AuthorizationLink(BaseModel):
+    """The page of the authorization server where the user allows the access."""
+
+    authorization_url: str
+    """Send the browser to this URL."""
+
+
+class ConnectionRead(BaseModel):
+    """An API with the authorization code flow, and the connection of the signed-in user."""
+
+    api: str
+    """The name of the API in the paths of the connections."""
+    title: str
+    connected: bool
+    scope: str | None = None
+    """The scopes that the user allowed, with spaces between."""
+    connected_at: dt.datetime | None = None
+
+
+def _read(api: str, connection: ApiConnection | None) -> ConnectionRead:
+    name = NAMES[api]
+    if connection is None:
+        return ConnectionRead(api=api, title=TITLES[name], connected=False)
+    return ConnectionRead(
+        api=api,
+        title=TITLES[name],
+        connected=True,
+        scope=connection.scope,
+        connected_at=connection.connected_at,
+    )
+
+
+def callback_url(request: Request, api: str) -> str:
+    """Return the URL that the authorization server sends the browser back to."""
+    public_url: str = request.app.state.settings.public_url
+    if public_url:
+        return f"{public_url.rstrip('/')}/auth/connections/{api}/callback"
+    return str(request.url_for("finish_connection", api=api))
+
+
+def _verifier(key: bytes, nonce: str) -> str:
+    """Return the PKCE verifier of a flow: an HMAC of its nonce (RFC 7636)."""
+    digest = hmac.new(key, f"api-connections.verifier.{nonce}".encode(), hashlib.sha256)
+    return base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode()
+
+
+def _check_return_to(request: Request, return_to: str) -> None:
+    origins: list[str] = request.app.state.settings.cors_origins
+    parts = urlsplit(return_to)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if parts.scheme not in ("http", "https") or origin not in {o.rstrip("/") for o in origins}:
+        {{ py.problem(422, "The origin of return_to is not in CORS_ORIGINS.", 8) }}
+
+
+def _with_fragment(url: str, values: dict[str, Any]) -> str:
+    return f"{url.partition('#')[0]}#{urlencode(values)}"
+
+
+router = APIRouter(prefix="/auth/connections", tags=["Connections"])
+
+
+@router.get("", responses=problem_responses(401), operation_id="list_connections")
+async def list_connections(user: CurrentUser, session: SessionDep) -> list[ConnectionRead]:
+    """List the APIs with the authorization code flow, with the connections of the user."""
+    rows = await session.scalars(select(ApiConnection).where(ApiConnection.user_id == user.id))
+    found = {row.api: row for row in rows}
+    return [_read(api, found.get(name)) for api, name in NAMES.items()]
+
+
+@router.post(
+    "/{api}",
+    responses=problem_responses(401, 422, 500),
+    operation_id="start_connection",
+)
+async def start_connection(
+    api: ApiName, data: ConnectionStart, request: Request, user: CurrentUser
+) -> AuthorizationLink:
+    """Give the page where the signed-in user allows the app to use the API in their name."""
+    app = oauth_app(request.app.state.settings, NAMES[api])
+    app.check()
+    if data.return_to is not None:
+        _check_return_to(request, data.return_to)
+    key = signing_key(request)
+    nonce = secrets.token_urlsafe(32)
+    flow = {
+        "user": str(user.id),
+        "nonce": nonce,
+        "return_to": data.return_to,
+        "exp": int(time.time()) + FLOW_SECONDS,
+    }
+    challenge = hashlib.sha256(_verifier(key, nonce).encode()).digest()
+    query = {
+        "response_type": "code",
+        "client_id": app.client_id,
+        "redirect_uri": callback_url(request, api),
+        "state": sign(key, f"api-connection.{api}", flow),
+        "code_challenge": base64.urlsafe_b64encode(challenge).rstrip(b"=").decode(),
+        "code_challenge_method": "S256",
+    }
+    if app.scopes:
+        query["scope"] = " ".join(app.scopes)
+    url = app.url(app.authorization_url)
+    separator = "&" if "?" in url else "?"
+    return AuthorizationLink(authorization_url=f"{url}{separator}{urlencode(query)}")
+
+
+async def _connect(
+    request: Request,
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    api: str,
+    flow: dict[str, Any],
+    code: str | None,
+    error: str | None,
+) -> ConnectionRead:
+    if error is not None:
+        {{ py.problem(401, "The authorization server gave the error '{error}'.", 8, error="error") }}
+    if code is None:
+        {{ py.problem(400, "The callback has no code. Connect the account again.", 8) }}
+    name = NAMES[api]
+    settings: Settings = request.app.state.settings
+    app = oauth_app(settings, name)
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": callback_url(request, api),
+        "code_verifier": _verifier(signing_key(request), str(flow["nonce"])),
+    }
+    try:
+        answer = await request_tokens(client, app, app.token_url, data)
+    except GrantError as grant:
+        {{ py.problem(401, "The authorization server did not accept the code. Connect the account again.", 8, suffix=" from grant") }}
+    except (ApiError, httpx.HTTPError) as failure:
+        {{ py.problem(502, "The token endpoint of the API {api} did not answer correctly.", 8, suffix=" from failure", api="name") }}
+    user_id = UUID(str(flow["user"]))
+    connection = await find_connection(session, name, user_id)
+    if connection is None:
+        connection = ApiConnection(user_id=user_id, api=name, scope=" ".join(app.scopes))
+        session.add(connection)
+    else:
+        # A new connection does not keep the refresh token of the old one.
+        connection.refresh_token = None
+        connection.scope = " ".join(app.scopes)
+        connection.connected_at = dt.datetime.now(dt.UTC)
+    store(encryption_key(settings), connection, answer)
+    await commit(session)
+    await session.refresh(connection)
+    return _read(api, connection)
+
+
+@router.get(
+    "/{api}/callback",
+    response_model=ConnectionRead,
+    responses={
+        303: {"description": "With return_to: the page, with the API or the error."},
+        **problem_responses(400, 401, 409, 500, 502),
+    },
+    operation_id="finish_connection",
+)
+async def finish_connection(
+    api: ApiName,
+    request: Request,
+    session: SessionDep,
+    client: ConnectionClient,
+    code: Annotated[str | None, Query(max_length=2000)] = None,
+    state: Annotated[str | None, Query(max_length=4000)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+) -> ConnectionRead | RedirectResponse:
+    """Change the code of the authorization server for the tokens of the user, and keep them."""
+    flow = unsign(signing_key(request), f"api-connection.{api}", state or "")
+    if flow is None:
+        {{ py.problem(400, "The state of the callback is not correct. Connect the account again.", 8) }}
+    return_to: str | None = flow.get("return_to")
+    try:
+        connection = await _connect(request, session, client, api, flow, code, error)
+    except ProblemError as problem:
+        if return_to is None:
+            raise
+        message = problem.detail or {{ py.message("The connection failed.") }}
+        target = _with_fragment(return_to, {"error": message})
+    else:
+        if return_to is None:
+            return connection
+        target = _with_fragment(return_to, {"connected": api})
+    return RedirectResponse(target, status_code=303)
+
+
+@router.delete(
+    "/{api}",
+    status_code=204,
+    responses=problem_responses(401),
+    operation_id="delete_connection",
+)
+async def delete_connection(api: ApiName, user: CurrentUser, session: SessionDep) -> Response:
+    """Delete the connection of the signed-in user to the API, and its tokens."""
+    connection = await find_connection(session, NAMES[api], user.id)
+    if connection is not None:
+        await session.delete(connection)
+        await commit(session)
+    return Response(status_code=204)

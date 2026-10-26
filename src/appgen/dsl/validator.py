@@ -754,6 +754,7 @@ def check_jobs(definition: AppDefinition) -> Iterator[Diagnostic]:
             yield _missing(job, "entity", "entity", job.entity, definition.entities)
             continue
         yield from _check_job_operation(definition, job)
+        yield from _check_job_user(definition, job, entity)
         if job.at is not None:
             found = _rule_field(job, "at", job.at, entity.fields)
             if isinstance(found, Diagnostic):
@@ -1557,8 +1558,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             yield _error(
                 "unsuitable-security",
                 f"The security scheme '{security.scheme}' is not an API key in a header or a "
-                "query parameter, a bearer token, or OAuth 2.0 with the client credentials flow."
-                + flows,
+                "query parameter, a bearer token, or OAuth 2.0 with the client credentials flow "
+                "or the authorization code flow." + flows,
                 api,
                 at="security",
                 hint="The clients support only these schemes. Call the API from hand-written "
@@ -1566,6 +1567,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
         else:
             yield from _check_security_keys(api, security, scheme)
+            if api.user_flow:
+                yield from _check_user_flow(definition, api)
     for operation in definition.operations.values():
         if len(set(operation.apis)) != len(operation.apis):
             yield _error(
@@ -2318,7 +2321,7 @@ def _check_security_keys(
                 api,
                 at="security",
             )
-    other = ("env",) if oauth else ("client_id_env", "client_secret_env", "scopes")
+    other = ("env",) if oauth else ("client_id_env", "client_secret_env", "scopes", "flow")
     for key in other:
         if getattr(security, key):
             yield _error(
@@ -2328,17 +2331,94 @@ def _check_security_keys(
                 at="security",
                 hint=f"Use {', '.join(repr(k) for k in needed)}.",
             )
-    if oauth:
-        for scope in security.scopes:
-            if scope not in scheme.scopes:
-                yield _error(
-                    "unknown-reference",
-                    f"The client credentials flow of the scheme '{scheme.name}' has no scope "
-                    f"'{scope}'.",
-                    api,
-                    at="security",
-                    hint=_did_you_mean(scope, scheme.scopes),
-                )
+    if not oauth:
+        return
+    code = scheme.authorization_code
+    flows = {"clientCredentials": scheme.token_url is not None, "authorizationCode": bool(code)}
+    if security.flow is not None and not flows[security.flow]:
+        names = {
+            "clientCredentials": "client credentials",
+            "authorizationCode": "authorization code",
+        }
+        yield _error(
+            "unknown-reference",
+            f"The scheme '{scheme.name}' has no {names[security.flow]} flow.",
+            api,
+            at="security",
+            hint=f"Its flows are {', '.join(repr(f) for f in scheme.flows)}.",
+        )
+        return
+    user = api.user_flow and code is not None
+    flow = "authorization code" if user else "client credentials"
+    scopes = code.scopes if user and code is not None else scheme.scopes
+    for scope in security.scopes:
+        if scope not in scopes:
+            yield _error(
+                "unknown-reference",
+                f"The {flow} flow of the scheme '{scheme.name}' has no scope '{scope}'.",
+                api,
+                at="security",
+                hint=_did_you_mean(scope, scopes),
+            )
+
+
+def _check_user_flow(definition: AppDefinition, api: Api) -> Iterator[Diagnostic]:
+    """An API with the authorization code flow has a signed-in user (ADR 0033): the app has
+    `auth`, no public operation calls the API, and a job that calls it names the user."""
+    name = api.id.rpartition(".")[2]
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "unsuitable-security",
+            "The authorization code flow calls the API in the name of a user, so the app needs "
+            "the sign-in of the users ('auth').",
+            api,
+            at="security",
+            hint="Add the section 'auth', or use the client credentials flow.",
+        )
+        return
+    for op_name, operation in definition.operations.items():
+        if name in operation.apis and op_name in auth.public_operations:
+            yield _error(
+                "unsuitable-security",
+                f"The public operation '{op_name}' has no signed-in user, so it cannot call the "
+                f"API '{name}' in the name of a user.",
+                operation,
+                at="apis",
+                hint=f"Remove '{op_name}' from 'auth.public_operations'.",
+            )
+    for job in definition.jobs.values():
+        operation = definition.operations.get(job.operation or "")
+        if operation is None or name not in operation.apis or job.user is not None:
+            continue
+        yield _error(
+            "missing-key",
+            f"The job runs the operation '{job.operation}', which calls the API '{name}' in the "
+            "name of a user: the job needs 'user'.",
+            job,
+            hint="Name a relation of the entity to the user entity in 'user'.",
+        )
+
+
+def _check_job_user(definition: AppDefinition, job: Job, entity: Entity) -> Iterator[Diagnostic]:
+    """The user of a job is a relation of its entity to the user entity, or `id` (ADR 0033)."""
+    if job.user is None:
+        return
+    auth = definition.auth
+    users = auth.user_entity if auth is not None else None
+    if job.user == "id" and job.entity == users:
+        return
+    relation = entity.relations.get(job.user)
+    if relation is None:
+        yield _missing(job, "user", "relation", job.user, entity.relations)
+    elif relation.target != users or relation.kind not in ("many_to_one", "one_to_one"):
+        yield _error(
+            "unsuitable-field",
+            f"The user of a job is a relation to one record of the user entity, but "
+            f"'{job.entity}.{job.user}' is a '{relation.kind}' relation to '{relation.target}'.",
+            job,
+            at="user",
+        )
 
 
 def _check_exposed(api: Api) -> Iterator[Diagnostic]:

@@ -8,8 +8,15 @@ from sqlalchemy.orm import configure_mappers
 {{ trace(definition.auth.id) }}
 from app.core.auth import Credential
 {% endif %}
+{% if py_connections %}
+
+{% for api in py_connections %}
+{{ trace(api.id) }}
+{% endfor %}
+from app.core.connections import ApiConnection
+{% endif %}
 {% if py.jobs %}
-{% if not password %}
+{% if not password and not py_connections %}
 
 {% endif %}
 from app.core.jobs import JobRun
@@ -28,7 +35,7 @@ from app.features.{{ e.slice }}.models import {{ e.name }}
 {% endfor %}
 
 __all__ = [
-{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else [])) | sort %}
+{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else [])) | sort %}
     "{{ model }}",
 {% endfor %}
 ]

@@ -161,6 +161,21 @@ class Operation:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorizationCodeFlow:
+    """The authorization code flow of an `oauth2` scheme: a user allows the app to call the API
+    in the name of the user (ADR 0033)."""
+
+    authorization_url: str
+    """The page where the user allows the access. A path is under the base URL of the API."""
+    token_url: str
+    """The token URL of the flow. A path is under the base URL of the API."""
+    refresh_url: str | None
+    """The URL that gives a new access token for a refresh token, or None: the token URL."""
+    scopes: tuple[str, ...]
+    """The scopes of the flow."""
+
+
+@dataclass(frozen=True, slots=True)
 class SecurityScheme:
     name: str
     type: str
@@ -178,15 +193,17 @@ class SecurityScheme:
     URL of the API."""
     scopes: tuple[str, ...] = ()
     """The scopes of the client credentials flow."""
+    authorization_code: AuthorizationCodeFlow | None = None
+    """The authorization code flow of an `oauth2` scheme, or None."""
 
     @property
     def supported(self) -> bool:
         """True for an API key in a header or a query parameter, for a bearer token, and for
-        OAuth 2.0 with the client credentials flow."""
+        OAuth 2.0 with the client credentials flow or the authorization code flow."""
         if self.type == "apiKey":
             return self.location in ("header", "query") and bool(self.parameter)
         if self.type == "oauth2":
-            return self.token_url is not None
+            return self.token_url is not None or self.authorization_code is not None
         return self.type == "http" and self.scheme == "bearer"
 
 
@@ -436,6 +453,7 @@ class _Reader:
             client = flows.get("clientCredentials")
             client = cast(dict[str, object], client) if isinstance(client, dict) else {}
             scopes = client.get("scopes")
+            code = _authorization_code(flows.get("authorizationCode")) if kind == "oauth2" else None
             schemes[name] = SecurityScheme(
                 name=name,
                 type=kind,
@@ -445,6 +463,7 @@ class _Reader:
                 flows=tuple(flows),
                 token_url=_text(client.get("tokenUrl")) if kind == "oauth2" else None,
                 scopes=tuple(cast(dict[str, object], scopes)) if isinstance(scopes, dict) else (),
+                authorization_code=code,
             )
         return OpenApiDocument(
             path=self.path,
@@ -566,6 +585,21 @@ class _Reader:
 
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _authorization_code(value: object) -> AuthorizationCodeFlow | None:
+    """Return the authorization code flow of a scheme, or None without its two URLs."""
+    flow = cast(dict[str, object], value) if isinstance(value, dict) else {}
+    authorization_url, token_url = _text(flow.get("authorizationUrl")), _text(flow.get("tokenUrl"))
+    if authorization_url is None or token_url is None:
+        return None
+    scopes = flow.get("scopes")
+    return AuthorizationCodeFlow(
+        authorization_url=authorization_url,
+        token_url=token_url,
+        refresh_url=_text(flow.get("refreshUrl")),
+        scopes=tuple(cast(dict[str, object], scopes)) if isinstance(scopes, dict) else (),
+    )
 
 
 def _follow(root: object, ref: str) -> object:
