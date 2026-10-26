@@ -171,6 +171,61 @@ def test_the_fastapi_tests_cover_each_rule() -> None:
 
 
 @pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
-def test_the_front_ends_generate_with_the_new_rules(binding: Binding) -> None:
-    app = files(binding)
-    assert "src/shared/lib/permissions.ts" in app
+def test_the_table_of_the_permissions_is_the_one_source_of_the_rules(binding: Binding) -> None:
+    table = files(binding)["src/shared/lib/permissions.ts"]
+    assert (
+        '    "Task": { actions: ["change", "read"], owner: true, '
+        'where: { status: ["open", "in_progress"] } }, '
+        "// @trace access.roles.member.records.Task\n"
+    ) in table
+    assert (
+        '    "Project": { actions: ["change", "read"], where: { archived: [false] } }, '
+        "// @trace access.roles.reviewer.records.Project\n"
+    ) in table
+
+
+def test_the_nextjs_repository_follows_the_owner_path() -> None:
+    app = files(nextjs.BINDING)
+    tasks = app["src/entities/task/api/task-repository.ts"]
+    assert "  belongsTo: (user) =>\n    inArray(\n      taskTable.projectId,\n" in tasks
+    # The last step is a many-to-many relation: its join table has the user.
+    assert ".where(eq(personTeamsTable.personId, user))" in tasks
+    assert "  owner:" not in tasks
+    projects = app["src/entities/project/api/project-repository.ts"]
+    assert "    inArray(\n      projectTable.teamId," in projects
+    shared = app["src/shared/db/repository.ts"]
+    assert "inArray(this.column(key), [...values])" in shared
+    assert "await this.checkScope(tx, String(row.id), options.scope ?? null);" in shared
+    assert 'throw new ForbiddenError("Your role may not give a record these values.");' in shared
+    actions = app["src/entities/task/api/task-actions.ts"]
+    assert ("return taskRepository.create(taskInputSchema.parse(input), { scope });") in actions
+    page = app["app/(app-shell)/tasks/[id]/page.tsx"]
+    assert 'taskRepository.exists(id, await recordScope("Task", "read"))' in page
+
+
+def test_the_react_mock_store_follows_the_owner_path() -> None:
+    app = files(react.BINDING)
+    api = app["src/entities/task/api/task-api.ts"]
+    assert (
+        "    path: [\n"
+        '      { key: "projectId", target: "Project" }, '
+        "// @trace entities.Task.relations.project\n"
+        '      { key: "teamId", target: "Team" }, // @trace entities.Project.relations.team\n'
+        '      { key: "members", target: "Person" }, // @trace entities.Team.relations.members\n'
+        "    ],\n"
+    ) in api
+    # Only an owner of one many-to-one relation gives a new record to the user.
+    assert "owner:" not in api
+    store = app["src/shared/api/mock-store.ts"]
+    assert "return hasValuesOf(scope, record) && (!scope.owner" in store
+    assert "throw new RecordRuleError();" in store
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=lambda b: b.name)
+def test_the_form_sets_a_condition_with_one_value(binding: Binding) -> None:
+    form = files(binding)["src/features/new-task-form/ui/new-task-form.tsx"]
+    assert 'const scope = useAccess().scopeOf("Task");' in form
+    assert '    status: fixedValue<Values["status"]>(scope, "status") ?? "open",\n' in form
+    assert '        {fixedValue(scope, "status") === undefined && (\n' in form
+    # An owner path does not hide a field: the user selects the project.
+    assert "scope?.owner" not in form

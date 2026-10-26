@@ -11,8 +11,9 @@ of the roles (ADR 0012) is a shared template too. The checks of the app
 and the menus, the links, and the actions of the UI read it. Each
 binding has its own `src/shared/lib/access` with the hook `useAccess`,
 because each binding finds the role of the user in another way. The
-table has the owner rules too (ADR 0018): the data access of each
-binding uses only the records of the user, and the forms hide the owner.
+table has the record rules too (ADR 0018, ADR 0025): the data access of
+each binding uses only the records of the rule of the role, and the forms
+hide the owner and the fields that a condition of the rule sets.
 """
 
 from dataclasses import dataclass
@@ -57,32 +58,69 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
 
 
 @dataclass(frozen=True, slots=True)
-class OwnerRule:
-    """The owner of the records of an entity with owner rules (ADR 0018), in TypeScript terms."""
+class PathStep:
+    """A step of the owner path of an entity (ADR 0025), in TypeScript terms."""
 
+    entity: str
+    """The entity of the step, for example `Task`."""
     relation: str
-    """The many-to-one relation to the user entity, for example `organizer`."""
+    """The many-to-one or many-to-many relation of the entity, for example `project`."""
     key: str
-    """The key of the ID of the owner in the record, for example `organizerId`."""
+    """The key of the relation in the record: `projectId`, or `members` for a list."""
+    many: bool
+    """True for a many-to-many relation: the key has a list of IDs."""
+    target: str
+    """The target entity of the relation."""
     element_id: str
     """The element ID of the relation."""
 
 
-def owner_rules(definition: AppDefinition) -> dict[str, OwnerRule]:
-    """Return the owner of each entity that an owner rule of a role names, by entity.
+@dataclass(frozen=True, slots=True)
+class EntityRules:
+    """The record rules of the roles on one entity (ADR 0018, ADR 0025)."""
+
+    path: tuple[PathStep, ...]
+    """The steps of the owner path to the user entity, or no steps without an owner."""
+    fixed: tuple[str, ...]
+    """The fields that a condition with one value can set, sorted: a form hides them."""
+    element_ids: tuple[str, ...]
+    """The element IDs of the rules."""
+
+    @property
+    def direct(self) -> bool:
+        """True for an owner of one many-to-one relation: a create sets it to the user."""
+        return len(self.path) == 1 and not self.path[0].many
+
+
+def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
+    """Return the record rules of the roles by entity, for the entities that a rule names.
 
     All rules of an entity with an owner use the same owner (the validator
-    checks it). Only a direct many-to-one owner counts (ADR 0018).
+    checks it), so each entity has one path.
     """
     if definition.access is None:
         return {}
-    found: dict[str, OwnerRule] = {}
+    owners: dict[str, str] = {}
+    fixed: dict[str, set[str]] = {}
+    ids: dict[str, list[str]] = {}
     for role in definition.access.roles.values():
         for entity, rule in role.records.items():
-            relation = definition.entities[entity].relations.get(rule.owner or "")
-            if relation is not None and relation.kind == "many_to_one":
-                assert rule.owner is not None
-                found[entity] = OwnerRule(rule.owner, camel(rule.owner) + "Id", relation.id)
+            if rule.owner is not None:
+                owners[entity] = rule.owner
+            single = {name for name, values in rule.conditions().items() if len(values) == 1}
+            fixed.setdefault(entity, set()).update(single)
+            ids.setdefault(entity, []).append(rule.id)
+    found: dict[str, EntityRules] = {}
+    for entity in ids:
+        steps: list[PathStep] = []
+        current = entity
+        for name in owners[entity].split(".") if entity in owners else []:
+            relation = definition.entities[current].relations[name]
+            many = relation.kind == "many_to_many"
+            key = camel(name) if many else camel(name) + "Id"
+            steps.append(PathStep(current, name, key, many, relation.target, relation.id))
+            current = relation.target
+        found[entity] = EntityRules(tuple(steps), tuple(sorted(fixed[entity])), tuple(ids[entity]))
     return found
 
 

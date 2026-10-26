@@ -95,27 +95,27 @@ export type ExpectedAuth = {
    * the role of the user.
    */
   secondFactor?: { username: string; menu: string[] } | null;
-  /** The owner rules of `read` (ADR 0018): a user of the role sees only the records of the user. */
-  ownerRules?: {
+  /** The record rules of `read` (ADR 0018, ADR 0025): a user of the role sees only the records of the rule. */
+  recordRules?: {
     role: string;
     entity: string;
-    /** The user of the role with the most records. */
+    /** The user of the role with the most records of the rule. */
     username: string;
     /** A page with a list of the records, and its title. */
     listPath: string;
     listTitle: string;
-    /** The titles of the records of the user, and of the records of other users. */
+    /** The titles of the records of the rule, and of the other records. */
     own: string[];
     others: string[];
-    /** The detail page of a record of the user, and its title. */
+    /** The detail page of a record of the rule, and its title. */
     ownPath: string;
     ownTitle: string;
-    /** The detail page of a record of another user, its title, and the message that shows instead. */
+    /** The detail page of another record, its title, and the message that shows instead. */
     otherPath: string;
     otherTitle: string;
     otherMessage: string;
-    /** The form of a new record on the list page: the label of its button, and the IDs of two widgets. */
-    form: { label: string; firstId: string; ownerId: string } | null;
+    /** The form of a new record on the list page: the label of its button, a widget that shows, and the widgets that do not. */
+    form: { label: string; firstId: string; hiddenIds: string[] } | null;
   }[];
   /** The sign-in with each provider that makes users (ADR 0020): the button, and the menu of the user. */
   providers?: { name: string; title: string; menu: string[] }[];

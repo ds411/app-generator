@@ -403,7 +403,8 @@ def test_the_nextjs_server_actions_translate_their_messages() -> None:
     definition = load_definition_text(text, str(room_booking))
     files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
     assert 'super(t("Sign in to do this."));' in files["src/shared/auth/session.ts"]
-    assert 'super(t("Your role may not do this operation."));' in files["src/shared/auth/access.ts"]
+    access = files["src/shared/auth/access.ts"]
+    assert 'constructor(message: string = t("Your role may not do this operation.")) {' in access
     sign_in = files["src/shared/auth/actions.ts"]
     assert "await inRequestLanguage(() => t(" in sign_in
     repository = files["src/shared/db/repository.ts"]

@@ -8,9 +8,11 @@ of `src/shared/db/seed.ts` fills the tables with the shared mock records.
 """
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from appgen.bindings.shared.auth import PathStep
 from appgen.bindings.shared.mock_data import mock_data, seed_records
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
 from appgen.dsl.rules import EntityUniqueRule
@@ -640,3 +642,115 @@ def _ts_value(value: Any, spec: Field) -> str:
 
 def _ts_object(entries: list[tuple[str, str]]) -> str:
     return "{ " + ", ".join(f"{key}: {value}" for key, value in entries) + " }"
+
+
+@dataclass(frozen=True, slots=True)
+class _Call:
+    """A call of a TypeScript function or method, for example `eq(a, b)`."""
+
+    name: str
+    args: list[_Code]
+
+
+@dataclass(frozen=True, slots=True)
+class _Chain:
+    """A chain of method calls, for example `getDb().select(...).from(...)`."""
+
+    base: str
+    calls: list[_Call]
+
+
+type _Code = str | _Call | _Chain
+
+_LINE_LENGTH = 110
+
+
+def _inline(code: _Code) -> str:
+    if isinstance(code, str):
+        return code
+    if isinstance(code, _Chain):
+        return code.base + "".join(f".{_inline(call)}" for call in code.calls)
+    return f"{code.name}({', '.join(_inline(arg) for arg in code.args)})"
+
+
+def _format(code: _Code, indent: int) -> str:
+    """Return an expression on one line if it fits, else with one part on each line."""
+    one = _inline(code)
+    if isinstance(code, str) or indent + len(one) <= _LINE_LENGTH:
+        return one
+    pad = " " * indent
+    if isinstance(code, _Chain):
+        lines = [code.base]
+        for call in code.calls:
+            lines.append(f"{pad}  .{_format(call, indent + 2)}")
+        return "\n".join(lines)
+    body = "".join(f"{pad}  {_format(arg, indent + 2)},\n" for arg in code.args)
+    return f"{code.name}(\n{body}{pad})"
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerCondition:
+    """The Drizzle condition of the records of a user through an owner path (ADR 0025)."""
+
+    code: str
+    """The expression, of the parameter `user`."""
+    operators: list[str]
+    """The names to import from `drizzle-orm`, sorted."""
+    tables: list[str]
+    """The tables to import from `@/shared/db`, sorted."""
+
+
+def belongs_to(steps: Sequence[PathStep], tables: dict[str, Table], indent: int) -> OwnerCondition:
+    """Return the Drizzle condition of the records of `user` through an owner path (ADR 0025).
+
+    A many-to-one step compares its foreign key with the IDs of the next
+    entity, and a many-to-many step finds the IDs in its join table. The
+    last step compares with `user`. Each inner step is a subquery.
+    """
+    operators: set[str] = set()
+    used: set[str] = set()
+
+    def ids(index: int) -> _Code:
+        """The subquery of the IDs of the records of step `index` that belong to the user."""
+        step, table = steps[index], tables[steps[index].entity]
+        if step.many:
+            join = next(item for item in table.lists if item.element_id == step.element_id)
+            used.add(join.join_const)
+            return _Chain(
+                "getDb()",
+                [
+                    _Call("select", [f"{{ id: {join.join_const}.{join.owner_key} }}"]),
+                    _Call("from", [join.join_const]),
+                    _Call("where", [target(index, f"{join.join_const}.{join.target_key}")]),
+                ],
+            )
+        used.add(table.const)
+        return _Chain(
+            "getDb()",
+            [
+                _Call("select", [f"{{ id: {table.const}.id }}"]),
+                _Call("from", [table.const]),
+                _Call("where", [condition(index)]),
+            ],
+        )
+
+    def target(index: int, column: str) -> _Code:
+        """The condition of a column with the ID of the target of step `index`."""
+        if index == len(steps) - 1:
+            operators.add("eq")
+            return _Call("eq", [column, "user"])
+        operators.add("inArray")
+        return _Call("inArray", [column, ids(index + 1)])
+
+    def condition(index: int) -> _Code:
+        """The condition of the records of the entity of step `index`."""
+        step, table = steps[index], tables[steps[index].entity]
+        used.add(table.const)
+        if step.many:
+            operators.add("inArray")
+            return _Call("inArray", [f"{table.const}.id", ids(index)])
+        column = next(c for c in table.columns if c.element_id == step.element_id)
+        return target(index, f"{table.const}.{column.key}")
+
+    code = _format(condition(0), indent)
+    return OwnerCondition(code, sorted(operators), sorted(used))

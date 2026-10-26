@@ -1,4 +1,8 @@
 {{ trace_header("app") }}
+{% if record_rules %}
+import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/permissions";
+
+{% endif %}
 import { applyQuery } from "./query";
 import { type EntityApi, type EntityRecord, type ListQuery, type ListResult, NotFoundError } from "./types";
 
@@ -12,16 +16,39 @@ export type Workflow = {
   message?: string;
 };
 
-{% if owner_rules %}
+{% if record_rules %}
+/** A step of an owner path (ADR 0025): the key of a relation in the record, and its target entity. */
+export type OwnerStep = { key: string; target: string };
+
 /**
- * An owner rule of the entity (ADR 0018): the key of the ID of the owner
- * in the record, and the user whose records an action may use (`read`: the
- * lists and the reads, `change`: the other calls), or null for all records.
+ * The record rules of the entity (ADR 0018, ADR 0025): the records that
+ * the user may use for an action (`read`: the lists and the reads,
+ * `change`: the other calls), or null for all records, and the owner path
+ * from a record to its users.
  */
-export type OwnerRule = {
-  key: string;
-  ownerOf: (action: "read" | "change") => string | null;
+export type RecordRules = {
+  scopeOf: (action: RecordAction) => RecordScope | null;
+  path: readonly OwnerStep[];
+  /** The key of an owner of one many-to-one relation: a new record of a user of the rule belongs to the user. */
+  owner?: string;
 };
+
+/** A new or changed record out of the record rule of the user. */
+export class RecordRuleError extends Error {
+  constructor() {
+    super({{ tr(js("Your role may not give a record these values.")) }});
+    this.name = "RecordRuleError";
+  }
+}
+
+/** The records of each store by entity: an owner path reads the records of other entities. */
+const recordsByEntity = new Map<string, () => readonly EntityRecord[]>();
+
+/** Return the IDs in the value of a relation: one ID, a list of IDs, or none. */
+function idsOf(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  return typeof value === "string" ? [value] : [];
+}
 
 {% endif %}
 /** A change of state that no transition of a workflow allows. */
@@ -41,9 +68,9 @@ function wait(): Promise<void> {
 
 /**
  * An in-memory store of the records of one entity. It starts with the
- * mock data, and keeps the changes until the page reloads.{% if owner_rules %} With an owner
- * rule, a user uses only the records of the user: the other records do
- * not exist for the user, and the user owns each new record.{% endif +%}
+ * mock data, and keeps the changes until the page reloads.{% if record_rules %} With a record
+ * rule, a user uses only the records of the rule: the other records do not
+ * exist for the user, and a new or changed record must be part of the rule.{% endif +%}
  */
 export class MockStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
@@ -56,18 +83,21 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     data: readonly T[],
     private readonly defaults: Partial<Omit<T, "id">>,
     private readonly workflows: readonly Workflow[] = [],
-{% if owner_rules %}
-    private readonly owner?: OwnerRule,
+{% if record_rules %}
+    private readonly rules?: RecordRules,
 {% endif %}
   ) {
     this.records = data.map((record) => ({ ...record }));
+{% if record_rules %}
+    recordsByEntity.set(entity, () => this.records);
+{% endif %}
   }
 
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
     await wait();
-{% if owner_rules %}
+{% if record_rules %}
     return applyQuery(
-      this.records.filter((record) => this.owns(record, "read")),
+      this.records.filter((record) => this.allows(record, "read")),
       query,
     );
 {% else %}
@@ -82,12 +112,15 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async create(input: TInput): Promise<T> {
     await wait();
-{% if owner_rules %}
+{% if record_rules %}
     const record = { ...this.defaults, ...input, ...this.ownerValues(), id: crypto.randomUUID() } as unknown as T;
 {% else %}
     const record = { ...this.defaults, ...input, id: crypto.randomUUID() } as unknown as T;
 {% endif %}
     this.checkWorkflows(undefined, record);
+{% if record_rules %}
+    this.checkRules(record);
+{% endif %}
     this.records = [...this.records, record];
     this.notify();
     return { ...record };
@@ -95,7 +128,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     await wait();
-{% if owner_rules %}
+{% if record_rules %}
     const before = this.find(id, "change");
     const record = { ...before, ...patch, ...this.ownerValues(), id } as T;
 {% else %}
@@ -103,6 +136,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     const record = { ...before, ...patch, id } as T;
 {% endif %}
     this.checkWorkflows(before, record);
+{% if record_rules %}
+    this.checkRules(record);
+{% endif %}
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
     return { ...record };
@@ -110,7 +146,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async remove(id: string): Promise<void> {
     await wait();
-    this.find(id{{ ', "change"' if owner_rules }});
+    this.find(id{{ ', "change"' if record_rules }});
     this.records = this.records.filter((item) => item.id !== id);
     this.notify();
   }
@@ -149,24 +185,48 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
   }
 
-{% if owner_rules %}
-  /** Return true if the user may use a record: without an owner rule, all records. */
-  private owns(record: T, action: "read" | "change"): boolean {
-    if (this.owner === undefined) return true;
-    const owner = this.owner.ownerOf(action);
-    return owner === null || (record as Record<string, unknown>)[this.owner.key] === owner;
+{% if record_rules %}
+  /** Return true if the user may use a record for an action: without a record rule, all records. */
+  private allows(record: T, action: RecordAction): boolean {
+    const scope = this.rules?.scopeOf(action) ?? null;
+    return scope === null || this.inScope(record, scope);
   }
 
-  /** Return the owner of a new or changed record: the user of an owner rule, or nothing. */
+  /** Return true if a record has the values of a scope, and belongs to its user if the scope has an owner. */
+  private inScope(record: T, scope: RecordScope): boolean {
+    return hasValuesOf(scope, record) && (!scope.owner || this.ownersOf(record).includes(scope.user));
+  }
+
+  /** Return the IDs of the users that a record belongs to: the records at the end of the owner path. */
+  private ownersOf(record: T): string[] {
+    const path = this.rules?.path ?? [];
+    let records: readonly object[] = [record];
+    for (const [index, step] of path.entries()) {
+      const ids = records.flatMap((item) => idsOf((item as Record<string, unknown>)[step.key]));
+      if (index === path.length - 1) return ids;
+      records = (recordsByEntity.get(step.target)?.() ?? []).filter((item) => ids.includes(item.id));
+    }
+    return [];
+  }
+
+  /** Throw a RecordRuleError if a new or changed record is not part of the record rule of the user. */
+  private checkRules(record: T): void {
+    if (!this.allows(record, "change")) {
+      throw new RecordRuleError();
+    }
+  }
+
+  /** Return the owner of a new or changed record: the user of an owner rule of one relation, or nothing. */
   private ownerValues(): Record<string, string> {
-    const owner = this.owner?.ownerOf("change") ?? null;
-    return this.owner === undefined || owner === null ? {} : { [this.owner.key]: owner };
+    const scope = this.rules?.scopeOf("change") ?? null;
+    const key = this.rules?.owner;
+    return key === undefined || scope === null || !scope.owner ? {} : { [key]: scope.user };
   }
 
   /** Return the record with an ID. A record that the user may not use does not exist. */
-  private find(id: string, action: "read" | "change" = "read"): T {
+  private find(id: string, action: RecordAction = "read"): T {
     const record = this.records.find((item) => item.id === id);
-    if (!record || !this.owns(record, action)) {
+    if (!record || !this.allows(record, action)) {
       throw new NotFoundError(this.entity, id);
     }
     return record;

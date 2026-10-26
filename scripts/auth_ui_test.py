@@ -23,9 +23,9 @@ test proves it for the room booking example (`examples/room-booking`):
    link of an email, and signs in with the new password (ADR 0017). The
    Next.js app sends the emails to the mock SMTP server of
    scripts/mock_smtp.py (`auth.delivery: smtp`), and the test reads them
-   in its file. For each owner rule (ADR 0018), it signs in as a
+   in its file. For each record rule (ADR 0018), it signs in as a
    user of the role, and checks that the list and the detail page show
-   only the records of the user, and that the form of a new record does
+   only the records of the rule, and that the form of a new record does
    not show the owner. For each provider that makes users (ADR 0020), it
    signs in with the button of the provider, and compares the menu with
    the menu of the role of the new user. With a second factor (ADR 0024),
@@ -33,7 +33,13 @@ test proves it for the room booking example (`examples/room-booking`):
    computes from the key on the page. Next.js signs in through the
    mock provider of scripts/mock_oidc.py. React with mock data signs in
    a mock user at once.
-4. The binding `react-api` is the React app with `x-react-data: api` and
+4. For React and Next.js, generate tests/fixtures/record-rules.yaml too,
+   and run only the tests of the record rules (ADR 0025): a member sees
+   the records of the teams of the member through an owner path, with a
+   condition on the status of the tasks, and a reviewer sees only the
+   records with the values of the conditions. The form of a new task of
+   a reviewer does not show the status, which the rule sets.
+5. The binding `react-api` is the React app with `x-react-data: api` and
    the FastAPI app of the example (SQLite). The script starts both and
    the mock provider, and runs only the test of the sign-in with a
    provider: the browser goes through the flow of the FastAPI app, and
@@ -71,17 +77,20 @@ import urllib.request
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import mock_oidc
 import mock_smtp
 from smoke_test import expected_ui
 
+from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.react.api_client import DATA_KEY
+from appgen.bindings.shared.auth import record_rules
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
-from appgen.dsl.access import ALL
+from appgen.dsl.access import ALL, RecordRule
+from appgen.dsl.model import Page
 from appgen.dsl.ui.common import FormAction, NavigateAction, OperationAction
 from appgen.dsl.ui.states import effective_states
 from appgen.gen.naming import kebab
@@ -102,6 +111,10 @@ MAILBOX = "messages.jsonl"
 """The file in the app folder that gets each email of the mock SMTP server as a JSON line."""
 PROVIDER_TEST = "signs in with the provider"
 """The part of the name of the UI test of the sign-in with a provider, for `react-api`."""
+RULES_DEFINITION = Path("tests/fixtures/record-rules.yaml")
+"""The definition with record rules of conditions and owner paths (ADR 0025)."""
+RULES_TEST = "the record rule of the role"
+"""The part of the names of the UI tests of the record rules, for RULES_DEFINITION."""
 
 
 class AuthUiTestError(Exception):
@@ -285,15 +298,109 @@ def entity_pages(
     return (lists[0] if lists else None), (details[0] if details else None)
 
 
-def expected_owner_rules(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
-    """Return the checks of the owner rules of `read` (ADR 0018): what a user of a rule sees.
+def owns_join_table(definition: AppDefinition, entity: str, name: str) -> bool:
+    """Return True if the Next.js table of an entity has the join table of a relation."""
+    relation = definition.entities[entity].relations[name]
+    table = next(t for t in build_tables(definition) if t.entity == entity)
+    return any(join.element_id == relation.id for join in table.join_tables)
 
-    The user is the user of the role with the most records of the entity in
-    the mock data (the Next.js app seeds the same records). The list page
-    shows the titles of the records of the user, and no title of another
-    user. A detail page of a record of another user shows "not found"
-    (Next.js) or the empty state of the view (React). The form of a new
-    record on the list page does not show the owner field.
+
+def linked_ids(
+    binding: str,
+    definition: AppDefinition,
+    data: dict[str, Any],
+    entity: str,
+    name: str,
+    record: Any,
+) -> list[str]:
+    """Return the IDs of the targets of a relation of a mock record, as the app has them.
+
+    The mock data has a list on each side of a many-to-many relation. The
+    mock store of React reads the list of the record. The seed of Next.js
+    fills the join table with the lists of the side that has the table, and
+    the other side reads the join table.
+    """
+    relation = definition.entities[entity].relations[name]
+    value = record.get(name)
+    if relation.kind != "many_to_many":
+        return [value] if isinstance(value, str) else []
+    if binding == "nextjs" and relation.inverse and not owns_join_table(definition, entity, name):
+        targets = data[relation.target]
+        return [t["id"] for t in targets if record["id"] in (t.get(relation.inverse) or [])]
+    return [str(item) for item in cast(list[Any], value or [])]
+
+
+def in_rule(
+    binding: str,
+    definition: AppDefinition,
+    data: dict[str, Any],
+    entity: str,
+    rule: RecordRule,
+    record: Any,
+    user_id: str,
+) -> bool:
+    """Return True if a user of a record rule may use a mock record (ADR 0018, ADR 0025)."""
+    if any(record.get(f) not in values for f, values in rule.conditions().items()):
+        return False
+    if rule.owner is None:
+        return True
+    records, current = [record], entity
+    steps = rule.owner.split(".")
+    for index, step in enumerate(steps):
+        ids = [i for r in records for i in linked_ids(binding, definition, data, current, step, r)]
+        if index == len(steps) - 1:
+            return user_id in ids
+        current = definition.entities[current].relations[step].target
+        records = [r for r in data[current] if r["id"] in ids]
+    return False
+
+
+def rule_form(
+    definition: AppDefinition, entity: str, rule: RecordRule, page: Page, allowed: Permissions
+) -> dict[str, Any] | None:
+    """Return the form of a new record on a list page, if a record rule hides fields of it.
+
+    For a user of the rule, a form does not show the owner of one
+    many-to-one relation, and the fields that a condition with one value
+    sets.
+    """
+    ui = definition.ui
+    assert ui is not None
+    direct = rule.owner is not None and record_rules(definition)[entity].direct
+    hidden = {f for f, values in rule.conditions().items() if len(values) == 1}
+    if direct and rule.owner is not None:
+        hidden.add(rule.owner)
+    for action_name, action in page.actions.items():
+        if not isinstance(action, FormAction):
+            continue
+        form = ui.forms[action.form]
+        if (
+            form.entity != entity
+            or definition.operations[form.operation].kind != "create"
+            or not allowed.operation(form.operation)
+        ):
+            continue
+        shown = [f for f in form.fields if f not in hidden]
+        fixed = [f for f in form.fields if f in hidden]
+        if shown and fixed:
+            return {
+                "label": str(action.label or label(action_name)),
+                "firstId": f"{kebab(action.form)}-{kebab(shown[0])}",
+                "hiddenIds": [f"{kebab(action.form)}-{kebab(f)}" for f in fixed],
+            }
+    return None
+
+
+def expected_record_rules(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
+    """Return the checks of the record rules of `read` (ADR 0018, ADR 0025): what a user sees.
+
+    For a rule with an owner, the user is the user of the role with the
+    most records of the rule in the mock data (the Next.js app seeds the
+    same records). Else it is the first user of the role. The list page
+    shows the titles of the records of the rule, and no title of another
+    record. A detail page of another record shows "not found" (Next.js)
+    or the empty state of the view (React). The form of a new record on
+    the list page does not show the fields that the rule sets.
     """
     auth, access, ui = definition.auth, definition.access, definition.ui
     assert auth is not None and access is not None and ui is not None
@@ -307,37 +414,29 @@ def expected_owner_rules(binding: str, definition: AppDefinition) -> list[dict[s
                 continue
             records = data[entity]
             title = definition_display(definition.entities[entity])
-            user = max(users, key=lambda u: sum(r[rule.owner] == u["id"] for r in records))
-            own = [r for r in records if r[rule.owner] == user["id"]]
+
+            def shown(user: Any, entity: str = entity, rule: RecordRule = rule) -> list[Any]:
+                return [
+                    r
+                    for r in data[entity]
+                    if in_rule(binding, definition, data, entity, rule, r, user["id"])
+                ]
+
+            user = max(users, key=lambda u: len(shown(u))) if rule.owner else users[0]
+            own = shown(user)
+            own_ids = {r["id"] for r in own}
             own_titles = {str(r[title]) for r in own}
-            others = [r for r in records if r[rule.owner] != user["id"]]
+            others = [r for r in records if r["id"] not in own_ids]
             others = [r for r in others if str(r[title]) not in own_titles]
             list_page, detail_page = entity_pages(definition, entity, allowed)
             if not own or not others or list_page is None or detail_page is None:
                 raise AuthUiTestError(
-                    f"The owner rule of {role_name!r} on {entity!r} needs records of the user "
-                    "and of other users in the mock data, a list page, and a detail page."
+                    f"The record rule of {role_name!r} on {entity!r} needs records in the rule "
+                    "and out of it in the mock data, a list page, and a detail page."
                 )
             detail = definition.pages[detail_page]
             view = ui.views[str(detail.content.view if detail.content else "")]
             page = definition.pages[list_page]
-            form = next(
-                (
-                    {
-                        "label": str(action.label or label(action_name)),
-                        "firstId": f"{kebab(action.form)}-{kebab(next(iter(f.fields)))}",
-                        "ownerId": f"{kebab(action.form)}-{kebab(rule.owner)}",
-                    }
-                    for action_name, action in page.actions.items()
-                    if isinstance(action, FormAction)
-                    and (f := ui.forms[action.form]).entity == entity
-                    and definition.operations[f.operation].kind == "create"
-                    and rule.owner in f.fields
-                    and next(iter(f.fields)) != rule.owner
-                    and allowed.operation(f.operation)
-                ),
-                None,
-            )
             checks.append(
                 {
                     "role": role_name,
@@ -354,7 +453,7 @@ def expected_owner_rules(binding: str, definition: AppDefinition) -> list[dict[s
                     "otherMessage": "This page does not exist"
                     if binding == "nextjs"
                     else str(effective_states(definition, view).empty.title or "No records yet"),
-                    "form": form,
+                    "form": rule_form(definition, entity, rule, page, allowed),
                 }
             )
     return checks
@@ -414,8 +513,8 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
                 "actions": page_actions(definition, allowed),
             }
         )
-    owner_rules = expected_owner_rules(binding, definition)
-    used = {check["username"] for check in [*roles, *owner_rules]}
+    record_checks = expected_record_rules(binding, definition)
+    used = {check["username"] for check in [*roles, *record_checks]}
     password_reset = expected_password_reset(binding, definition, app, used)
     if password_reset is not None:
         used.add(password_reset["username"])
@@ -436,7 +535,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         "signUp": expected_sign_up(binding, definition, app),
         "passwordReset": password_reset,
         "secondFactor": expected_second_factor(definition, used),
-        "ownerRules": owner_rules,
+        "recordRules": record_checks,
         "providers": expected_providers(binding, definition),
     }
 
@@ -518,12 +617,25 @@ def provider_env(definition: AppDefinition) -> dict[str, str]:
     return env
 
 
-def check_ui(binding: str, definition: AppDefinition, app: Path) -> None:
-    """Run the UI test of the sign-in and the permissions on the app that runs."""
-    name = f"{binding}-auth"
+def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = False) -> None:
+    """Run the UI test of the sign-in and the permissions on the app that runs.
+
+    With `rules`, run only the tests of the record rules: the app is of
+    RULES_DEFINITION.
+    """
+    name = f"{binding}-record-rules" if rules else f"{binding}-auth"
     expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
     expected_file.parent.mkdir(exist_ok=True)
-    if binding == "react-api":
+    if rules:
+        auth = {
+            "app": definition.app.name,
+            "password": PASSWORDS[binding],
+            "roles": [],
+            "recordRules": expected_record_rules(binding, definition),
+            "providers": [],
+        }
+        expected = {**expected_ui(binding, definition), "auth": auth}
+    elif binding == "react-api":
         # Only the test of the sign-in with a provider: the FastAPI app has no seed users.
         auth = {
             "app": definition.app.name,
@@ -548,7 +660,9 @@ def check_ui(binding: str, definition: AppDefinition, app: Path) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
         run("pnpm", "install", "--silent", "--frozen-lockfile", cwd=UI_TESTS)
     command = ["pnpm", "exec", "playwright", "test", "tests/auth.spec.ts"]
-    if binding == "react-api":
+    if rules:
+        command += ["--grep", RULES_TEST]
+    elif binding == "react-api":
         command += ["--grep", PROVIDER_TEST]
     if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
         command.append("--update-snapshots")
@@ -651,7 +765,27 @@ def auth_ui_test(binding: str, out: Path) -> None:
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
         check_ui(binding, definition, app)
+    record_rules_test(binding, out)
     log(binding, "passed")
+
+
+def record_rules_test(binding: str, out: Path) -> None:
+    """Sign in to the app of RULES_DEFINITION as a user of each record rule (ADR 0025).
+
+    The rules have conditions and owner paths: a member sees the projects
+    and the open tasks of the teams of the member, and a reviewer sees the
+    done tasks and the projects that are not archived.
+    """
+    definition = load_definition(RULES_DEFINITION)
+    app = out / f"{binding}-record-rules"
+    generate(RULES_DEFINITION, binding, app)
+    log(binding, "record rules: pnpm install and pnpm build")
+    run("pnpm", "install", "--silent", cwd=app)
+    run("pnpm", "--silent", "build", cwd=app)
+    with started(binding, app):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the record rules (Playwright)")
+        check_ui(binding, definition, app, rules=True)
 
 
 def main() -> int:

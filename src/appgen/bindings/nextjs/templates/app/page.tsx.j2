@@ -1,8 +1,8 @@
 {% set info = nextjs.pages[name] %}
 {% set detail = element.entity and info.params and element.content is not none and element.content.view in ui_views.detail_views %}
 {% set protected = definition.auth and name not in definition.auth.public_pages %}
-{# On a protected page, an owner rule (ADR 0018) hides the records of other users. #}
-{% set rule = owner_rules.get(element.entity) if detail and protected else none %}
+{# On a protected page, a record rule (ADR 0018, ADR 0025) hides the records out of the rule. #}
+{% set rule = record_rules.get(element.entity) if detail and protected else none %}
 {% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
 {% set api_plan = ui_views.api_view_plan(api_view) if api_view else none %}
 {{ trace_header(element_id) }}
@@ -21,7 +21,7 @@ import { viewAnswer } from "@/shared/api/third-party";
 {% endif %}
 import { {{ info.component }} } from "@/pages/{{ info.slice }}";
 {% if protected and definition.access %}
-import { {{ "recordOwner, " if rule }}requirePage } from "@/shared/auth/access";
+import { {{ "recordScope, " if rule }}requirePage } from "@/shared/auth/access";
 {% elif protected %}
 import { requirePageUser } from "@/shared/auth/session";
 {% endif %}
@@ -68,7 +68,7 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 {% endif %}
   const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
 {% if rule %}
-  if (!(await {{ element.entity | camel }}Repository.exists(id, await recordOwner({{ ts_value(element.entity) }}, "read")))) { {{ trace(rule.element_id) }}
+  if (!(await {{ element.entity | camel }}Repository.exists(id, await recordScope({{ ts_value(element.entity) }}, "read")))) { {{ trace(rule.element_ids[0]) }}
 {% else %}
   if (!(await {{ element.entity | camel }}Repository.exists(id))) {
 {% endif %}

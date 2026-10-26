@@ -48,7 +48,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+{% if topbar is not none %}
   SidebarTrigger,
+{% endif %}
 } from "@/shared/ui/sidebar";
 {% endif %}
 {% if sidebar is not none and topbar is not none %}

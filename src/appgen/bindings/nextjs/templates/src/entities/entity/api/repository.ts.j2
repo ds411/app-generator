@@ -1,10 +1,16 @@
 {% set table = nextjs.tables_by_entity[name] %}
 {% set type = name | pascal %}
 {% set var = name | camel %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list %}
+{% set rules = record_rules.get(name) %}
+{% set condition = nextjs.owner_conditions.get(name) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
 
+{% if condition %}
+import { {{ condition.operators | join(", ") }} } from "drizzle-orm";
+
+{% endif %}
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
 import { Repository } from "@/shared/db/repository";
 
@@ -15,8 +21,15 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   entity: {{ ts_value(name) }},
   table: {{ table.const }},
   defaults: {{ var }}Defaults,
-{% if name in owner_rules %}
-  owner: {{ ts_value(owner_rules[name].key) }}, {{ trace(owner_rules[name].element_id) }}
+{% if rules and rules.direct %}
+  owner: {{ ts_value(rules.path[0].key) }}, {{ trace(rules.path[0].element_id) }}
+{% elif condition %}
+  // The records of a user: the owner path {{ rules.path | map(attribute="relation") | join(".") }} of the record rules (ADR 0025).
+{% for step in rules.path %}
+  {{ trace(step.element_id) }}
+{% endfor %}
+  belongsTo: (user) =>
+    {{ condition.code }},
 {% endif %}
 {% if table.lists %}
   manyToMany: [

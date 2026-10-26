@@ -1,15 +1,15 @@
 {% from "src/features/operation/api/macros.j2" import returns, entity_imports %}
 {% set fn = name | camel %}
 {% set result = "null" if element.returns == "none" else element.returns | pascal %}
-{# An owner rule (ADR 0018) applies to a custom operation that is not public. #}
-{% set rule = owner_rules.get(element.entity) if not (definition.auth and name in definition.auth.public_operations) else none %}
+{# A record rule (ADR 0018, ADR 0025) applies to a custom operation that is not public. #}
+{% set rule = record_rules.get(element.entity) if not (definition.auth and name in definition.auth.public_operations) else none %}
 {{ trace_header(element_id) }}
 "use server";
 
 import type { ActionResult } from "@/shared/api";
 import { idSchema, runAction } from "@/shared/api/server";
 {% if rule %}
-import { recordOwner } from "@/shared/auth/access";
+import { recordScope } from "@/shared/auth/access";
 {% endif %}
 
 {% set imports = entity_imports(name, element, [fn ~ "ParamsSchema"] if element.params else []) | trim %}
@@ -30,9 +30,11 @@ export async function {{ fn }}Action(
   return runAction(
     async () => {
 {% if rule %}
-      // A user of an owner rule runs the operation only on a record of the user.
-      {{ trace(rule.element_id) }}
-      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id), await recordOwner({{ ts_value(element.entity) }}, "change"));
+      // A user of a record rule runs the operation only on a record of the rule.
+{% for id in rule.element_ids %}
+      {{ trace(id) }}
+{% endfor %}
+      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id), await recordScope({{ ts_value(element.entity) }}, "change"));
 {% else %}
       const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id));
 {% endif %}

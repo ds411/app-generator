@@ -10,9 +10,9 @@
 {% endif %}
 {%- endmacro %}
 {% set store = "HttpStore" if react.api else "MockStore" %}
-{# With mock data, the store applies the owner rule of the entity (ADR 0018). #}
-{% set rule = owner_rules.get(name) if not react.api else none %}
-{% set auth_names = (["recordOwner"] if rule else []) + (["requireOperation"] if guarded else []) %}
+{# With mock data, the store applies the record rules of the entity (ADR 0018, ADR 0025). #}
+{% set rule = record_rules.get(name) if not react.api else none %}
+{% set auth_names = (["recordScope"] if rule else []) + (["requireOperation"] if guarded else []) %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
 import { {% if not react.api %}type EntityApi, {% endif %}{{ store }}, type ListQuery, type ListResult } from "@/shared/api";
 {% else %}
@@ -77,7 +77,24 @@ export const {{ var }}Api: EntityApi<{{ type }}, {{ type }}Input> = new MockStor
   [],
 {% endif %}
 {% if rule %}
-  { key: {{ ts_value(rule.key) }}, ownerOf: (action) => recordOwner({{ ts_value(name) }}, action) }, {{ trace(rule.element_id) }}
+  {
+{% for id in rule.element_ids %}
+    {{ trace(id) }}
+{% endfor %}
+    scopeOf: (action) => recordScope({{ ts_value(name) }}, action),
+{% if rule.path %}
+    path: [
+{% for step in rule.path %}
+      { key: {{ ts_value(step.key) }}, target: {{ ts_value(step.target) }} }, {{ trace(step.element_id) }}
+{% endfor %}
+    ],
+{% else %}
+    path: [],
+{% endif %}
+{% if rule.direct %}
+    owner: {{ ts_value(rule.path[0].key) }},
+{% endif %}
+  },
 {% endif %}
 );
 {% endif %}

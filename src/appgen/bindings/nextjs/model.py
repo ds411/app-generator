@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
-from appgen.bindings.nextjs.db import build_tables, seed_tables
+from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.shared import shadcn
-from appgen.bindings.shared.auth import auth_pages, owner_rules
+from appgen.bindings.shared.auth import auth_pages, record_rules
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis
@@ -199,6 +199,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     groups = {info.layout for info in plan.pages.values()}
     theme = ui.theme if ui is not None else None
     tables = build_tables(definition)
+    by_entity = {table.entity: table for table in tables}
+    rules = record_rules(definition)
     return {
         "ts_apis": ts_apis(definition),
         "theme": build_theme(definition),
@@ -207,7 +209,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_views": ViewContext(definition, forms=True, api_server=True),
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
-        "owner_rules": owner_rules(definition),
+        "record_rules": rules,
         **text_helpers(definition),
         "nextjs": {
             "default_layout": default_layout,
@@ -218,7 +220,13 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "hooks": shadcn.hooks(components),
             "layers": FSD_LAYERS,
             "tables": tables,
-            "tables_by_entity": {table.entity: table for table in tables},
+            "tables_by_entity": by_entity,
+            # The conditions of the owner paths of the record rules (ADR 0025).
+            "owner_conditions": {
+                entity: belongs_to(r.path, by_entity, 4)
+                for entity, r in rules.items()
+                if r.path and not r.direct
+            },
             "seed": seed_tables(definition, tables),
             "pages": pages,
             "package_json": package_json(definition),

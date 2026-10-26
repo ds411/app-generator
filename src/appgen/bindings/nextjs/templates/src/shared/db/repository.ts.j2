@@ -36,6 +36,11 @@ import {
   ValidationError,
 } from "@/shared/api";
 
+{% if record_rules %}
+import { ForbiddenError } from "@/shared/auth/access";
+import type { RecordScope } from "@/shared/lib/permissions";
+{% endif %}
+
 import { type Database, getDb } from "./client";
 
 type Row = Record<string, unknown>;
@@ -89,6 +94,21 @@ export type Workflow = {
   message?: string;
 };
 
+{% if record_rules %}
+/**
+ * The options of a create: the records that the user may use (ADR 0025),
+ * which the new record must be part of{% if definition.auth and definition.auth.sign_up %}, and `then`, which writes more rows
+ * in the same transaction, for example the credential of a new user
+ * (ADR 0016){% endif %}.
+ */
+export type CreateOptions{{ "<T>" if definition.auth and definition.auth.sign_up }} = {
+  scope?: RecordScope | null;
+{% if definition.auth and definition.auth.sign_up %}
+  then?: (tx: Transaction, record: T) => Promise<void>;
+{% endif %}
+};
+
+{% endif %}
 type JoinTable = ManyToMany & { owner: PgColumn; target: PgColumn };
 type ForeignKey = InverseOne & { column: PgColumn };
 
@@ -105,13 +125,17 @@ export type RepositoryOptions<T> = {
   noOverlap?: OverlapRule[];
   /** The workflows of the entity. A change that no transition allows gives a ValidationError. */
   workflows?: Workflow[];
-{% if owner_rules %}
+{% if record_rules %}
   /**
-   * The key of the ID of the owner in the record, if an owner rule names
-   * the entity (ADR 0018). With an owner, the methods use only the records
-   * of the owner: another record does not exist for them.
+   * The key of the ID of the owner in the record, for an owner rule of one
+   * many-to-one relation (ADR 0018).
    */
   owner?: string;
+  /**
+   * The condition of the records of a user, for an owner path of the
+   * record rules (ADR 0025). Without it, the key of the owner gives it.
+   */
+  belongsTo?: (user: string) => SQL;
 {% endif %}
 };
 
@@ -181,8 +205,8 @@ export class Repository<T extends EntityRecord, TInput extends object>
   private readonly compare: CompareRule[];
   private readonly noOverlap: OverlapRule[];
   private readonly workflows: Workflow[];
-{% if owner_rules %}
-  private readonly ownerColumn: Column | undefined;
+{% if record_rules %}
+  private readonly belongsTo: ((user: string) => SQL) | undefined;
 {% endif %}
 
   constructor(options: RepositoryOptions<T>) {
@@ -193,8 +217,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.compare = options.compare ?? [];
     this.noOverlap = options.noOverlap ?? [];
     this.workflows = options.workflows ?? [];
-{% if owner_rules %}
-    this.ownerColumn = options.owner === undefined ? undefined : this.columns[options.owner];
+{% if record_rules %}
+    const owner = options.owner === undefined ? undefined : this.columns[options.owner];
+    this.belongsTo = options.belongsTo ?? (owner === undefined ? undefined : (user) => eq(owner, user));
 {% endif %}
     this.manyToMany = (options.manyToMany ?? []).map((relation) => {
       const columns = getTableColumns(relation.table);
@@ -210,10 +235,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
     }));
   }
 
-{% if owner_rules %}
-  async list(query: ListQuery<T> = {}, owner: string | null = null): Promise<ListResult<T>> {
+{% if record_rules %}
+  /** Return a page of the records. With a scope, only the records of the scope (ADR 0025). */
+  async list(query: ListQuery<T> = {}, scope: RecordScope | null = null): Promise<ListResult<T>> {
     const db = getDb();
-    const where = and(this.where(query), this.owned(owner));
+    const where = and(this.where(query), this.scoped(scope));
 {% else %}
   async list(query: ListQuery<T> = {}): Promise<ListResult<T>> {
     const db = getDb();
@@ -236,17 +262,17 @@ export class Repository<T extends EntityRecord, TInput extends object>
   }
 
   /** Return true if a record with the ID exists. An ID that is not a UUID does not exist. */
-{% if owner_rules %}
-  async exists(id: string, owner: string | null = null): Promise<boolean> {
+{% if record_rules %}
+  async exists(id: string, scope: RecordScope | null = null): Promise<boolean> {
     if (!UUID.test(id)) {
       return false;
     }
-    return (await getDb().$count(this.table, this.byId(id, owner))) > 0;
+    return (await getDb().$count(this.table, this.byId(id, scope))) > 0;
   }
 
-  async get(id: string, owner: string | null = null): Promise<T> {
+  async get(id: string, scope: RecordScope | null = null): Promise<T> {
     const db = getDb();
-    const rows: Row[] = await db.select().from(this.table).where(this.byId(id, owner)).limit(1);
+    const rows: Row[] = await db.select().from(this.table).where(this.byId(id, scope)).limit(1);
 {% else %}
   async exists(id: string): Promise<boolean> {
     if (!UUID.test(id)) {
@@ -263,7 +289,10 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return record as T;
   }
 
-{% if definition.auth and definition.auth.sign_up %}
+{% if record_rules %}
+  /** Add a record. A record out of the scope of the options gives a ForbiddenError, and is not added. */
+  async create(input: TInput, options: CreateOptions{{ "<T>" if definition.auth and definition.auth.sign_up }} = {}): Promise<T> {
+{% elif definition.auth and definition.auth.sign_up %}
   /**
    * Add a record. `then` writes more rows in the same transaction, for
    * example the credential of a new user (ADR 0016).
@@ -279,17 +308,21 @@ export class Repository<T extends EntityRecord, TInput extends object>
       this.checkWorkflows(undefined, row);
       await this.checkRules(tx, row);
       await this.writeLinks(tx, String(row.id), values);
+{% if record_rules %}
+      await this.checkScope(tx, String(row.id), options.scope ?? null);
+{% endif %}
       const [record] = await this.toRecords(tx, rows);
 {% if definition.auth and definition.auth.sign_up %}
-      await then?.(tx, record as T);
+      await {{ "options.then" if record_rules else "then" }}?.(tx, record as T);
 {% endif %}
       return record as T;
     });
   }
 
-{% if owner_rules %}
-  async update(id: string, patch: Partial<TInput>, owner: string | null = null): Promise<T> {
-    const where = this.byId(id, owner);
+{% if record_rules %}
+  /** Change a record. With a scope, the record must be in the scope before and after the change. */
+  async update(id: string, patch: Partial<TInput>, scope: RecordScope | null = null): Promise<T> {
+    const where = this.byId(id, scope);
 {% else %}
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     const where = eq(this.table.id, id);
@@ -306,16 +339,19 @@ export class Repository<T extends EntityRecord, TInput extends object>
       this.checkWorkflows(before[0] ?? (rows[0] as Row), rows[0] as Row);
       await this.checkRules(tx, rows[0] as Row);
       await this.writeLinks(tx, id, patch);
+{% if record_rules %}
+      await this.checkScope(tx, id, scope);
+{% endif %}
       const [record] = await this.toRecords(tx, rows);
       return record as T;
     });
   }
 
-{% if owner_rules %}
-  async remove(id: string, owner: string | null = null): Promise<void> {
+{% if record_rules %}
+  async remove(id: string, scope: RecordScope | null = null): Promise<void> {
     const rows: Row[] = await getDb()
       .delete(this.table)
-      .where(this.byId(id, owner))
+      .where(this.byId(id, scope))
       .returning({ id: this.table.id });
     this.found(rows, id);
   }
@@ -403,15 +439,36 @@ export class Repository<T extends EntityRecord, TInput extends object>
     }
   }
 
-{% if owner_rules %}
-  /** Return the condition of the records of an owner (ADR 0018), or undefined for all records. */
-  private owned(owner: string | null): SQL | undefined {
-    return owner === null || this.ownerColumn === undefined ? undefined : eq(this.ownerColumn, owner);
+{% if record_rules %}
+  /**
+   * Return the condition of the records of a scope (ADR 0018, ADR 0025):
+   * the records of the user, and the records with the values of the
+   * conditions. Return undefined for all records.
+   */
+  private scoped(scope: RecordScope | null): SQL | undefined {
+    if (scope === null) {
+      return undefined;
+    }
+    const conditions = Object.entries(scope.where).map(([key, values]) => inArray(this.column(key), [...values]));
+    if (scope.owner && this.belongsTo !== undefined) {
+      conditions.push(this.belongsTo(scope.user));
+    }
+    return and(...conditions);
   }
 
-  /** Return the condition of the record with an ID: with an owner, only a record of the owner. */
-  private byId(id: string, owner: string | null): SQL | undefined {
-    return and(eq(this.table.id, id), this.owned(owner));
+  /** Return the condition of the record with an ID: with a scope, only a record of the scope. */
+  private byId(id: string, scope: RecordScope | null): SQL | undefined {
+    return and(eq(this.table.id, id), this.scoped(scope));
+  }
+
+  /**
+   * Throw a ForbiddenError if a new or changed record is not in a scope:
+   * the transaction rolls back, and the record does not change.
+   */
+  private async checkScope(tx: Transaction, id: string, scope: RecordScope | null): Promise<void> {
+    if (scope !== null && (await tx.$count(this.table, this.byId(id, scope))) === 0) {
+      throw new ForbiddenError({{ tr(js("Your role may not give a record these values.")) }});
+    }
   }
 
 {% endif %}

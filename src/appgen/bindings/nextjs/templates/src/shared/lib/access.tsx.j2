@@ -8,8 +8,8 @@
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 import type { PageName } from "@/shared/config/pages";
-{% if owner_rules %}
-import { ownerRuleApplies, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% if record_rules %}
+import { type RecordScope, recordScopeOf, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% endif %}
@@ -19,22 +19,23 @@ export type Access = {
   canOpenPage: (page: PageName) => boolean;
   /** Return true if the user may call an operation. */
   canCall: (operation: string) => boolean;
-{% if owner_rules %}
+{% if record_rules %}
   /**
-   * Return the ID of the user if an owner rule of the role applies to the
-   * changes of an entity (ADR 0018), else null. A form then gives a new
-   * record to the user, and does not show the owner.
+   * Return the records that the user may change, of the record rule of the
+   * role (ADR 0018, ADR 0025), or null for all records. A form then gives a
+   * new record to the user, sets the values that the rule allows, and does
+   * not show these fields.
    */
-  ownerOf: (entity: string) => string | null;
+  scopeOf: (entity: string) => RecordScope | null;
 {% endif %}
 };
 
-{% if owner_rules %}
+{% if record_rules %}
 function accessOf(role: string | null, userId: string | null): Access {
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
     canCall: (operation) => roleMayCall(role, operation),
-    ownerOf: (entity) => (userId !== null && ownerRuleApplies(role, entity, "change") ? userId : null),
+    scopeOf: (entity) => recordScopeOf(role, userId, entity, "change"),
   };
 }
 

@@ -89,8 +89,8 @@ user (with `owner`) and that have the values of the conditions (with
 
 - The shared table of the permissions (`src/shared/lib/permissions.ts`,
   ADR 0012) stays the one source of the rules: for each role and
-  entity, the actions, `owner`, and the values of the conditions
-  (`recordRule`).
+  entity, the actions, `owner`, and the values of the conditions.
+  `recordScopeOf` gives the scope of a user for an action.
 - The data access of each entity has its owner path. Next.js: a Drizzle
   condition with subqueries, in the repository of the entity. React
   with mock data: the steps of the path, which the mock store follows

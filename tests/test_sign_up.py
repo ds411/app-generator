@@ -158,15 +158,16 @@ def test_the_front_ends_have_a_sign_up_page(binding: Binding) -> None:
 def test_the_nextjs_sign_up_adds_the_user_and_the_password_in_one_transaction() -> None:
     app = files(nextjs.BINDING)
     action = app["src/features/sign-up/api/sign-up-action.ts"]
+    # The example has record rules: the create takes the rows of the credential as an option.
     assert (
-        'await memberRepository.create({ ...fields, role: "member" }, async (tx, record) => {'
-        in (action)
-    )
+        'await memberRepository.create({ ...fields, role: "member" }, {\n'
+        "        then: async (tx, record) => {\n"
+    ) in action
     assert "await tx.insert(credentialsTable).values(" in action
     assert "await startSession(user.id);" in action
     assert "{ public: true, changes: true }," in action
     repository = app["src/shared/db/repository.ts"]
-    assert "      await then?.(tx, record as T);\n" in repository
+    assert "      await options.then?.(tx, record as T);\n" in repository
     assert "<SignUpForm next=" in app["app/sign-up/page.tsx"]
     assert "  await startSession(userId);\n" in app["src/shared/auth/actions.ts"]
 

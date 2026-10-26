@@ -48,8 +48,14 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
-{% if owner_rules %}
-import { ownerRuleApplies, type RecordAction, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+{% if record_rules and not react.api %}
+import {
+  type RecordAction,
+  type RecordScope,
+  recordScopeOf,
+  roleMayCall,
+  roleMayOpenPage,
+} from "@/shared/lib/permissions";
 {% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% endif %}
@@ -157,17 +163,16 @@ export function requireOperation(operation: string): void {
     throw new ForbiddenError();
   }
 }
-{% if owner_rules and not react.api %}
+{% if record_rules and not react.api %}
 
 /**
- * Return the ID of the signed-in user if an owner rule of its role applies
- * to an action on the records of an entity (ADR 0018), else null. The mock
- * data then gives only the records of the user, as a demonstration: an app
- * with a back end applies the rules on the server.
+ * Return the records that the signed-in user may use for an action on the
+ * records of an entity: the record rule of its role (ADR 0018, ADR 0025),
+ * or null for all records. The mock data then gives only these records, as
+ * a demonstration: an app with a back end applies the rules on the server.
  */
-export function recordOwner(entity: string, action: RecordAction): string | null {
-  const userId = currentUserId();
-  return userId !== null && ownerRuleApplies(currentRole(), entity, action) ? userId : null;
+export function recordScope(entity: string, action: RecordAction): RecordScope | null {
+  return recordScopeOf(currentRole(), currentUserId(), entity, action);
 }
 {% endif %}
 {% endif %}

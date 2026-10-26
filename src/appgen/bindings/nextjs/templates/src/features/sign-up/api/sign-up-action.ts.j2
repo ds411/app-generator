@@ -42,15 +42,32 @@ export async function signUpAction(input: SignUpInput): Promise<ActionResult<nul
   return runAction(
     async () => {
       const { password, ...fields } = signUpSchema.parse(input);
-{% if verify %}
-      await {{ var }}Repository.create({{ "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" }}, async (tx, record) => {
+{% set values = "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" %}
+{% if verify and record_rules %}
+      await {{ var }}Repository.create({{ values }}, {
+        then: async (tx, record) => {
+          {{ trace(verify.id) }}
+          // The new user is not verified. Without a value, the database would set the time.
+          await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password), emailVerifiedAt: null });
+          await sendVerification({ id: record.id, address: record.{{ address.key }} });
+        },
+      });
+{% elif verify %}
+      await {{ var }}Repository.create({{ values }}, async (tx, record) => {
         {{ trace(verify.id) }}
         // The new user is not verified. Without a value, the database would set the time.
         await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password), emailVerifiedAt: null });
         await sendVerification({ id: record.id, address: record.{{ address.key }} });
       });
+{% elif record_rules %}
+      const user = await {{ var }}Repository.create({{ values }}, {
+        then: async (tx, record) => {
+          await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password) });
+        },
+      });
+      await startSession(user.id);
 {% else %}
-      const user = await {{ var }}Repository.create({{ "{ ...fields, " ~ (definition.access.role_field | camel) ~ ": " ~ (plan.role | tojson) ~ " }" if plan.role else "fields" }}, async (tx, record) => {
+      const user = await {{ var }}Repository.create({{ values }}, async (tx, record) => {
         await tx.insert(credentialsTable).values({ userId: record.id, passwordHash: hashPassword(password) });
       });
       await startSession(user.id);
