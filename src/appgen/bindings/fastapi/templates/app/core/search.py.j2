@@ -1,0 +1,55 @@
+{{ trace_header("app") }}
+"""The full-text search of Postgres for the parameter `q` of the list endpoints.
+
+`q` is a web search: words, a phrase in quotes, `or`, and `-word` for a
+word that a record must not have. Postgres compares the stems of the
+words in the text search configuration `{{ py.search_config }}`, and a GIN index
+on the vector of the text fields of each entity makes the search fast.
+Without a sort, the records come in the order of their rank. SQLite has
+no full-text search, so the list endpoints find each word with `LIKE`
+there.
+"""
+
+from typing import Any
+
+from sqlalchemy import ColumnElement, Float, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+
+SEARCH_CONFIG = "{{ py.search_config }}"
+"""The text search configuration of Postgres: the default language of the app."""
+
+# The index and the query must have the same expression, so that Postgres
+# uses the index. The texts stay in the SQL as they are, not as parameters.
+_CONFIG = text(f"'{SEARCH_CONFIG}'::regconfig")
+_EMPTY = text("''")
+_SPACE = text("' '")
+
+
+def full_text(session: AsyncSession) -> bool:
+    """Return True if the database of the session has the full-text search: Postgres."""
+    return session.get_bind().dialect.name == "postgresql"
+
+
+def search_vector(*columns: InstrumentedAttribute[Any]) -> ColumnElement[Any]:
+    """Return the text search vector of text columns: the expression of the GIN index."""
+    words: ColumnElement[Any] = func.coalesce(columns[0], _EMPTY)
+    for column in columns[1:]:
+        words = words.op("||")(_SPACE).op("||")(func.coalesce(column, _EMPTY))
+    return func.to_tsvector(_CONFIG, words)
+
+
+def web_query(search: str) -> ColumnElement[Any]:
+    """Return the text search query of a web search, for example `login "error page" -closed`."""
+    return func.websearch_to_tsquery(_CONFIG, search)
+
+
+def matches(vector: ColumnElement[Any], query: ColumnElement[Any]) -> ColumnElement[bool]:
+    """Return a condition: the vector has the words of the query."""
+    return vector.bool_op("@@")(query)
+
+
+def search_rank(vector: ColumnElement[Any], query: ColumnElement[Any]) -> ColumnElement[float]:
+    """Return the rank of a record for a query: a record with more of the words comes first."""
+    return func.ts_rank(vector, query, type_=Float)
+

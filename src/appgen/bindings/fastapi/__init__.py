@@ -18,6 +18,7 @@ from appgen.bindings.fastapi.model import (
     EXAMPLE_KEY,
     PATH_KEY,
     RATE_LIMIT_STORE_KEY,
+    SEARCH_KEY,
     TABLE_KEY,
     binding_context,
 )
@@ -90,6 +91,7 @@ BINDING = Binding(
         Output(template="app/core/db.py.j2", path="app/core/db.py"),
         Output(template="app/core/errors.py.j2", path="app/core/errors.py"),
         Output(template="app/core/pagination.py.j2", path="app/core/pagination.py"),
+        Output(template="app/core/search.py.j2", path="app/core/search.py", when="py.full_text"),
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/logging.py.j2", path="app/core/logging.py"),
         Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
@@ -398,6 +400,15 @@ BINDING = Binding(
             description=(
                 "The deployment targets: `kubernetes` (default, Kustomize) or `knative` "
                 "(a Knative Service that Google Cloud Run accepts too), or a list of both."
+            ),
+        ),
+        ExtensionKey(
+            name=SEARCH_KEY,
+            kinds=frozenset({"app"}),
+            type=Literal["like", "fulltext"],
+            description=(
+                "The search of the list endpoints: `like` (default, `ILIKE` for each word) or "
+                "`fulltext` (the full-text search of Postgres, with a GIN index)."
             ),
         ),
     ),

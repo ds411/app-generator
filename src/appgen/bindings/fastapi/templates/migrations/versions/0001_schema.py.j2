@@ -65,6 +65,15 @@ def upgrade() -> None:
 {% endif %}
 {% endfor %}
 {% endfor %}
+{% if py.search_indexes %}
+    if op.get_bind().dialect.name == "postgresql":
+        # The GIN indexes of the full-text search (`x-fastapi-search: fulltext`).
+{% for e in py.search_indexes %}
+{% for line in e.search_index.migration_lines(py.search_config) %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% endif %}
 {% if definition.auth and definition.auth.password %}
 {% set u = py.entity(definition.auth.user_entity) %}
     op.create_table(

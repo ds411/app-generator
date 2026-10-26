@@ -26,7 +26,7 @@ from appgen.bindings.fastapi.pysource import (
     raise_problem,
     string,
 )
-from appgen.bindings.fastapi.queries import PyListQuery, list_query
+from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
 from appgen.bindings.shared.i18n import i18n_plan
@@ -61,6 +61,41 @@ DEPLOY_KEY = "x-fastapi-deploy"
 """The extension key of the app that selects the deployment targets: one target or a list."""
 DEPLOY_TARGETS = ("kubernetes", "knative")
 """The deployment targets, in the order of the README. `kubernetes` is the default."""
+SEARCH_KEY = "x-fastapi-search"
+"""The extension key of the app that selects the search of the list endpoints."""
+SEARCH_CONFIGS = {
+    "ar": "arabic",
+    "ca": "catalan",
+    "da": "danish",
+    "de": "german",
+    "el": "greek",
+    "en": "english",
+    "es": "spanish",
+    "eu": "basque",
+    "fi": "finnish",
+    "fr": "french",
+    "ga": "irish",
+    "hi": "hindi",
+    "hu": "hungarian",
+    "hy": "armenian",
+    "id": "indonesian",
+    "it": "italian",
+    "lt": "lithuanian",
+    "nb": "norwegian",
+    "ne": "nepali",
+    "nl": "dutch",
+    "nn": "norwegian",
+    "no": "norwegian",
+    "pt": "portuguese",
+    "ro": "romanian",
+    "ru": "russian",
+    "sr": "serbian",
+    "sv": "swedish",
+    "ta": "tamil",
+    "tr": "turkish",
+    "yi": "yiddish",
+}
+"""The text search configuration of Postgres for each language (ISO 639-1)."""
 
 _INT32 = 2**31 - 1
 _ON_DELETE = {"restrict": "RESTRICT", "cascade": "CASCADE", "set_null": "SET NULL"}
@@ -869,10 +904,17 @@ class PyEntity:
     """The embedded relations whose records a record rule can hide, also in a nested embed."""
     translated: bool = False
     """True if the app has translations: the messages go through `t` (ADR 0010)."""
+    full_text: bool = False
+    """True if `q` uses the full-text search of Postgres (`x-fastapi-search: fulltext`)."""
 
     @property
     def guard_module(self) -> str:
         return "access" if self.guard == "check_access" else "auth"
+
+    @property
+    def search_index(self) -> PySearchIndex | None:
+        """The GIN index of the full-text search of `q` (`x-fastapi-search: fulltext`), or None."""
+        return self.query.search_index(self)
 
     @property
     def owner(self) -> PyRelation | None:
@@ -1077,6 +1119,11 @@ class PyEntity:
         pagination |= {
             n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
         }
+        search = {
+            n
+            for n in ("full_text", "matches", "search_rank", "search_vector", "web_query")
+            if n + "(" in code
+        }
         owner = op is not None and op.scope_action is not None
         typing = {"Annotated"} | ({"Literal"} if self.translations_query else set[str]())
         # Without sort keys, `SORTABLE` is an empty dict with a type.
@@ -1098,6 +1145,8 @@ class PyEntity:
             from_import("app.core.pagination", pagination),
             f"from app.features.{self.slice}.schemas import {self.name}Read",
         }
+        if search:
+            lines.add(from_import("app.core.search", search))
         classes = {self.name} | {e.name for e in query.entities()}
         if query.aliases:
             # `aliased()` prepares the mappers: all models must be imported first.
@@ -1177,6 +1226,9 @@ class PyEntity:
             sqlalchemy |= {"Column", "ForeignKey", "Table", "Uuid"}
         if self.unique_rules:
             sqlalchemy.add("UniqueConstraint")
+        if self.search_index is not None:
+            sqlalchemy.add("Index")
+            lines.add("from app.core.search import search_vector")
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
         orm = {"Mapped", "mapped_column"}
@@ -1335,6 +1387,18 @@ class PyApp:
     """True if the app has roles (`access`)."""
     auth: bool = False
     """True if the app has the sign-in (`auth`)."""
+    search_config: str | None = None
+    """The text search configuration of Postgres with `x-fastapi-search: fulltext`, else None."""
+
+    @property
+    def full_text(self) -> bool:
+        """True if the list endpoints use the full-text search of Postgres."""
+        return self.search_config is not None
+
+    @property
+    def search_indexes(self) -> list[PyEntity]:
+        """The entities with a GIN index for the full-text search, in the order of the tables."""
+        return [e for e in self.entity_order() if e.search_index is not None]
 
     @property
     def test_today(self) -> str:
@@ -1507,6 +1571,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         by_name = {f.name: f for f in users.fields}
         users.sign_up_fields = [by_name[name] for name in auth.sign_up.fields]
     _record_rules(definition, entities)
+    search_config = _search_config(definition)
     for entity in entities.values():
         if definition.access is not None:
             entity.guard = "check_access"
@@ -1516,6 +1581,7 @@ def python_app(definition: AppDefinition) -> PyApp:
                 rule.translated = True
         _place_routes(entity)
         _check_names(entity)
+        entity.full_text = search_config is not None
         entity.query = list_query(definition, entity)
     return PyApp(
         name=definition.app.name,
@@ -1537,7 +1603,25 @@ def python_app(definition: AppDefinition) -> PyApp:
         dashboards=python_dashboards(definition, entities),
         access=definition.access is not None,
         auth=auth is not None,
+        search_config=search_config,
     )
+
+
+def _search_config(definition: AppDefinition) -> str | None:
+    """Return the text search configuration of `x-fastapi-search: fulltext`, else None.
+
+    The configuration is the one of the default language of the
+    translations (`SEARCH_CONFIGS`), else `simple`, which does not change
+    the words.
+    """
+    if definition.app.extensions.get(SEARCH_KEY) != "fulltext":
+        return None
+    translations = definition.translations
+    if translations is None:
+        return "simple"
+    code = translations.default
+    tag = translations.languages[code].locale_tag(code)
+    return SEARCH_CONFIGS.get(tag.replace("_", "-").split("-")[0].lower(), "simple")
 
 
 def _message_elements(definition: AppDefinition) -> list[str]:

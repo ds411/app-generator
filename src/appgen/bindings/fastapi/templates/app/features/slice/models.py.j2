@@ -58,3 +58,12 @@ class {{ e.name }}(Record):
         """The IDs of the records of the relation `{{ r.name }}`."""
         return [item.id for item in self.{{ r.attr }}]
 {% endfor %}
+{% set index = e.search_index %}
+{% if index %}
+
+
+{% for id in index.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ index.model_code() }}
+{% endif %}

@@ -139,7 +139,11 @@ generator stops with an error.
   the related records of a page in the React client (M26), and `q` also
   searches the display field when it is a text. A board makes the
   parameter of its group field a list, and a calendar adds the date
-  ranges of its start field and of a required end field.
+  ranges of its start field and of a required end field. With
+  `x-fastapi-search: fulltext` (M26), `q` is a web search with the
+  full-text search of Postgres (`websearch_to_tsquery`), on a GIN index
+  of the text fields of the entity, and the rank orders the records
+  without a sort. On SQLite, `q` stays `LIKE`.
 - All errors use the problem details format of RFC 9457
   (`application/problem+json`).
 - Input schemas give a relation as the ID of the target (`project_id`),

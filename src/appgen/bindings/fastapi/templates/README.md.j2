@@ -97,6 +97,16 @@ of a database that has data:
    all changes: edit the migration for a rename (Alembic gives a drop
    and an add) or for a changed enum value.
 4. Apply it: `uv run alembic upgrade head`. The data stays.
+{% if py.full_text %}
+
+The full-text search (`x-fastapi-search: fulltext`) has a GIN index for
+each entity with a search, only on Postgres. Make a migration that
+changes these indexes with `DATABASE_URL` of a Postgres database:
+`migrations/env.py` writes each GIN index under a test of the dialect,
+so that the migration also runs on SQLite. On SQLite, Alembic does not
+compare the indexes of an expression, and `q` finds each word with
+`LIKE`.
+{% endif %}
 
 ## Tests
 

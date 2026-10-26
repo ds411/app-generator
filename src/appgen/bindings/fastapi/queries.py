@@ -25,7 +25,7 @@ start (and of its end), so that it loads the records of the shown dates.
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from appgen.bindings.fastapi.pysource import LINE_LENGTH, call
+from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, string
 from appgen.bindings.shared.views import definition_display
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.ui.fields import TEXT_TYPES
@@ -189,6 +189,31 @@ class PyParam:
     """How a test makes a record with a known value, or None if no test is generated."""
     hop_test: TestPlan | None = None
     """For the search: a test of a field of a related record, or None."""
+    full_text: bool = False
+    """For the search: True for the full-text search of Postgres (`x-fastapi-search`)."""
+
+    @property
+    def rank_field(self) -> PyField | None:
+        """For the full-text search: a field of the vector that the test of the rank can set.
+
+        The test stores the words `report draft`, so the field must take a
+        free text of 20 characters.
+        """
+        for path in self.vector:
+            f = path.field
+            if f is None or f.type not in ("string", "text") or f.enum is not None:
+                continue
+            rules = dict(f.constraints)
+            if "pattern" in rules or int(rules.get("max_length", "20")) < 20:
+                continue
+            if int(rules.get("min_length", "0")) <= 12:
+                return f
+        return None
+
+    @property
+    def vector(self) -> list[PyPath]:
+        """For the full-text search: the text fields of the entity, in one vector with an index."""
+        return [p for p in self.search if self.full_text and _in_vector(p)]
 
     @property
     def is_list(self) -> bool:
@@ -208,9 +233,7 @@ class PyParam:
         """Return the statements that add the condition of the parameter to `statement`."""
         value = f"query.{self.attr}"
         if self.kind == "search":
-            terms = tuple(p.criterion(Call("contains", (p.column, "word"))) for p in self.search)
-            where = render(Call("statement.where", (Call("or_", terms),)), 8, "statement = ")
-            return [f"for word in search_words({value}):", f"    {where}"]
+            return self._search_lines(value)
         path = self.path
         match self.kind:
             case "in":
@@ -228,6 +251,30 @@ class PyParam:
         where = render(Call("statement.where", (condition,)), 8, "statement = ")
         return [test, f"    {where}"]
 
+    def _search_lines(self, value: str) -> list[str]:
+        """Return the statements of `q`: on Postgres the full-text search, else `LIKE`."""
+        terms = tuple(p.criterion(Call("contains", (p.column, "word"))) for p in self.search)
+        if not self.full_text:
+            where = render(Call("statement.where", (Call("or_", terms),)), 8, "statement = ")
+            return [f"for word in search_words({value}):", f"    {where}"]
+        vector = self.vector
+        matches: list[Expr] = ["matches(vector, words)"] if vector else []
+        for p in self.search:
+            if not _in_vector(p):
+                inner = Call("matches", (Call("search_vector", (p.column,)), "words"))
+                matches.append(p.criterion(inner))
+        lines = ["rank = None"] if vector else []
+        lines += [f"if {value} and full_text(session):", f"    words = web_query({value})"]
+        if vector:
+            columns = Call("search_vector", tuple(p.column for p in vector))
+            lines.append("    " + render(columns, 8, "vector = "))
+        where = Call("statement.where", (Call("or_", tuple(matches)),))
+        lines.append("    " + render(where, 8, "statement = "))
+        if vector:
+            lines.append("    rank = search_rank(vector, words)")
+        where = render(Call("statement.where", (Call("or_", terms),)), 12, "statement = ")
+        return [*lines, "else:", f"    for word in search_words({value}):", f"        {where}"]
+
     def _in(self, value: str) -> Expr:
         relation = self.path.relation
         if relation is None or relation.side == "fk":
@@ -237,6 +284,11 @@ class PyParam:
         method = "any" if relation.many else "has"
         inner = Call(f"{target.name}.id.in_", (value,))
         return Call(f"{entity.name}.{relation.attr}.{method}", (inner,))
+
+
+def _in_vector(path: PyPath) -> bool:
+    """Return True for a text field of the entity itself: the vector of its index has it."""
+    return not path.hops and path.field is not None and not path.computed
 
 
 def _string(text: str) -> str:
@@ -280,6 +332,48 @@ def _join(hop: Hop, source: str, alias: str) -> str:
     return f"{alias}.{inverse.fk_attr} == {source}.id"
 
 
+@dataclass(frozen=True, slots=True)
+class PySearchIndex:
+    """The GIN index of the full-text search of an entity: the vector of the text fields of `q`."""
+
+    name: str
+    """The index name, for example `ix_projects_search`."""
+    table: str
+    entity: str
+    fields: tuple[PyField, ...]
+    ids: tuple[str, ...]
+    """The definition elements of `q`, for the traces."""
+
+    def model_code(self) -> str:
+        """Return the declaration of the index after the model class (only for Postgres)."""
+        columns = Call("search_vector", tuple(f"{self.entity}.{f.attr}" for f in self.fields))
+        index = Call("Index", (f'"{self.name}"', columns, 'postgresql_using="gin"'))
+        return render(index, 0, suffix='.ddl_if(dialect="postgresql")')
+
+    def migration_lines(self, config: str) -> list[str]:
+        """Return the statements of the first migration that create the index, at an indent of 4.
+
+        The expression is the one of `search_vector` in `app/core/search.py`,
+        so that Alembic finds no difference between the index and the model.
+        """
+        parts = [f"coalesce(\"{f.name}\", '')" for f in self.fields]
+        tokens = [f"to_tsvector('{config}'::regconfig, {parts[0]}"]
+        tokens += [f" || ' ' || {part}" for part in parts[1:]]
+        tokens[-1] += ")"
+        one_line = "vector = " + string("".join(tokens))
+        if 8 + len(one_line) <= LINE_LENGTH:
+            lines = [f"    {one_line}"]
+        else:
+            chunks = [""]
+            for token in tokens:
+                if chunks[-1] and 12 + len(string(chunks[-1] + token)) > LINE_LENGTH:
+                    chunks.append("")
+                chunks[-1] += token
+            lines = ["    vector = (", *(f"        {string(c)}" for c in chunks), "    )"]
+        args = [f'"{self.name}"', f'"{self.table}"', "[sa.text(vector)]", 'postgresql_using="gin"']
+        return [*lines, "    " + call("", "op.create_index", args, 8)]
+
+
 @dataclass(slots=True)
 class PyListQuery:
     """The filters and the sort keys of the list endpoint of an entity."""
@@ -299,6 +393,21 @@ class PyListQuery:
     @property
     def search(self) -> PyParam | None:
         return next((p for p in self.params if p.kind == "search"), None)
+
+    def search_index(self, entity: PyEntity) -> PySearchIndex | None:
+        """Return the GIN index of the full-text search of the entity, or None."""
+        search = self.search
+        if search is None or not search.vector:
+            return None
+        fields = tuple(f for p in search.vector if (f := p.field) is not None)
+        name = f"ix_{entity.table[:53]}_search"
+        return PySearchIndex(name, entity.table, entity.name, fields, tuple(search.ids))
+
+    @property
+    def ranked(self) -> bool:
+        """True if the full-text search orders the records by their rank without a sort."""
+        search = self.search
+        return search is not None and bool(search.vector)
 
     @property
     def view_sort_keys(self) -> list[PySortKey]:
@@ -488,6 +597,13 @@ class _Builder:
         if self.search:
             paths = list(self.search.values())
             fields = ", ".join(f"`{p.path}`" for p in paths)
+            description = f"Words that each record has in one of the fields {fields}, in any case."
+            if self.entity.full_text:
+                description = (
+                    f"A web search in the fields {fields}: words, a phrase in quotes, `or`, "
+                    "and `-word`. Postgres compares the stems of the words. SQLite finds "
+                    "each word in one of the fields, in any case."
+                )
             search = PyParam(
                 "q",
                 "q",
@@ -495,10 +611,11 @@ class _Builder:
                 "search",
                 paths[0],
                 self.search_ids,
-                f"Words that each record has in one of the fields {fields}, in any case.",
+                description,
                 paths,
                 test=next((_test(p) for p in paths if not p.hops), None),
                 hop_test=next((t for p in paths if p.hops and (t := _test(p))), None),
+                full_text=self.entity.full_text,
             )
             self.add(search)
             params.append(search)

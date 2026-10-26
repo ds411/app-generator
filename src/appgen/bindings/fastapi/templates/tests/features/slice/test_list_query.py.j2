@@ -138,6 +138,28 @@ async def _ids(client: AsyncClient, params: dict[str, Any]) -> list[str]:
     assert first not in await _ids(client, {"q": f"{text} no-such-word"})
     assert await _ids(client, {"q": "%"}) == []
 {% endif %}
+{% set f = s.rank_field %}
+{% if f %}
+
+
+{% for id in s.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_finds_the_words_in_the_order_of_their_rank", "client: AsyncClient, session: AsyncSession") }}    if session.get_bind().dialect.name != "postgresql":
+        pytest.skip("Only Postgres has the full-text search.")
+    few = str((await make_{{ e.snake }}(session, {{ f.name }}="report draft")).id)
+    many = str((await make_{{ e.snake }}(session, {{ f.name }}="report report report")).id)
+    other = str((await make_{{ e.snake }}(session, {{ f.name }}="unrelated")).id)
+
+    async def found(text: str) -> list[str]:
+        return [i for i in await _ids(client, {"q": text}) if i in (few, many, other)]
+
+    # Without a sort, a record with more of the words comes first.
+    assert await found("report") == [many, few]
+    assert await found("report -draft") == [many]
+    assert await found('"report draft"') == [few]
+    assert set(await found("draft or unrelated")) == {few, other}
+{% endif %}
 {% if s.hop_test %}
 
 
