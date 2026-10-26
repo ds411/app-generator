@@ -42,7 +42,7 @@ next step. One error can cause more errors later in the file.
 | `workflows`    | No       | State machines on `enum` fields.                           | A status field allows only some changes.       |
 | `jobs`         | No       | Work on a schedule (cron, UTC), or at the time of a date field of each record. | The app does work at a time, for example a reminder. |
 | `apis`         | No       | Third-party APIs: a local OpenAPI document and the operations that the app calls. | The app calls an outside service. |
-| `webhooks`     | No       | The endpoints that other systems send signed events to: the path, the signature, and the schema of the body. | An outside service sends events to the app, for example payments. |
+| `webhooks`     | No       | The endpoints that other systems send signed events to: the path, the signature, and the schema of the body, or the inbound emails of a mail service (`format: email`). | An outside service sends events to the app, for example payments, or the app receives email. |
 | `auth`         | No       | The sign-in: the user entity and the public parts.         | The users must sign in.                        |
 | `access`       | No       | Roles, and the operations and pages of each role. Needs `auth`. | The users have roles with different rights. |
 | `translations` | No       | The UI text in more than one language.                     | The app has more than one language.            |

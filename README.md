@@ -639,6 +639,8 @@ custom operation has a generated endpoint and an extension file for its
 logic, and each entity has an extension file for its custom validation.
 Each webhook has an endpoint that checks the signature of the sender
 and records the ID of each event, and an extension file for its logic.
+A webhook with `format: email` reads the inbound emails of Mailgun,
+Postmark, or SendGrid.
 Each operation has generated API tests that run against Postgres in a
 container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. `uv run python -m app.cli

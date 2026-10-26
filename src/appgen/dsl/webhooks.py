@@ -4,7 +4,9 @@ A webhook is an endpoint of the server apps. The apps check the
 signature of each request with a secret, keep the ID of each event, and
 call a gap function with the body one time for each event ID. The
 loader reads the optional OpenAPI document of the body from the folder
-of the definition, as for the `apis` (ADR 0019).
+of the definition, as for the `apis` (ADR 0019). A webhook with
+`format: email` receives the inbound emails that a mail service
+forwards, and gives the gap function the parsed message (ADR 0030).
 """
 
 from pathlib import Path
@@ -21,6 +23,16 @@ WEBHOOK_PATH_PATTERN = r"^(/[a-z0-9][a-z0-9._~-]*)+$"
 HEADER_PATTERN = r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
 STRIPE_HEADER = "Stripe-Signature"
 """The header of the signature of the `stripe` scheme."""
+BASIC_HEADER = "Authorization"
+"""The header of the user name and the password of the `basic` scheme."""
+EMAIL_SCHEMES: dict[str, tuple[str, ...]] = {
+    "mailgun": ("mailgun", "basic"),
+    "postmark": ("basic",),
+    "sendgrid": ("basic",),
+}
+"""The signature schemes that each mail service can send with an inbound email."""
+EMAIL_PROVIDERS = {"mailgun": "Mailgun", "postmark": "Postmark", "sendgrid": "SendGrid"}
+"""The name of each mail service, for the texts of the apps."""
 
 type WebhookPath = Annotated[str, StringConstraints(pattern=WEBHOOK_PATH_PATTERN)]
 """The path of a webhook: one or more fixed segments in lower case, for example
@@ -34,11 +46,15 @@ class WebhookSignature(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    scheme: Literal["hmac_sha256", "stripe"]
+    scheme: Literal["hmac_sha256", "stripe", "mailgun", "basic"]
     """`hmac_sha256`: a header has the HMAC-SHA256 of the body. `stripe`: the header
-    `Stripe-Signature` has a time and the HMAC-SHA256 of the time and the body."""
+    `Stripe-Signature` has a time and the HMAC-SHA256 of the time and the body. `mailgun`:
+    the fields `timestamp`, `token`, and `signature` of the form have the HMAC-SHA256 of the
+    time and the token. `basic`: the header `Authorization` has a user name and a password
+    (HTTP Basic authentication)."""
     secret_env: EnvName
-    """The environment variable that holds the secret of the signatures."""
+    """The environment variable that holds the secret of the signatures. With `basic`, it
+    holds `<user name>:<password>`."""
     header: HeaderName | None = None
     """`hmac_sha256`: the header with the signature, for example `X-Signature-256`."""
     prefix: str = ""
@@ -46,12 +62,22 @@ class WebhookSignature(BaseModel):
     encoding: Literal["hex", "base64"] = "hex"
     """`hmac_sha256`: the encoding of the signature."""
     tolerance_seconds: Annotated[int, pydantic.Field(ge=1, le=86400)] = 300
-    """`stripe`: the age of a signature, in seconds, after which the app refuses it."""
+    """`stripe` and `mailgun`: the age of a signature, in seconds, after which the app refuses
+    it."""
 
     @property
     def signature_header(self) -> str:
-        """The header with the signature."""
-        return STRIPE_HEADER if self.scheme == "stripe" else self.header or ""
+        """The header with the signature, or empty for `mailgun` (the signature is in the
+        form)."""
+        match self.scheme:
+            case "stripe":
+                return STRIPE_HEADER
+            case "basic":
+                return BASIC_HEADER
+            case "mailgun":
+                return ""
+            case _:
+                return self.header or ""
 
 
 class WebhookEventId(BaseModel):
@@ -98,6 +124,16 @@ class Webhook(Element):
     """Where the ID of the event is. The default is the property `id` of the body."""
     body: WebhookBody | None = None
     """The schema of the body. Without it, the body is any JSON value."""
+    format: Literal["json", "email"] = "json"
+    """`json`: the body is a JSON event. `email`: the body is an inbound email that a mail
+    service forwards (`provider`), and the event ID is its `Message-ID` header."""
+    provider: Literal["mailgun", "postmark", "sendgrid"] | None = None
+    """With `format: email`: the mail service, which gives the format of the body."""
+
+    @property
+    def email(self) -> bool:
+        """True if the webhook receives inbound emails."""
+        return self.format == "email"
 
     _openapi: OpenApiDocument | None = PrivateAttr(default=None)
     _error: str | None = PrivateAttr(default=None)

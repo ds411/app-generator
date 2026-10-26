@@ -1,5 +1,14 @@
 {{ trace_header(element_id) }}
 {% set w = py_webhooks[name] %}
+{% if w.email %}
+"""The webhook `{{ w.name }}`: POST {{ w.path }}, the inbound emails of {{ w.provider_title }}.
+
+The endpoint checks the signature of the request ({{ w.scheme }}), reads the
+email, and calls `{{ w.handler }}` of `handler_ext.py` one time for each
+`Message-ID`. A repeated email gives the answer again, without a call.
+appgen creates `handler_ext.py` once and never changes it.
+"""
+{% else %}
 """The webhook `{{ w.name }}`: POST {{ w.path }}.
 
 The endpoint checks the signature of the request ({{ w.scheme }}), and calls
@@ -7,6 +16,7 @@ The endpoint checks the signature of the request ({{ w.scheme }}), and calls
 event gives the answer again, without a call. appgen creates
 `handler_ext.py` once and never changes it.
 """
+{% endif %}
 
 {{ py.imports(w.router_imports()) }}
 
@@ -18,23 +28,29 @@ _EVENT = TypeAdapter({{ w.body_type }})
 
 @router.post(
     {{ py.string(w.path) }},
-    responses=problem_responses(400, 401, 422, 500, 501),
+    responses=problem_responses({{ '400, 401, 500, 501' if w.email else '400, 401, 422, 500, 501' }}),
     summary={{ py.string("Webhook " ~ w.name) }},
     operation_id={{ py.string("webhook_" ~ w.module) }},
 )
 {{ py.call("async def ", w.endpoint, ["request: Request", "session: SessionDep"], 0, " -> WebhookReceipt:") }}
-    """{{ w.description or ("Receive an event of the webhook " ~ w.name ~ ".") }}"""
+    """{{ w.description or ("Receive " ~ ("an inbound email" if w.email else "an event") ~ " of the webhook " ~ w.name ~ ".") }}"""
     settings: Settings = request.app.state.settings
     body = await request.body()
 {% for line in w.check_lines() %}
     {{ line }}
 {% endfor %}
+{% if w.email %}
+{% for line in w.email_lines() %}
+    {{ line }}
+{% endfor %}
+{% else %}
     data = read_json(body)
     {{ w.event_id_line() }}
 {% if w.typed %}
     event = read_event(data, _EVENT)
 {% else %}
     event = data
+{% endif %}
 {% endif %}
     if not await record_event(session, {{ py.string(w.name) }}, event_id):
         return WebhookReceipt(event_id=event_id, repeated=True)

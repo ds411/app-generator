@@ -372,6 +372,11 @@ BINDING = Binding(
             when="py_apis[name].expose",
         ),
         Output(template="app/core/webhooks.py.j2", path="app/core/webhooks.py", when="py_webhooks"),
+        Output(
+            template="app/core/inbound_email.py.j2",
+            path="app/core/inbound_email.py",
+            when="py_webhooks.values() | selectattr('email') | list",
+        ),
         Output(template="package.py.j2", path="app/webhooks/__init__.py", when="py_webhooks"),
         Output(template="package.py.j2", path=_WEBHOOK + "/__init__.py", for_each="webhook"),
         Output(
@@ -396,6 +401,13 @@ BINDING = Binding(
             template="tests/webhooks/test_webhook.py.j2",
             path="tests/webhooks/test_{{ py_webhooks[name].module }}.py",
             for_each="webhook",
+            when="not py_webhooks[name].email",
+        ),
+        Output(
+            template="tests/webhooks/test_email_webhook.py.j2",
+            path="tests/webhooks/test_{{ py_webhooks[name].module }}.py",
+            for_each="webhook",
+            when="py_webhooks[name].email",
         ),
         Output(template="tests/factories.py.j2", path="tests/factories.py"),
         Output(

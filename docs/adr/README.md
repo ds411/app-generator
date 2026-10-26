@@ -46,3 +46,4 @@ gives the rules.
 | 0027   | [Files and images in the records](0027-files.md)                       | Accepted |
 | 0028   | [Signed webhooks](0028-webhooks.md)                                    | Accepted |
 | 0029   | [Jobs on a schedule and at the time of a date field](0029-jobs.md)    | Accepted |
+| 0030   | [Inbound email in webhooks](0030-inbound-email.md)                     | Accepted |

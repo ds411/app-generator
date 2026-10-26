@@ -13,6 +13,16 @@
 
 
 {{ py.call("async def ", w.handler, ["session: AsyncSession", "event: " ~ w.body_type, "headers: Mapping[str, str]"], 0, " -> None:") }}
+{% if w.email %}
+    """Handle one inbound email. The endpoint checked the signature of the request.
+
+    The endpoint calls the function one time for each `Message-ID`, and
+    commits the session after it, with the row of the email. Raise an
+    error to refuse the email: then the mail service can deliver it
+    again. `event.in_reply_to` is the `Message-ID` of the email that this
+    email answers. `headers` are the headers of the request.
+    """
+{% else %}
     """Handle one event. The endpoint checked the signature of the request.
 
     The endpoint calls the function one time for each event ID, and
@@ -20,5 +30,6 @@
     error to refuse the event: then the sender can deliver it again.
     `headers` are the headers of the request.
     """
+{% endif %}
     # TODO(appgen): write the logic of the webhook {{ w.name }}.
     raise NotImplementedError("{{ element_id }}")

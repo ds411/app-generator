@@ -1,0 +1,341 @@
+{% set emails = ts_webhooks.values() | selectattr("email") | list %}
+{% set providers = emails | map(attribute="provider") | unique | sort | list %}
+{{ trace_header(*(emails | map(attribute="id"))) }}
+import "server-only";
+
+import { createHash } from "node:crypto";
+
+import { deliver, problem } from "./receive";
+import { checkBasic, checkMailgun } from "./signature";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+
+/*
+ * The inbound emails of the webhooks with the format `email` (ADR 0030). A mail
+ * service receives an email for the app, and forwards it as an HTTP request:
+ * Mailgun and SendGrid as a form, Postmark as JSON. The event ID of an email is its
+ * `Message-ID` header, or the SHA-256 hash of the body for an email without one. The
+ * attachments give only their names, types, and sizes.
+ */
+
+/** An address of an email, with the name of the person if the email gives one. */
+export type EmailAddress = { address: string; name: string | null };
+
+/** A file of an email: its name, its media type, and its size in bytes. */
+export type EmailAttachment = { name: string; contentType: string; size: number };
+
+/** An email that a mail service forwards to the app. */
+export type InboundEmail = {
+  /** The `Message-ID` header, for example `<abc@mail.example.com>`. */
+  messageId: string | null;
+  /** The address of the `From` header. */
+  sender: EmailAddress;
+  to: EmailAddress[];
+  cc: EmailAddress[];
+  subject: string;
+  /** The text of the email, without HTML. */
+  text: string;
+  html: string | null;
+  /** The `In-Reply-To` header: the `Message-ID` of the email that this email answers. */
+  inReplyTo: string | null;
+  attachments: EmailAttachment[];
+};
+
+/** What an email webhook needs: the mail service, the secret, and the logic. */
+export type EmailOptions = {
+  /** The name of the webhook in the definition. */
+  name: string;
+  /** The secret of the signatures, from the environment. */
+  secret: string | undefined;
+  /** The mail service, which gives the format of the body. */
+  provider: {{ providers | map("tojson") | join(" | ") }};
+  /** The signature scheme: HTTP Basic, or the signature of Mailgun in the form. */
+  scheme: "basic" | "mailgun";
+  /** `mailgun`: the age of a signature, in seconds, after which the app refuses it. */
+  tolerance: number;
+  /** The logic of the webhook (the extension file). */
+  handle: (email: InboundEmail, headers: Headers) => Promise<void>;
+};
+
+/** Return a text value, or null for an empty value or a file. */
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/** Return the value of a header without the spaces around it, or null. */
+function header(value: unknown): string | null {
+  return text(value)?.trim() ?? null;
+}
+
+/** Return the addresses of a header, for example `Ada <ada@example.com>, bob@example.com`. */
+function addresses(value: string | null): EmailAddress[] {
+  const parts: string[] = [];
+  let current = "";
+  let quoted = false;
+  let angle = false;
+  for (const char of value ?? "") {
+    if (char === '"') {
+      quoted = !quoted;
+    } else if (!quoted && (char === "<" || char === ">")) {
+      angle = char === "<";
+    }
+    if (char === "," && !quoted && !angle) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts.flatMap((part) => {
+    const match = /^(.*)<([^<>]+)>\s*$/.exec(part.trim());
+    const address = (match?.[2] ?? part).trim();
+    const name = (match?.[1] ?? "").trim().replace(/^"(.*)"$/, "$1").trim();
+    return address.includes("@") ? [{ address, name: name || null }] : [];
+  });
+}
+{% if "mailgun" in providers or "sendgrid" in providers %}
+
+/** Return the form of the body. A body that is not a form gives an empty form. */
+async function readForm(body: Buffer, headers: Headers): Promise<FormData> {
+  const type = headers.get("content-type") ?? "";
+  try {
+    return await new Response(new Uint8Array(body), { headers: { "Content-Type": type } }).formData();
+  } catch {
+    return new FormData();
+  }
+}
+
+/** Return each file of the form as an attachment. */
+function files(form: FormData): EmailAttachment[] {
+  const found: EmailAttachment[] = [];
+  form.forEach((value, key) => {
+    if (typeof value !== "string") {
+      found.push({
+        name: value.name || key,
+        contentType: value.type || "application/octet-stream",
+        size: value.size,
+      });
+    }
+  });
+  return found;
+}
+{% endif %}
+{% if "mailgun" in providers %}
+
+/**
+ * Read the form of a route of Mailgun with the action `forward`. The field
+ * `message-headers` has all headers of the email, as a JSON list of `[name, value]` pairs.
+ */
+function readMailgun(form: FormData): InboundEmail | undefined {
+  let pairs: unknown;
+  try {
+    pairs = JSON.parse(text(form.get("message-headers")) ?? "[]");
+  } catch {
+    return undefined;
+  }
+  const headers = new Map<string, string>();
+  for (const pair of Array.isArray(pairs) ? (pairs as unknown[]) : []) {
+    const [name, value] = Array.isArray(pair) && pair.length === 2 ? (pair as unknown[]) : [];
+    if (typeof name === "string" && typeof value === "string" && !headers.has(name.toLowerCase())) {
+      headers.set(name.toLowerCase(), value);
+    }
+  }
+  const field = (name: string) =>
+    header(headers.get(name.toLowerCase()) ?? form.get(name) ?? form.get(name.toLowerCase()));
+  const [sender] = [...addresses(field("From")), ...addresses(header(form.get("sender")))];
+  if (sender === undefined) {
+    return undefined;
+  }
+  return {
+    messageId: field("Message-Id"),
+    sender,
+    to: addresses(field("To") ?? header(form.get("recipient"))),
+    cc: addresses(field("Cc")),
+    subject: text(form.get("subject")) ?? "",
+    text: text(form.get("body-plain")) ?? "",
+    html: text(form.get("body-html")),
+    inReplyTo: field("In-Reply-To"),
+    attachments: files(form),
+  };
+}
+{% endif %}
+{% if "postmark" in providers %}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+/** Return the addresses of a `FromFull`, `ToFull`, or `CcFull` value of Postmark. */
+function postmarkAddresses(value: unknown): EmailAddress[] {
+  return (Array.isArray(value) ? list(value) : [value]).flatMap((item) => {
+    const address = isRecord(item) ? header(item.Email) : null;
+    return address?.includes("@") && isRecord(item) ? [{ address, name: header(item.Name) }] : [];
+  });
+}
+
+/**
+ * Read the JSON body of the inbound webhook of Postmark. The list `Headers` has the
+ * headers of the email that the other keys do not have, for example `Message-ID` and
+ * `In-Reply-To`.
+ */
+function readPostmark(data: unknown): InboundEmail | undefined {
+  if (!isRecord(data)) {
+    return undefined;
+  }
+  const headers = new Map<string, string>();
+  for (const item of list(data.Headers)) {
+    if (isRecord(item) && typeof item.Name === "string" && typeof item.Value === "string") {
+      if (!headers.has(item.Name.toLowerCase())) {
+        headers.set(item.Name.toLowerCase(), item.Value);
+      }
+    }
+  }
+  const [sender] = [...postmarkAddresses(data.FromFull), ...addresses(header(data.From))];
+  if (sender === undefined) {
+    return undefined;
+  }
+  const to = postmarkAddresses(data.ToFull);
+  const cc = postmarkAddresses(data.CcFull);
+  return {
+    messageId: header(headers.get("message-id")),
+    sender,
+    to: to.length > 0 ? to : addresses(header(data.To)),
+    cc: cc.length > 0 ? cc : addresses(header(data.Cc)),
+    subject: text(data.Subject) ?? "",
+    text: text(data.TextBody) ?? "",
+    html: text(data.HtmlBody),
+    inReplyTo: header(headers.get("in-reply-to")),
+    attachments: list(data.Attachments)
+      .filter(isRecord)
+      .map((item) => ({
+        name: header(item.Name) ?? "attachment",
+        contentType: header(item.ContentType) ?? "application/octet-stream",
+        size: typeof item.ContentLength === "number" ? item.ContentLength : 0,
+      })),
+  };
+}
+{% endif %}
+{% if "sendgrid" in providers %}
+
+/** Return the headers of the header lines of an email, by name in lower case. */
+function headerLines(lines: string): Map<string, string> {
+  const found = new Map<string, string>();
+  let last: string | undefined;
+  for (const line of lines.split(/\r?\n/)) {
+    if (/^[ \t]/.test(line) && last !== undefined) {
+      found.set(last, `${found.get(last) ?? ""} ${line.trim()}`);
+      continue;
+    }
+    const index = line.indexOf(":");
+    const name = line.slice(0, Math.max(index, 0)).trim().toLowerCase();
+    last = index > 0 && !found.has(name) ? name : undefined;
+    if (last !== undefined) {
+      found.set(last, line.slice(index + 1).trim());
+    }
+  }
+  return found;
+}
+
+/**
+ * Read the form of the Inbound Parse webhook of SendGrid (not the raw MIME message).
+ * The field `headers` has the header lines of the email, for example the `Message-ID`
+ * and the `In-Reply-To` header.
+ */
+function readSendgrid(form: FormData): InboundEmail | undefined {
+  const headers = headerLines(text(form.get("headers")) ?? "");
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(text(form.get("envelope")) ?? "{}");
+  } catch {
+    return undefined;
+  }
+  const from =
+    typeof envelope === "object" && envelope !== null ? (envelope as { from?: unknown }).from : null;
+  const [sender] = [...addresses(header(form.get("from"))), ...addresses(header(from))];
+  if (sender === undefined) {
+    return undefined;
+  }
+  return {
+    messageId: header(headers.get("message-id")),
+    sender,
+    to: addresses(header(form.get("to"))),
+    cc: addresses(header(form.get("cc"))),
+    subject: text(form.get("subject")) ?? "",
+    text: text(form.get("text")) ?? "",
+    html: text(form.get("html")),
+    inReplyTo: header(headers.get("in-reply-to")),
+    attachments: files(form),
+  };
+}
+{% endif %}
+
+/**
+ * Receive a request of an email webhook. Check the signature (401 if it is not
+ * correct), read the email of the mail service (400 if the body is not an email),
+ * and call the logic one time for each `Message-ID`. A repeated email gives the
+ * receipt with `repeated: true`, and the logic does not run.
+ */
+export async function receiveEmail(request: Request, options: EmailOptions): Promise<Response> {
+{% if i18n %}
+  return inRequestLanguage(() => receive(request, options));
+}
+
+async function receive(request: Request, options: EmailOptions): Promise<Response> {
+{% endif %}
+  if (!options.secret) {
+    console.error(`The server has no secret for the webhook ${options.name}.`);
+    return problem(500, {{ js_format("The server has no secret for the webhook {name}.", name="options.name") }});
+  }
+  const secret = Buffer.from(options.secret);
+  const body = Buffer.from(await request.arrayBuffer());
+  const headers = request.headers;
+  const invalid = () => problem(401, {{ tr(text("The signature of the webhook is not valid.")) }});
+  if (options.scheme === "basic" && !checkBasic(secret, headers.get("authorization"))) {
+    return invalid();
+  }
+{% set postmark = "postmark" in providers %}
+{% set form = "mailgun" in providers or "sendgrid" in providers %}
+  let email: InboundEmail | undefined;
+{% if postmark and form %}
+  if (options.provider === "postmark") {
+{% endif %}
+{% if postmark %}
+  {{ "  " if form else "" }}let data: unknown;
+  {{ "  " if form else "" }}try {
+  {{ "  " if form else "" }}  data = JSON.parse(body.toString("utf8"));
+  {{ "  " if form else "" }}} catch {
+  {{ "  " if form else "" }}  return problem(400, {{ tr(text("The body of the webhook is not valid JSON.")) }});
+  {{ "  " if form else "" }}}
+  {{ "  " if form else "" }}email = readPostmark(data);
+{% endif %}
+{% if postmark and form %}
+  } else {
+{% endif %}
+{% if form %}
+  {{ "  " if postmark else "" }}const form = await readForm(body, headers);
+  {{ "  " if postmark else "" }}if (options.scheme === "mailgun" && !checkMailgun(secret, form, { tolerance: options.tolerance })) {
+  {{ "  " if postmark else "" }}  return invalid();
+  {{ "  " if postmark else "" }}}
+{% if "mailgun" in providers and "sendgrid" in providers %}
+  {{ "  " if postmark else "" }}email = options.provider === "mailgun" ? readMailgun(form) : readSendgrid(form);
+{% elif "mailgun" in providers %}
+  {{ "  " if postmark else "" }}email = readMailgun(form);
+{% else %}
+  {{ "  " if postmark else "" }}email = readSendgrid(form);
+{% endif %}
+{% endif %}
+{% if postmark and form %}
+  }
+{% endif %}
+  if (email === undefined) {
+    return problem(400, {{ tr(text("The body of the webhook is not a valid email.")) }});
+  }
+  const eventId = email.messageId ?? createHash("sha256").update(body).digest("hex");
+  return deliver(options.name, eventId, email, headers, options.handle);
+}

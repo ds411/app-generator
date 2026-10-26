@@ -57,3 +57,42 @@ export function checkStripe(
   const expected = createHmac("sha256", secret).update(`${timestamp}.`).update(body).digest("hex");
   return signatures.some((signature) => equal(signature, expected));
 }
+
+/**
+ * Check the fields `timestamp`, `token`, and `signature` of a form of Mailgun. The
+ * signature is the HMAC-SHA256 of `<timestamp><token>` with the signing key, in hex. A
+ * time that is more than `tolerance` seconds before or after now is not valid.
+ */
+export function checkMailgun(
+  secret: Buffer,
+  form: FormData,
+  options: { tolerance: number; now?: number },
+): boolean {
+  const [timestamp, token, signature] = ["timestamp", "token", "signature"].map((key) => form.get(key));
+  if (typeof timestamp !== "string" || typeof token !== "string" || typeof signature !== "string") {
+    return false;
+  }
+  const now = options.now ?? Date.now() / 1000;
+  if (!/^\d+$/.test(timestamp) || Math.abs(now - Number(timestamp)) > options.tolerance) {
+    return false;
+  }
+  const expected = createHmac("sha256", secret).update(timestamp + token).digest("hex");
+  return equal(signature.trim(), expected);
+}
+
+/**
+ * Check the header `Authorization: Basic <credentials>` (HTTP Basic authentication). The
+ * secret is `<user name>:<password>`, and the credentials are its Base64. A mail service
+ * sends the header when its URL of the webhook has the user name and the password.
+ */
+export function checkBasic(secret: Buffer, header: string | null): boolean {
+  const [scheme, credentials, ...rest] = (header ?? "").trim().split(/\s+/);
+  if (scheme?.toLowerCase() !== "basic" || credentials === undefined || rest.length > 0) {
+    return false;
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(credentials)) {
+    return false;
+  }
+  const given = Buffer.from(credentials, "base64");
+  return given.length === secret.length && timingSafeEqual(given, secret);
+}

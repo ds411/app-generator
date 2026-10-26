@@ -319,8 +319,19 @@ again. The changes that the logic made before the error stay.
 | Webhook | Endpoint | Signature | Secret |
 | ------- | -------- | --------- | ------ |
 {% for w in ts_webhooks.values() %}
-| `{{ w.name }}` | `POST {{ w.path }}` | {{ "Stripe (`Stripe-Signature`)" if w.scheme == "stripe" else "HMAC-SHA256 in `" ~ w.header ~ "`" }} | `{{ w.secret_env }}` |
+| `{{ w.name }}` | `POST {{ w.path }}` | {{ w.signature_text }} | `{{ w.secret_env }}` |
 {% endfor %}
+{% if ts_webhooks.values() | selectattr("email") | list %}
+
+A webhook with the format `email` receives the inbound emails that a
+mail service forwards (Mailgun, Postmark, or SendGrid). The logic gets
+the email as `InboundEmail` of `@/shared/webhooks`: the sender, the receivers, the subject, the
+text, the `In-Reply-To` header, and the names and sizes of the
+attachments. The event ID is the `Message-ID` header. With HTTP Basic,
+the secret is `<user name>:<password>`, and the URL of the webhook at
+the mail service has them, for example
+`https://<user name>:<password>@example.com/webhooks/support`.
+{% endif %}
 
 Without its secret, an endpoint gives 500. A `WebhookError` of
 `@/shared/webhooks` in the logic gives its status to the sender.

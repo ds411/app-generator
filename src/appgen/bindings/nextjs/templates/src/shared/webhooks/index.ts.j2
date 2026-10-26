@@ -1,6 +1,7 @@
 {{ trace_header(*(ts_webhooks.values() | map(attribute="id"))) }}
 // The webhooks (ADR 0028): the checks of the signatures and of the
-// repeated events. Use it only on the server.
+// repeated events, and the inbound emails (ADR 0030). Use it only on the
+// server.
 import "server-only";
 
 export {
@@ -11,4 +12,13 @@ export {
   type WebhookOptions,
   type WebhookReceipt,
 } from "./receive";
-export { checkHmacSha256, checkStripe } from "./signature";
+export { checkBasic, checkHmacSha256, checkMailgun, checkStripe } from "./signature";
+{% if ts_webhooks.values() | selectattr("email") | list %}
+export {
+  type EmailAddress,
+  type EmailAttachment,
+  type EmailOptions,
+  type InboundEmail,
+  receiveEmail,
+} from "./email";
+{% endif %}

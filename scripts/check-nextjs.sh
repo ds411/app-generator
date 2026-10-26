@@ -11,7 +11,9 @@
 # generate tests/fixtures/seed-data.yaml, and run lint, type check,
 # appgen check, and the seed test (scripts/seed_test.py) on it. Then
 # generate tests/fixtures/webhooks.yaml, and run lint, type check, build,
-# appgen check, and the webhook test (scripts/webhook_test.py) on it.
+# appgen check, and the webhook test (scripts/webhook_test.py) on it, and
+# the same for tests/fixtures/inbound-email.yaml with its hand-written
+# logic and the inbound email test (scripts/inbound_email_test.py).
 # Last, generate tests/fixtures/jobs.yaml with the hand-written operations
 # of tests/fixtures/jobs-extensions/nextjs/, and run lint, type check,
 # appgen check, and the test of the routes of the jobs with a fixed clock
@@ -47,16 +49,19 @@ seed_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-seed.XXXXXX")
 # The app of the webhooks fixture (ADR 0028), in a temporary folder.
 webhooks_definition=tests/fixtures/webhooks.yaml
 webhooks_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-webhooks.XXXXXX")
+# The app of the inbound email fixture (ADR 0030), in a temporary folder.
+email_definition=tests/fixtures/inbound-email.yaml
+email_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-email.XXXXXX")
 jobs_definition=tests/fixtures/jobs.yaml
 jobs_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-jobs.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$jobs_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$jobs_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out"' EXIT
 fi
 
 step() {
@@ -149,6 +154,28 @@ uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
 
 step "webhook test"
 uv run --locked scripts/webhook_test.py "$webhooks_definition" --app "$webhooks_out"
+
+step "generate $email_definition in $email_out"
+# The hand-written logic of the fixture: appgen keeps an extension file
+# that exists.
+cp -R tests/fixtures/inbound-email/extensions/nextjs/. "$email_out"/
+uv run --locked appgen generate "$email_definition" -b nextjs -o "$email_out" >/dev/null
+(
+    cd "$email_out"
+    step "pnpm install (inbound email)"
+    pnpm install --silent
+    step "pnpm lint (inbound email)"
+    pnpm --silent lint
+    step "pnpm typecheck (inbound email)"
+    pnpm --silent typecheck
+    step "pnpm build (inbound email)"
+    pnpm --silent build >/dev/null
+)
+step "appgen check (inbound email)"
+uv run --locked appgen check "$email_definition" "$email_out"
+
+step "inbound email test"
+uv run --locked scripts/inbound_email_test.py nextjs "$email_definition" --app "$email_out"
 
 step "generate $jobs_definition in $jobs_out"
 cp -R tests/fixtures/jobs-extensions/nextjs/. "$jobs_out"/

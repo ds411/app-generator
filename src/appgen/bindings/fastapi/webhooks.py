@@ -5,16 +5,22 @@ For each webhook of the definition, the binding writes a package
 models of the schema of the body (`models.py`), and the extension file
 with the logic (`handler_ext.py`). This module gives the values of these
 files: the names, the check of the signature, and a valid sample body
-for the generated tests.
+for the generated tests. A webhook with `format: email` reads the inbound
+email of its mail service with `app/core/inbound_email.py` (ADR 0030).
 """
 
 from dataclasses import dataclass, field
 
 from appgen.bindings.fastapi.integrations import PyApiModel, python_models
 from appgen.bindings.fastapi.pysource import call, from_import, literal, string
-from appgen.bindings.shared.webhooks import sample_event, sample_event_id
+from appgen.bindings.shared.webhooks import (
+    sample_event,
+    sample_event_id,
+    secret_comment,
+    signature_text,
+)
 from appgen.dsl.model import AppDefinition
-from appgen.dsl.webhooks import Webhook
+from appgen.dsl.webhooks import EMAIL_PROVIDERS, Webhook
 from appgen.gen.naming import snake
 
 
@@ -29,7 +35,7 @@ class PyWebhook:
     path: str
     description: str | None
     scheme: str
-    """`hmac_sha256` or `stripe`."""
+    """`hmac_sha256`, `stripe`, `mailgun`, or `basic`."""
     header: str
     """The header with the signature."""
     prefix: str
@@ -48,6 +54,33 @@ class PyWebhook:
     """A valid body with the event ID, for the generated tests (`sample_event`)."""
     sample_event_id: str = ""
     """The event ID of the sample body or of the header of the generated tests."""
+    provider: str | None = None
+    """The mail service of a webhook with `format: email`, or None for JSON events."""
+
+    @property
+    def email(self) -> bool:
+        """True if the webhook receives the inbound emails of a mail service."""
+        return self.provider is not None
+
+    @property
+    def signature_text(self) -> str:
+        """The check of the signature, for the README."""
+        return signature_text(self.scheme, self.header)
+
+    @property
+    def secret_comment(self) -> str:
+        """The comment of the secret variable in `.env.example`."""
+        return secret_comment(self.name, self.path, self.scheme)
+
+    @property
+    def provider_title(self) -> str:
+        """The name of the mail service, for example `Postmark`."""
+        return EMAIL_PROVIDERS.get(self.provider or "", "")
+
+    @property
+    def form(self) -> bool:
+        """True if the body is a form: the inbound emails of Mailgun and SendGrid."""
+        return self.provider in ("mailgun", "sendgrid")
 
     @property
     def handler(self) -> str:
@@ -82,9 +115,7 @@ class PyWebhook:
 
     def router_imports(self) -> list[str]:
         """Return the import lines of `router.py`."""
-        names = ["WebhookReceipt", "read_json", "record_event", "require_secret"]
-        names.append("check_stripe" if self.scheme == "stripe" else "check_hmac_sha256")
-        names.append("event_id_in_header" if self.event_header else "event_id_in_body")
+        names = ["WebhookReceipt", "record_event", "require_secret", f"check_{self.scheme}"]
         lines = [
             "from fastapi import APIRouter, Request",
             "from app.core.config import Settings",
@@ -92,6 +123,17 @@ class PyWebhook:
             "from app.core.errors import problem_responses",
             f"from app.webhooks.{self.module}.handler_ext import {self.handler}",
         ]
+        if self.provider is not None:
+            readers = {"email_event_id", f"read_{self.provider}"}
+            if self.form:
+                readers.add("read_form")
+            else:
+                names.append("read_json")
+            lines.append(from_import("app.core.inbound_email", readers))
+            lines.append(from_import("app.core.webhooks", set(names)))
+            return lines
+        names.append("read_json")
+        names.append("event_id_in_header" if self.event_header else "event_id_in_body")
         if self.typed:
             names.append("read_event")
             lines.append("from pydantic import TypeAdapter")
@@ -105,7 +147,9 @@ class PyWebhook:
             "from collections.abc import Mapping",
             "from sqlalchemy.ext.asyncio import AsyncSession",
         ]
-        if self.typed:
+        if self.email:
+            lines.append("from app.core.inbound_email import InboundEmail")
+        elif self.typed:
             lines.append(f"from app.webhooks.{self.module}.models import {self.body_type}")
         else:
             lines.append("from pydantic import JsonValue")
@@ -115,6 +159,11 @@ class PyWebhook:
         """Return the statements of the endpoint that check the signature (indent 4)."""
         secret = f"require_secret(settings.{self.secret_setting}, {string(self.name)})"
         header = f"request.headers.get({string(self.header)})"
+        if self.scheme == "mailgun":
+            # The signature is in the form, so the check follows `read_form`.
+            return [f"secret = {secret}"]
+        if self.scheme == "basic":
+            return [f"secret = {secret}", f"check_basic(secret, {header})"]
         if self.scheme == "stripe":
             args = ["secret", "body", header, f"tolerance={self.tolerance}"]
             check = call("", "check_stripe", args)
@@ -128,6 +177,18 @@ class PyWebhook:
             ]
             check = call("", "check_hmac_sha256", args)
         return [f"secret = {secret}", check]
+
+    def email_lines(self) -> list[str]:
+        """Return the statements of the endpoint that read the email and its event ID (indent
+        4)."""
+        if self.form:
+            lines = ["form = await read_form(request)"]
+            if self.scheme == "mailgun":
+                lines.append(f"check_mailgun(secret, form, tolerance={self.tolerance})")
+            lines.append(f"event = read_{self.provider}(form)")
+        else:
+            lines = [f"event = read_{self.provider}(read_json(body))"]
+        return [*lines, "event_id = email_event_id(event, body)"]
 
     def event_id_line(self) -> str:
         """Return the statement that reads the event ID (indent 4)."""
@@ -168,7 +229,11 @@ def _webhook(name: str, webhook: Webhook) -> PyWebhook:
         event_field=event_id.path,
         event_header=event_id.header,
         body_type="JsonValue",
+        provider=webhook.provider if webhook.email else None,
     )
+    if py.email:
+        py.body_type = "InboundEmail"
+        return py
     spec = webhook.spec
     schema_name = webhook.body_schema
     if schema_name is not None and spec.schemas:

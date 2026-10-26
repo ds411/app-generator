@@ -1,6 +1,28 @@
 {% set w = ts_webhooks[name] %}
 {{ trace_header(element_id) }}
 import "server-only";
+{% if w.email %}
+
+import { receiveEmail } from "@/shared/webhooks";
+
+import { {{ w.handler }} } from "./{{ w.slice }}.ext";
+
+/**
+ * Receive an inbound email of {{ w.provider_title }} for the webhook `{{ w.name }}`: check the
+ * signature ({{ w.scheme }}), read the email, and call `{{ w.handler }}` of the extension file
+ * one time for each `Message-ID`.
+ */
+export function {{ w.receive }}(request: Request): Promise<Response> {
+  return receiveEmail(request, {
+    name: {{ w.name | tojson }},
+    secret: process.env.{{ w.secret_env }},
+    provider: {{ w.provider | tojson }},
+    scheme: {{ w.scheme | tojson }},
+    tolerance: {{ w.tolerance }},
+    handle: {{ w.handler }},
+  });
+}
+{% else %}
 
 {% if w.typed %}
 import type { z } from "zod";
@@ -33,3 +55,4 @@ export function {{ w.receive }}(request: Request): Promise<Response> {
     handle: {{ w.handler }},
   });
 }
+{% endif %}

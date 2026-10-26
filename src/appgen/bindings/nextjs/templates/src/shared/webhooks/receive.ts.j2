@@ -47,7 +47,7 @@ export type WebhookOptions<T> = {
 export type WebhookReceipt = { event_id: string; repeated: boolean };
 
 /** Return an error answer in the format of the problem details (RFC 9457). */
-function problem(status: number, detail: string, extra: Record<string, unknown> = {}): Response {
+export function problem(status: number, detail: string, extra: Record<string, unknown> = {}): Response {
   return Response.json(
     { type: "about:blank", status, detail, ...extra },
     { status, headers: { "Content-Type": "application/problem+json" } },
@@ -147,14 +147,29 @@ async function receive<T>(request: Request, options: WebhookOptions<T>): Promise
     }
     event = parsed.data;
   }
+  return deliver(options.name, eventId, event, headers, options.handle);
+}
+
+/**
+ * Call the logic of a webhook one time for an event ID, after the checks of the
+ * request. A repeated event gives the receipt with `repeated: true`. When the logic
+ * fails, the app removes the event ID again, and gives the status of the error.
+ */
+export async function deliver<T>(
+  name: string,
+  eventId: string,
+  event: T,
+  headers: Headers,
+  handle: (event: T, headers: Headers) => Promise<void>,
+): Promise<Response> {
   const key = eventKey(eventId);
-  if (!(await recordEvent(options.name, key))) {
+  if (!(await recordEvent(name, key))) {
     return Response.json({ event_id: eventId, repeated: true } satisfies WebhookReceipt);
   }
   try {
-    await options.handle(event, headers);
+    await handle(event, headers);
   } catch (error) {
-    await forgetEvent(options.name, key);
+    await forgetEvent(name, key);
     if (error instanceof WebhookError) {
       return problem(error.status, error.message);
     }
@@ -164,7 +179,7 @@ async function receive<T>(request: Request, options: WebhookOptions<T>): Promise
     if (error instanceof ValidationError) {
       return problem(422, error.message);
     }
-    console.error(`The logic of the webhook ${options.name} failed:`, error);
+    console.error(`The logic of the webhook ${name} failed:`, error);
     return problem(500, {{ tr(text("The logic of the webhook failed. Deliver the event again later.")) }});
   }
   return Response.json({ event_id: eventId, repeated: false } satisfies WebhookReceipt);

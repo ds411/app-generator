@@ -6643,6 +6643,32 @@
             }
           ],
           "default": null
+        },
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "email"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "enum": [
+                "mailgun",
+                "postmark",
+                "sendgrid"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
         }
       },
       "required": [
@@ -6711,7 +6737,9 @@
         "scheme": {
           "enum": [
             "hmac_sha256",
-            "stripe"
+            "stripe",
+            "mailgun",
+            "basic"
           ],
           "title": "Scheme",
           "type": "string"

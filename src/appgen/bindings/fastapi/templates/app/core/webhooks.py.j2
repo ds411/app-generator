@@ -21,8 +21,9 @@ the sender can deliver the event again.
      "from sqlalchemy.orm import Mapped, mapped_column",
      "from app.core.db import Base",
      "from app.core.errors import ProblemError"]
-    + (["import base64"] if py_webhooks.values() | selectattr("encoding", "eq", "base64") | list else [])
-    + (["import time"] if "stripe" in schemes else [])
+    + (["import base64"] if "basic" in schemes or py_webhooks.values() | selectattr("encoding", "eq", "base64") | list else [])
+    + (["import time"] if "stripe" in schemes or "mailgun" in schemes else [])
+    + (["from collections.abc import Mapping"] if "mailgun" in schemes else [])
     + (["from app.core.i18n import t"] if py.translated else [])
 ) }}
 
@@ -72,7 +73,7 @@ def check_hmac_sha256(
     if header is None or not header.startswith(prefix):
         raise _invalid_signature()
     digest = hmac.new(secret, body, hashlib.sha256).digest()
-{% if py_webhooks.values() | selectattr("encoding", "eq", "base64") | list %}
+{% if py_webhooks.values() | selectattr("scheme", "eq", "hmac_sha256") | selectattr("encoding", "eq", "base64") | list %}
     expected = base64.b64encode(digest).decode() if encoding == "base64" else digest.hex()
 {% else %}
     expected = digest.hex()
@@ -103,6 +104,50 @@ def check_stripe(
     signed = f"{timestamp}.".encode() + body
     expected = hmac.new(secret, signed, hashlib.sha256).hexdigest()
     if not any(hmac.compare_digest(signature, expected) for signature in signatures):
+        raise _invalid_signature()
+{% endif %}
+{% if "mailgun" in schemes %}
+
+
+def check_mailgun(
+    secret: bytes, form: Mapping[str, object], *, tolerance: int, now: float | None = None
+) -> None:
+    """Check the fields `timestamp`, `token`, and `signature` of a form of Mailgun.
+
+    The signature is the HMAC-SHA256 of `<timestamp><token>` with the
+    signing key, in hex. A time that is more than `tolerance` seconds before
+    or after now gives 401, so that an old request cannot come again.
+    """
+    timestamp, token, signature = (form.get(key) for key in ("timestamp", "token", "signature"))
+    if not isinstance(timestamp, str) or not isinstance(token, str):
+        raise _invalid_signature()
+    if not isinstance(signature, str) or not timestamp.isdigit():
+        raise _invalid_signature()
+    if abs((time.time() if now is None else now) - int(timestamp)) > tolerance:
+        raise _invalid_signature()
+    expected = hmac.new(secret, (timestamp + token).encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature.strip(), expected):
+        raise _invalid_signature()
+{% endif %}
+{% if "basic" in schemes %}
+
+
+def check_basic(secret: bytes, header: str | None) -> None:
+    """Check the header `Authorization: Basic <credentials>` (HTTP Basic authentication).
+
+    The secret is `<user name>:<password>`, and the credentials are its
+    Base64. A mail service sends the header when its URL of the webhook
+    has the user name and the password, for example
+    `https://<user name>:<password>@example.com/webhooks/support`.
+    """
+    scheme, _, credentials = (header or "").partition(" ")
+    if scheme.lower() != "basic":
+        raise _invalid_signature()
+    try:
+        given = base64.b64decode(credentials.strip(), validate=True)
+    except ValueError:
+        raise _invalid_signature() from None
+    if not hmac.compare_digest(given, secret):
         raise _invalid_signature()
 {% endif %}
 

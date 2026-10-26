@@ -448,6 +448,14 @@ The project tracker example has the same logic for the commits
 `scripts/webhook_test.py` sends signed events to each webhook of
 `tests/fixtures/webhooks.yaml`, with the stubs of the extension files.
 
+A webhook with `format: email` ([ADR 0030](adr/0030-inbound-email.md))
+has the same gap, and its function gets the inbound email
+(`InboundEmail`). The fixture `tests/fixtures/inbound-email.yaml` has
+hand-written logic for both apps in `tests/fixtures/inbound-email/extensions/`:
+an email makes a ticket, and a reply counts on the ticket of the email
+that it answers. `scripts/inbound_email_test.py` sends emails in the
+format of Mailgun, Postmark, and SendGrid to the built apps.
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration
