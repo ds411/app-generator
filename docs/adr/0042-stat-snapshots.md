@@ -36,12 +36,15 @@ has the optional key `snapshots`: the name of a stat widget of the same
 dashboard with `snapshots: daily`. The chart of snapshots is a line
 chart of the stored values of the stat, and `days` (2 to 366, default
 30) is the count of days up to today that it shows. It has no `entity`,
-`group_by`, `interval`, `aggregate`, `field`, `filter`, or `badge`. A
-chart without `snapshots` needs `entity` and `group_by`.
+`group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, or
+`period_field`. A chart without `snapshots` needs `entity` and
+`group_by`.
 
 A snapshot has the value of all records. So the validator reports a
 stat with snapshots whose entity has a record rule, because the chart
-would show the value of records that a role may not read.
+would show the value of records that a role may not read. A snapshot is
+the value of a day, not of the period of the dashboard (ADR 0038), so
+the validator also reports a stat with snapshots and `period_field`.
 
 The FastAPI and the Next.js apps keep the table `stat_snapshots`, with
 the same columns: the dashboard, the widget, the day (the primary key),
