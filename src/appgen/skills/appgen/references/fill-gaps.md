@@ -217,6 +217,10 @@ of the entity in snake case, for example `bookings`.
   the stub fails, and so each change that starts the event fails (501).
   The generated tests turn off the events: a test of your logic that
   needs them has `@pytest.mark.events`.
+- The repository functions `add`, `update`, and `delete` add the
+  entries of the change log of an entity with `history` (ADR 0040). A
+  custom operation that changes records with these functions adds the
+  entries too. A change with SQL adds none.
 - The factories of `tests/factories.py` (`make_<entity>(session, **values)`)
   give a value to each field, also to the optional fields, and the
   values change with each call. In a test of your logic, give each value

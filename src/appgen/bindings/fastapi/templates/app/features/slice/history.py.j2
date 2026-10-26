@@ -1,0 +1,79 @@
+{{ trace_header(py.entity(name).history.id) }}
+{% set e = py.entity(name) %}
+{% set h = e.history %}
+{% set read_scope = h.read and h.read.scope_action and e.scoped %}
+{% set change_scope = h.update and h.update.scope_action %}
+{{ e.history_doc() }}
+
+{{ e.history_imports() }}
+
+router = APIRouter(prefix="{{ e.path }}")
+{% if read_scope %}
+
+ReadScope = Annotated[RecordScope | None, Depends(scope_of("read"))]
+"""The records that the request may read (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% if change_scope %}
+
+ChangeScope = Annotated[RecordScope | None, Depends(scope_of("change"))]
+"""The records that the request may change (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% if h.read %}
+
+
+{{ trace(h.id) }}
+@router.get(
+    "/{id}/history",
+    responses=problem_responses(404),
+    summary="List {{ e.snake | replace('_', ' ') }} history",
+    operation_id="{{ e.history_operation }}",
+{% if h.read.protected %}
+    dependencies=[Depends({{ e.guard }})],
+{% endif %}
+)
+async def {{ e.history_operation }}(
+    id: UUID,
+    query: Annotated[HistoryQuery, Query()],
+    session: SessionDep,
+{% if read_scope %}
+    scope: ReadScope,
+{% endif %}
+) -> Page[HistoryEntryRead]:
+    """Return a page of the change log of a record, the newest entry first."""
+    record = await repository.get(session, id{{ ", scope" if read_scope }})
+    return await history_page(session, "{{ e.name }}", record.id, query)
+{% endif %}
+{% if h.update %}
+{% set deps = ([("Depends(" ~ e.guard ~ ")")] if h.update.protected else []) + (["Depends(translations_query)"] if e.translations_query else []) %}
+
+
+{{ trace(h.id) }}
+@router.post(
+    "/{id}/history/{entry_id}/restore",
+    responses=problem_responses(404, 409, 422),
+    summary="Restore {{ e.snake | replace('_', ' ') }} history entry",
+    operation_id="{{ e.restore_operation }}",
+{% if deps %}
+    dependencies=[{{ deps | join(", ") }}],
+{% endif %}
+)
+async def {{ e.restore_operation }}(
+    id: UUID,
+    entry_id: UUID,
+    session: SessionDep,
+{% if change_scope %}
+    scope: ChangeScope,
+{% endif %}
+) -> {{ e.name }}Read:
+    """Give the fields of an entry their old values back. It is a change, with its checks."""
+    record = await repository.get(session, id{{ ", scope" if change_scope and e.scoped }})
+    entry = await restorable(session, "{{ e.name }}", record.id, entry_id)
+    record = await repository.restore(session, record, entry{{ ", scope" if change_scope and e.scoped }})
+{% if e.hides and change_scope %}
+    result = {{ e.name }}Read.model_validate(record)
+    await repository.hide(session, [result], scope)
+    return result
+{% else %}
+    return {{ e.name }}Read.model_validate(record)
+{% endif %}
+{% endif %}

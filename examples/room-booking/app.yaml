@@ -118,6 +118,8 @@ entities:
     events:
       # A new time of a booking goes to the organizer.
       changed: { operation: notify_organizer, fields: [starts_at, ends_at] }
+    # The change log keeps who changed the time, the room, and the state.
+    history: { fields: [title, starts_at, ends_at, status, room] }
 
 operations:
   cancel_booking:

@@ -1114,6 +1114,41 @@ def check_events(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
 
 
+def check_history(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """The change log keeps stored fields and `many_to_one` relations (ADR 0040)."""
+    for entity_name, entity in definition.entities.items():
+        history = entity.history
+        if history is None or history.fields is None:
+            continue
+        if len(set(history.fields)) != len(history.fields):
+            yield _error(
+                "duplicate-name", "The names in 'fields' must be unique.", history, at="fields"
+            )
+        choices = [*entity.fields, *entity.relations]
+        for name in history.fields:
+            field = entity.fields.get(name)
+            relation = entity.relations.get(name)
+            if field is None and relation is None:
+                yield _missing(history, "fields", "field or relation", name, choices)
+            elif field is not None and (field.computed is not None or field.is_file):
+                kind = "computed" if field.computed is not None else "a file field"
+                yield _error(
+                    "unsuitable-field",
+                    f"The field '{entity_name}.{name}' is {kind}. The change log keeps the "
+                    "values of the stored fields, except the files.",
+                    history,
+                    at="fields",
+                )
+            elif relation is not None and relation.kind != "many_to_one":
+                yield _error(
+                    "unsuitable-field",
+                    f"The relation '{entity_name}.{name}' is a '{relation.kind}' relation. The "
+                    "change log keeps the 'many_to_one' relations: the ID of the target.",
+                    history,
+                    at="fields",
+                )
+
+
 def _custom_operations(definition: AppDefinition, entity: str | None) -> list[str]:
     return [
         name
@@ -2729,6 +2764,7 @@ CHECKS: list[Check] = [
     check_workflows,
     check_jobs,
     check_events,
+    check_history,
     check_auth,
     check_access,
     check_apis,

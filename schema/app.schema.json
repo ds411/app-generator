@@ -2724,6 +2724,10 @@
           },
           "title": "Events",
           "type": "object"
+        },
+        "history": {
+          "$ref": "#/$defs/HistoryInput",
+          "default": null
         }
       },
       "required": [
@@ -3866,6 +3870,57 @@
     "HeaderName": {
       "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
       "type": "string"
+    },
+    "History": {
+      "additionalProperties": false,
+      "description": "The change log of the records of an entity.\n\nEach create, change, and delete of a record adds an entry with the\nuser, the time, and the old and the new values of the fields. A\nrestore gives the old values of an entry back. The short form is\n`history: true`.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "History",
+      "type": "object"
+    },
+    "HistoryInput": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/History"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "IconName": {
       "pattern": "^[a-z][a-z0-9-]*$",

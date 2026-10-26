@@ -1,6 +1,9 @@
 {{ trace_header(element_id) }}
 {% set e = py.entity(name) %}
 {% macro change_body(e) %}
+{% if e.history %}
+    kept = snapshot(record, HISTORY)
+{% endif %}
 {% if e.before_attrs %}
     {{ e.before_code() }}
 {% endif %}
@@ -26,6 +29,10 @@
     await flush(session)
     await on_changed(session, record, before)
 {% endif %}
+{% if e.history %}
+    {{ trace(e.history.id) }}
+    add_entry(session, "{{ e.name }}", record.id, action, kept, snapshot(record, HISTORY))
+{% endif %}
 {% endmacro %}
 """The data access of the slice `{{ e.slice }}`, which its operations share."""
 
@@ -46,6 +53,12 @@
 {{ trace(e.changed_event.id) }}
 {{ e.changed_constant_code() }}
 """The fields of the event `changed`: a change of one of them runs `{{ e.changed_event.operation.name }}`."""
+{% endif %}
+{% if e.history %}
+
+{{ trace(e.history.id) }}
+{{ e.history_code() }}
+"""The fields of the change log (ADR 0040): the name in the definition, and the attribute."""
 {% endif %}
 
 
@@ -189,6 +202,10 @@ async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
     await flush(session)
     await on_created(session, record)
 {% endif %}
+{% if e.history %}
+    {{ trace(e.history.id) }}
+    add_entry(session, "{{ e.name }}", record.id, "created", None, snapshot(record, HISTORY))
+{% endif %}
     return record
 
 
@@ -217,11 +234,28 @@ async def change(
     record: {{ e.name }},
     data: {{ e.name }}Update,
     scope: RecordScope | None = None,
+{% if e.history %}
+    *,
+    action: Action = "changed",
+{% endif %}
 ) -> None:
     """Change the fields that the request gives, and validate the record, without a commit.
 
     The record must stay in the scope of the request.{% if e.owner %} With a scope of an owner
-    rule, the record stays with the user.{% endif +%}
+    rule, the record stays with the user.{% endif %}{% if e.history %} The entry of the change log has the
+    action `action` (ADR 0040).{% endif +%}
+    """
+{% elif e.history %}
+async def change(
+    session: AsyncSession,
+    record: {{ e.name }},
+    data: {{ e.name }}Update,
+    *,
+    action: Action = "changed",
+) -> None:
+    """Change the fields that the request gives, and validate the record, without a commit.
+
+    The entry of the change log has the action `action` (ADR 0040).
     """
 {% else %}
 {{ py.signature("async def change", ["session: AsyncSession", "record: " ~ e.name, "data: " ~ e.name ~ "Update"], " -> None:") }}
@@ -237,18 +271,35 @@ async def update(
     record: {{ e.name }},
     data: {{ e.name }}Update,
     scope: RecordScope | None = None,
+{% if e.history %}
+    *,
+    action: Action = "changed",
+{% endif %}
 ) -> {{ e.name }}:
     """Change the fields that the request gives, validate the record, and return it.
 
     The record must stay in the scope of the request.{% if e.owner %} With a scope of an owner
-    rule, the record stays with the user.{% endif +%}
+    rule, the record stays with the user.{% endif %}{% if e.history %} The entry of the change log has the
+    action `action` (ADR 0040).{% endif +%}
+    """
+{% elif e.history %}
+async def update(
+    session: AsyncSession,
+    record: {{ e.name }},
+    data: {{ e.name }}Update,
+    *,
+    action: Action = "changed",
+) -> {{ e.name }}:
+    """Change the fields that the request gives, validate the record, and return it.
+
+    The entry of the change log has the action `action` (ADR 0040).
     """
 {% else %}
 {{ py.signature("async def update", ["session: AsyncSession", "record: " ~ e.name, "data: " ~ e.name ~ "Update"], " -> " ~ e.name ~ ":") }}
     """Change the fields that the request gives, validate the record, and return it."""
 {% endif %}
 {% if e.line_items %}
-    await change(session, record, data{{ ", scope" if e.scoped }})
+    await change(session, record, data{{ ", scope" if e.scoped }}{{ ", action=action" if e.history }})
 {% else %}
 {{ change_body(e) | trim("\n") }}
 {% endif %}
@@ -260,20 +311,34 @@ async def update(
 async def delete(session: AsyncSession, record: {{ e.name }}, storage: Storage) -> None:
     """Delete a record, and then its files (ADR 0027)."""
     {{ e.files_statement() }}
+{% if e.history %}
+    kept = snapshot(record, HISTORY)
+{% endif %}
     await session.delete(record)
 {% if e.deleted_event %}
     await flush(session)
     await on_deleted(session, record)
+{% endif %}
+{% if e.history %}
+    {{ trace(e.history.id) }}
+    add_entry(session, "{{ e.name }}", record.id, "deleted", kept, None)
 {% endif %}
     await commit(session)
     await delete_files(storage, files)
 {% elif e.line_items %}
 async def remove(session: AsyncSession, record: {{ e.name }}) -> None:
     """Delete a record without a commit."""
+{% if e.history %}
+    kept = snapshot(record, HISTORY)
+{% endif %}
     await session.delete(record)
 {% if e.deleted_event %}
     await flush(session)
     await on_deleted(session, record)
+{% endif %}
+{% if e.history %}
+    {{ trace(e.history.id) }}
+    add_entry(session, "{{ e.name }}", record.id, "deleted", kept, None)
 {% endif %}
 
 
@@ -284,10 +349,17 @@ async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
 {% else %}
 async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
     """Delete a record."""
+{% if e.history %}
+    kept = snapshot(record, HISTORY)
+{% endif %}
     await session.delete(record)
 {% if e.deleted_event %}
     await flush(session)
     await on_deleted(session, record)
+{% endif %}
+{% if e.history %}
+    {{ trace(e.history.id) }}
+    add_entry(session, "{{ e.name }}", record.id, "deleted", kept, None)
 {% endif %}
     await commit(session)
 {% endif %}
@@ -328,6 +400,32 @@ async def delete(session: AsyncSession, record: {{ e.name }}) -> None:
         except ProblemError as error:
             raise error.at("body", "{{ lines.name }}", index) from error
 {% endfor %}
+{% if e.history %}
+
+
+{% if e.scoped %}
+async def restore(
+    session: AsyncSession,
+    record: {{ e.name }},
+    entry: HistoryEntry,
+    scope: RecordScope | None = None,
+) -> {{ e.name }}:
+{% else %}
+{{ py.signature("async def restore", ["session: AsyncSession", "record: " ~ e.name, "entry: HistoryEntry"], " -> " ~ e.name ~ ":") }}
+{% endif %}
+    """Give the fields of an entry of the change log their old values back (ADR 0040).
+
+    The restore is a change, with the checks of `update`. It adds an entry `restored`.
+    """
+    values = old_values(entry, HISTORY)
+{% for attr in e.history.translatable %}
+    if "{{ attr }}" in values:
+        # The log keeps the value of the default language.
+        values["{{ attr }}_translations"] = {DEFAULT: values.pop("{{ attr }}")}
+{% endfor %}
+    data = {{ e.name }}Update.model_validate(values)
+    return await update(session, record, data{{ ", scope" if e.scoped }}, action="restored")
+{% endif %}
 {% if e.created_event %}
 {% set ev = e.created_event %}
 

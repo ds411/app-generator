@@ -628,6 +628,41 @@ generated operations and the custom operations both start them.
   change of other fields or no change runs no `changed`, and a change in
   the operation starts no event.
 
+### The change log of the FastAPI app
+
+The FastAPI app keeps the `history` of an entity in the table
+`history_entries` ([ADR 0040](adr/0040-history.md)). `app/core/history.py`
+has the model `HistoryEntry`, the schema `HistoryEntryRead`, and the
+helpers of the log.
+
+- The repository has the constant `HISTORY`: the name in the definition
+  and the attribute of each kept field or relation. `add` adds an entry
+  `created`, `update` an entry `changed`, and `delete` an entry
+  `deleted`, after the events and before the commit. `change` and
+  `remove`, which write the lines of other records (ADR 0035), add the
+  entries of the lines. `update` keeps the
+  old values with `snapshot()` before the change, and `add_entry()`
+  compares them with the new values. Without a new value, it adds no
+  entry.
+- `json_value()` gives the JSON value of a field: the value of an enum,
+  a decimal number without the zeros at the end, a time in UTC, and an
+  ID as text.
+- With `auth`, the dependency `current_user` puts the ID of the user in
+  `session.info` with the key `appgen.user` (`USER_KEY`), and
+  `add_entry()` takes it from there. The entries of a change without a
+  request have no user.
+- `app/features/<slice>/history.py` has the endpoints
+  `GET /<entity>/{id}/history` (with the guard of the read operation)
+  and `POST /<entity>/{id}/history/{entry_id}/restore` (with the guard
+  of the update operation). The restore gives the old values of the
+  entry to `restore()` of the repository, which validates them with the
+  update schema and calls `update` with the action `restored`. The
+  record rules of a read and of a change apply.
+- The generated tests in `tests/features/<slice>/test_history.py` check
+  the entries of a create, a change, a change without a new value, and
+  a delete, the user of an entry, the page of the endpoint, and the
+  restore.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process

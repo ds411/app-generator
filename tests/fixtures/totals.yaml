@@ -4,7 +4,8 @@
 # function of a total has a field here, also with a filter, over a
 # one_to_many and over a many_to_many relation. The create and the
 # update operations of the invoices write the lines with the invoice
-# (ADR 0035), and the lines have a workflow.
+# (ADR 0035), and the lines have a workflow. The invoices and the lines
+# keep a change log (ADR 0040), also of the lines that an invoice writes.
 # scripts/check-fastapi.sh checks the FastAPI app of this definition, and
 # scripts/check-nextjs.sh the Next.js app (scripts/totals_test.py).
 version: 0
@@ -18,6 +19,7 @@ entities:
   Invoice:
     display_field: number
     crud: { views: [table, detail] }
+    history: true
     fields:
       number: { type: string, required: true, unique: true, max_length: 20 }
       discount: { type: decimal, min: 0, scale: 2, default: 0, format: currency }
@@ -33,6 +35,7 @@ entities:
   InvoiceLine:
     display_field: description
     crud: { views: [table] }
+    history: true
     fields:
       description: { type: string, required: true, max_length: 120 }
       quantity: { type: integer, min: 1, default: 1 }

@@ -10,6 +10,7 @@ deterministic.
 import json
 import math
 import re
+import textwrap
 from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from decimal import Decimal
@@ -824,6 +825,26 @@ class PyEvent:
 
 
 @dataclass(slots=True)
+class PyHistory:
+    """The change log of the records of an entity (ADR 0040)."""
+
+    id: str
+    members: list[tuple[str, str]]
+    """The fields and the relations that the log keeps: the name in the definition, and the
+    attribute of the model."""
+    translatable: list[str] = field(default_factory=list[str])
+    """The attributes of the kept translatable fields: the log keeps the default language."""
+    read: PyOperation | None = None
+    """The read operation of the entity: the endpoint of the entries needs its permission."""
+    update: PyOperation | None = None
+    """The update operation of the entity: the restore needs its permission."""
+    user_entity: str | None = None
+    """The entity of the users (`auth`): each entry has the signed-in user of the change."""
+    user_label: str | None = None
+    """The attribute of the user entity that names the user of an entry."""
+
+
+@dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
 
@@ -1199,6 +1220,8 @@ class PyEntity:
     line_items: list[PyLines] = field(default_factory=list[PyLines])
     """The lines of other entities whose records are records of this entity: the schemas
     have an item for each, and the repository has `change` and `remove`."""
+    history: PyHistory | None = None
+    """The change log of the records (ADR 0040), or None."""
 
     @property
     def guard_module(self) -> str:
@@ -1563,6 +1586,172 @@ class PyEntity:
             lines |= {"from pathlib import Path", "from app.core.storage import FolderStorage"}
         return import_block(lines)
 
+    @property
+    def history_operation(self) -> str:
+        """The operation ID of the endpoint of the change log of a record (ADR 0040)."""
+        return f"list_{self.snake}_history"
+
+    @property
+    def restore_operation(self) -> str:
+        """The operation ID of the endpoint of a restore of an entry of the change log."""
+        return f"restore_{self.snake}_history_entry"
+
+    @property
+    def history_endpoints(self) -> bool:
+        """True if the slice has the endpoints of its change log: `history.py`."""
+        h = self.history
+        return h is not None and (h.read is not None or h.update is not None)
+
+    @property
+    def history_test_field(self) -> PyField | None:
+        """A field of the change log that the tests change, or None if the tests cannot change one.
+
+        Its test value varies, and no rule or workflow of the entity reads it.
+        """
+        h = self.history
+        if h is None:
+            return None
+        kept = {attr for _, attr in h.members}
+        ruled = {a for r in self.rules for a in (r.field, r.other, r.start, r.end, *r.scope)}
+        return next(
+            (
+                f
+                for f in self._test_fields()
+                if f.attr in kept
+                and _varies(f)
+                and f.attr not in ruled
+                and f.attr not in self._workflow_attrs()
+            ),
+            None,
+        )
+
+    def history_test_imports(self) -> str:
+        """Return the import block of the tests of the change log."""
+        h = self.history
+        assert h is not None
+        f = self.history_test_field
+        history = {"HistoryEntry", "json_value", "snapshot"}
+        uuid = {"UUID"}
+        schemas: set[str] = set()
+        factories = {f"make_{self.snake}"}
+        lines = {
+            "import pytest",
+            "from sqlalchemy import select",
+            "from sqlalchemy.ext.asyncio import AsyncSession",
+            f"from app.features.{self.slice} import repository",
+            f"from app.features.{self.slice}.repository import HISTORY",
+        }
+        if f is not None:
+            factories.add(f"{self.snake}_input")
+            schemas.add(f"{self.name}Update")
+        if h.user_entity is not None:
+            history |= {"HistoryQuery", "history_page"}
+            lines.add("from app.core.db import USER_KEY")
+            factories.add(f"make_{self.app_entities[h.user_entity].snake}")
+        if h.read is not None or h.update is not None:
+            lines |= {"from httpx import AsyncClient", "from tests.problems import assert_problem"}
+        if h.read is not None:
+            uuid.add("uuid4")
+        if h.update is not None and f is not None:
+            schemas.add(f"{self.name}Read")
+        if self.files:
+            lines |= {"from pathlib import Path", "from app.core.storage import FolderStorage"}
+        lines |= {
+            from_import("uuid", uuid),
+            from_import("app.core.history", history),
+            from_import("tests.factories", factories),
+        }
+        if schemas:
+            lines.add(from_import(f"app.features.{self.slice}.schemas", schemas))
+        return import_block(lines)
+
+    def history_change_assert(self) -> str:
+        """Return the assert of the test of a change: the old and the new value of the field."""
+        f = self.history_test_field
+        assert f is not None
+        change = f'"{f.name}": {{"old": json_value(old), "new": json_value(record.{f.attr})}}'
+        line = f"    assert entry.changes == {{{change}}}"
+        if len(line) <= LINE_LENGTH:
+            return line
+        return f"    assert entry.changes == {{\n        {change}\n    }}"
+
+    def history_user_assert(self) -> str:
+        """Return the assert of the test of the user of an entry: the ID and the display value."""
+        assert self.history is not None
+        label = self.history.user_label
+        line = (
+            "    assert [(item.user_id, item.user) for item in page.items] == "
+            f"[(user.id, str(user.{label}))]"
+        )
+        if len(line) <= LINE_LENGTH:
+            return line
+        return (
+            "    assert [(item.user_id, item.user) for item in page.items] == [\n"
+            f"        (user.id, str(user.{label}))\n    ]"
+        )
+
+    def history_code(self) -> str:
+        """Return the constant with the fields of the change log and their attributes."""
+        assert self.history is not None
+        items = [f"{string(name)}: {string(attr)}" for name, attr in self.history.members]
+        return _braces("HISTORY = ", items, 0)
+
+    def history_doc(self) -> str:
+        """Return the docstring of the module of the endpoints of the change log."""
+        h = self.history
+        assert h is not None
+        head = f"The change log of the entity {self.name} (ADR 0040): the entries, and a restore."
+        text: list[str] = []
+        if h.read is not None:
+            text.append(f"The entries of a record need the permission of `{h.read.name}`.")
+            if h.read.scope_action and self.scoped:
+                text.append("The record rules of a read apply (ADR 0025).")
+        if h.update is not None:
+            text.append(f"A restore is a change: it needs the permission of `{h.update.name}`.")
+            if h.update.scope_action:
+                text.append("The record rules of a change apply.")
+        body = textwrap.fill(" ".join(text), 72)
+        return '"""' + "\n".join([head, "", body]) + '\n"""'
+
+    def history_imports(self) -> str:
+        """Return the import block of the module of the endpoints of the change log."""
+        h = self.history
+        assert h is not None
+        guards = [op for op in (h.read, h.update) if op is not None and op.protected]
+        scoped = (h.read is not None and h.read.scope_action and self.scoped) or (
+            h.update is not None and h.update.scope_action
+        )
+        fastapi = {"APIRouter"} | ({"Depends"} if guards or scoped else set[str]())
+        lines = {
+            "from uuid import UUID",
+            "from app.core.db import SessionDep",
+            "from app.core.errors import problem_responses",
+            f"from app.features.{self.slice} import repository",
+        }
+        history: set[str] = set()
+        if h.update is not None and self.translations_query:
+            fastapi.add("Depends")
+        if h.read is not None:
+            fastapi.add("Query")
+            lines |= {"from typing import Annotated", "from app.core.pagination import Page"}
+            history |= {"HistoryEntryRead", "HistoryQuery", "history_page"}
+        if h.update is not None:
+            history.add("restorable")
+            lines.add(f"from app.features.{self.slice}.schemas import {self.name}Read")
+            if self.translations_query:
+                lines.add("from app.core.i18n import translations_query")
+        core: dict[str, set[str]] = {}
+        if guards:
+            core.setdefault(self.guard_module, set()).add(self.guard)
+        if scoped:
+            lines.add("from typing import Annotated")
+            core.setdefault("access", set()).update({"RecordScope", "scope_of"})
+        for module, names in core.items():
+            lines.add(from_import(f"app.core.{module}", names))
+        lines.add(from_import("fastapi", fastapi))
+        lines.add(from_import("app.core.history", history))
+        return import_block(lines)
+
     def _test_fields(self) -> list[PyField]:
         return [f for f in self.fields if not f.translatable and f.type not in ("file", "image")]
 
@@ -1629,9 +1818,14 @@ class PyEntity:
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
         if self.files:
             lines.add("from app.core.storage import Storage, delete_files")
+        if self.history is not None:
+            names = {"Action", "HistoryEntry", "add_entry", "old_values", "snapshot"}
+            lines.add(from_import("app.core.history", names))
         i18n = {"t"} if self.translated else set[str]()
         if self.translatable:
             i18n.add("store_translations")
+        if self.history is not None and self.history.translatable:
+            i18n.add("DEFAULT")
         if i18n:
             lines.add(from_import("app.core.i18n", i18n))
         checks = {r.kind for r in self.check_rules}
@@ -1746,6 +1940,8 @@ class PyEntity:
         modules = {o.module for o in self.operations}
         if self.file_endpoints:
             modules.add("files")
+        if self.history_endpoints:
+            modules.add("history")
         if modules:
             lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)
@@ -1985,11 +2181,23 @@ class PyApp:
     """The jobs that the worker runs (ADR 0029), by name."""
     storage: PyStorage | None = None
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
+    user_label_attr: str | None = None
+    """The attribute of the user entity that names a user, for example in the change log."""
 
     @property
     def events(self) -> bool:
         """True if an entity has an event, or a transition has `run` (ADR 0031)."""
         return any(e.events for e in self.entities.values())
+
+    @property
+    def history(self) -> list[PyEntity]:
+        """The entities with a change log (ADR 0040), in the order of the tables."""
+        return [e for e in self.entity_order() if e.history is not None]
+
+    @property
+    def history_ids(self) -> list[str]:
+        """The IDs of the change logs of the entities, in the order of the tables."""
+        return [e.history.id for e in self.history if e.history is not None]
 
     @property
     def full_text(self) -> bool:
@@ -2089,6 +2297,13 @@ class PyApp:
             for f in entity.files:
                 found.append((f.upload_operation, permission.name, f.id))
                 found.append((f.delete_operation, permission.name, f.id))
+        for entity in self.history:
+            h = entity.history
+            assert h is not None
+            if h.read is not None and h.read.protected:
+                found.append((entity.history_operation, h.read.name, h.id))
+            if h.update is not None and h.update.protected:
+                found.append((entity.restore_operation, h.update.name, h.id))
         return found
 
     @property
@@ -2110,6 +2325,9 @@ class PyApp:
                 found[f"{op.returns}Read"] = self.entities[op.returns].id
             if entity.files and op.kind in ("create", "read", "update", "list"):
                 found.setdefault("FileRead", entity.files[0].id)
+        for entity in self.history:
+            if entity.history is not None and entity.history.read is not None:
+                found.setdefault("HistoryEntryRead", entity.history.id)
         for dashboard in self.dashboards.values():
             for widget in dashboard.widgets:
                 if widget.kind == "stat":
@@ -2242,6 +2460,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _events(definition, entities, operations)
     python_lines(definition, entities, operations)
     _record_rules(definition, entities)
+    _history(definition, entities)
     search_config = _search_config(definition)
     for entity in entities.values():
         if definition.access is not None:
@@ -2278,6 +2497,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         search_config=search_config,
         jobs=_jobs(definition, entities, operations),
         storage=_storage(definition, entities),
+        user_label_attr=_user_label_attr(definition, entities),
     )
 
 
@@ -2735,6 +2955,54 @@ def _events(
                     name=transition_name,
                 )
             )
+
+
+def _history(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Give the entities with `history` their change log (ADR 0040)."""
+    for name, entity in definition.entities.items():
+        if entity.history is None:
+            continue
+        py_entity = entities[name]
+        fields = {f.name: f for f in py_entity.fields}
+        relations = {r.name: r for r in py_entity.relations}
+        members: list[tuple[str, str]] = []
+        translatable: list[str] = []
+        for member in entity.history_members:
+            f = fields.get(member)
+            if f is not None:
+                members.append((member, f.attr))
+                if f.translatable:
+                    translatable.append(f.attr)
+            else:
+                fk_attr = relations[member].fk_attr
+                assert fk_attr is not None
+                members.append((member, fk_attr))
+        operations = {op.kind: op for op in reversed(py_entity.operations)}
+        py_entity.history = PyHistory(
+            id=entity.history.id,
+            members=members,
+            translatable=translatable,
+            read=operations.get("read"),
+            update=operations.get("update"),
+            user_entity=definition.auth.user_entity if definition.auth else None,
+            user_label=_user_label_attr(definition, entities),
+        )
+
+
+def _user_label_attr(definition: AppDefinition, entities: dict[str, PyEntity]) -> str | None:
+    """Return the attribute that names a user: the display field, else the user name field.
+
+    A computed display field is not a column, so the user name field names
+    the user then.
+    """
+    auth = definition.auth
+    if auth is None:
+        return None
+    users = definition.entities[auth.user_entity]
+    name = users.display_field
+    if name is None or users.fields[name].computed is not None or users.fields[name].is_file:
+        name = auth.username_field
+    return next(f.attr for f in entities[auth.user_entity].fields if f.name == name)
 
 
 def _later_sample(f: PyField) -> None:
@@ -3274,11 +3542,21 @@ def _check_names(entity: PyEntity) -> None:
         names[name] = owner
 
     modules = {"enums", "files", "models", "repository", "router", "schemas", "validation_ext"}
+    if entity.history is not None:
+        modules.add("history")
     for op in entity.operations:
         if op.module in modules or op.name in modules:
             raise GenerationError(
                 f"The operation '{op.name}' has the name of a module of the slice "
                 f"'{entity.slice}'. Give it another name."
+            )
+        if entity.history is not None and op.name in (
+            entity.history_operation,
+            entity.restore_operation,
+        ):
+            raise GenerationError(
+                f"The operation '{op.name}' has the name of an endpoint of the change log of "
+                f"'{entity.name}' (ADR 0040). Give it another name."
             )
     for f in entity.fields:
         claim(f.attr, f"the field '{f.name}'")

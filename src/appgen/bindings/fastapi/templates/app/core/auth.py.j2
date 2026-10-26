@@ -60,12 +60,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 {% endif %}
 
+{% set user_key = ["USER_KEY"] if py.history else [] %}
 {% if sign_up %}
-from app.core.db import Base, SessionDep, commit, flush
+{{ py.from_import("app.core.db", ["Base", "SessionDep", "commit", "flush"] + user_key) }}
 {% elif password %}
-from app.core.db import Base, SessionDep, commit
+{{ py.from_import("app.core.db", ["Base", "SessionDep", "commit"] + user_key) }}
 {% else %}
-from app.core.db import SessionDep
+{{ py.from_import("app.core.db", ["SessionDep"] + user_key) }}
 {% endif %}
 from app.core.errors import ProblemError, problem_responses
 {% if i18n %}
@@ -305,11 +306,22 @@ async def current_user(
     session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> {{ u.name }}:
+{% if py.history %}
+    """Return the signed-in user. Give a 401 error without a valid token.
+
+    The session of the request keeps the ID of the user: the change log
+    names the user of each change (ADR 0040).
+    """
+{% else %}
     """Return the signed-in user. Give a 401 error without a valid token."""
+{% endif %}
     user_id = read_token(signing_key(request), credentials.credentials) if credentials else None
     user = await session.get({{ u.name }}, user_id) if user_id else None
     if user is None:
         raise ProblemError(401, {{ py.message("Sign in to use this endpoint.") }})
+{% if py.history %}
+    session.info[USER_KEY] = user.id
+{% endif %}
     return user
 
 
