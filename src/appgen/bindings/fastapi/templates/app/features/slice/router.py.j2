@@ -28,3 +28,7 @@ router.include_router(files.router, dependencies=[{{ dependencies | join(", ") }
 router.include_router(files.router)
 {% endif %}
 {% endif %}
+{% if e.history_endpoints %}
+{{ trace(e.history.id) }}
+router.include_router(history.router)
+{% endif %}

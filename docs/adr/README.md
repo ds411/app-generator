@@ -53,3 +53,4 @@ gives the rules.
 | 0034   | [Totals of the relations in computed fields](0034-totals.md)           | Accepted |
 | 0035   | [Lines of a record in create and update operations](0035-lines.md)     | Accepted |
 | 0037   | [Sequence numbers of the fields](0037-sequence-numbers.md)             | Accepted |
+| 0040   | [Change log of the records](0040-history.md)                           | Accepted |

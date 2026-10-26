@@ -56,7 +56,21 @@ NEEDS: dict[str, str] = {
     "{{ operation_id }}": "{{ permission }}",
 {% endfor %}
 }
-{% if widgets and needs | length > widgets | length %}
+{% set logs = needs | selectattr("2", "in", py.history_ids) | list %}
+{% if logs %}
+{% set parts = [] %}
+{% if widgets %}
+{% set parts = parts + ["A dashboard widget needs the list operation of its entity. A widget of an entity without a list operation needs its own operation ID, which only `*` gives."] %}
+{% endif %}
+{% if needs | length > widgets | length + logs | length %}
+{% set parts = parts + ["The upload and the delete of a file need the update operation of the entity, else its create operation (ADR 0027)."] %}
+{% endif %}
+{% set parts = parts + ["The change log of a record needs the read operation of its entity, and a restore needs its update operation (ADR 0040)."] %}
+"""The endpoints that need the permission of an operation, and the operation of each.
+
+{{ parts | join(" ") | wordwrap(72, break_long_words=False) }}
+"""
+{% elif widgets and needs | length > widgets | length %}
 """The endpoints that need the permission of an operation, and the operation of each.
 
 A dashboard widget needs the list operation of its entity. A widget of an

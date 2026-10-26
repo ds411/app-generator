@@ -173,6 +173,7 @@ the React app.
 | `crud`          | No       | The CRUD shorthand: operations, views, and forms (see below). |
 | `rules`         | No       | Rules over more than one field or record (see [Entity rules](#entity-rules)). |
 | `events`        | No       | Custom operations that run after a record is created, changed, or deleted (see [Events](#events)). |
+| `history`       | No       | The change log of the records: `true`, or a mapping (see [History](#history)). |
 
 ### The CRUD shorthand
 
@@ -584,6 +585,51 @@ Booking:
   change, as a demonstration: it has no transactions, so an error of the
   operation does not undo the change. With the FastAPI app
   (`x-react-data: api`), the FastAPI app runs them.
+
+### History
+
+`history` keeps a change log of the records of the entity
+([ADR 0040](adr/0040-history.md)). Each create, change, and delete of a
+record adds an entry with the user, the time, and the old and the new
+value of each field that changed. A restore gives the old values of an
+entry back.
+
+| Key           | Required | Content                                                         |
+| ------------- | -------- | --------------------------------------------------------------- |
+| `fields`      | No       | The fields and the relations that the log keeps. The default is all: the stored fields except the file fields, and the `many_to_one` relations. |
+| `description` | No       | Text.                                                           |
+
+`history: true` keeps all of them.
+
+```yaml
+# example: room-booking
+# in: entities
+Booking:
+  # The change log keeps who changed the time, the room, and the state.
+  history: { fields: [title, starts_at, ends_at, status, room] }
+```
+
+- An entry has the action `created`, `changed`, `deleted`, or
+  `restored`, the signed-in user (none without a user, for example in a
+  job), the time, and the changes: the old and the new value of each
+  field, by the name in the definition. A relation has the ID of its
+  target. A translatable field has the value of the default language.
+- The data access functions of the apps add the entries in the
+  transaction of the change, after the [events](#events). A change
+  without a new value adds no entry. A change outside these functions
+  adds none: SQL in a script, a record that the database deletes with
+  `on_delete: cascade`, and the seed.
+- A restore gives the fields of the entry of a change their old values
+  back, and keeps the later changes of the other fields. It is a change,
+  with the checks of a change: the rules, the workflows, the record
+  rules, and the events. It adds an entry `restored`.
+- The entries of a record need the access of the read operation of the
+  entity, and a restore the access of its update operation. Without
+  the operation, the app has no endpoint for them.
+- The FastAPI app has the endpoints `GET /<entity>/{id}/history` (the
+  entries, the newest first) and
+  `POST /<entity>/{id}/history/{entry_id}/restore`. The entries stay
+  after the delete of a record.
 
 ### Relations
 
@@ -2587,6 +2633,8 @@ to translate one. The rules and the workflows give their own messages.
 - The files of the file fields: `The file is larger than {size}.`,
   `The type {type} is not allowed. Use one of: {types}.`, and for a link
   that is not valid `The link is not valid, or has ended.`.
+- The change log: `The record has no history entry with the ID {id}.`,
+  `Only the entry of a change has old values to restore.`.
 
 ## Extension keys
 

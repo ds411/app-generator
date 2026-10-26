@@ -1,0 +1,213 @@
+{{ trace_header(*py.history_ids) }}
+{% set u = py.entity(definition.auth.user_entity) if definition.auth else none %}
+"""The change log of the records (ADR 0040): the entries, and the restore of old values.
+
+Each create, change, and delete of a record of an entity with `history`
+adds an entry in the transaction of the change: the user, the time, and
+the old and the new values of the fields that changed. The repository of
+the entity adds the entries, so that the generated and the custom
+operations both add them. The entries stay after the delete of a record.
+"""
+
+import datetime as dt
+from collections.abc import Mapping
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Literal
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field, JsonValue
+from sqlalchemy import String, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
+
+{{ py.from_import("app.core.db", ["JSON_TYPE", "Base", "Timestamp"] + (["USER_KEY"] if u else [])) }}
+from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.core.pagination import Page
+from app.core.schemas import ReadModel
+{% if u %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+{% endif %}
+
+type Action = Literal["created", "changed", "deleted", "restored"]
+"""The kind of a change: `restored` is a restore of the old values of an entry."""
+
+
+class HistoryEntry(Base):
+    """An entry of the change log: a change of a record, by a user, at a time."""
+
+    __tablename__ = "history_entries"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    entity: Mapped[str] = mapped_column(String(63))
+    record_id: Mapped[UUID] = mapped_column(index=True)
+    action: Mapped[str] = mapped_column(String(10))
+    user_id: Mapped[UUID | None]
+    """The signed-in user of the change, or None for a change without one, for example a job."""
+    at: Mapped[dt.datetime] = mapped_column(Timestamp)
+    changes: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE)
+    """The old and the new value of each field that changed, by the name in the definition."""
+
+
+class Change(BaseModel):
+    """The value of a field before and after a change."""
+
+    old: JsonValue
+    new: JsonValue
+
+
+class HistoryEntryRead(ReadModel):
+    """An entry of the change log of a record, as the API returns it."""
+
+    id: UUID
+    action: Action
+    user_id: UUID | None
+    user: str | None = Field(default=None, description="The display value of the user.")
+    at: dt.datetime
+    changes: dict[str, Change]
+    """The old and the new value of each field that changed, by the name in the definition."""
+
+
+class HistoryQuery(BaseModel):
+    """The query parameters of the change log of a record: the page. The newest entry is first."""
+
+    limit: int = Field(default=50, ge=1, le=200, description="The maximum count of items.")
+    offset: int = Field(default=0, ge=0, description="The count of items to skip.")
+
+
+def json_value(value: Any) -> JsonValue:
+    """Return the value of a field as JSON, the same for the same value.
+
+    An enum gives its value. A decimal number, a date, a time, and an ID
+    give text: a time in UTC, and a decimal number without the zeros at
+    the end.
+    """
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
+    if isinstance(value, dt.datetime):
+        return value.astimezone(dt.UTC).isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    return value
+
+
+def snapshot(record: object, fields: Mapping[str, str]) -> dict[str, Any]:
+    """Return the values of the fields of the change log of a record, by name.
+
+    `fields` maps the name of each field in the definition to its attribute.
+    """
+    return {name: getattr(record, attr) for name, attr in fields.items()}
+
+
+def add_entry(
+    session: AsyncSession,
+    entity: str,
+    record_id: UUID,
+    action: Action,
+    before: Mapping[str, Any] | None,
+    after: Mapping[str, Any] | None,
+) -> HistoryEntry | None:
+    """Add the entry of a change to the session, without a commit, and return it.
+
+    `before` is None for a create, and `after` is None for a delete. A
+    change or a restore without a new value adds no entry, and gives None.
+    The user is the signed-in user of the request{{ " (`current_user`)" if u }}.
+    """
+    names = list(after if after is not None else before or {})
+    changes: dict[str, Any] = {}
+    for name in names:
+        old = before.get(name) if before is not None else None
+        new = after.get(name) if after is not None else None
+        if old != new:
+            changes[name] = {"old": json_value(old), "new": json_value(new)}
+    if not changes and action in ("changed", "restored"):
+        return None
+    entry = HistoryEntry(
+        id=uuid4(),
+        entity=entity,
+        record_id=record_id,
+        action=action,
+{% if u %}
+        user_id=session.info.get(USER_KEY),
+{% else %}
+        user_id=None,
+{% endif %}
+        at=dt.datetime.now(dt.UTC),
+        changes=changes,
+    )
+    session.add(entry)
+    return entry
+
+
+async def history_page(
+    session: AsyncSession, entity: str, record_id: UUID, query: HistoryQuery
+) -> Page[HistoryEntryRead]:
+    """Return a page of the entries of a record, the newest first."""
+    where = (HistoryEntry.entity == entity, HistoryEntry.record_id == record_id)
+    total = await session.scalar(select(func.count()).select_from(HistoryEntry).where(*where))
+    statement = (
+        select(HistoryEntry)
+        .where(*where)
+        .order_by(HistoryEntry.at.desc(), HistoryEntry.id.desc())
+        .limit(query.limit)
+        .offset(query.offset)
+    )
+    entries = list(await session.scalars(statement))
+{% if u %}
+    users = await _user_labels(session, {e.user_id for e in entries if e.user_id is not None})
+    items = [
+        HistoryEntryRead.model_validate(entry).model_copy(update={"user": users.get(entry.user_id)})
+        for entry in entries
+    ]
+{% else %}
+    items = [HistoryEntryRead.model_validate(entry) for entry in entries]
+{% endif %}
+    return Page[HistoryEntryRead](
+        items=items, total=total or 0, limit=query.limit, offset=query.offset
+    )
+{% if u %}
+
+
+async def _user_labels(session: AsyncSession, ids: set[UUID]) -> dict[UUID | None, str]:
+    """Return the display value of each user of a set of IDs: `{{ py.user_label_attr }}`."""
+    if not ids:
+        return {}
+    statement = select({{ u.name }}.id, {{ u.name }}.{{ py.user_label_attr }}).where({{ u.name }}.id.in_(ids))
+    return {id: str(label) for id, label in await session.execute(statement)}
+{% endif %}
+
+
+async def restorable(
+    session: AsyncSession, entity: str, record_id: UUID, entry_id: UUID
+) -> HistoryEntry:
+    """Return an entry of the change log of a record that a restore can give back.
+
+    An entry of another record gives a 404 error. The entry of a create or
+    of a delete gives a 422 error: only a change has old values.
+    """
+    entry = await session.get(HistoryEntry, entry_id)
+    if entry is None or entry.entity != entity or entry.record_id != record_id:
+{% if i18n %}
+        raise ProblemError(404, t("The record has no history entry with the ID {id}.", id=entry_id))
+{% else %}
+        raise ProblemError(404, f"The record has no history entry with the ID {entry_id}.")
+{% endif %}
+    if entry.action not in ("changed", "restored"):
+{% if i18n %}
+        raise ProblemError(422, t("Only the entry of a change has old values to restore."))
+{% else %}
+        raise ProblemError(422, "Only the entry of a change has old values to restore.")
+{% endif %}
+    return entry
+
+
+def old_values(entry: HistoryEntry, fields: Mapping[str, str]) -> dict[str, JsonValue]:
+    """Return the old values of an entry by attribute, for the fields that the log keeps now."""
+    return {fields[name]: change["old"] for name, change in entry.changes.items() if name in fields}

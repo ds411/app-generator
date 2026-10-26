@@ -222,6 +222,11 @@ generated app has a stub for it, and the check reports it in `gaps`.
   `deleted`, in the transaction of the change. A transition of a
   workflow runs one with `run`. The operation has no required params
   and calls no API.
+- `history: true` keeps a change log of the records: an entry for each
+  create, change, and delete, with the user, the time, and the old and
+  the new values, and a restore of the old values of a change.
+  `history: { fields: [...] }` keeps only some fields and `many_to_one`
+  relations. Only the FastAPI binding keeps a change log for now.
 
 ## Operations
 

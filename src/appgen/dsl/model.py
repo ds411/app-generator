@@ -14,6 +14,7 @@ from appgen.dsl.crud import Crud, crud_input, crud_schema
 from appgen.dsl.element import AppName, Element, EntityName, MemberName, Text
 from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.events import EventInput, EventName
+from appgen.dsl.history import HistoryInput
 from appgen.dsl.jobs import Job
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
@@ -180,6 +181,8 @@ class Entity(Element):
         default_factory=dict[EventName, EventInput]
     )
     """The custom operations that run after a record is created, changed, or deleted (ADR 0031)."""
+    history: HistoryInput = None
+    """The change log of the records (ADR 0040)."""
 
     @property
     def stored_fields(self) -> dict[str, Field]:
@@ -200,6 +203,22 @@ class Entity(Element):
     def sequence_fields(self) -> dict[str, Field]:
         """The fields whose values come from a database sequence (`sequence`)."""
         return {name: f for name, f in self.fields.items() if f.sequence is not None}
+
+    @property
+    def history_members(self) -> list[str]:
+        """The fields and the relations that the change log keeps, in source order (ADR 0040).
+
+        They are the names in `history.fields`, else the stored fields
+        except the file fields, and the `many_to_one` relations. Without
+        `history`, the list is empty.
+        """
+        if self.history is None:
+            return []
+        fields = [n for n, f in self.stored_fields.items() if not f.is_file]
+        relations = [n for n, r in self.relations.items() if r.kind == "many_to_one"]
+        if self.history.fields is None:
+            return fields + relations
+        return [n for n in fields + relations if n in self.history.fields]
 
 
 class Operation(Element):

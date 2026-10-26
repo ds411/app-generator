@@ -223,6 +223,12 @@ EVENT_KEY = "appgen.event"
 
 
 {% endif %}
+{% if py.history and definition.auth %}
+USER_KEY = "appgen.user"
+"""The key of `session.info` with the ID of the signed-in user, for the change log (ADR 0040)."""
+
+
+{% endif %}
 async def commit(session: AsyncSession) -> None:
 {% if py.events %}
     """Commit the session. A broken constraint gives a 409 Conflict error.

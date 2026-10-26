@@ -196,6 +196,25 @@ the transaction of the change (the `events` of the definition, and
   `events`.
 
 {% endif %}
+{% if py.history %}
+## Change log
+
+The repositories keep a change log of these entities in the table
+`history_entries`: an entry for each create, change, and delete of a
+record, with the user, the time, and the old and the new values.
+
+| Entity | Fields | Endpoints |
+| ------ | ------ | --------- |
+{% for e in py.history %}
+| {{ e.name }} | {% for member, _ in e.history.members %}`{{ member }}`{{ ", " if not loop.last }}{% endfor %} | {% if e.history.read %}`GET {{ e.path }}/{id}/history`{% endif %}{% if e.history.read and e.history.update %}, {% endif %}{% if e.history.update %}`POST {{ e.path }}/{id}/history/{entry_id}/restore`{% endif %}{% if not e.history_endpoints %}None{% endif %} |
+{% endfor %}
+
+- A restore gives the fields of the entry of a change their old values
+  back, with the checks of an update, and adds an entry `restored`.
+- A change outside the repository functions adds no entry: SQL in a
+  script, a delete of the database (`on_delete: cascade`), and the seed.
+
+{% endif %}
 ## Production
 
 - Logs: the API writes one log line for each request, with the method,

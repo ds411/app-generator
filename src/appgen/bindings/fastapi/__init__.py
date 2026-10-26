@@ -235,6 +235,12 @@ BINDING = Binding(
             when="py.entity(name).file_endpoints",
         ),
         Output(
+            template="app/features/slice/history.py.j2",
+            path=_SLICE + "/history.py",
+            for_each="entity",
+            when="py.entity(name).history_endpoints",
+        ),
+        Output(
             template="app/features/slice/validation_ext.py.j2",
             path=_SLICE + "/validation_ext.py",
             for_each="entity",
@@ -264,6 +270,7 @@ BINDING = Binding(
             for_each="dashboard",
             when="name in py.dashboards",
         ),
+        Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
         Output(template="app/core/jobs.py.j2", path="app/core/jobs.py", when="py.jobs"),
         Output(template="package.py.j2", path="app/jobs/__init__.py", when="py.jobs"),
         Output(template="app/jobs/job.py.j2", path="app/jobs/{{ name }}.py", for_each="job"),
@@ -291,6 +298,12 @@ BINDING = Binding(
             path=_TESTS + "/test_events.py",
             for_each="entity",
             when="py.entity(name).events",
+        ),
+        Output(
+            template="tests/features/slice/test_history.py.j2",
+            path=_TESTS + "/test_history.py",
+            for_each="entity",
+            when="py.entity(name).history",
         ),
         Output(
             template="tests/features/slice/test_schemas.py.j2",
@@ -481,7 +494,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
-        | {"job", "event"}
+        | {"job", "event", "history"}
         | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),

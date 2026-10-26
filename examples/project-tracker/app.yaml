@@ -100,6 +100,8 @@ entities:
     events:
       # A new status sets the time of the completion, or clears it.
       changed: { operation: record_completion, fields: [status] }
+    # The apps keep a change log of the tasks, with a restore (ADR 0040).
+    history: true
 
   Comment:
     crud: [create, list, delete]

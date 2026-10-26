@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 {% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
-{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -167,6 +167,22 @@ def upgrade() -> None:
 {% endfor %}
     )
 {% endfor %}
+{% if py.history %}
+    op.create_table(
+        "history_entries",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("entity", sa.String(length=63), nullable=False),
+        sa.Column("record_id", sa.Uuid(), nullable=False),
+        sa.Column("action", sa.String(length=10), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=True),
+        sa.Column("at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "changes", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False
+        ),
+        sa.PrimaryKeyConstraint("id", name="pk_history_entries"),
+    )
+    op.create_index("ix_history_entries_record_id", "history_entries", ["record_id"])
+{% endif %}
 {% if py.jobs %}
     op.create_table(
         "job_runs",
@@ -189,6 +205,10 @@ def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
 {% if py.jobs %}
     op.drop_table("job_runs")
+{% endif %}
+{% if py.history %}
+    op.drop_index("ix_history_entries_record_id", table_name="history_entries")
+    op.drop_table("history_entries")
 {% endif %}
 {% if py_webhooks %}
     op.drop_table("webhook_events")

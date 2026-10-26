@@ -1,0 +1,169 @@
+{{ trace_header(py.entity(name).history.id) }}
+{% set e = py.entity(name) %}
+{% set h = e.history %}
+{% set f = e.history_test_field %}
+{% set url = e.path ~ "/{record.id}/history" %}
+{% set storage = ", FolderStorage(tmp_path)" if e.files else "" %}
+{% set u = py.entity(h.user_entity) if h.user_entity else none %}
+"""The tests of the change log of {{ e.name }} (ADR 0040).
+
+The repository adds an entry for each create, change, and delete of a
+record, in the transaction of the change. A restore gives the old values
+of an entry back.
+"""
+
+{{ e.history_test_imports() }}
+
+pytestmark = pytest.mark.anyio
+
+
+async def entries(session: AsyncSession, id: UUID) -> list[HistoryEntry]:
+    """Return the entries of the change log of a record, the newest first."""
+    statement = (
+        select(HistoryEntry)
+        .where(HistoryEntry.entity == "{{ e.name }}", HistoryEntry.record_id == id)
+        .order_by(HistoryEntry.at.desc())
+        .execution_options(populate_existing=True)
+    )
+    return list(await session.scalars(statement))
+
+
+async def test_a_create_adds_an_entry_with_the_new_values(session: AsyncSession) -> None:
+    record = await make_{{ e.snake }}(session)
+
+    [entry] = await entries(session, record.id)
+
+    assert entry.action == "created"
+    assert entry.user_id is None
+    values = snapshot(record, HISTORY)
+    assert entry.changes == {
+        name: {"old": None, "new": json_value(value)}
+        for name, value in values.items()
+        if value is not None
+    }
+{% if f %}
+
+
+async def test_a_change_adds_an_entry_with_the_old_and_the_new_value(
+    session: AsyncSession,
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    old = record.{{ f.attr }}
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({"{{ f.name }}": other["{{ f.name }}"]})
+
+    record = await repository.update(session, record, changes)
+
+    entry = (await entries(session, record.id))[0]
+    assert entry.action == "changed"
+{{ e.history_change_assert() }}
+
+
+async def test_a_change_without_a_new_value_adds_no_entry(session: AsyncSession) -> None:
+    record = await make_{{ e.snake }}(session)
+    same = {{ e.name }}Update.model_validate({"{{ f.name }}": json_value(record.{{ f.attr }})})
+
+    await repository.update(session, record, same)
+
+    assert [entry.action for entry in await entries(session, record.id)] == ["created"]
+{% endif %}
+
+
+{{ py.signature("async def test_a_delete_adds_an_entry_with_the_old_values", ["session: AsyncSession"] + (["tmp_path: Path"] if e.files else []), " -> None:") }}
+    record = await make_{{ e.snake }}(session)
+    values = snapshot(record, HISTORY)
+
+    await repository.delete(session, record{{ storage }})
+
+    entry = (await entries(session, record.id))[0]
+    assert entry.action == "deleted"
+    assert entry.changes == {
+        name: {"old": json_value(value), "new": None}
+        for name, value in values.items()
+        if value is not None
+    }
+{% if u %}
+
+
+async def test_an_entry_has_the_signed_in_user(session: AsyncSession) -> None:
+    user = await make_{{ u.snake }}(session)
+    session.info[USER_KEY] = user.id
+
+    record = await make_{{ e.snake }}(session)
+
+    page = await history_page(session, "{{ e.name }}", record.id, HistoryQuery())
+{{ e.history_user_assert() }}
+{% endif %}
+{% if h.read %}
+
+
+async def test_the_endpoint_gives_the_entries_of_a_record_the_newest_first(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+{% if f %}
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({"{{ f.name }}": other["{{ f.name }}"]})
+    await repository.update(session, record, changes)
+{% endif %}
+
+    response = await client.get(f"{{ url }}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["action"] for item in body["items"]] == [{{ '"changed", ' if f }}"created"]
+    assert body["total"] == {{ 2 if f else 1 }}
+
+
+async def test_the_endpoint_gives_404_for_a_missing_record(client: AsyncClient) -> None:
+    response = await client.get(f"{{ e.path }}/{uuid4()}/history")
+
+    assert_problem(response, 404)
+{% endif %}
+{% if h.update %}
+{% if f %}
+
+
+async def test_a_restore_gives_the_old_value_back(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    old = record.{{ f.attr }}
+    other = await {{ e.snake }}_input(session)
+    changes = {{ e.name }}Update.model_validate({"{{ f.name }}": other["{{ f.name }}"]})
+    await repository.update(session, record, changes)
+    changed = (await entries(session, record.id))[0]
+
+    response = await client.post(f"{{ url }}/{changed.id}/restore")
+
+    assert response.status_code == 200, response.text
+    record = await repository.get(session, record.id)
+    assert record.{{ f.attr }} == old
+    assert response.json() == {{ e.name }}Read.model_validate(record).model_dump(mode="json")
+    actions = [entry.action for entry in await entries(session, record.id)]
+    assert actions == ["restored", "changed", "created"]
+{% endif %}
+
+
+async def test_a_restore_of_the_entry_of_a_create_gives_422(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    [created] = await entries(session, record.id)
+
+    response = await client.post(f"{{ url }}/{created.id}/restore")
+
+    assert_problem(response, 422)
+
+
+async def test_a_restore_of_an_entry_of_another_record_gives_404(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    other = await make_{{ e.snake }}(session)
+    [created] = await entries(session, other.id)
+
+    response = await client.post(f"{{ url }}/{created.id}/restore")
+
+    assert_problem(response, 404)
+{% endif %}
