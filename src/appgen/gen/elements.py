@@ -29,11 +29,14 @@ def element_kind(path: DataPath, element: Element) -> ElementKind:
 
     The kind is the class name of the element in snake case, for example
     `entity` for an Entity and `token` for a design token. The `Field`
-    class serves for entity fields and for operation params, so a Field
-    in a `params` mapping has the kind `param`.
+    class serves for entity fields, for operation params, and for the
+    fields of the rows of a query, so a Field in a `params` mapping has the
+    kind `param`, and a Field in a `result` mapping the kind `result_field`.
     """
     if isinstance(element, Field) and len(path) >= 2 and path[-2] == "params":
         return "param"
+    if isinstance(element, Field) and len(path) >= 2 and path[-2] == "result":
+        return "result_field"
     return _CAMEL_BOUNDARY.sub("_", type(element).__name__).lower()
 
 

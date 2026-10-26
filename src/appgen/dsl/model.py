@@ -64,7 +64,7 @@ type FieldType = Literal[
 ]
 type RelationKind = Literal["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 type OnDelete = Literal["restrict", "cascade", "set_null"]
-type OperationKind = Literal["create", "read", "update", "delete", "list", "custom"]
+type OperationKind = Literal["create", "read", "update", "delete", "list", "custom", "query"]
 
 FIELD_TYPES: tuple[str, ...] = FieldType.__value__.__args__
 RELATION_KINDS: tuple[str, ...] = RelationKind.__value__.__args__
@@ -227,19 +227,29 @@ class Entity(Element):
 
 
 class Operation(Element):
-    """An action that the app can do on an entity."""
+    """An action that the app can do on an entity, or a query that returns a list (ADR 0045)."""
 
     kind: OperationKind
     entity: EntityName
+    """The entity of the operation. A query is in the slice of the entity."""
     description: Text | None = None
     params: dict[MemberName, Field] = pydantic.Field(default_factory=dict[str, Field])
     returns: Text = "none"
-    """An entity name, or `none`."""
+    """An entity name, or `none`. A query with `returns` gives records of the entity."""
+    result: dict[MemberName, Field] | None = None
+    """A query: the fields of each row, for rows that are not records (ADR 0045)."""
     apis: list[MemberName] = pydantic.Field(default_factory=list[str])
     """The third-party APIs that the logic of a custom operation calls (ADR 0019)."""
     lines: list[MemberName] = pydantic.Field(default_factory=list[str])
     """A create or an update operation: the `one_to_many` relations whose records it writes
     with the record, in one transaction (ADR 0035)."""
+
+    @property
+    def row_entity(self) -> str | None:
+        """A query that gives records: the entity of the records, else None."""
+        if self.kind != "query" or self.returns == "none":
+            return None
+        return self.returns
 
 
 RECORD_PREFIX = "$record."

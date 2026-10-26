@@ -46,4 +46,8 @@ export type {
   Sort,
   SortDirection,
 } from "./types";
+{% if query_operations(definition) %}
+export { FIRST_ROWS, NotFoundError, pageOfRows, type RowsPage } from "./types";
+{% else %}
 export { NotFoundError } from "./types";
+{% endif %}

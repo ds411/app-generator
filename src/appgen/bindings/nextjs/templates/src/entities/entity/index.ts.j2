@@ -1,9 +1,9 @@
 {{ trace_header(element_id) }}
 {% set var = name | camel %}
 {# An operation with lines (ADR 0035) is in its own feature slice. #}
-{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | rejectattr("1.lines") | map(attribute=0) | map("camel") | list %}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "in", ("custom", "query")) | rejectattr("1.lines") | map(attribute=0) | map("camel") | list %}
 {% set lists = inverse_lists(definition, name) %}
-{% set customs = operations_of(definition, name) | selectattr("1.kind", "eq", "custom") | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
+{% set customs = operations_of(definition, name) | selectattr("1.kind", "in", ("custom", "query")) | selectattr("1.params") | map(attribute=0) | map("camel") | list %}
 export {
   {{ var }}Api,
 {% if element.file_fields and definition.storage %}

@@ -13,11 +13,16 @@ from sqlalchemy.orm import InstrumentedAttribute
 from app.core.errors import ProblemError
 
 
-class PageQuery(BaseModel):
-    """The query parameters of a list endpoint for the page and the order."""
+class PageParams(BaseModel):
+    """The query parameters of the page of a list endpoint or a query endpoint."""
 
     limit: int = Field(default=50, ge=1, le=200, description="The maximum count of items.")
     offset: int = Field(default=0, ge=0, description="The count of items to skip.")
+
+
+class PageQuery(PageParams):
+    """The query parameters of a list endpoint for the page and the order."""
+
     sort: str | None = Field(
         default=None,
         description="Sort keys, with a comma between them. A `-` before a key sorts "
@@ -26,7 +31,7 @@ class PageQuery(BaseModel):
 
 
 class Page[T](BaseModel):
-    """One page of the items of a list endpoint."""
+    """One page of the items of a list endpoint or a query endpoint."""
 
     items: list[T]
     total: int

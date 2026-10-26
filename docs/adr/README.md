@@ -56,3 +56,4 @@ gives the rules.
 | 0038   | [The period of a dashboard](0038-dashboard-period.md)                  | Accepted |
 | 0040   | [Change log of the records](0040-history.md)                           | Accepted |
 | 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |
+| 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |

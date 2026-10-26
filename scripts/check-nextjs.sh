@@ -29,9 +29,13 @@
 # M33), and run lint, type check, appgen check, the sequence test
 # (scripts/sequence_test.py), and the test of the page metadata
 # (scripts/page_meta_test.py) on it.
-# Last, generate tests/fixtures/totals.yaml (totals of relations and the
+# Then generate tests/fixtures/totals.yaml (totals of relations and the
 # compare rules over totals, ADR 0034), and run lint, type check, appgen
 # check, and the totals test (scripts/totals_test.py) on it.
+# Last, generate tests/fixtures/listings.yaml with the hand-written
+# queries of tests/fixtures/listings/extensions/nextjs/ (ADR 0045), and
+# run lint, type check, appgen check, and the queries test
+# (scripts/queries_test.py) on it.
 # The pre-push hook runs this script when a push changes the generator
 # or the Next.js binding. Run it by hand from the repository root:
 #
@@ -80,14 +84,17 @@ invoices_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-invoices.XXXXXX")
 # The app of the totals fixture (ADR 0034), in a temporary folder.
 totals_definition=tests/fixtures/totals.yaml
 totals_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-totals.XXXXXX")
+# The app of the listings fixture (ADR 0045), in a temporary folder.
+listings_definition=tests/fixtures/listings.yaml
+listings_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-listings.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
 fi
 
 step() {
@@ -292,5 +299,25 @@ uv run --locked appgen check "$totals_definition" "$totals_out"
 
 step "totals test"
 uv run --locked scripts/totals_test.py --app "$totals_out"
+
+step "generate $listings_definition in $listings_out"
+# The hand-written queries of the fixture: appgen keeps an extension file
+# that exists.
+cp -R tests/fixtures/listings/extensions/nextjs/. "$listings_out"/
+uv run --locked appgen generate "$listings_definition" -b nextjs -o "$listings_out" >/dev/null
+(
+    cd "$listings_out"
+    step "pnpm install (listings)"
+    pnpm install --silent
+    step "pnpm lint (listings)"
+    pnpm --silent lint
+    step "pnpm typecheck (listings)"
+    pnpm --silent typecheck
+)
+step "appgen check (listings)"
+uv run --locked appgen check "$listings_definition" "$listings_out"
+
+step "queries test"
+uv run --locked scripts/queries_test.py --app "$listings_out"
 
 step "passed"

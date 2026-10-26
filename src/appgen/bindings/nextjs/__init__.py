@@ -29,6 +29,7 @@ _PAGE = "src/pages/{{ nextjs.pages[name].slice }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _OPERATION = "src/features/{{ name | kebab }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_QUERY_OP = "element.kind == 'query'"
 _LINES_OP = "element.lines and element.kind in ('create', 'update')"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 _WEBHOOK = "src/features/{{ ts_webhooks[name].slice }}"
@@ -485,6 +486,22 @@ BINDING = Binding(
                 ("api/operation.ext.ts", "api/{{ name | kebab }}.ext.ts"),
             )
         ),
+        # A query (ADR 0045): the server action gives a page of the rows of the extension file.
+        *(
+            Output(
+                template=f"src/features/query/{template}.j2",
+                path=f"{_OPERATION}/{path}",
+                for_each="operation",
+                when=_QUERY_OP,
+                extension=template.endswith(".ext.ts"),
+            )
+            for template, path in (
+                ("index.ts", "index.ts"),
+                ("api/api.ts", "api/{{ name | kebab }}-api.ts"),
+                ("api/query.gen.ts", "api/{{ name | kebab }}.gen.ts"),
+                ("api/query.ext.ts", "api/{{ name | kebab }}.ext.ts"),
+            )
+        ),
         # An operation with lines (ADR 0035): the server action writes the lines.
         *(
             Output(
@@ -564,7 +581,7 @@ BINDING = Binding(
     ),
     covers=frozenset(
         {"app", "page", "page_meta", "entity", "field", "sequence", "relation", "operation"}
-        | {"param"}
+        | {"param", "result_field"}
         | {"theme", "tokens", "token_group", "token"}
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}

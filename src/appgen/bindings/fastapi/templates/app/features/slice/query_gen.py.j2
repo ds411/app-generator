@@ -1,0 +1,79 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% set r = py.entity(op.returns) if op.returns else none %}
+{% set owner = op.scope_action %}
+{% set repo = "repository" if r and r.name == e.name else (r.snake ~ "_repository" if r else none) %}
+"""The query `{{ op.name }}`: {{ op.method | upper }} {{ e.path }}{{ op.path }}.
+
+The rows come from `{{ op.name }}_ext.py`, which appgen creates once and
+never changes (ADR 0045). The endpoint returns one page of the rows.
+"""
+
+{% set lines = [
+    "from typing import Annotated",
+    "from fastapi import APIRouter" ~ (", Depends" if owner) ~ ", Query",
+    "from pydantic import ConfigDict",
+    "from app.core.db import SessionDep",
+    "from app.core.errors import problem_responses",
+    "from app.core.pagination import Page, PageParams",
+    "from app.features." ~ e.slice ~ "." ~ op.name ~ "_ext import " ~ op.name,
+] %}
+{% set ns = namespace(lines=lines, own=[op.params_class] if op.params else []) %}
+{% if r and r.name == e.name %}
+{% set ns.own = ns.own + [op.row_class] %}
+{% elif r %}
+{% set ns.lines = ns.lines + ["from app.features." ~ r.slice ~ ".schemas import " ~ op.row_class] %}
+{% else %}
+{% set ns.own = ns.own + [op.row_class] %}
+{% endif %}
+{% if ns.own %}
+{% set ns.lines = ns.lines + [py.from_import("app.features." ~ e.slice ~ ".schemas", ns.own)] %}
+{% endif %}
+{% if owner %}
+{% set ns.lines = ns.lines + ["from app.core.access import RecordScope, scope_of"] %}
+{% if (r.scoped or r.hides) and repo == "repository" %}
+{% set ns.lines = ns.lines + ["from app.features." ~ r.slice ~ " import repository"] %}
+{% elif r.scoped or r.hides %}
+{% set ns.lines = ns.lines + ["from app.features." ~ r.slice ~ " import repository as " ~ repo] %}
+{% endif %}
+{% endif %}
+{{ py.imports(ns.lines) }}
+
+router = APIRouter(prefix="{{ e.path }}")
+{% if owner %}
+
+Scope = Annotated[RecordScope | None, Depends(scope_of("{{ owner }}"))]
+"""The records that the request may use (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+
+
+class {{ op.query_class }}({{ (op.params_class ~ ", ") if op.params }}PageParams):
+    """The query parameters of the query: {{ "its params and " if op.params }}the page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+{{ op.decorator() }}
+{% set args = ["query: Annotated[" ~ op.query_class ~ ", Query()]", "session: SessionDep"] + (["scope: Scope"] if owner else []) %}
+{{ py.signature("async def run_" ~ op.name, args, " -> Page[" ~ op.row_class ~ "]:") }}
+    """{{ op.description or ("Return a page of the rows of the query " ~ op.name ~ ".") }}"""
+    rows = await {{ op.name }}(session{{ ", query" if op.params }})
+{% if owner and r.scoped %}
+    # The record rules of the role (ADR 0025): only the records that the user may read.
+    shown = await {{ repo }}.visible(session, [row.id for row in rows], scope)
+    rows = [row for row in rows if row.id in shown]
+{% endif %}
+    page = rows[query.offset : query.offset + query.limit]
+{% if owner and r.hides %}
+    items = [{{ op.row_class }}.model_validate(row) for row in page]
+    await {{ repo }}.hide(session, items, scope)
+{% else %}
+    items = [{{ op.row_class }}.model_validate(row) for row in page]
+{% endif %}
+    return Page[{{ op.row_class }}](
+        items=items,
+        total=len(rows),
+        limit=query.limit,
+        offset=query.offset,
+    )

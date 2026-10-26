@@ -2,7 +2,7 @@
 {% set type = name | pascal %}
 {% set var = name | camel %}
 {# An operation with lines (ADR 0035) is in its own feature slice. #}
-{% set ops = operations_of(definition, name) | rejectattr("1.kind", "eq", "custom") | rejectattr("1.lines") | list %}
+{% set ops = operations_of(definition, name) | rejectattr("1.kind", "in", ("custom", "query")) | rejectattr("1.lines") | list %}
 {% set lists = inverse_lists(definition, name) %}
 {% set guarded = definition.access and (ops | rejectattr("0", "in", definition.auth.public_operations) | list) %}
 {% macro guard(op_name) -%}

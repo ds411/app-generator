@@ -38,6 +38,20 @@ export type ListResult<T> = {
   page: number;
   pageSize: number;
 };
+{% if query_operations(definition) %}
+
+/** A page of the rows of a query (ADR 0045): the page number, from 1, and the count of rows of a page. */
+export type RowsPage = { page: number; pageSize: number };
+
+/** The first page of the rows of a query. */
+export const FIRST_ROWS: RowsPage = { page: 1, pageSize: 50 };
+
+/** Return one page of the rows of a query, in their order. */
+export function pageOfRows<T>(rows: readonly T[], { page, pageSize }: RowsPage): ListResult<T> {
+  const start = (page - 1) * pageSize;
+  return { items: rows.slice(start, start + pageSize), total: rows.length, page, pageSize };
+}
+{% endif %}
 
 export type EntityRecord = { id: string };
 

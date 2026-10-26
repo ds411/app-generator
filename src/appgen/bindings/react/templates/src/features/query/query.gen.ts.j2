@@ -1,0 +1,89 @@
+{% set spec = gap_spec(definition, element_id, element_kind) %}
+{% set entity = element.entity %}
+{% set row = spec.returns.removeprefix("Promise<").removesuffix("[]>") %}
+{% set public = definition.auth and name in definition.auth.public_operations %}
+{# With mock data, the record rules of the entity of the rows apply (ADR 0025). The FastAPI app applies them itself. #}
+{% set rows_entity = element.row_entity %}
+{% set rule = record_rules.get(rows_entity) if rows_entity and not public and not react.api else none %}
+{{ trace_header(element_id) }}
+{% if react.api %}
+import { FIRST_ROWS, type ListResult, type RowsPage } from "@/shared/api";
+{% else %}
+import { FIRST_ROWS, type ListResult, pageOfRows, type RowsPage } from "@/shared/api";
+{% endif %}
+{% if definition.access and not public %}
+import { requireOperation } from "@/shared/auth";
+{% endif %}
+
+{# The imports of the entity slices: the data access of the entities, and the types of the params and the rows. #}
+{% set apis = ([entity] if react.api else []) + ([rows_entity] if (rule or react.api) and rows_entity else []) %}
+{% set types = ([name | pascal ~ "Params"] if element.params else []) %}
+{% set slices = {entity: {"values": [], "types": types + ([row] if rows_entity in (none, entity) else [])}} %}
+{% if rows_entity and rows_entity != entity %}
+{% set _ = slices.update({rows_entity: {"values": [], "types": [row]}}) %}
+{% endif %}
+{% for api_entity in apis | unique %}
+{% set _ = slices[api_entity]["values"].append(api_entity | camel ~ "Api") %}
+{% endfor %}
+{% for slice, names in slices | dictsort %}
+{% if names["values"] %}
+import { {{ names["values"] | join(", ") }}{% for t in names["types"] | sort %}, type {{ t }}{% endfor %} } from "@/entities/{{ slice | kebab }}";
+{% elif names["types"] %}
+import type { {{ names["types"] | sort | join(", ") }} } from "@/entities/{{ slice | kebab }}";
+{% endif %}
+{% endfor %}
+{% if not react.api %}
+
+import { {{ spec.name }} as {{ spec.name }}Ext } from "./{{ spec.file }}.ext";
+{% endif %}
+
+{% set where = "The FastAPI app runs the query." if react.api else "The rows come from the extension file." %}
+{% if element.description %}
+/** {{ element.description }} One page of the rows. {{ where }} */
+{% else %}
+/** The query {{ name }}: one page of the rows. {{ where }} */
+{% endif %}
+export async function {{ spec.name }}({% if element.params %}params: {{ name | pascal }}Params, {% endif %}page: RowsPage = FIRST_ROWS): Promise<ListResult<{{ row }}>> {
+{% if definition.access and not public %}
+  requireOperation({{ name | tojson }}); {{ trace(definition.access.id) }}
+{% endif %}
+{% if react.api %}
+{% set api = api_entities[entity] %}
+{% set endpoint = api.endpoints | selectattr("operation", "eq", name) | first %}
+  // The FastAPI app runs the query: {{ endpoint.method }} {{ endpoint.path }}.
+  const result = await {{ entity | camel }}Api.rows({{ endpoint.path.removeprefix(api.path) | tojson }}, {
+{% for param in element.params %}
+    {{ param | tojson }}: params.{{ param | camel }},
+{% endfor %}
+  }, page);
+{% if rows_entity %}
+  return { ...result, items: result.items.map((item) => {{ rows_entity | camel }}Api.fromJson(item)) };
+{% else %}
+  return {
+    ...result,
+    items: result.items.map((item) => ({
+{% for field_name, field in element.result.items() %}
+{% if field.type == "decimal" %}
+      {{ field_name | camel }}: item[{{ field_name | tojson }}] === null ? null : Number(item[{{ field_name | tojson }}]),
+{% else %}
+      {{ field_name | camel }}: item[{{ field_name | tojson }}],
+{% endif %}
+{% endfor %}
+    }) as {{ row }}),
+  };
+{% endif %}
+{% elif rule %}
+  const rows = await {{ spec.name }}Ext({% if element.params %}params{% endif %});
+  // A user of a record rule gets only the records of the rule.
+{% for id in rule.element_ids %}
+  {{ trace(id) }}
+{% endfor %}
+  const shown = new Set((await {{ rows_entity | camel }}Api.list()).items.map((record) => record.id));
+  return pageOfRows(
+    rows.filter((row) => shown.has(row.id)),
+    page,
+  );
+{% else %}
+  return pageOfRows(await {{ spec.name }}Ext({% if element.params %}params{% endif %}), page);
+{% endif %}
+}

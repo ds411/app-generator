@@ -448,6 +448,18 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return (await getDb().$count(this.table, this.byId(id, scope))) > 0;
   }
 
+  /** Return the IDs of the records of the scope, of the IDs (the rows of a query, ADR 0045). */
+  async visible(ids: string[], scope: RecordScope | null): Promise<Set<string>> {
+    if (scope === null || ids.length === 0) {
+      return new Set(ids);
+    }
+    const rows = await getDb()
+      .select({ id: this.table.id })
+      .from(this.table)
+      .where(and(inArray(this.table.id, ids), this.scoped(scope)));
+    return new Set(rows.map((row) => String(row.id)));
+  }
+
   async get(id: string, scope: RecordScope | null = null): Promise<T> {
     const db = getDb();
     const rows: Row[] = await db.select().from(this.table).where(this.byId(id, scope)).limit(1);

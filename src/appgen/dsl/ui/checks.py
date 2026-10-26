@@ -1172,6 +1172,14 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
                 operation = operations.get(element.operation)
                 if operation is None:
                     yield _missing(element, "operation", "operation", element.operation, operations)
+                elif operation.kind == "query":
+                    yield _error(
+                        "unsuitable-operation",
+                        f"The operation '{element.operation}' is a query: it gives rows, and an "
+                        "action does not show them.",
+                        element,
+                        at="operation",
+                    )
                 elif operation.kind == "custom" and operation.params:
                     yield _error(
                         "unsuitable-operation",

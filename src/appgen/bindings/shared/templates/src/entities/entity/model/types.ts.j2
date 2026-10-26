@@ -63,12 +63,21 @@ export type {{ type }}FileField = {{ files | map(attribute="key") | map("tojson"
  */
 export type {{ item.type }} = Omit<{{ type }}Input, {{ ts_value(item.link) }}> & { id?: string }; {{ trace(item.element_id) }}
 {% endfor %}
-{% for op_name, op in operations_of(definition, name) if op.kind == "custom" and op.params %}
+{% for op_name, op in operations_of(definition, name) if op.kind in ("custom", "query") and op.params %}
 
-/** The parameters of the operation {{ op_name }}. */
+/** The parameters of the {{ "query" if op.kind == "query" else "operation" }} {{ op_name }}. */
 export type {{ op_name | pascal }}Params = {
 {% for param_name, param in op.params.items() %}
   {{ param_name | camel }}{{ "" if param.required else "?" }}: {{ param_type(param) }}{{ "" if param.required else " | null" }}; {{ trace(param.id) }}
+{% endfor %}
+};
+{% endfor %}
+{% for op_name, op in operations_of(definition, name) if op.kind == "query" and op.result %}
+
+/** A row of the query {{ op_name }} (ADR 0045). */
+export type {{ op_name | pascal }}Row = {
+{% for field_name, field in op.result.items() %}
+  {{ field_name | camel }}: {{ param_type(field) }}{{ "" if field.required else " | null" }}; {{ trace(field.id) }}
 {% endfor %}
 };
 {% endfor %}

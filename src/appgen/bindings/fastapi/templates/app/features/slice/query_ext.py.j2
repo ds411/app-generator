@@ -1,0 +1,46 @@
+{{ trace_header(element_id) }}
+{% set op = py.operations[name] %}
+{% set e = py.entity(op.entity) %}
+{% set r = py.entity(op.returns) if op.returns else none %}
+{% if op.description %}
+"""The rows of the query `{{ op.name }}`.
+
+{{ op.description }}
+"""
+{% else %}
+"""The rows of the query `{{ op.name }}`."""
+{% endif %}
+
+{% set lines = [
+    "from collections.abc import Sequence",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+] %}
+{% if r %}
+{% set lines = lines + ["from app.features." ~ r.slice ~ ".models import " ~ r.name] %}
+{% endif %}
+{% set own = ([op.params_class] if op.params else []) + ([] if r else [op.row_class]) %}
+{% if own %}
+{% set lines = lines + [py.from_import("app.features." ~ e.slice ~ ".schemas", own)] %}
+{% endif %}
+{{ py.imports(lines) }}
+
+
+async def {{ op.name }}(
+    session: AsyncSession,
+{% if op.params %}
+    params: {{ op.params_class }},
+{% endif %}
+) -> Sequence[{{ r.name if r else op.row_class }}]:
+    """Return all rows of the query{{ " for the params" if op.params }}, in their order.
+
+{% if r %}
+    Each row is a record of {{ r.name }}, for example of
+    `await session.scalars(select({{ r.name }}).where(...))`. The generated
+    endpoint returns one page of the rows{{ ", and only the records that the role may read" if r.scoped }}.
+{% else %}
+    Each row is a `{{ op.row_class }}` with the fields of `result`. The
+    generated endpoint returns one page of the rows.
+{% endif %}
+    """
+    # TODO(appgen): write the query {{ op.name }}.
+    raise NotImplementedError("operations.{{ op.name }}")

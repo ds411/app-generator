@@ -16,7 +16,8 @@ the cause and the fix of each diagnostic code.
    `appgen validate app.yaml --format json`.
 4. Write the operations. Use the CRUD shorthand (`crud`) for the
    create, read, update, delete, and list operations. Add a `custom`
-   operation only for logic that is not CRUD. Validate.
+   operation only for logic that is not CRUD, and a `query` only for a
+   list that the filters of a list cannot give. Validate.
 5. Write `pages`, and the parts of `ui` that the pages use: the views,
    the forms, the dashboards, the layouts, and the menus. The CRUD
    shorthand can also give a default table view, detail view, and forms.
@@ -251,6 +252,14 @@ and forms. A `custom` operation has `entity`, `description`, `params`
 (fields, as the fields of an entity), and `returns` (an entity or
 `none`). Its logic is a generation gap. Use one only if the logic is
 not CRUD.
+
+A `query` operation returns a list of rows for its `params`, for
+example the free slots of a room or the totals of each month. It has
+`returns` (each row is a record of the entity) or `result` (the fields
+of each row, for rows that are not records), not both. Its logic is a
+generation gap that returns all rows: the generated code gives a page
+of them, and applies the permission and the record rules. Do not name
+a param `limit` or `offset`.
 
 For a record with lines, for example an invoice with invoice lines,
 give the create and the update operation `lines` with the names of the

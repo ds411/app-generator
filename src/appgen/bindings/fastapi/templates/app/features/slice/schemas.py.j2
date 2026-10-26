@@ -146,15 +146,27 @@ class {{ e.name }}SignUp(InputModel):
 {% endfor %}
     password: str = Field(min_length={{ definition.auth.min_password_length }}, max_length=200)
 {% endif %}
-{% for op in e.custom_operations if op.params %}
+{% for op in e.param_operations if op.params %}
 
 
 {{ trace(op.id) }}
 class {{ op.params_class }}(InputModel):
-    """The params of the operation `{{ op.name }}`."""
+    """The params of the {{ "query" if op.query else "operation" }} `{{ op.name }}`."""
 
 {% for p in op.params %}
     {{ trace(p.id) }}
     {{ p.declaration("create") }}
+{% endfor %}
+{% endfor %}
+{% for op in e.queries if op.result %}
+
+
+{{ trace(op.id) }}
+class {{ op.row_class }}(ReadModel):
+    """A row of the query `{{ op.name }}` (ADR 0045)."""
+
+{% for f in op.result %}
+    {{ trace(f.id) }}
+    {{ f.declaration("read") }}
 {% endfor %}
 {% endfor %}
