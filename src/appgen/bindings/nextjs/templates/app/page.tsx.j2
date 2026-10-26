@@ -5,10 +5,27 @@
 {% set rule = record_rules.get(element.entity) if detail and protected else none %}
 {% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
 {% set api_plan = ui_views.api_view_plan(api_view) if api_view else none %}
+{% set meta = element.meta %}
+{# A value of the metadata that a field of the record of the page gives (`$record.<field>`):
+   the name and the type of the field. #}
+{% set meta_fields = namespace(description=none, image=none) %}
+{% if meta %}
+{% for key in ("description", "image") %}
+{% set value = meta[key] %}
+{% if value and value.startswith("$record.") %}
+{% set field = (value[8:], definition.entities[element.entity].fields[value[8:]].type) %}
+{% if key == "description" %}{% set meta_fields.description = field %}{% else %}{% set meta_fields.image = field %}{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% set meta_record = meta_fields.description or meta_fields.image %}
 {{ trace_header(element_id) }}
 import type { Metadata } from "next";
 {% if detail %}
 import { notFound } from "next/navigation";
+
+import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.entity | kebab }}/server";
+{% elif meta_record %}
 
 import { {{ element.entity | camel }}Repository } from "@/entities/{{ element.entity | kebab }}/server";
 {% elif api_plan %}
@@ -28,8 +45,38 @@ import { requirePageUser } from "@/shared/auth/session";
 {% if i18n %}
 import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
+{% if meta %}
+import { pageMetadata } from "@/shared/lib/site";
+{% endif %}
 
+{% if meta %}
+{% macro meta_value(key, field) %}
+{%- if field and field[1] == "image" -%}
+record?.{{ field[0] | camel }}?.url
+{%- elif field -%}
+record?.{{ field[0] | camel }}
+{%- else -%}
+{{ tr(js(meta[key])) if key == "description" else js(meta[key]) }}
+{%- endif -%}
+{% endmacro %}
+{% set ns = namespace(values=["title: " ~ tr(js(element.title))]) %}
+{% for key, field in (("description", meta_fields.description), ("image", meta_fields.image)) if meta[key] %}
+{% set ns.values = ns.values + [key ~ ": " ~ meta_value(key, field)] %}
+{% endfor %}
+{% set call = "pageMetadata({ " ~ ns.values | join(", ") ~ " })" %}
+/** The metadata of the page{{ " in the language of the request" if i18n }}: its title, its description, and the preview of its links. */
+export async function generateMetadata({% if meta_record %}{ params }: PageProps<{{ ("/" ~ info.route_dir) | tojson }}>{% endif %}): Promise<Metadata> { {{ trace(meta.id) }}
+{% if meta_record %}
+  const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
+  const record = (await {{ element.entity | camel }}Repository.exists(id)) ? await {{ element.entity | camel }}Repository.get(id) : null;
+{% endif %}
 {% if i18n %}
+  return inRequestLanguage(() => {{ call }});
+{% else %}
+  return {{ call }};
+{% endif %}
+}
+{% elif i18n %}
 /** The title of the page, in the language of the request. */
 export async function generateMetadata(): Promise<Metadata> {
   return inRequestLanguage(() => ({ title: {{ tr(js(element.title)) }} }));

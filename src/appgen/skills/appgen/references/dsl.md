@@ -1009,6 +1009,7 @@ ignores the pages.
 | `breadcrumb`  | The label in the breadcrumbs. Default: the label of the menu item of the page, else the title, or the display field of the record for a page with an entity and a path parameter. |
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 | `embed`       | The origins of the websites that can show the page in a frame, for example `[https://www.example.com]` (see [Pages in frames](#pages-in-frames)). |
+| `meta`        | The `description` and the `image` of the page for search engines and the previews of links (see [Page metadata](#page-metadata)). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
 longest prefix of the page path. Two pages cannot have the same path.
@@ -1053,6 +1054,46 @@ pages:
         confirm: { title: "Delete the task?", confirm_label: Delete }
         on_success: { toast: The task is deleted., navigate: task_board }
 ```
+
+### Page metadata
+
+`meta` gives a page a `description` and an `image` for search engines
+and the previews of links, for example in a chat or a social network.
+Each value is a text, or `$record.<field>` for a field of the record of
+a page with an entity and a path parameter. The description takes a
+`string` or a `text` field. The image takes an `image` or a `url`
+field, or a text: an absolute URL, or a path of the app, for example
+`/card.png` (a file of the `public` folder).
+
+```yaml
+pages:
+  projects:
+    meta:
+      description: All the projects of the team, with their status and due dates.
+      image: /projects.png
+  project_detail:
+    meta: { description: $record.description }
+```
+
+- A `$record.` value needs a public page: the definition has no `auth`,
+  or the page is in `auth.public_pages`. The metadata shows to all
+  users and crawlers.
+- The Next.js app renders the metadata on the server: the `description`
+  tag, the Open Graph tags (`og:title`, `og:description`, `og:image`),
+  and the tags of the cards of X (`twitter:card`). An image path
+  becomes an absolute URL with `PUBLIC_URL`, else with the host of the
+  request.
+- The Next.js app gives `/sitemap.xml` and `/robots.txt` for the public
+  pages with `meta`. A page without path parameters has one URL. A page
+  with path parameters has the URL of each record of its entity if each
+  parameter is the ID, a required field, or the key of a required
+  `many_to_one` relation (`<relation>_id`). `robots.txt` allows all
+  pages but `/api/`, and gives the URL of the sitemap.
+- The React app sets the description of the document while the page
+  shows. A browser app has no server render: search engines that do not
+  run JavaScript, and most previews of links, read only the title and
+  the description of `index.html`. Use the Next.js app for pages that
+  search engines must find.
 
 ### Pages in frames
 

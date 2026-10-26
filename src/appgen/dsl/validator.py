@@ -52,12 +52,15 @@ from appgen.dsl.expressions import (
 from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import (
+    RECORD_PREFIX,
     SEQUENCE_TYPES,
     AppDefinition,
     Element,
     Entity,
     Field,
     Operation,
+    Page,
+    PageMeta,
     Relation,
     Sequence,
 )
@@ -2244,10 +2247,80 @@ _ORIGIN = re.compile(
 """An https origin: the scheme, a host name in lower case, and an optional port."""
 
 
+_META_TYPES = {"description": ("string", "text"), "image": ("image", "url")}
+"""The field types of the values of the metadata of a page that a record gives."""
+
+
+def _check_page_meta(
+    definition: AppDefinition, name: str, page: Page, meta: PageMeta
+) -> Iterator[Diagnostic]:
+    """A value of the record needs a public page of a record. An image is a URL or a path of
+    the app."""
+    auth = definition.auth
+    for key in ("description", "image"):
+        value = getattr(meta, key)
+        if not isinstance(value, str):
+            continue
+        if not value.startswith(RECORD_PREFIX):
+            if key == "image" and not re.match(r"^(https?://\S+|/\S*)$", value):
+                yield _error(
+                    "invalid-value",
+                    f"{_show(value)} is not a URL or a path of the app.",
+                    meta,
+                    at=key,
+                    hint="Give an absolute URL, for example 'https://example.com/card.png', a "
+                    "path, for example '/card.png', or '$record.<field>'.",
+                )
+            continue
+        field_name = value.removeprefix(RECORD_PREFIX)
+        entity = definition.entities.get(page.entity or "")
+        if auth is not None and name not in auth.public_pages:
+            # The metadata is in the HTML of the page before the check of the user.
+            yield _error(
+                "invalid-option",
+                f"{_show(value)} needs a public page: the metadata of a page shows to all "
+                "users and crawlers.",
+                meta,
+                at=key,
+                hint=f"Give a text, or add '{name}' to 'auth.public_pages'.",
+            )
+            continue
+        if entity is None or "{" not in page.path:
+            yield _error(
+                "invalid-option",
+                f"{_show(value)} needs a page of a record: a page with 'entity' and a path "
+                "parameter.",
+                meta,
+                at=key,
+                hint="Give a text, or add 'entity' and a parameter of the path to the page.",
+            )
+            continue
+        f = entity.fields.get(field_name)
+        if f is None:
+            yield _error(
+                "unknown-reference",
+                f"The entity '{page.entity}' has no field '{field_name}'.",
+                meta,
+                at=key,
+            )
+        elif f.type not in _META_TYPES[key]:
+            yield _error(
+                "unsuitable-field",
+                f"The {key} of a page needs a field of the type "
+                f"{' or '.join(repr(t) for t in _META_TYPES[key])}, but '{field_name}' has the "
+                f"type '{f.type}'.",
+                meta,
+                at=key,
+            )
+
+
 def check_pages(definition: AppDefinition) -> Iterator[Diagnostic]:
-    """A page with `embed` is public, has no layout, and names https origins (ADR 0032)."""
+    """A page with `embed` is public, has no layout, and names https origins (ADR 0032). The
+    metadata of a page reads fields of the record of a page of a record."""
     auth = definition.auth
     for name, page in definition.pages.items():
+        if page.meta is not None:
+            yield from _check_page_meta(definition, name, page, page.meta)
         if page.embed is None:
             continue
         if auth is not None and name not in auth.public_pages:

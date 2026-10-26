@@ -220,6 +220,14 @@ BINDING = Binding(
             path="{{ nextjs.pages[name].route_file }}",
             for_each="page",
         ),
+        # The metadata of the pages: the previews of the links, the sitemap, and robots.txt.
+        Output(
+            template="src/shared/lib/site.ts.j2",
+            path="src/shared/lib/site.ts",
+            when="definition.pages.values() | selectattr('meta') | list",
+        ),
+        Output(template="app/sitemap.ts.j2", path="app/sitemap.ts", when="nextjs.sitemap"),
+        Output(template="app/robots.ts.j2", path="app/robots.ts", when="nextjs.sitemap"),
         Output(template="theme/globals.css.j2", path="src/app/styles/globals.css"),
         Output(template="src/app/providers/index.tsx.j2", path="src/app/providers/index.tsx"),
         Output(
@@ -555,7 +563,8 @@ BINDING = Binding(
         *_HOOKS,
     ),
     covers=frozenset(
-        {"app", "page", "entity", "field", "sequence", "relation", "operation", "param"}
+        {"app", "page", "page_meta", "entity", "field", "sequence", "relation", "operation"}
+        | {"param"}
         | {"theme", "tokens", "token_group", "token"}
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}

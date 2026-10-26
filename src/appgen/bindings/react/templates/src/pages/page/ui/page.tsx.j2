@@ -8,11 +8,23 @@
 {% set id_param = params[-1] if detail else none %}
 {% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
 {% set api_route = api_view and ui_views.api_view_plan(api_view).props %}
+{% set description = element.meta.description if element.meta else none %}
+{# A description that a field of the record of the page gives (`$record.<field>`). #}
+{% set description_field = description[8:] if description and description.startswith("$record.") else none %}
+{% if description_field %}
+import { {{ element.entity | camel }}Api } from "@/entities/{{ element.entity | kebab }}";
+{% endif %}
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
 {% endif %}
-{% if (params and not view and not dashboard and not api_view) or form or api_route %}
+{% if (params and not view and not dashboard and not api_view) or form or api_route or description_field %}
 import { useParams } from "@/shared/lib/router";
+{% endif %}
+{% if description %}
+import { useDescription } from "@/shared/lib/use-description";
+{% endif %}
+{% if description_field %}
+import { useResource } from "@/shared/lib/use-resource";
 {% endif %}
 {% if dashboard %}
 import { {{ dashboard | pascal }}Dashboard } from "@/widgets/{{ dashboard | kebab }}";
@@ -35,7 +47,21 @@ import { {{ name | pascal }}Content } from "./{{ name | kebab }}-content.gen";
 {{ trace(action_id) }}
 
 {% endfor %}
+{% if description_field %}
+/** The description of the page: a field of its record, when the record is there. */
+function usePageDescription(): string | null {
+  const { {{ params[-1] }}{% if params[-1] != "id" %}: id{% endif %} } = useParams();
+  const record = useResource(`{{ name }}:meta:${id}`, () => {{ element.entity | camel }}Api.get(id ?? ""));
+  return record.status === "success" ? (record.data.{{ description_field | camel }} ?? null) : null;
+}
+
+{% endif %}
 export function {{ name | pascal }}Page() {
+{% if description_field %}
+  useDescription(usePageDescription()); {{ trace(element.meta.id) }}
+{% elif description %}
+  useDescription({{ tr(js(description)) }}); {{ trace(element.meta.id) }}
+{% endif %}
 {% if (custom and element.entity) or form %}
   const params = useParams();
 {% elif detail %}
