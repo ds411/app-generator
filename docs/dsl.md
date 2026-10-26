@@ -1915,6 +1915,7 @@ see [Views of API data](#views-of-api-data).
 | `row_click`    | The row action that a click on a row runs.                      |
 | `selection`    | Boolean: check boxes on the rows.                               |
 | `bulk_actions` | Actions of the selected rows.                                   |
+| `order_field`  | An `integer` field of a manual order: the user moves the rows (see [Manual order](#manual-order)). |
 
 A column has `field` (default: the column name), `label`, `format`,
 `badge`, `width` (a `size` token), `align` (`start`, `center`, `end`),
@@ -1977,7 +1978,50 @@ another column), and `responsive`. `responsive` has `below` (a
 breakpoint token) and `layout`: on screens narrower than the
 breakpoint, `stack` shows the columns one under the other, and `scroll`
 shows each column almost as wide as the screen, with snap scroll.
-Without `responsive`, the columns scroll sideways.
+Without `responsive`, the columns scroll sideways. `order_field` gives
+the cards of each column a manual order (see [Manual order](#manual-order)).
+
+#### Manual order
+
+A table or a board with `order_field` has a manual order
+([ADR 0039](adr/0039-manual-order.md)): the view sorts the records by
+this `integer` field, and a record without a value comes last. The user
+moves a row of a table by drag and drop, or with the arrow keys on the
+handle of the row, and a card of a board by drag and drop, also to
+another column. The app writes the new value with the update operation
+of the entity.
+
+```yaml
+entities:
+  Task:
+    fields:
+      rank: { type: integer, min: 0 }
+ui:
+  views:
+    backlog:
+      kind: table
+      entity: Task
+      columns: { title: {}, status: {}, assignee: {} }
+      order_field: rank
+```
+
+- The moved record gets the middle value between the values of its
+  neighbors, rounded down: one update. At the top, the lower neighbor is
+  0. At the end, the value is the value of the last record plus 1024.
+- When no integer is free, or a neighbor has no value, the app gives the
+  records of the list 1024, 2048, 3072, and so on, in the new order, and
+  updates the records whose value changes.
+- The list is the list that the user sees: the filtered records of a
+  table, or the cards of a column. A table that the user sorts by a
+  column does not show the handles. With `x-react-data: api`, a move
+  loads all records of the view, so that new values cover the other
+  pages too.
+- A view with `order_field` takes no `sort`. The field has no `unique`,
+  no `max`, no `computed`, no `sequence`, and a `min` of 1 or less. The
+  entity needs an update operation. With `access`, a role that may not
+  call the update operation cannot move the records.
+- The mock data of the React app is in memory: a reload shows the order
+  of the mock data again.
 
 **Calendar** (`kind: calendar`): the records on a calendar, in a week
 or a month. `start` (a `date` or a `datetime` field) gives the day and
@@ -2824,7 +2868,8 @@ use in the app does not show.
   `Last page`, `pagination`, `Go to previous page`, `Go to next page`,
   `Previous`, `Next`, `More pages`, `Select all`, `Select the row`,
   `Actions`, `{count} selected`, `Clear the selection`, `Loading`,
-  `Try again`, `Yes`, `No`.
+  `Try again`, `Yes`, `No`, and the manual order: `Order`,
+  `Move the row`, `The row did not move.`.
 - Filters: `No matching records`, `Change or reset the filters.`,
   `Reset the filters`, `Reset`, `{label}: all`, `{count} chosen`,
   `No value has this name.`, `Clear the filter`, `Clear {label}`.

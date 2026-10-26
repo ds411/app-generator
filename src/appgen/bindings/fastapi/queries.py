@@ -488,6 +488,9 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
             builder.board(view)
         if isinstance(view, CalendarView):
             builder.calendar(view)
+        if isinstance(view, TableView | BoardView) and view.order_field is not None:
+            # A manual order (ADR 0039): the view sorts by its order field.
+            builder.sort_key(view.order_field, view.id)
         if isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
             builder.sort_key(view.sort.field, view.sort.id)
         if isinstance(view, TableView):

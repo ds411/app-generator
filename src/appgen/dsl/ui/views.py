@@ -215,6 +215,9 @@ class TableView(ListViewBase):
     """A row action that runs when the user clicks a row."""
     selection: bool = False
     bulk_actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
+    order_field: MemberName | None = None
+    """An `integer` field that gives a manual order: the user moves the rows by drag and drop
+    (ADR 0039)."""
 
 
 class CardsView(ListViewBase):
@@ -243,10 +246,13 @@ class BoardView(ViewBase):
     card: Card | None = None
     sort: Sort | None = None
     move: MemberName | None = None
+    """The operation that runs when the user moves a card to another column."""
     responsive: ViewResponsive | None = None
     """The layout on narrow screens. Without it, the columns scroll sideways."""
-    """The operation that runs when the user moves a card to another column."""
     row_actions: dict[MemberName, Action] = pydantic.Field(default_factory=dict[str, Action])
+    order_field: MemberName | None = None
+    """An `integer` field that gives a manual order of the cards of each column: the user moves
+    the cards by drag and drop (ADR 0039)."""
 
 
 class CalendarView(ViewBase):

@@ -54,6 +54,7 @@ gives the rules.
 | 0035   | [Lines of a record in create and update operations](0035-lines.md)     | Accepted |
 | 0037   | [Sequence numbers of the fields](0037-sequence-numbers.md)             | Accepted |
 | 0038   | [The period of a dashboard](0038-dashboard-period.md)                  | Accepted |
+| 0039   | [A manual order with drag and drop](0039-manual-order.md)              | Accepted |
 | 0040   | [Change log of the records](0040-history.md)                           | Accepted |
 | 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |
 | 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |

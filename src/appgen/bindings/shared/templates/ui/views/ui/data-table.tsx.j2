@@ -13,7 +13,8 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
+{% set order = "order" in ui_views.features %}
+import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon{{ ", GripVerticalIcon" if order }} } from "lucide-react";
 import { type CSSProperties, type ReactNode, useState } from "react";
 
 import { Button } from "@/shared/ui/button";
@@ -48,7 +49,9 @@ export type ServerPages = {
  * `server`, `data` is one page, and the view loads the page and the sort
  * that `server.onChange` gives.{% if "scroll" in ui_views.features %} With `scroll`, the table shows the next
  * page at its end, and keeps the shown rows. With `server` and `scroll`,
- * `data` is the loaded pages, and `scroll.onMore` loads the next page.{% endif %}
+ * `data` is the loaded pages, and `scroll.onMore` loads the next page.{% endif %}{% if order %} With
+ * `onMove`, a row moves by drag and drop, or with the arrow keys on its
+ * handle, while no column sorts the rows (ADR 0039).{% endif %}
  */
 export function DataTable<T extends { id: string }>({
   columns,
@@ -64,6 +67,9 @@ export function DataTable<T extends { id: string }>({
   server,
 {% if "scroll" in ui_views.features %}
   scroll,
+{% endif %}
+{% if order %}
+  onMove,
 {% endif %}
 }: {
   columns: ColumnDef<T>[];
@@ -85,6 +91,10 @@ export function DataTable<T extends { id: string }>({
   /** Show the next page at the end (`pagination.mode: scroll`). The server loads it with `onMore`. */
   scroll?: true | { loading: boolean; onMore: () => void };
 {% endif %}
+{% if order %}
+  /** Move the record `id` to the place of the record `overId` (`order_field`). */
+  onMove?: (id: string, overId: string) => void;
+{% endif %}
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -100,7 +110,51 @@ export function DataTable<T extends { id: string }>({
 {% endif %}
   }
 
+{% if order %}
+  // The rows move only in the manual order: not while a column sorts them.
+  const movable = onMove !== undefined && (server ? server.sorting : sorting).length === 0;
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const endDrag = () => {
+    setDragged(null);
+    setOver(null);
+  };
+
+{% endif %}
   const allColumns: ColumnDef<T>[] = [
+{% if order %}
+    ...(movable
+      ? [
+          {
+            id: "move",
+            header: () => <span className="sr-only">{{ jsx_text("Order") }}</span>,
+            cell: ({ row, table }) => (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 cursor-grab text-muted-foreground active:cursor-grabbing"
+                aria-label={{ jsx_attr("Move the row") }}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  // The arrow keys move the row above the row before it, or below the row after it.
+                  const shown = table.getRowModel().rows;
+                  const index = shown.findIndex((other) => other.id === row.id);
+                  const other = event.key === "ArrowUp" ? shown[index - 1] : event.key === "ArrowDown" ? shown[index + 1] : undefined;
+                  if (other) {
+                    event.preventDefault();
+                    onMove?.(row.id, other.id);
+                  }
+                }}
+              >
+                <GripVerticalIcon className="size-4" />
+              </Button>
+            ),
+            enableSorting: false,
+            meta: { className: "w-10" },
+          } satisfies ColumnDef<T>,
+        ]
+      : []),
+{% endif %}
     ...(selection
       ? [
           {
@@ -231,8 +285,35 @@ export function DataTable<T extends { id: string }>({
               <TableRow
                 key={row.id}
                 data-state={row.getIsSelected() ? "selected" : undefined}
+{% if order %}
+                className={cn(
+                  onRowClick && "cursor-pointer",
+                  dragged === row.id && "opacity-50",
+                  over === row.id && dragged !== row.id && "bg-primary/5 outline-2 -outline-offset-2 outline-primary",
+                )}
+{% else %}
                 className={cn(onRowClick && "cursor-pointer")}
+{% endif %}
                 onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+{% if order %}
+                draggable={movable}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/plain", row.id);
+                  event.dataTransfer.effectAllowed = "move";
+                  setDragged(row.id);
+                }}
+                onDragOver={(event) => {
+                  if (dragged === null) return;
+                  event.preventDefault();
+                  setOver(row.id);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (dragged !== null && dragged !== row.id) onMove?.(dragged, row.id);
+                  endDrag();
+                }}
+                onDragEnd={endDrag}
+{% endif %}
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className={metaOf(cell.column.columnDef.meta)?.className}>

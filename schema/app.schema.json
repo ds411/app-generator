@@ -1239,6 +1239,17 @@
           },
           "title": "Row Actions",
           "type": "object"
+        },
+        "order_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -6542,6 +6553,17 @@
           },
           "title": "Bulk Actions",
           "type": "object"
+        },
+        "order_field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
