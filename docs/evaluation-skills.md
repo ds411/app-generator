@@ -483,7 +483,8 @@ and makes a working app.
 
 ### Method of the quick-start tasks
 
-- The work folder is empty, and the home folder has both skills
+- The work folder is empty, or has only the files that the prompts
+  name, and the home folder has both skills
   (`appgen skills install --scope user`). The prompts are in
   [evaluation/skill-tasks/](evaluation/skill-tasks/), in the files that
   start with `quickstart-`. They name no key of the DSL.
@@ -513,13 +514,16 @@ and makes a working app.
 | ---- | ------- | ----------------- |
 | `quickstart-tool-library` | "Make an app for our neighborhood tool library. Members lend their tools to each other, and borrow a tool for a few days." | `nextjs` in `nextjs/`, a sign-in with a password and no provider, and the rows `binding`, `app`, and `auth`. |
 | `quickstart-mobile-api` | "We are building a mobile app for a running club. Make the REST API behind it: ..." | Only `fastapi` in `fastapi/`, a sign-in, and the row `binding`. |
+| `quickstart-company-jira` | "Make an internal IT help desk for our company. The staff sign in with their work Microsoft account: our Entra ID is connected to the Amazon Cognito user pool eu-west-1_Hd7Qm2xYz in eu-west-1, and its identity provider there has the name EntraID. Nobody needs another password for the help desk. ... The OpenAPI document of Jira is jira.openapi.json in this folder, and the app calls Jira with the email address and an API token of our Jira bot account." The work folder has the trimmed Jira document of `tests/fixtures/jira/`. | `nextjs` in `nextjs/`, no password and no sign-up, a provider with the issuer of the user pool, `authorize_params.identity_provider: EntraID`, `trust_email: true`, and `create_users: true`, the API `jira.openapi.json` with HTTP Basic (`username_env`), and the rows `binding`, `auth`, `providers`, `password`, and `apis`. |
 | `quickstart-change-bindings` | First "Make an app for a small bike repair shop. ... A mechanic marks a repair as picked up, and that sets the pickup date to today.", then "Make the front end React with a Python API." | `react` in `react/` and `fastapi` in `fastapi/`, `app.x-react-data: api`, and the row `binding`. The folder `nextjs/` of the first prompt stays with its hand-written code, and the new apps have hand-written code for each element of it. |
 
 The runs were on 2026-10-27, with appgen 0.1.0 (installed as a tool from
 the branch of #489), Claude Code 2.1.311, and the model
 `claude-sonnet-5-5` only: the runs cost money, and the maintainer chose
 one model for this part. The work folders and the logs of the runs are
-not in the repository.
+not in the repository. The task `quickstart-company-jira` needs the keys
+of #483 and #486, so it ran later, with the fixes of the first runs
+(see [The company sign-in and Jira](#the-company-sign-in-and-jira)).
 
 ### Results of the first runs
 
@@ -587,6 +591,46 @@ tool library and in 3 of 3 runs of the running club, a workflow of the
 loans in 3 of 3 runs of the tool library, and seed records in 1 run of
 the tool library, which the prompt did not ask for. The expected
 defaults of the tasks do not include these rows.
+
+### The company sign-in and Jira
+
+The task `quickstart-company-jira` ran after #483 and #486 were on
+main, with the fixes 10 to 12 and two new parts of the skill: the keys
+of a user pool of Amazon Cognito with an identity provider
+(`authorize_params` and `trust_email`), and HTTP Basic for an API
+(`username_env`, or `per_user` for the own account of each user). The
+skill also tells the agent to leave out `roles` and `sign_out` when the
+prompts do not give the IDs of the groups or the domain of the user
+pool, and to name them in the summary.
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Defaults | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | -------- | ----------- | ------ |
+| company-jira-claude-sonnet-5-5-1 | quickstart-company-jira | claude-sonnet-5-5 | 16 | 141 | 0.31 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| company-jira-claude-sonnet-5-5-2 | quickstart-company-jira | claude-sonnet-5-5 | 15 | 130 | 0.29 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| company-jira-claude-sonnet-5-5-3 | quickstart-company-jira | claude-sonnet-5-5 | 18 | 132 | 0.31 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+
+All 3 runs passed, and the three definitions agree in each expected
+default:
+
+- Each agent loaded both skills with the Skill tool, asked no question,
+  and made `nextjs` in `nextjs/`. The provider had the issuer of the
+  user pool, `authorize_params: { identity_provider: EntraID }`,
+  `trust_email: true`, `create_users: true`, and `default_role: staff`,
+  and `auth.password` was `false`.
+- Each agent called Jira with HTTP Basic (`JIRA_EMAIL` and
+  `JIRA_API_TOKEN`), selected only the search operation, and showed the
+  open issues of the project IT in a view of API data with the JQL
+  `project = IT AND statusCategory != Done ORDER BY created DESC`. The
+  app needs no hand-written code for it.
+- No agent added `roles` or `sign_out`. Each summary told that the
+  sign-out ends only the session of the app until the user gives the
+  domain of the user pool, and two summaries told that the roles from
+  the groups of Entra ID need the IDs of the groups.
+- Each run made the roles `it_team` and `staff`, the record rules (a
+  member of the staff sees only the own tickets), and a workflow of the
+  status of a ticket. The task does not expect these rows.
+
+The three runs cost 0.91 USD.
 
 ## Limits
 
