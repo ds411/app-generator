@@ -186,12 +186,15 @@ A story is done when all these conditions are true:
   - The generated example apps build.
   - The trace check reports no invalid traces.
 - The docs agree with the change.
-- The skill agrees with the change: the agent skill in
+- The skills agree with the change: the agent skill in
   `src/appgen/skills/appgen/` describes each changed command, option, DSL
   section, and diagnostic code (ADR 0015). Its JSON examples, exit codes,
   and defaults agree with the CLI (`tests/test_skill_statements.py`).
   After a change to `docs/dsl.md`, run
-  `uv run scripts/update_skill_references.py`.
+  `uv run scripts/update_skill_references.py`. The quick-start skill in
+  `src/appgen/skills/appgen-quickstart/` (ADR 0053) names only keys,
+  values, and bindings that exist, and has a row for each new section
+  of the DSL (`tests/test_skill_quickstart.py`).
 - The pull request that closes the story is merged.
 
 ## Generated code

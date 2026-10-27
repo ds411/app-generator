@@ -1,4 +1,4 @@
-"""Helpers for the tests of the agent skill: its files, its front matter, and its code."""
+"""Helpers for the tests of the agent skills: their files, their front matter, and their code."""
 
 import re
 from dataclasses import dataclass
@@ -14,6 +14,8 @@ from appgen.cli import app
 ROOT = Path(__file__).parent.parent
 SKILLS = ROOT / "src" / "appgen" / "skills"
 SKILL = SKILLS / "appgen"
+QUICKSTART = SKILLS / "appgen-quickstart"
+"""The quick-start skill (ADR 0053): the defaults of an app. It uses the skill `appgen`."""
 
 _FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.DOTALL | re.MULTILINE)
 _SPAN = re.compile(r"`([^`]+)`")
@@ -37,11 +39,11 @@ class CodeBlock:
     """The text of an HTML comment on the line before the block, for example `appgen check`."""
 
 
-def skill_docs() -> dict[str, str]:
-    """Return the text of each Markdown file of the skill, by its path in the skill folder."""
+def skill_docs(skill: Path = SKILL) -> dict[str, str]:
+    """Return the text of each Markdown file of a skill, by its path in the skill folder."""
     return {
-        path.relative_to(SKILL).as_posix(): path.read_text(encoding="utf-8")
-        for path in sorted(SKILL.rglob("*.md"))
+        path.relative_to(skill).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(skill.rglob("*.md"))
     }
 
 
