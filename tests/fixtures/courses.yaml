@@ -112,7 +112,8 @@ pages:
   # An admin shares a lesson with a guest: a secret link opens it
   # without a sign-in (ADR 0049). A member may not change a lesson, so
   # a member sees no button "Share". The page shows the other users on
-  # the lesson, and a note when one of them types (ADR 0052).
+  # the lesson, and a note when one of them types in the form "Edit"
+  # (ADR 0052).
   lesson_detail:
     path: "/lessons/{id}"
     title: Lesson
@@ -120,6 +121,8 @@ pages:
     content: { view: lesson_detail }
     share: true
     presence: true
+    actions:
+      edit: { kind: form, form: edit_lesson, label: Edit, icon: pencil, variant: outline }
   submissions:
     path: /submissions
     title: Submissions
