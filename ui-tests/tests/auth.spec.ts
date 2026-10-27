@@ -4,8 +4,9 @@
 // (ADR 0017), a user of a record rule sees only the records of the rule
 // (ADR 0018, ADR 0025), a user signs in with a provider (ADR 0020), a
 // user turns on a second factor and signs in with a code (ADR 0024), and
-// the receiver of a change gets a notice in the bell (ADR 0041), and a
-// user that a text mentions gets one too (ADR 0043).
+// the receiver of a change gets a notice in the bell (ADR 0041) and its
+// email, and turns off the emails of a notification (ADR 0044), and a
+// user that a text mentions gets a notice too (ADR 0043).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -129,6 +130,17 @@ function messageLinks(mailbox: string, kind: string, to: string): string[] {
 async function newMessageLink(mailbox: string, kind: string, to: string, before: number): Promise<string> {
   await expect.poll(() => messageLinks(mailbox, kind, to).length).toBeGreaterThan(before);
   return messageLinks(mailbox, kind, to).at(-1) ?? "";
+}
+
+/** Return the subjects of the emails of the notices to an address with a text, from the file of the mock SMTP server. */
+function noticeEmails(mailbox: string, to: string, text: string): string[] {
+  if (!existsSync(mailbox)) return [];
+  return readFileSync(mailbox, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as { to: string[]; subject: string; text: string })
+    .filter((email) => email.to.includes(to) && email.text.includes(text) && email.text.includes("/notice-settings"))
+    .map((email) => email.subject);
 }
 
 test("the page of the verification link asks for a confirmation", async ({ page }, testInfo) => {
@@ -369,6 +381,31 @@ test("the receiver of a change finds the notice in the bell of the top bar", asy
   await item.click();
   await page.waitForURL((url) => url.pathname === notice.path);
   await expect(count).toHaveCount(0);
+
+  const emails = auth?.noticeEmails;
+  if (!emails) return;
+  if (emails.mailbox !== null) {
+    // A scheduler calls the route of the job each minute. The run sends the email of the notice.
+    const response = await page.request.post("/api/jobs/notice_emails", {
+      headers: { authorization: `Bearer ${emails.secret}` },
+    });
+    expect(response.status()).toBe(200);
+    const mailbox = emails.mailbox;
+    await expect.poll(() => noticeEmails(mailbox, emails.to, notice.text)).toHaveLength(1);
+  }
+  // The bell links to the page of the settings: a switch for each notification with emails.
+  await page.getByRole("button", { name: /^Notices/ }).click();
+  await page.getByRole("link", { name: "Email settings", exact: true }).click();
+  await page.waitForURL((url) => url.pathname === "/notice-settings");
+  for (const label of emails.labels) {
+    await expect(page.getByRole("switch", { name: label, exact: true })).toBeChecked();
+  }
+  const first = page.getByRole("switch", { name: emails.labels[0], exact: true });
+  await first.click();
+  await expect(first).not.toBeChecked();
+  // The choice stays after a new load of the page.
+  await page.reload();
+  await expect(page.getByRole("switch", { name: emails.labels[0], exact: true })).not.toBeChecked();
 });
 
 test("a mention in a text shows as a link, and gives the user a notice in the bell", async ({ page }, testInfo) => {

@@ -6,14 +6,29 @@ The repository of each entity with a notification adds the notices of a
 change in the transaction of the change, after the events and the
 change log. A `text` field with mentions (ADR 0043) gives a notice to
 each user that a new or a changed text mentions for the first time.
+
+The notices of a notification with `email: true` (ADR 0044) wait for the
+built-in job `notice_emails`: the worker sends their emails with
+`app/core/mail.py`. The table `notice_settings` keeps the choices of the
+users about the emails.
 """
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from appgen.bindings.fastapi.jobs import PyJob, PySchedule
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, literal, string
 from appgen.bindings.shared.i18n import I18nPlan
-from appgen.bindings.shared.notices import MENTION, MENTION_TEXT
+from appgen.bindings.shared.notices import (
+    MENTION,
+    MENTION_TEXT,
+    NOTICE_EMAILS_BATCH,
+    NOTICE_EMAILS_JOB,
+    NOTICE_EMAILS_SCHEDULE,
+    email_notifications,
+    notice_links,
+)
+from appgen.dsl.cron import parse_cron
 from appgen.dsl.model import AppDefinition
 from appgen.gen.naming import constant
 from appgen.gen.render import GenerationError
@@ -23,6 +38,8 @@ if TYPE_CHECKING:
 
 TABLE = "notices"
 """The table of the notices."""
+SETTINGS_TABLE = "notice_settings"
+"""The table of the settings of the emails of the notices (ADR 0044)."""
 
 
 @dataclass(slots=True)
@@ -110,6 +127,8 @@ class PyNotification:
     """`transition`: the name of the transition."""
     user_entity: str = ""
     """The user entity of `auth`: the receivers are its records."""
+    email: bool = False
+    """True if the notices also go by email (ADR 0044)."""
 
     @property
     def has_receiver(self) -> bool:
@@ -328,6 +347,7 @@ def python_notifications(definition: AppDefinition, entities: dict[str, PyEntity
             receivers=[_receiver(entities, py_entity, path) for path in notification.receivers],
             values=[],
             user_entity=definition.auth.user_entity if definition.auth else "",
+            email=notification.email,
         )
         for value in notification.values():
             f = fields.get(value)
@@ -372,6 +392,69 @@ def python_notifications(definition: AppDefinition, entities: dict[str, PyEntity
             result.after = transition.to
             result.transition = transition_name
         py_entity.notifications.append(result)
+
+
+@dataclass(slots=True)
+class PyNoticeEmails:
+    """The emails of the notices (ADR 0044): the notifications with `email: true`, and the
+    built-in job `notice_emails` that sends them."""
+
+    names: list[str]
+    """The notifications with emails, in source order."""
+    ids: list[str]
+    """The element IDs of the notifications, for the traces."""
+    job: PyJob
+    address: str
+    """The attribute of the user model with the email address."""
+    links: dict[str, tuple[str, str]]
+    """The path of the detail page of each entity of a notice in the front end, and the
+    parameter of the ID, for example `("/bookings/{id}", "id")`."""
+    batch: int = NOTICE_EMAILS_BATCH
+
+
+def python_notice_emails(
+    definition: AppDefinition, entities: dict[str, PyEntity]
+) -> PyNoticeEmails | None:
+    """Return the emails of the notices, or None without a notification with `email: true`.
+
+    Raise GenerationError if a job has the name of the built-in job, or if
+    an entity has the table of the settings.
+    """
+    emails = email_notifications(definition)
+    address = definition.address_field()
+    if not emails or definition.auth is None or address is None:
+        return None
+    if NOTICE_EMAILS_JOB in definition.jobs:
+        raise GenerationError(
+            f"The job '{NOTICE_EMAILS_JOB}' has the name of the built-in job of the emails of "
+            "the notices (ADR 0044). Give the job another name."
+        )
+    for entity in entities.values():
+        if entity.table == SETTINGS_TABLE:
+            raise GenerationError(
+                f"The entity '{entity.name}' has the table '{SETTINGS_TABLE}' of the settings of "
+                "the emails of the notices. Give it another table with x-fastapi-table."
+            )
+    users = entities[definition.auth.user_entity]
+    attr = next(f.attr for f in users.fields if f.name == address)
+    job = PyJob(
+        name=NOTICE_EMAILS_JOB,
+        id=emails[0].id,
+        description="Send the emails of the notices of the notifications with `email: true`.",
+        schedule=PySchedule(parse_cron(NOTICE_EMAILS_SCHEDULE)),
+        builtin=True,
+    )
+    links = {
+        entities[entity].name: (definition.pages[page].path, param)
+        for entity, (page, param) in notice_links(definition).items()
+    }
+    return PyNoticeEmails(
+        names=[e.name for e in emails],
+        ids=[e.id for e in emails],
+        job=job,
+        address=attr,
+        links=links,
+    )
 
 
 def _receiver(entities: dict[str, PyEntity], entity: PyEntity, path: str) -> PyReceiver:

@@ -29,6 +29,11 @@
             - name: EMAIL_VERIFY_URL
               value: https://app.example.com/verify-email
 {% endif %}
+{% if py.notice_emails %}
+            # The front end: the links of the emails of the notices start with it.
+            - name: FRONT_END_URL
+              value: https://app.example.com
+{% endif %}
 {% if py.smtp %}
             # The SMTP server of the messages of the sign-in.
             - name: SMTP_HOST

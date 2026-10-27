@@ -1,6 +1,11 @@
 {{ trace_header(*notice_ids(definition)) }}
 {% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set emails = has_notice_emails(definition) %}
+{% if emails %}
+import { boolean, index, jsonb, pgTable, primaryKey, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+{% else %}
 import { index, jsonb, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+{% endif %}
 
 import { {{ users.const }} } from "./{{ users.module }}";
 
@@ -28,6 +33,33 @@ export const noticesTable = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
     // The time that the user marked the notice read, or null.
     readAt: timestamp("read_at", { withTimezone: true }),
+{% if emails %}
+    // True while the email of the notice waits for the job notice_emails (ADR 0044).
+    email: boolean("email").notNull().default(false),
+  },
+  (table) => [index("ix_notices_user_id").on(table.userId), index("ix_notices_email_at").on(table.email, table.at)],
+);
+
+/**
+ * The choices of the users about the emails of the notifications (ADR
+ * 0044): one row for each user and notification that the user changed.
+ * Without a row, the emails are on. The FastAPI app has the same table.
+ */
+export const noticeSettingsTable = pgTable(
+  "notice_settings",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => {{ users.const }}.id, { onDelete: "cascade" }),
+    // The name of the notification in the app definition.
+    notification: varchar("notification", { length: 63 }).notNull(),
+    // False: the user gets no emails of the notification.
+    email: boolean("email").notNull(),
+  },
+  (table) => [primaryKey({ name: "pk_notice_settings", columns: [table.userId, table.notification] })],
+);
+{% else %}
   },
   (table) => [index("ix_notices_user_id").on(table.userId)],
 );
+{% endif %}

@@ -328,6 +328,12 @@ BINDING = Binding(
             path="app/jobs/stat_snapshots.py",
             when="py.snapshots",
         ),
+        # The emails of the notices (ADR 0044): the built-in job.
+        Output(
+            template="app/jobs/notice_emails.py.j2",
+            path="app/jobs/notice_emails.py",
+            when="py.notice_emails",
+        ),
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
         Output(template="tests/test_migrations.py.j2", path="tests/test_migrations.py"),
@@ -554,6 +560,11 @@ BINDING = Binding(
             template="tests/jobs/test_stat_snapshots.py.j2",
             path="tests/jobs/test_stat_snapshots.py",
             when="py.snapshots",
+        ),
+        Output(
+            template="tests/jobs/test_notice_emails.py.j2",
+            path="tests/jobs/test_notice_emails.py",
+            when="py.notice_emails",
         ),
         Output(
             template="tests/test_storage.py.j2", path="tests/test_storage.py", when="py.storage"

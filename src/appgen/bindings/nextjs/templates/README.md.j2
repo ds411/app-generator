@@ -85,7 +85,7 @@ starts the service `jobs`, which calls each route each minute.
 | Job | When | What |
 | --- | ---- | ---- |
 {% for job in nextjs.jobs.values() %}
-| `{{ job.name }}` | {{ job.when }} | {% if job.entity %}The operation `{{ job.operation }}` on each {{ job.entity }} record of the filter{% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`src/app/jobs/{{ job.module }}.ext.ts`{% endif %} |
+| `{{ job.name }}` | {{ job.when }} | {% if job.entity %}The operation `{{ job.operation }}` on each {{ job.entity }} record of the filter{% elif job.builtin and job.name == "notice_emails" %}The emails of the notices of the notifications with `email: true` (built in){% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`src/app/jobs/{{ job.module }}.ext.ts`{% endif %} |
 {% endfor %}
 
 - A run is for one record (or for none) and one time. The table
@@ -470,6 +470,15 @@ the change log.
 {% endif %}
 - A change outside the repositories gives no notice: SQL in a script,
   and the seed.
+{% if has_notice_emails(definition) %}
+- The notifications {% for n in email_notifications(definition) %}`{{ n.name }}`{{ ", " if not loop.last }}{% endfor %} also send each
+  notice by email. The job `notice_emails` sends the emails that wait
+  each minute (`POST /api/jobs/notice_emails`), with the SMTP server of
+  `SMTP_*`. The links of an email start with `PUBLIC_URL`.
+- The page `/notice-settings` (the link "Email settings" of the bell)
+  turns the emails of each notification on or off for the signed-in
+  user. The notices stay in the bell.
+{% endif %}
 
 {% endif %}
 {% if shares %}

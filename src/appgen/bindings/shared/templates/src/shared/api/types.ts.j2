@@ -160,7 +160,23 @@ export interface NoticeApi {
   readAll(): Promise<void>;
   /** Call the listener after a change of the notices. Return the function that stops it. */
   subscribe(listener: () => void): () => void;
+{% if has_notice_emails(definition) %}
+  /** Return the settings of the emails of the signed-in user: each notification with emails (ADR 0044). */
+  settings(): Promise<NoticeSetting[]>;
+  /** Turn the emails of a notification on or off for the signed-in user. */
+  setEmail(notification: string, email: boolean): Promise<void>;
+{% endif %}
 }
+{% if has_notice_emails(definition) %}
+
+/** The emails of the notices of a notification for the signed-in user (ADR 0044). */
+export type NoticeSetting = {
+  /** The name of the notification in the app definition. */
+  notification: string;
+  /** False: the notices of the notification come only in the bell. */
+  email: boolean;
+};
+{% endif %}
 
 {% endif %}
 {% if has_points(definition) %}

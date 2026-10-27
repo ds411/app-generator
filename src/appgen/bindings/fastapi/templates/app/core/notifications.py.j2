@@ -15,6 +15,12 @@ A `text` field with mentions (ADR 0043) gives a notice to each user that
 a new or a changed text mentions for the first time. A mention is
 `@[<name>](<ID of the user>)`.
 {% endif %}
+{% if py.notice_emails %}
+
+The notices of a notification with `email: true` (ADR 0044) wait for
+their emails: the job `notice_emails` sends them. The table
+`notice_settings` keeps the choices of the users about the emails.
+{% endif %}
 """
 
 import datetime as dt
@@ -26,7 +32,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
-from sqlalchemy import ForeignKey, String, select
+from sqlalchemy import ForeignKey, {{ "Index, " if py.notice_emails }}String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, Mapped, aliased, mapped_column
 
@@ -50,6 +56,16 @@ TEXTS: dict[str, str] = {
 {% endif %}
 }
 """The text of each notification, by name: a name in braces is a value of the record."""
+{% if py.notice_emails %}
+EMAILS = frozenset(
+    {
+{% for name in py.notice_emails.names %}
+        {{ py.string(name) }},
+{% endfor %}
+    }
+)
+"""The notifications with emails (ADR 0044): their notices wait for the job `notice_emails`."""
+{% endif %}
 _VALUE = re.compile(r"\{(\w+)\}")
 {% if py.mentions %}
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -84,6 +100,47 @@ class Notice(Base):
     at: Mapped[dt.datetime] = mapped_column(Timestamp)
     read_at: Mapped[dt.datetime | None] = mapped_column(Timestamp)
     """The time that the user marked the notice read, or None for an unread notice."""
+{% if py.notice_emails %}
+    email: Mapped[bool] = mapped_column(default=False)
+    """True while the email of the notice waits for the job `notice_emails` (ADR 0044)."""
+
+    __table_args__ = (Index("ix_notices_email_at", "email", "at"),)
+
+
+class NoticeSetting(Base):
+    """A choice of a user about the emails of a notification (ADR 0044).
+
+    Without a row, the emails are on. The rows of a user go with the user.
+    """
+
+    __tablename__ = "notice_settings"
+
+{% set fk = 'ForeignKey("' ~ u.table ~ '.id", ondelete="CASCADE"), primary_key=True' %}
+{% if (fk | length) + 43 <= 100 %}
+    user_id: Mapped[UUID] = mapped_column({{ fk }})
+{% else %}
+    user_id: Mapped[UUID] = mapped_column(
+        {{ fk }}
+    )
+{% endif %}
+    notification: Mapped[str] = mapped_column(String(63), primary_key=True)
+    """The name of the notification in the app definition."""
+    email: Mapped[bool]
+    """False: the user gets no emails of the notification."""
+
+
+class NoticeSettingRead(BaseModel):
+    """The emails of the notices of a notification for the signed-in user."""
+
+    notification: str = Field(description="The name of the notification in the app definition.")
+    email: bool = Field(description="False: the notices of the notification come only in the bell.")
+
+
+class NoticeSettingChange(BaseModel):
+    """A change of the emails of a notification for the signed-in user."""
+
+    email: bool = Field(description="False: the notices of the notification come only in the bell.")
+{% endif %}
 
 
 class NoticeRead(ReadModel):
@@ -183,6 +240,10 @@ def add_notices(
     """
     actor: UUID | None = session.info.get(USER_KEY)
     at = dt.datetime.now(dt.UTC)
+{% if py.notice_emails %}
+    # A notice of a notification with emails waits for its email (ADR 0044).
+    email = notification in EMAILS
+{% endif %}
     notices = [
         Notice(
             id=uuid4(),
@@ -193,6 +254,9 @@ def add_notices(
             actor_id=actor,
             values=dict(values),
             at=at,
+{% if py.notice_emails %}
+            email=email,
+{% endif %}
         )
         for user in dict.fromkeys(users)
         if user is not None and user != actor

@@ -23,6 +23,7 @@ from appgen.dsl.auth import (
     CONNECTIONS_PATH,
     FORGOT_PASSWORD_PATH,
     ME,
+    NOTICE_SETTINGS_PATH,
     PROVIDER_PATHS,
     RESET_PASSWORD_PATH,
     SECOND_FACTOR_PATH,
@@ -139,11 +140,13 @@ RESERVED_WEBHOOK_PATHS = (
     "/dashboards",
     "/docs",
     "/health",
+    "/notices",
     "/openapi.json",
     "/redoc",
     FORGOT_PASSWORD_PATH,
     RESET_PASSWORD_PATH,
     CONNECTIONS_PATH,
+    NOTICE_SETTINGS_PATH,
     SECOND_FACTOR_PATH,
     SIGN_IN_PATH,
     SIGN_UP_PATH,
@@ -1495,6 +1498,14 @@ def check_notifications(definition: AppDefinition) -> Iterator[Diagnostic]:
                     what="receiver",
                 )
         yield from _check_notification_text(notification, entity)
+        if notification.email and auth is not None and auth.delivery != "smtp":
+            yield _error(
+                "invalid-option",
+                "The emails of a notification need the delivery 'smtp' of the section 'auth'.",
+                notification,
+                at="email",
+                hint="Set 'delivery: smtp' in the section 'auth', or remove 'email'.",
+            )
 
 
 def _check_notification_change(
@@ -1753,6 +1764,8 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     connections = any(api.user_flow for api in definition.apis.values())
     if connections:
         reserved[CONNECTIONS_PATH] = "connections"
+    if any(n.email for n in definition.notifications.values()):
+        reserved[NOTICE_SETTINGS_PATH] = "notice settings"
     for page in definition.pages.values():
         if connections and page.path.startswith(CONNECTIONS_PATH + "/"):
             yield _error(

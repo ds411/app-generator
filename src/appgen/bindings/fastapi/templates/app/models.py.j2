@@ -17,7 +17,9 @@
 {% if py.history %}
 {% set first = first + [(py.history_ids, "from app.core.history import HistoryEntry")] %}
 {% endif %}
-{% if py.notices %}
+{% if py.notice_emails %}
+{% set first = first + [(py.notice_ids, "from app.core.notifications import Notice, NoticeSetting")] %}
+{% elif py.notices %}
 {% set first = first + [(py.notice_ids, "from app.core.notifications import Notice")] %}
 {% endif %}
 {% if py.shares %}
@@ -52,7 +54,7 @@
 {% endif %}
 
 __all__ = [
-{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else []) + (["Notice"] if py.notices else []) + (["ShareLink"] if py.shares else []) + (["StatSnapshot"] if py.snapshots else [])) | sort %}
+{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else []) + (["Notice"] if py.notices else []) + (["NoticeSetting"] if py.notice_emails else []) + (["ShareLink"] if py.shares else []) + (["StatSnapshot"] if py.snapshots else [])) | sort %}
     "{{ model }}",
 {% endfor %}
 ]
