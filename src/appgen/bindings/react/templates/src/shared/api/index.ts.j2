@@ -42,6 +42,9 @@ export type {
 {% endif %}
   Filter,
   FilterOp,
+{% if has_points(definition) %}
+  GeoPoint,
+{% endif %}
 {% if has_history(definition) %}
   HistoryAction,
   HistoryApi,

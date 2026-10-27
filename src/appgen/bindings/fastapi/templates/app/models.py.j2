@@ -23,6 +23,9 @@
 {% if py.shares %}
 {% set first = first + [(py.share_ids, "from app.core.sharing import ShareLink")] %}
 {% endif %}
+{% if py.snapshots %}
+{% set first = first + [(py.snapshots.ids, "from app.core.snapshots import StatSnapshot")] %}
+{% endif %}
 
 {{ py.models_head() }}
 {% for ids, line in py.models_imports(first) %}
@@ -49,7 +52,7 @@
 {% endif %}
 
 __all__ = [
-{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else []) + (["Notice"] if py.notifications else []) + (["ShareLink"] if py.shares else [])) | sort %}
+{% for model in (py.entity_order() | map(attribute="name") | list + (["Credential"] if password else []) + (["ApiConnection"] if py_connections else []) + (["WebhookEvent"] if py_webhooks else []) + (["JobRun"] if py.jobs else []) + (["HistoryEntry"] if py.history else []) + (["Notice"] if py.notifications else []) + (["ShareLink"] if py.shares else []) + (["StatSnapshot"] if py.snapshots else [])) | sort %}
     "{{ model }}",
 {% endfor %}
 ]

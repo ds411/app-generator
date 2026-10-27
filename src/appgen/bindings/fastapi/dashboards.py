@@ -130,6 +130,29 @@ class PyWidget:
     order: list[str] = field(default_factory=list[str])
     limit: int = 0
     test: WidgetTest | None = None
+    snapshots: bool = False
+    """True for a stat with `snapshots: daily`: its value function gives the value to the
+    endpoint and to the built-in job `stat_snapshots` (ADR 0042)."""
+    snapshot_of: tuple[str, str, int] | None = None
+    """For a chart of snapshots: the dashboard, the stat widget, and the count of days."""
+
+    @property
+    def value_function(self) -> str:
+        """The value function of a stat with snapshots, for example `overview_rooms_value`."""
+        return f"{self.operation_id}_value"
+
+    def value_params(self) -> list[str]:
+        """Return the parameters of the value function: the session, the day, and the time."""
+        params = ["session: AsyncSession"]
+        if self.today:
+            params.append("day: dt.date")
+        if self.now:
+            params.append("moment: dt.datetime")
+        return params
+
+    def value_lines(self) -> list[str]:
+        """Return the body of the value function of a stat, at an indent of 4."""
+        return [*self.statement_lines(), "return number(await session.scalar(statement))"]
 
     @property
     def returns(self) -> str:
@@ -180,12 +203,52 @@ class PyWidget:
 
     def body(self) -> list[str]:
         """Return the lines of the body of the endpoint function, at an indent of 4."""
-        name = self.entity.name
+        if self.snapshot_of is not None:
+            return self.snapshot_lines()
+        if self.snapshots:
+            args = ["session"]
+            if self.today:
+                args.append("today or utc_today()")
+            if self.now:
+                args.append("dt.datetime.now(dt.UTC)")
+            return [
+                call("value = await ", self.value_function, args, 4),
+                "return StatValue(value=value)",
+            ]
         lines: list[str] = []
         if self.today:
             lines.append("day = today or utc_today()")
         if self.now:
             lines.append("moment = dt.datetime.now(dt.UTC)")
+        lines += self.statement_lines()
+        if self.kind == "stat":
+            lines.append("return StatValue(value=number(await session.scalar(statement)))")
+        elif self.kind == "chart":
+            lines.append("return chart_values(await session.execute(statement))")
+        return lines
+
+    def snapshot_lines(self) -> list[str]:
+        """Return the body of the endpoint of a chart of snapshots: the stored values."""
+        assert self.snapshot_of is not None
+        dashboard, stat, days = self.snapshot_of
+        conditions = (
+            f"StatSnapshot.dashboard == {string(dashboard)}",
+            f"StatSnapshot.widget == {string(stat)}",
+            f"StatSnapshot.day > day - dt.timedelta(days={days})",
+            "StatSnapshot.day <= day",
+        )
+        return [
+            "day = today or utc_today()",
+            "statement = select(StatSnapshot.day, StatSnapshot.value)",
+            render(Call("statement.where", conditions), 4, "statement = "),
+            "return chart_values(await session.execute(statement))",
+        ]
+
+    def statement_lines(self) -> list[str]:
+        """Return the lines that build the statement of a stat or a chart, or that return the
+        records of a list."""
+        name = self.entity.name
+        lines: list[str] = []
         if self.kind == "stat":
             lines += [f"value = {self.value}", f"statement = select(value).select_from({name})"]
         elif self.kind == "chart":
@@ -212,11 +275,7 @@ class PyWidget:
             ]
         if self.scoped:
             lines.append(f"statement = {self.entity.snake}_repository.owned(statement, scope)")
-        if self.kind == "stat":
-            lines.append("return StatValue(value=number(await session.scalar(statement)))")
-        elif self.kind == "chart":
-            lines.append("return chart_values(await session.execute(statement))")
-        else:
+        if self.kind == "list":
             order = Call("statement.order_by", tuple(self.order))
             lines.append(render(order, 4, "statement = ", f".limit({self.limit})"))
             lines.append("records = await session.scalars(statement)")
@@ -243,7 +302,9 @@ class PyDashboard:
     widgets: list[PyWidget]
 
     def code(self) -> str:
-        return "\n".join(line for w in self.widgets for line in w.body())
+        lines = [line for w in self.widgets for line in w.body()]
+        lines += [line for w in self.widgets if w.snapshots for line in w.value_lines()]
+        return "\n".join(lines)
 
     @property
     def scoped(self) -> bool:
@@ -282,8 +343,12 @@ class PyDashboard:
         lines.add(from_import("sqlalchemy", sql))
         if self.aliases():
             lines.add("from sqlalchemy.orm import aliased")
-        if "dt." in code:
+        if "dt." in code or any(w.snapshots and w.value_params()[1:] for w in self.widgets):
             lines.add("import datetime as dt")
+        if any(w.snapshots for w in self.widgets):
+            lines.add("from sqlalchemy.ext.asyncio import AsyncSession")
+        if any(w.snapshot_of for w in self.widgets):
+            lines.add("from app.core.snapshots import StatSnapshot")
         if "Decimal(" in code:
             lines.add("from decimal import Decimal")
         if "UUID(" in code:
@@ -327,7 +392,8 @@ class PyDashboard:
                     if enum.name + "." in code:
                         enums.setdefault(e.slice, set()).add(enum.name)
         classes |= {cls for _, cls in self.aliases()}
-        lines.add(from_import("app.models", classes))
+        if classes:
+            lines.add(from_import("app.models", classes))
         for slice_name, names in enums.items():
             lines.add(from_import(f"app.features.{slice_name}.enums", names))
         return import_block(lines)
@@ -346,7 +412,9 @@ def python_dashboards(
     found: dict[str, PyDashboard] = {}
     for name, dashboard in definition.ui.dashboards.items():
         widgets = [
-            _widget(definition, entities, name, widget_name, widget)
+            _snapshot_chart(definition, entities, name, widget_name, widget)
+            if isinstance(widget, ChartWidget) and widget.snapshots is not None
+            else _widget(definition, entities, name, widget_name, widget)
             for widget_name, widget in dashboard.widgets.items()
             if isinstance(widget, StatWidget | ChartWidget | ListWidget)
         ]
@@ -397,22 +465,10 @@ def _widget(
         assert isinstance(view, TableView | CardsView)
         entity_name = view.entity
     else:
+        assert widget.entity is not None
         entity_name = widget.entity
-    entity = entities[entity_name]
-    lists = [op for op in entity.operations if op.kind == "list"]
-    operation_id = f"{snake(dashboard)}_{snake(name)}"
-    auth = definition.auth
-    result = PyWidget(
-        name=name,
-        id=widget.id,
-        kind=widget.kind,
-        label=widget.label or name.replace("_", " ").capitalize(),
-        operation_id=operation_id,
-        path="/" + kebab(name),
-        entity=entity,
-        permission=lists[0].name if lists else operation_id,
-        protected=auth is not None and not (lists and lists[0].name in auth.public_operations),
-    )
+    result = _plain(definition, entities[entity_name], dashboard, name, widget)
+    entity = result.entity
     result.scoped = result.protected and entity.scoped
     result.hides = result.protected and isinstance(widget, ListWidget) and bool(entity.hides)
     builder = FilterBuilder(definition, result)
@@ -425,7 +481,10 @@ def _widget(
     if isinstance(widget, StatWidget | ChartWidget):
         result.aggregate = widget.aggregate
         result.value = builder.aggregate(widget.aggregate, widget.field)
+    if isinstance(widget, StatWidget):
+        result.snapshots = widget.snapshots is not None
     if isinstance(widget, ChartWidget):
+        assert widget.group_by is not None
         result.key = builder.group(widget.group_by, widget.interval)
         result.week = isinstance(result.key, Call) and widget.interval == "week"
     if isinstance(widget, ListWidget):
@@ -436,6 +495,49 @@ def _widget(
         result.order = [*builder.order(sort), f"{entity.name}.id.asc()"]
         result.limit = widget.limit
     result.test = _Tests(definition, result, widget).plan()
+    return result
+
+
+def _plain(
+    definition: AppDefinition,
+    entity: PyEntity,
+    dashboard: str,
+    name: str,
+    widget: StatWidget | ChartWidget | ListWidget,
+) -> PyWidget:
+    """Return a widget with its endpoint and the permission of the list operation of its
+    entity, without its query."""
+    lists = [op for op in entity.operations if op.kind == "list"]
+    operation_id = f"{snake(dashboard)}_{snake(name)}"
+    auth = definition.auth
+    return PyWidget(
+        name=name,
+        id=widget.id,
+        kind=widget.kind,
+        label=widget.label or name.replace("_", " ").capitalize(),
+        operation_id=operation_id,
+        path="/" + kebab(name),
+        entity=entity,
+        permission=lists[0].name if lists else operation_id,
+        protected=auth is not None and not (lists and lists[0].name in auth.public_operations),
+    )
+
+
+def _snapshot_chart(
+    definition: AppDefinition,
+    entities: dict[str, PyEntity],
+    dashboard: str,
+    name: str,
+    widget: ChartWidget,
+) -> PyWidget:
+    """Return a chart of snapshots: its endpoint gives the stored values of its stat, with the
+    permission of the stat (ADR 0042)."""
+    assert definition.ui is not None and widget.snapshots is not None
+    stat = definition.ui.dashboards[dashboard].widgets[widget.snapshots]
+    assert isinstance(stat, StatWidget)
+    result = _plain(definition, entities[stat.entity], dashboard, name, widget)
+    result.today = True
+    result.snapshot_of = (dashboard, widget.snapshots, widget.days)
     return result
 
 
@@ -882,7 +984,9 @@ class _Tests(FilterValues):
         numbers: list[Decimal],
         paths: dict[str, list[TestValue]],
     ) -> bool:
-        path = resolve_path(self.entity, source.group_by)
+        group_by = source.group_by
+        assert group_by is not None
+        path = resolve_path(self.entity, group_by)
         passing = test.records[: test.passing]
         # The first record is in the first group, the next two in the second.
         groups = [0, 1, 1]
@@ -902,7 +1006,7 @@ class _Tests(FilterValues):
                 'assert response.json() == {"groups": groups}',
             ]
             return True
-        f = self.direct_field(source.group_by)
+        f = self.direct_field(group_by)
         if f is None or f.attr in paths:
             return False
         if f.type == "enum":

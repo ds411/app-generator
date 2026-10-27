@@ -395,8 +395,8 @@ def test_unknown_view_kind_gets_a_hint() -> None:
     [diagnostic] = errors(VALID.replace("kind: cards", "kind: card"))
 
     assert (
-        diagnostic.message
-        == "The kind 'card' is not valid. Expected 'table', 'cards', 'board', 'calendar', 'detail'."
+        diagnostic.message == "The kind 'card' is not valid. "
+        "Expected 'table', 'cards', 'board', 'calendar', 'map', 'detail'."
     )
     assert diagnostic.hint == "Did you mean 'cards'?"
 

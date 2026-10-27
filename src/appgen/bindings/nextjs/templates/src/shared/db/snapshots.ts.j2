@@ -1,0 +1,45 @@
+{{ trace_header(*nextjs.snapshots.ids) }}
+import "server-only";
+
+import { and, asc, eq, gt, lte } from "drizzle-orm";
+
+import { getDb } from "./client";
+import { statSnapshotsTable } from "./schema";
+
+/** The value of a stat on a day: the day `YYYY-MM-DD`, and the value or null. */
+export type SnapshotValue = { key: string; value: number | null };
+
+/** Return the day `YYYY-MM-DD` of a number of days after a day. */
+function addDays(day: string, days: number): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Store the value of a stat for a day. A second value of the same day replaces the first. */
+export async function storeSnapshot(dashboard: string, widget: string, day: string, value: number | null): Promise<void> {
+  await getDb()
+    .insert(statSnapshotsTable)
+    .values({ dashboard, widget, day, value })
+    .onConflictDoUpdate({
+      target: [statSnapshotsTable.dashboard, statSnapshotsTable.widget, statSnapshotsTable.day],
+      set: { value },
+    });
+}
+
+/** Return the stored values of a stat of the `days` days up to `today`, in the order of the days. */
+export async function readSnapshots(dashboard: string, widget: string, days: number, today: string): Promise<SnapshotValue[]> {
+  const rows = await getDb()
+    .select({ day: statSnapshotsTable.day, value: statSnapshotsTable.value })
+    .from(statSnapshotsTable)
+    .where(
+      and(
+        eq(statSnapshotsTable.dashboard, dashboard),
+        eq(statSnapshotsTable.widget, widget),
+        gt(statSnapshotsTable.day, addDays(today, -days)),
+        lte(statSnapshotsTable.day, today),
+      ),
+    )
+    .orderBy(asc(statSnapshotsTable.day));
+  return rows.map((row) => ({ key: row.day, value: row.value }));
+}

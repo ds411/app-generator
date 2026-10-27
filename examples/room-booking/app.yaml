@@ -355,6 +355,7 @@ ui:
     overview:
       title: Overview
       widgets:
+        # The job stat_snapshots stores the value of each day (ADR 0042).
         rooms:
           kind: stat
           label: Bookable rooms
@@ -362,6 +363,7 @@ ui:
           filter: { bookable: true }
           icon: door-open
           link: rooms
+          snapshots: daily
         requested:
           kind: stat
           label: Requested bookings
@@ -376,6 +378,13 @@ ui:
           entity: Booking
           group_by: status
           badge: booking_status
+          span: 2
+        rooms_per_day:
+          kind: chart
+          label: Bookable rooms per day
+          chart: line
+          snapshots: rooms
+          days: 30
           span: 2
         upcoming:
           kind: list

@@ -313,6 +313,26 @@ BINDING = Binding(
             path="app/api/jobs/{{ name }}/route.ts",
             for_each="job",
         ),
+        # The daily snapshots of the stat widgets (ADR 0042): the table, the built-in job and
+        # its route, and the server actions of the charts.
+        *(
+            Output(template=f"{path}.j2", path=path, when="nextjs.snapshots")
+            for path in (
+                "src/shared/db/schema/stat-snapshots.ts",
+                "src/shared/db/snapshots.ts",
+                "src/app/jobs/stat-snapshots.ts",
+            )
+        ),
+        Output(
+            template="src/shared/api/snapshot-actions.ts.j2",
+            path="src/shared/api/snapshot-actions.ts",
+            when="nextjs.snapshots and nextjs.snapshots.charts",
+        ),
+        Output(
+            template="app/api/jobs/stat-snapshots-route.ts.j2",
+            path="app/api/jobs/stat_snapshots/route.ts",
+            when="nextjs.snapshots",
+        ),
         Output(template="env.example.j2", path=".env.example"),
         Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
         Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
@@ -648,7 +668,7 @@ BINDING = Binding(
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
         | {"menu", "menu_group", "menu_item", "menu_sub_item"}
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
-        | {"calendar_view"}
+        | {"calendar_view", "map_view", "near_filter", "area_filter"}
         | {"api_table_view", "api_cards_view", "api_detail_view", "api_column", "api_sort"}
         | {"api_search_filter", "api_card", "api_detail_header", "api_detail_section"}
         | {"query_table_view", "query_cards_view", "query_calendar_view", "query_column"}

@@ -1,4 +1,5 @@
-"""The list views of the front-end apps: tables, card lists, and boards (ADR 0003).
+"""The list views of the front-end apps: tables, card lists, boards, calendars, and maps
+(ADR 0003).
 
 The shared UI templates in `templates/ui/views/` render the values of this
 module. A view reads all records of its entity and of the entities that
@@ -11,7 +12,8 @@ The React app with the FastAPI app (`x-react-data: api`) gives the names
 of the list endpoints (`ListEndpoint`). Then a table or a card list sends
 its filters, its sort, and its page to the API, and loads one page
 (`ServerPlan`). A board loads one page for each column, and a calendar
-loads the records of the shown dates. The related records are the
+loads the records of the shown dates, and a map the records in its
+visible area (ADR 0046). The related records are the
 records of the IDs on the page (`RelatedStep`), and a select filter of a
 relation searches its options on the server.
 """
@@ -23,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from appgen.bindings.shared.auth import kind_operations
 from appgen.bindings.shared.gaps import gap_spec
+from appgen.bindings.shared.geo import DEFAULT_ATTRIBUTION, DEFAULT_TILES
 from appgen.bindings.shared.totals import has_totals, total_key
 from appgen.bindings.shared.ui import css_class_var, css_var, js
 from appgen.dsl.auth import ME
@@ -52,6 +55,7 @@ from appgen.dsl.ui.fields import SINGLE_KINDS, resolve_path
 from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
     ApiViewBase,
+    AreaFilter,
     BadgeSet,
     BoardView,
     BooleanFilter,
@@ -61,6 +65,8 @@ from appgen.dsl.ui.views import (
     DetailView,
     EntityView,
     Filter,
+    MapView,
+    NearFilter,
     QueryViewBase,
     SearchFilter,
     SelectFilter,
@@ -97,6 +103,7 @@ _DEFAULT_FORMATS = {
     "json": "text",
     "file": "file",
     "image": "image",
+    "point": "point",
 }
 DEFAULT_PAGE_SIZE = 20
 _BOARD_AREA_CLASSES = "w-full min-w-0"
@@ -291,6 +298,17 @@ class CalendarPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class MapPlan:
+    """The values of a map view: the point and the label of a record (ADR 0046)."""
+
+    point: Value
+    label: str
+    """The TypeScript text of a record, of `row`."""
+    href: str | None
+    """The TypeScript path of the page that a record opens, of `row`, or None."""
+
+
+@dataclass(frozen=True, slots=True)
 class ListEndpoint:
     """The names of the list endpoint of an entity, for the views that send their query to it."""
 
@@ -365,6 +383,8 @@ class ServerPlan:
     """For a board: the query parameter of the group field."""
     range: tuple[str, str] | None = None
     """For a calendar: the query parameters of the first and of the last shown day."""
+    area: str | None = None
+    """For a map: the query parameter of the visible area of the map."""
 
 
 @dataclass(slots=True)
@@ -412,6 +432,7 @@ class ViewPlan:
     order: OrderPlan | None = None
     """The manual order of a table or a board (`order_field`), or None."""
     calendar: CalendarPlan | None = None
+    map: MapPlan | None = None
     forms: list[FormRef] = field(default_factory=lambda: list[FormRef]())
     """The forms that the actions of the view open in a dialog or a sheet."""
     uses: set[str] = field(default_factory=set[str])
@@ -464,11 +485,34 @@ class ViewPlan:
         if calendar is not None:
             parts += [calendar.start.expr, calendar.end.expr if calendar.end else ""]
             parts += [calendar.label, calendar.href or ""]
+        if self.map is not None:
+            parts += [self.map.point.expr, self.map.label, self.map.href or ""]
         return " ".join(parts)
 
     def needs(self, name: str) -> bool:
         """Return True if the code of the view calls a helper, for example `formatValue`."""
         return f"{name}(" in self.code()
+
+    @property
+    def geo_imports(self) -> list[str]:
+        """Return the names that the view imports from `src/shared/lib/geo.ts` (ADR 0046)."""
+        kinds = {f.kind for f in self.filters}
+        names: list[str] = []
+        if self.map is not None or "area" in kinds:
+            names.append("type GeoBox")
+        if "near" in kinds:
+            names.append("type NearValue")
+        if self.server is not None:
+            if "near" in kinds:
+                names.append("nearParam")
+            if self.map is not None or "area" in kinds:
+                names.append("boxText")
+        else:
+            if "near" in kinds:
+                names.append("isNear")
+            if self.map is not None or "area" in kinds:
+                names.append("inBox")
+        return sorted(names, key=lambda name: name.removeprefix("type "))
 
     def row_action(self, name: str | None) -> ActionPlan | None:
         """Return a row action by name, if the template can render it."""
@@ -537,6 +581,10 @@ class UsesParts(Protocol):
 class ViewContext:
     """The values that the view templates read: badges, values, and view plans."""
 
+    default_tiles = DEFAULT_TILES
+    """The tile URL of a map without a setting (ADR 0046)."""
+    default_attribution = DEFAULT_ATTRIBUTION
+
     def __init__(
         self,
         definition: AppDefinition,
@@ -545,6 +593,7 @@ class ViewContext:
         endpoints: Mapping[str, ListEndpoint] | None = None,
         api_server: bool = False,
         widgets: Mapping[str, WidgetEndpoint] | None = None,
+        snapshot_store: bool = False,
     ) -> None:
         """Make the context; `forms` is True if the binding generates the forms (`form_rules`).
 
@@ -553,10 +602,13 @@ class ViewContext:
         of a page calls the operation of a view of API data (Next.js), else
         the view calls it in the browser. `widgets` gives the endpoint of each
         dashboard widget by element ID: the dashboards read their values.
+        With `snapshot_store`, a chart of snapshots reads the stored daily
+        values with a server action (Next.js, ADR 0042).
         """
         self.definition = definition
         self.with_forms = forms
         self.api_server = api_server
+        self.snapshot_store = snapshot_store
         self.endpoints: dict[str, ListEndpoint] = dict(endpoints or {})
         self.widgets: dict[str, WidgetEndpoint] = dict(widgets or {})
         ui = definition.ui
@@ -564,9 +616,10 @@ class ViewContext:
         self.list_views: dict[str, str] = {
             name: view.kind
             for name, view in (ui.views.items() if ui else ())
-            if isinstance(view, TableView | CardsView | BoardView | CalendarView)
+            if isinstance(view, TableView | CardsView | BoardView | CalendarView | MapView)
         }
-        """The kind of each list view (`table`, `cards`, `board`, or `calendar`), by name."""
+        """The kind of each list view (`table`, `cards`, `board`, `calendar`, or `map`), by
+        name."""
         self.detail_views: list[str] = [
             name for name, view in (ui.views.items() if ui else ()) if isinstance(view, DetailView)
         ]
@@ -611,6 +664,14 @@ class ViewContext:
     def server(self) -> bool:
         """Return True if the views send their query to the API, and load related records by ID."""
         return bool(self.endpoints)
+
+    @property
+    def map_tiles(self) -> bool:
+        """Return True if the app shows a map: a map view or an area filter (ADR 0046).
+
+        The map loads its tiles from the URL of a setting at build time.
+        """
+        return bool(self.features & {"map", "area"})
 
     @property
     def computed(self) -> bool:
@@ -804,11 +865,13 @@ class ViewContext:
         """Return the runtime parts that the views need, for the outputs and shadcn/ui.
 
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
-        `date_range`, `select`, `multi_select`, and `param` for the input of
-        a param of a query), the value components
-        (`badge`, `avatar`, `formatted`), the charts (`chart`, and
-        `dates` for a chart of dates), the period of a dashboard
-        (`period`), and the manual order of a table or a board (`order`).
+        `date_range`, `select`, `multi_select`, `near`, `area`, and `param`
+        for the input of a param of a query), `geo` for the helpers of the
+        points of a map view or of a geo filter (ADR 0046), the value components
+        (`badge`, `avatar`, `formatted`), the charts (`chart`, `dates` for
+        a chart of dates, and `snapshots` for a chart of snapshots), the
+        period of a dashboard (`period`), and the manual order of a table or
+        a board (`order`).
         """
         found: set[str] = set()
         values = {"badge", "avatar", "formatted", "file"}
@@ -825,6 +888,8 @@ class ViewContext:
                     found.add("record_select")
                 else:
                     found.add("multi_select" if f.multiple else f.kind)
+        if found & {"map", "near", "area"}:
+            found.add("geo")
         for name in self.detail_views:
             found.add("detail")
             detail = self.detail_plan(name)
@@ -845,7 +910,7 @@ class ViewContext:
         for name in self.dashboards:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
-            found |= dashboard.uses & {"chart", "dates"}
+            found |= dashboard.uses & {"chart", "dates", "snapshots"}
             period = dashboard.dashboard.period
             if period is not None:
                 found |= {"period", "date_range"} if "custom" in period.ranges else {"period"}
@@ -918,6 +983,9 @@ class ViewContext:
                 badge = badge or (self.badge_for(entity, path) if member.type == "enum" else None)
             enum_values = tuple(member.values or ()) if member.type == "enum" else ()
             fmt = fmt or ("badge" if badge else _DEFAULT_FORMATS[member.type])
+            if member.type == "point":
+                # A point shows as its latitude and its longitude (ADR 0046).
+                fmt = "point"
             currency = member.currency if fmt == "currency" else None
             currency_expr = None
             if fmt == "currency" and member.currency_field is not None:
@@ -946,7 +1014,7 @@ class ViewContext:
                 expr=raw,
                 key_expr=raw,
                 text_expr=text,
-                sort_expr=raw,
+                sort_expr=text if member.type == "point" else raw,
                 format=fmt,
                 badge=camel(badge) if badge else None,
                 enum_values=enum_values,
@@ -1125,10 +1193,14 @@ class ViewContext:
         if isinstance(view, CalendarView):
             paths += [view.start, *([view.end] if view.end else [])]
             paths.append(view.label or definition_display(definition.entities[view.entity]))
-        if isinstance(view, TableView | CardsView):
+        if isinstance(view, MapView):
+            paths.append(view.point)
+            paths.append(view.label or definition_display(definition.entities[view.entity]))
+        if isinstance(view, TableView | CardsView | MapView):
             for filter_name, filter_ in view.filters.items():
                 plan.filters.append(self._filter(view.entity, filter_name, filter_))
                 paths += filter_.fields if isinstance(filter_, SearchFilter) else [filter_.field]
+        if isinstance(view, TableView | CardsView):
             pagination = view.pagination
             defaults = definition.ui.defaults
             plan.page_size = (
@@ -1147,7 +1219,9 @@ class ViewContext:
                 camel(view.order_field),
                 kind_operations(definition, view.entity).get("update"),
             )
-        elif isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
+        elif (
+            isinstance(view, TableView | CardsView | BoardView | MapView) and view.sort is not None
+        ):
             plan.sort = self.value(view.entity, view.sort.field)
             plan.sort_desc = view.sort.direction == "desc"
             paths.append(view.sort.field)
@@ -1173,8 +1247,9 @@ class ViewContext:
         plan.forms = self.form_refs(all_actions)
         plan.icons |= {a.action.icon for a in all_actions if a.action.icon}
         states = plan.states
-        # A calendar of the API shows its grid without records, and no empty state.
-        server_calendar = isinstance(view, CalendarView) and view.entity in self.endpoints
+        # A calendar or a map of the API shows its grid or its map without records, and no
+        # empty state.
+        server_calendar = isinstance(view, CalendarView | MapView) and view.entity in self.endpoints
         shown = (states.error,) if server_calendar else (states.empty, states.error)
         plan.icons |= {s.icon for s in shown if s and s.icon}
         if isinstance(view, TableView):
@@ -1185,6 +1260,8 @@ class ViewContext:
             self._board(plan, view)
         if isinstance(view, CalendarView):
             plan.calendar = self._calendar(plan, view)
+        if isinstance(view, MapView):
+            plan.map = self._map(view)
         if plan.filters:
             plan.uses.add("filters")
         endpoint = self.endpoints.get(view.entity)
@@ -1199,8 +1276,8 @@ class ViewContext:
 
         A column without a sort key on the server cannot sort, and a sort of
         the view without a sort key (a computed field) does not apply. A
-        board sends the value of its group field for each column, and a
-        calendar the first and the last shown day.
+        board sends the value of its group field for each column, a
+        calendar the first and the last shown day, and a map its visible area.
         """
         if isinstance(view, BoardView | CalendarView):
             names = endpoint.params.get(view.id, [])
@@ -1228,7 +1305,7 @@ class ViewContext:
                     f"{view.id}."
                 )
             return server
-        assert isinstance(view, TableView | CardsView)
+        assert isinstance(view, TableView | CardsView | MapView)
         values: dict[str, list[str]] = {}
         for f in plan.filters:
             names = endpoint.params.get(f.element_id)
@@ -1242,6 +1319,11 @@ class ViewContext:
                     value = f"{state}.{'from' if name.endswith('_from') else 'to'}"
                 elif f.kind == "boolean":
                     value = f"{state} || null"
+                elif f.kind == "near":
+                    distance = name.endswith("_distance")
+                    value = f"{state}.distance" if distance else f"nearParam({state})"
+                elif f.kind == "area":
+                    value = f"{state} ? boxText({state}) : null"
                 elif f.multiple:
                     # An empty list matches no records: no selection is no filter.
                     value = f"{state}.length > 0 ? {state} : null"
@@ -1258,6 +1340,21 @@ class ViewContext:
             # The words of all search filters must be in the record.
             value = items[0] if len(items) == 1 else "[" + ", ".join(items) + '].join(" ")'
             server.params.append(ServerParam(name, value, ts_key(name)))
+        if isinstance(view, MapView):
+            # The area of the point has the only parameter of the map.
+            names = endpoint.params.get(view.id, [])
+            if not names:
+                raise GenerationError(
+                    f"The list endpoint of {plan.entity} has no parameter for {view.id}."
+                )
+            server.area = names[0]
+            # The list of the map is in the order of the sort, else of the label.
+            label_path = view.label or definition_display(self.definition.entities[view.entity])
+            if view.sort is not None and view.sort.field in endpoint.sort_keys:
+                server.sort.append(("-" if view.sort.direction == "desc" else "") + view.sort.field)
+            elif view.sort is None and label_path in endpoint.sort_keys:
+                server.sort.append(label_path)
+            return server
         order_field = view.order_field if isinstance(view, TableView) else None
         if order_field is not None and order_field in endpoint.sort_keys:
             server.sort.append(order_field)
@@ -1450,6 +1547,17 @@ class ViewContext:
             mode=view.mode,
         )
 
+    def _map(self, view: MapView) -> MapPlan:
+        label_path = view.label or definition_display(self.definition.entities[view.entity])
+        href = None
+        if view.link:
+            href = self.href(view.entity, view.link, {}, "row")
+        return MapPlan(
+            point=self.value(view.entity, view.point),
+            label=self.value(view.entity, label_path).text_expr,
+            href=href,
+        )
+
     def card_paths(self, view: CardsView | BoardView) -> list[str]:
         """Return the field paths that the cards of a view show."""
         card = view.card
@@ -1602,6 +1710,31 @@ class ViewContext:
                 default="{}",
                 state_type="DateRange",
                 match=f"inDateRange({value.expr}, {state})",
+                value=value,
+            )
+        if isinstance(filter_, NearFilter):
+            # No point is no filter: the user gives the point (ADR 0046).
+            return FilterPlan(
+                name=name,
+                key=key,
+                element_id=filter_.id,
+                kind="near",
+                label=filter_label,
+                default=f'{{ point: "", distance: {filter_.distance:g} }}',
+                state_type="NearValue",
+                match=f"isNear({value.expr}, {state})",
+                value=value,
+            )
+        if isinstance(filter_, AreaFilter):
+            return FilterPlan(
+                name=name,
+                key=key,
+                element_id=filter_.id,
+                kind="area",
+                label=filter_label,
+                default="null",
+                state_type="GeoBox | null",
+                match=f"inBox({value.expr}, {state})",
                 value=value,
             )
         assert isinstance(filter_, SelectFilter)
@@ -1933,6 +2066,9 @@ def view_rules() -> tuple[Output, ...]:
                     "src/shared/ui/calendar-grid.tsx",
                     "'calendar' in ui_views.features",
                 ),
+                # The points of the maps and of the geo filters (ADR 0046).
+                ("lib/geo.ts.j2", "src/shared/lib/geo.ts", "'geo' in ui_views.features"),
+                ("ui/geo-map.tsx.j2", "src/shared/ui/geo-map.tsx", "ui_views.map_tiles"),
                 *(
                     (f"{folder}/{part}.tsx.j2", f"src/shared/ui/{folder}/{part}.tsx", when)
                     for folder, part, when in (
@@ -1947,6 +2083,8 @@ def view_rules() -> tuple[Output, ...]:
                         ("filters", "multi-select-filter", "'multi_select' in ui_views.features"),
                         ("filters", "record-filter", "'record_select' in ui_views.features"),
                         ("filters", "param-filter", "'param' in ui_views.features"),
+                        ("filters", "near-filter", "'near' in ui_views.features"),
+                        ("filters", "area-filter", "'area' in ui_views.features"),
                     )
                 ),
             )
@@ -1957,13 +2095,13 @@ def view_rules() -> tuple[Output, ...]:
                 path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
                 for_each=f"{kind}_view",
             )
-            for kind in ("table", "cards", "board", "calendar")
+            for kind in ("table", "cards", "board", "calendar", "map")
         ),
         *(
             Output(
                 template="ui/views/index.ts.j2", path=_VIEW + "/index.ts", for_each=f"{kind}_view"
             )
-            for kind in ("table", "cards", "board", "calendar", "detail")
+            for kind in ("table", "cards", "board", "calendar", "map", "detail")
         ),
         Output(
             template="ui/details/detail-view.tsx.j2",

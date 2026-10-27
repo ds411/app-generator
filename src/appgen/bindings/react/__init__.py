@@ -406,7 +406,7 @@ BINDING = Binding(
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}
         | {"menu", "menu_group", "menu_item", "menu_sub_item"}
         | {"table_view", "cards_view", "board_view", "column", "card", "badge_ref", "board_column"}
-        | {"calendar_view"}
+        | {"calendar_view", "map_view", "near_filter", "area_filter"}
         | {"api_table_view", "api_cards_view", "api_detail_view", "api_column", "api_sort"}
         | {"api_search_filter", "api_card", "api_detail_header", "api_detail_section"}
         | {"query_table_view", "query_cards_view", "query_calendar_view", "query_column"}

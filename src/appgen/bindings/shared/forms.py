@@ -12,6 +12,10 @@ A file field (ADR 0027) keeps the file of the record (`FileValue`), a
 new `File`, or `null`. The input of the operation has no files: after
 the operation, the form uploads the new files and deletes the removed
 files with the file API of the entity (`<entity>Files`).
+
+A point field (ADR 0046) keeps a `GeoPoint` or `null`. Its widget has
+an input for the latitude and one for the longitude: a value that is
+not a number is `NaN`, so that the zod schema of the entity reports it.
 """
 
 from collections.abc import Callable
@@ -37,7 +41,18 @@ from appgen.gen.binding import Output
 from appgen.gen.naming import camel, kebab, pascal, snake
 
 type ValueKind = Literal[
-    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json", "file", "lines"
+    "text",
+    "number",
+    "enum",
+    "one",
+    "many",
+    "boolean",
+    "date",
+    "datetime",
+    "json",
+    "file",
+    "lines",
+    "point",
 ]
 
 _KINDS: dict[str, ValueKind] = {
@@ -53,6 +68,7 @@ _KINDS: dict[str, ValueKind] = {
     "datetime": "datetime",
     "enum": "enum",
     "json": "json",
+    "point": "point",
 }
 _EMPTY: dict[ValueKind, str] = {
     "text": '""',
@@ -816,6 +832,8 @@ def _value_field(
         value_type = "boolean"
     elif kind == "number":
         value_type = "number | null"
+    elif kind == "point":
+        value_type = "GeoPoint | null"
     else:
         value_type = "string | null"
     plan = FieldPlan(
@@ -830,6 +848,8 @@ def _value_field(
         input_type=_INPUT_TYPES.get(value.type, "text"),
         required_message="Select a value."
         if kind in ("enum", "date", "datetime")
+        else "Enter a latitude and a longitude."
+        if kind == "point"
         else "Enter a value.",
     )
     if kind == "enum":
@@ -1154,6 +1174,7 @@ def form_rules() -> tuple[Output, ...]:
                 ("number-input", "'number_format' in ui_forms.widgets"),
                 ("relation-select", "ui_forms.relations"),
                 ("file-input", "ui_forms.files"),
+                ("point-input", "'point' in ui_forms.widgets"),
             )
         ),
         Output(

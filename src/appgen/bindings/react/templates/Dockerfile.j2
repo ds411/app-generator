@@ -26,6 +26,12 @@ ARG {{ api.browser_env }}={{ api.base_url }}
 ENV {{ api.browser_env }}=${ {{- api.browser_env -}} }
 {% endfor %}
 {% endif %}
+{% if ui_views.map_tiles %}
+# The tiles of the maps (see the README). Without a value, the maps use
+# the tiles of OpenStreetMap.
+ARG VITE_MAP_TILES
+ARG VITE_MAP_ATTRIBUTION
+{% endif %}
 RUN pnpm build
 
 FROM ${NGINX_IMAGE}

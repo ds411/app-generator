@@ -18,6 +18,9 @@ export type Format =
   | "badge"
   | "email"
   | "url"
+{% if has_points(definition) %}
+  | "point"
+{% endif %}
   | "avatar";
 
 /** The default currency of the `currency` format. A field can give another currency. */
@@ -164,6 +167,13 @@ export function formatValue(value: unknown, format: Format = "text", currency?: 
       return formatRelative(toDate(String(value)));
     case "boolean":
       return value ? {{ tr(js("Yes")) }} : {{ tr(js("No")) }};
+{% if has_points(definition) %}
+    case "point": {
+      // A point field (ADR 0046): the latitude and the longitude, to about 10 meters.
+      const point = value as { lat: number; lng: number };
+      return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+    }
+{% endif %}
     default:
       return Array.isArray(value) ? value.join(", ") : String(value);
   }

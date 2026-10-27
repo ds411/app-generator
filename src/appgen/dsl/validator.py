@@ -2539,9 +2539,7 @@ def _check_page_share(definition: AppDefinition, name: str, page: Page) -> Itera
         )
 
 
-def _check_page_presence(
-    definition: AppDefinition, name: str, page: Page
-) -> Iterator[Diagnostic]:
+def _check_page_presence(definition: AppDefinition, name: str, page: Page) -> Iterator[Diagnostic]:
     """A page with `presence` is a detail page with the path parameter `id` only, of a live
     entity, in an app with `auth`, and not public (ADR 0052)."""
     auth = definition.auth

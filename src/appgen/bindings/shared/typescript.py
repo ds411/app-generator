@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from appgen.bindings.shared.geo import has_points
 from appgen.bindings.shared.integrations import ts_features
 from appgen.bindings.shared.lines import line_items, lines_operations
 from appgen.bindings.shared.notices import (
@@ -37,6 +38,7 @@ _TS_TYPES = {
     "json": "unknown",
     "file": "FileValue",
     "image": "FileValue",
+    "point": "GeoPoint",
 }
 
 
@@ -281,6 +283,11 @@ def zod_type(field: Field, enum_values: str | None = None) -> str:
             code = f"z.enum({enum_values or ts_value(field.values or [])})"
         case "json":
             code = "z.json()"
+        case "point":
+            # A latitude and a longitude in degrees (ADR 0046).
+            code = (
+                "z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })"
+            )
         case _:
             code = "z.string()"
     if field.type in ("string", "text", "email", "url"):
@@ -344,6 +351,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "translations_key": translations_key,
     "history_members": history_members,
     "has_history": has_history,
+    "has_points": has_points,
     "history_user_key": history_user_key,
     "has_notices": has_notices,
     "notice_plans": notice_plans,

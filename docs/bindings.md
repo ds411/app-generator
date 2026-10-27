@@ -929,6 +929,35 @@ definition in the route `POST /api/jobs/<job>`
   `tests/fixtures/jobs.yaml` with a fixed clock and PGlite, with the
   hand-written operations of `tests/fixtures/jobs-extensions/nextjs/`.
 
+### The daily snapshots of the stat widgets
+
+A stat widget with `snapshots: daily` gets the built-in job
+`stat_snapshots` ([ADR 0042](adr/0042-stat-snapshots.md)), with the
+machinery of the jobs of the definition: the table `job_runs`, the
+worker of the FastAPI app, and the routes, the CronJobs, and the service
+`jobs` of the Compose file of the Next.js app. The job runs at 00:00
+UTC, and stores the value of each stat in the table `stat_snapshots`
+(the same columns in both apps), as the value of the day of the run.
+
+- FastAPI: the module of the dashboard has a value function for each
+  stat with snapshots, for example `overview_rooms_value(session, day)`:
+  the endpoint of the stat and `app/jobs/stat_snapshots.py` call it.
+  `app/core/snapshots.py` has the model `StatSnapshot` and
+  `store_snapshot()`. The endpoint of a chart of snapshots gives the
+  stored values of its days up to `today`, as the groups of a chart.
+  `tests/jobs/test_stat_snapshots.py` runs the job on three days with a
+  fixed clock, and checks the rows and the charts.
+- Next.js: `src/app/jobs/stat-snapshots.ts` computes each stat with a
+  Drizzle query (the filter builder of the jobs), and
+  `app/api/jobs/stat_snapshots/route.ts` runs it. A chart of snapshots
+  reads its values with a server action of
+  `src/shared/api/snapshot-actions.ts`, with the permission of the list
+  operation of the entity of the stat. `scripts/jobs_test.py` runs the
+  job of `tests/fixtures/jobs.yaml` on three days.
+- React: with `x-react-data: api`, a chart of snapshots calls the
+  endpoint of the FastAPI app. The mock data has no stored values: the
+  chart shows the value of today, from the function of the stat.
+
 ### The events of the Next.js app and of the React app
 
 The repository of each entity in the Next.js app runs its `events` and
@@ -1041,6 +1070,37 @@ widgets, and the totals, and in the defaults of the forms (M36).
   the three front ends, and runs `ui-tests/tests/sessions.spec.ts`: the
   stat widgets, the list of the submissions, the student of a new
   submission, and the totals of the lessons of each user.
+
+### The points and the maps of the Next.js app and of the React app
+
+A point field ([ADR 0046](adr/0046-geo-points.md)) is a `GeoPoint`
+(`{ lat, lng }`) of `@/shared/api`:
+
+- The Next.js app keeps a point in a `jsonb` column
+  (`jsonb("<column>").$type<GeoPoint>()`). The views filter the points
+  in the browser, so the column has no index.
+- A view shows a point with the format `point` of
+  `src/shared/lib/format.ts`. The form widget is
+  `src/shared/ui/form-widgets/point-input.tsx`: two empty inputs give
+  `null`, and one empty input gives `NaN`, which the zod schema reports.
+- The filters `near` and `area` are `src/shared/ui/filters/near-filter.tsx`
+  and `area-filter.tsx`, with the helpers of `src/shared/lib/geo.ts`
+  (`isNear`, `inBox`, and the query parameters `nearParam` and
+  `boxText` of the FastAPI app).
+- A map view is a widget with `src/shared/ui/geo-map.tsx`: Leaflet,
+  loaded in the browser after the first render, with HTML markers. The
+  view gives the visible area to its list after each move. With
+  `x-react-data: api`, it loads the records with
+  `<entity>Api.all({ ...params, <point>_area })`.
+- The tile URL is `NEXT_PUBLIC_MAP_TILES` or `VITE_MAP_TILES` at build
+  time (the README of the app, `.env.example`, and the build arguments
+  of the Dockerfile). The default is the tiles of OpenStreetMap.
+- `scripts/places_ui_test.py` (run by `scripts/check-auth-ui.sh`) builds
+  the app of `tests/fixtures/places.yaml` in the three front ends with a
+  local tile server on the port 8471, and runs
+  `ui-tests/tests/places.spec.ts`: the markers and the tiles, a move of
+  the map with the keyboard, a near filter, the links of the list and of
+  a marker, and the form of a new place.
 
 ### The lines of the Next.js app and of the React app
 

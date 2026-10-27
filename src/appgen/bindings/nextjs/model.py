@@ -14,13 +14,13 @@ from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.live import live_entities
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
+from appgen.bindings.nextjs.snapshots import ts_snapshots
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules, uses_me
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
-from appgen.bindings.shared.geo import reject_point_fields
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -211,8 +211,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     The app gets the npm packages of the shadcn/ui components that it uses,
     with providers `jose` (ADR 0020), with the delivery by SMTP
     `nodemailer`, with the rate limit in Redis or with live entities
-    `@redis/client` (ADR 0013, ADR 0051), and with the storage kind `s3`
-    `@aws-sdk/client-s3` (ADR 0027).
+    `@redis/client` (ADR 0013, ADR 0051), with the storage kind `s3`
+    `@aws-sdk/client-s3` (ADR 0027), and with a map Leaflet (ADR 0046).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -220,8 +220,13 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         **versions.UI_DEPENDENCIES,
         **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
     }
-    if "table" in ViewContext(definition).features:
+    views = ViewContext(definition)
+    dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
+    if "table" in views.features:
         dependencies |= versions.TABLE_PACKAGES
+    if views.map_tiles:
+        dependencies |= versions.MAP_PACKAGES
+        dev_dependencies |= versions.MAP_DEV_PACKAGES
     if definition.auth is not None and definition.auth.providers:
         dependencies |= versions.PROVIDER_PACKAGES
     if definition.auth is not None and definition.auth.second_factor is not None:
@@ -232,7 +237,6 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.SMTP_PACKAGES
     if uses_redis(definition) or any(e.live for e in definition.entities.values()):
         dependencies |= versions.REDIS_PACKAGES
-    dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,
         "version": "0.1.0",
@@ -305,7 +309,6 @@ def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
-    reject_point_fields(definition, "nextjs")
     plan = ui_plan(definition)
     pages = {
         name: page_info(name, page, plan.pages[name].layout)
@@ -322,6 +325,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     jobs = ts_jobs(definition, by_entity)
     if has_notices(definition):
         check_notice_table(by_entity)
+    snapshots = ts_snapshots(definition, by_entity)
+    if snapshots is not None:
+        # The built-in job of the snapshots (ADR 0042) runs as the jobs of the definition.
+        jobs[snapshots.job.name] = snapshots.job
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     totals = repository_totals(definition, by_entity)
@@ -333,7 +340,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
-        "ui_views": ViewContext(definition, forms=True, api_server=True),
+        "ui_views": ViewContext(definition, forms=True, api_server=True, snapshot_store=True),
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
@@ -384,6 +391,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # that call the routes.
             "jobs": jobs,
             "cron_jobs": cron_jobs(f"{definition.app.name}-web", jobs),
+            # The daily snapshots of the stat widgets (ADR 0042): the value functions of the
+            # built-in job, and the server actions of the charts.
+            "snapshots": snapshots,
             "upload_limit": upload_limit(definition),
             # The events (ADR 0031): the repositories run their operations.
             "events": has_events(definition),

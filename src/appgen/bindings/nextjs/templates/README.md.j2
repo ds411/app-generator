@@ -85,7 +85,7 @@ starts the service `jobs`, which calls each route each minute.
 | Job | When | What |
 | --- | ---- | ---- |
 {% for job in nextjs.jobs.values() %}
-| `{{ job.name }}` | {{ job.when }} | {% if job.entity %}The operation `{{ job.operation }}` on each {{ job.entity }} record of the filter{% else %}`src/app/jobs/{{ job.module }}.ext.ts`{% endif %} |
+| `{{ job.name }}` | {{ job.when }} | {% if job.entity %}The operation `{{ job.operation }}` on each {{ job.entity }} record of the filter{% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`src/app/jobs/{{ job.module }}.ext.ts`{% endif %} |
 {% endfor %}
 
 - A run is for one record (or for none) and one time. The table
@@ -402,6 +402,24 @@ is the route `/files/<entity>/<id>/<field>`, which checks the session
 and the access rules of the read of the record, as a read does. The
 delete of a record deletes its files. The files of the records that the
 database deletes with `on_delete: cascade` stay in the storage.
+
+{% endif %}
+{% if ui_views.map_tiles %}
+## Maps
+
+The map views and the area filters show the tiles of a tile server with
+Leaflet. The build variable `NEXT_PUBLIC_MAP_TILES` sets the URL of the tiles,
+with `{z}`, `{x}`, and `{y}`, and `NEXT_PUBLIC_MAP_ATTRIBUTION` sets
+their attribution as HTML. Without a value, the maps use the standard
+tiles of OpenStreetMap. Read the
+[tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+of OpenStreetMap, and use a tile server of your own or of a provider in
+production:
+
+```sh
+NEXT_PUBLIC_MAP_TILES='https://tiles.example.com/{z}/{x}/{y}.png' \
+  NEXT_PUBLIC_MAP_ATTRIBUTION='&copy; Example' pnpm build
+```
 
 {% endif %}
 {% if nextjs.history %}

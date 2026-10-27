@@ -1,4 +1,4 @@
-{#- Macros of the list view templates (table, cards, and board). -#}
+{#- Macros of the list view templates (table, cards, board, calendar, and map). -#}
 
 {% macro imports(plan, shape, lucide=[], react=[], ui=[]) -%}
 {% set ns = namespace(icons=lucide | list) %}
@@ -37,6 +37,9 @@ import { compute } from "@/shared/lib/compute";
 {% endif %}
 {% if plan.needs("formatValue") %}
 import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if plan.geo_imports %}
+import { {{ plan.geo_imports | join(", ") }} } from "@/shared/lib/geo";
 {% endif %}
 {% if plan.me %}
 import { useMe } from "@/shared/lib/me";
@@ -86,6 +89,10 @@ import { SearchFilter } from "@/shared/ui/filters/search-filter";
 import { BooleanFilter } from "@/shared/ui/filters/boolean-filter";
 {% elif f.kind == "date_range" %}
 import { DateRangeFilter } from "@/shared/ui/filters/date-range-filter";
+{% elif f.kind == "near" %}
+import { NearFilter } from "@/shared/ui/filters/near-filter";
+{% elif f.kind == "area" %}
+import { AreaFilter } from "@/shared/ui/filters/area-filter";
 {% endif %}
 {% endfor %}
 {% if plan.filters | selectattr("options") | selectattr("multiple") | list %}
@@ -479,6 +486,10 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
         <BooleanFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
 {% elif f.kind == "date_range" %}
         <DateRangeFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.kind == "near" %}
+        <NearFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.kind == "area" %}
+        <AreaFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
 {% elif f.source and f.multiple %}
         <RecordFilter label={{ jsx_attr(f.label) }} source={ {{- f.source }}} multiple value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
 {% elif f.source %}
