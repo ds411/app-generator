@@ -113,6 +113,9 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% if "formatted" in plan.uses %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
 {% endif %}
+{% if "mentions" in plan.uses %}
+import { MentionText } from "@/shared/ui/values/mention-text";
+{% endif %}
 {% set file_code = plan.code() %}
 {% set file_names = (["FileLink"] if "<FileLink" in file_code else []) + (["ImageValue"] if "<ImageValue" in file_code else []) %}
 {% if file_names %}

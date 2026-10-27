@@ -874,7 +874,7 @@ class ViewContext:
         a board (`order`).
         """
         found: set[str] = set()
-        values = {"badge", "avatar", "formatted", "file"}
+        values = {"badge", "avatar", "formatted", "file", "mentions"}
         for name, kind in self.list_views.items():
             plan = self.view_plan(name)
             found.add(kind)
@@ -982,6 +982,8 @@ class ViewContext:
             if fmt is None or fmt == "badge":
                 badge = badge or (self.badge_for(entity, path) if member.type == "enum" else None)
             enum_values = tuple(member.values or ()) if member.type == "enum" else ()
+            if fmt is None and member.mentions and self.definition.auth is not None:
+                fmt = "mentions"  # The mentions of users show as links (ADR 0043).
             fmt = fmt or ("badge" if badge else _DEFAULT_FORMATS[member.type])
             if member.type == "point":
                 # A point shows as its latitude and its longitude (ADR 0046).
@@ -1393,6 +1395,9 @@ class ViewContext:
         if value.format == "avatar" or (avatar and value.kind == "one"):
             plan.uses.add("avatar")
             return f"<AvatarValue name={{{value.text_expr}}} />"
+        if value.format == "mentions":
+            plan.uses.add("mentions")
+            return f"<MentionText text={{{value.expr}}} />"
         plan.uses.add("formatted")
         if value.kind in ("one", "many") or value.type in FILE_TYPES:
             return f"<FormattedValue value={{{value.text_expr}}} />"
@@ -1430,6 +1435,8 @@ class ViewContext:
         for name, column in view.columns.items():
             path = column.field or name
             value = self.value(view.entity, path, column.format, column.badge)
+            if column.link and value.format == "mentions":
+                value = replace(value, format="text")  # A link holds no links of mentions.
             cell = self.jsx(value, plan)
             if column.link:
                 plan.uses.add("link")
@@ -1904,6 +1911,7 @@ def _value_parts(code: str) -> set[str]:
         "avatar": ("<AvatarValue",),
         "formatted": ("<FormattedValue",),
         "file": ("<ImageValue", "<FileLink"),
+        "mentions": ("<MentionText",),
     }
     return {part for part, tags in names.items() if any(tag in code for tag in tags)}
 
@@ -2076,6 +2084,7 @@ def view_rules() -> tuple[Output, ...]:
                         ("values", "avatar-value", "'avatar' in ui_views.features"),
                         ("values", "formatted-value", "'formatted' in ui_views.features"),
                         ("values", "file-value", "'file' in ui_views.features"),
+                        ("values", "mention-text", "'mentions' in ui_views.features"),
                         ("filters", "search-filter", "'search' in ui_views.features"),
                         ("filters", "boolean-filter", "'boolean' in ui_views.features"),
                         ("filters", "date-range-filter", "'date_range' in ui_views.features"),

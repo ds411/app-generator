@@ -35,6 +35,7 @@ from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.me import PyMeTest, me_tests
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.notifications import (
+    PyMention,
     PyNotification,
     PyReceiver,
     python_notifications,
@@ -1328,6 +1329,8 @@ class PyEntity:
     """The notifications of the changes of the records (ADR 0041)."""
     live: PyLive | None = None
     """The live updates of the records (ADR 0051), or None."""
+    mentions: list[PyMention] = field(default_factory=list[PyMention])
+    """The `text` fields with mentions (ADR 0043)."""
 
     @property
     def guard_module(self) -> str:
@@ -1617,14 +1620,15 @@ class PyEntity:
     def before_attrs(self) -> list[str]:
         """The attributes that an update reads before the change.
 
-        They are the fields of the workflows, of the event `changed`, and of
-        the notifications of a change (ADR 0041).
+        They are the fields of the workflows, of the event `changed`, of the
+        notifications of a change (ADR 0041), and of the mentions (ADR 0043).
         """
         attrs = [w.attr for w in self.workflows]
         changed = self.changed_event
         watched = [*(changed.attrs if changed else [])]
         for notification in self.change_notifications:
             watched += notification.attrs
+        watched += [m.attr for m in self.mentions]
         for attr in watched:
             if attr not in attrs:
                 attrs.append(attr)
@@ -2097,14 +2101,21 @@ class PyEntity:
             target = self.target(rel)
             if target.name != self.name:
                 lines.add(f"from app.features.{target.slice}.models import {target.name}")
-        if self.notifications:
+        if self.notifications or self.mentions:
             code = "\n".join(n.body(8) for n in self.notifications)
-            names = {"add_notices"} | {
-                name for name in ("path_users", "record_text", "text_value") if name + "(" in code
+            code += "\n".join(m.call(4) for m in self.mentions)
+            names = {"add_notices"} if self.notifications else set[str]()
+            names |= {
+                name
+                for name in ("add_mentions", "path_users", "record_text", "text_value")
+                if name + "(" in code
             }
             if any(n.kind == "changed" for n in self.notifications):
                 names.add("changed")
             lines.add(from_import("app.core.notifications", names))
+            users = self.app_entities[self.mentions[0].user_entity] if self.mentions else None
+            if users is not None and users.name != self.name:
+                lines.add(f"from app.features.{users.slice}.models import {users.name}")
             for n in self.notifications:
                 for value in n.values:
                     if value.target is not None and value.label is not None:
@@ -2547,13 +2558,33 @@ class PyApp:
         return [e.share.id for e in self.shares if e.share is not None]
 
     @property
+    def mentions(self) -> list[PyMention]:
+        """The `text` fields with mentions (ADR 0043), by entity in the order of the tables."""
+        return [m for e in self.entity_order() for m in e.mentions]
+
+    @property
+    def notices(self) -> bool:
+        """True if the app keeps notices: it has notifications or fields with mentions."""
+        return bool(self.notifications) or bool(self.mentions)
+
+    @property
+    def notice_ids(self) -> list[str]:
+        """The IDs of the notifications and of the fields with mentions."""
+        return self.notification_ids + [m.id for m in self.mentions]
+
+    @property
+    def notice_sample(self) -> PyNotification:
+        """The notification of the tests of the notices: the first one, else the mentions."""
+        return self.notifications[0] if self.notifications else self.mentions[0].sample()
+
+    @property
     def user_key(self) -> bool:
         """True if the session of a request keeps the ID of the signed-in user (`USER_KEY`).
 
         The change log (ADR 0040) and the notices (ADR 0041) name the user of a change, and a
         link (ADR 0049) names the user that made it.
         """
-        return self.auth and (bool(self.history) or bool(self.notifications) or bool(self.shares))
+        return self.auth and (bool(self.history) or self.notices or bool(self.shares))
 
     @property
     def me(self) -> bool:

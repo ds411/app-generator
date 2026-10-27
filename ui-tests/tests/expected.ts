@@ -142,6 +142,25 @@ export type ExpectedAuth = {
     /** The text of the notice. */
     text: string;
   } | null;
+  /**
+   * The mentions (ADR 0043): a user with all operations mentions another
+   * user in a text with the edit form of the detail page of a record. The
+   * other user finds the notice in the bell.
+   */
+  mention?: {
+    /** The user names of the user of the change and of the user of the mention. */
+    actor: string;
+    receiver: string;
+    /** The display value of the user of the mention. */
+    name: string;
+    /** The detail page of the record, and the label of the text with mentions. */
+    path: string;
+    field: string;
+    /** The page of the user of the mention, or null: the mention shows without a link. */
+    userPath: string | null;
+    /** The text of the notice. */
+    text: string;
+  } | null;
 };
 
 /** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */

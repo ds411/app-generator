@@ -1,4 +1,4 @@
-{{ trace_header(*py.notification_ids) }}
+{{ trace_header(*py.notice_ids) }}
 {% set u = py.entity(definition.auth.user_entity) %}
 """The endpoints of the notices of the signed-in user (ADR 0041): the list, and the reads.
 
@@ -46,7 +46,7 @@ async def _reads(session: AsyncSession, notices: Sequence[Notice]) -> list[Notic
     ]
 
 
-{% for id in py.notification_ids %}
+{% for id in py.notice_ids %}
 {{ trace(id) }}
 {% endfor %}
 @router.get(

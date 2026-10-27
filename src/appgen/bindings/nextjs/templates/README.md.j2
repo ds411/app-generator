@@ -453,12 +453,20 @@ the change log.
 {% for name, n in definition.notifications.items() %}
 | `{{ name }}` | {{ notice_summary(n) }} | {% for r in n.receivers %}`{{ r }}`{{ ", " if not loop.last }}{% endfor %} | {{ n.text }} |
 {% endfor %}
+{% for m in mention_plans(definition) %}
+| `@mention` | A new mention in `{{ m.name }}` of a {{ m.entity }} | The users that the text mentions for the first time | You are mentioned in {record}. |
+{% endfor %}
 
 - The bell in the top bar shows the count of the unread notices of the
   signed-in user, and the newest notices. A click on a notice marks it
   read, and opens the detail page of its record. "Mark all read" marks
   all notices of the user read.
 - A notice keeps the values of its text from the time of the change.
+{% if has_mentions(definition) %}
+- A text with mentions (`mentions: true`) shows a list of the users
+  after `@` in the forms. A mention is `@[<name>](<ID of the user>)` in
+  the text, and the views show it as `@<name>`{{ " with a link to the page of the user" if mention_link(definition) }}.
+{% endif %}
 - A change outside the repositories gives no notice: SQL in a script,
   and the seed.
 

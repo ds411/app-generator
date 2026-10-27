@@ -14,8 +14,12 @@ from appgen.bindings.shared.geo import has_points
 from appgen.bindings.shared.integrations import ts_features
 from appgen.bindings.shared.lines import line_items, lines_operations
 from appgen.bindings.shared.notices import (
+    has_mentions,
     has_notices,
+    mention_link,
+    mention_plans,
     mock_notify,
+    notice_ids,
     notice_links,
     notice_plans,
     notice_summary,
@@ -358,6 +362,10 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "notice_texts": notice_texts,
     "notice_links": notice_links,
     "notice_summary": notice_summary,
+    "notice_ids": notice_ids,
+    "has_mentions": has_mentions,
+    "mention_plans": mention_plans,
+    "mention_link": mention_link,
     "mock_notify": mock_notify,
     "operations_of": operations_of,
     "query_operations": query_operations,

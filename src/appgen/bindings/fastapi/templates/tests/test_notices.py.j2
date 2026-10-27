@@ -1,6 +1,6 @@
-{{ trace_header(*py.notification_ids) }}
+{{ trace_header(*py.notice_ids) }}
 {% set u = py.entity(definition.auth.user_entity) %}
-{% set n = py.notifications[0] %}
+{% set n = py.notice_sample %}
 """The tests of the notices of the signed-in user (ADR 0041): the list and the reads."""
 
 from uuid import UUID, uuid4

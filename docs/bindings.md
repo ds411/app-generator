@@ -742,6 +742,17 @@ import the helpers.
   for the user of the change. `tests/test_notices.py` checks the
   endpoints, and the text in another language when a language
   translates the text of the first notification.
+- A `text` field with mentions ([ADR 0043](adr/0043-mentions.md)) gives
+  the repository the function `mention()`: `add` and `update` call it
+  after `notify()`. It calls `add_mentions()` of
+  `app/core/notifications.py` for each such field, with the ID column of
+  the user entity, the display value of the record, and the texts after
+  and before the change. `add_mentions()` adds the built-in notification
+  `@mention` for each user that the new text mentions and the old text
+  does not, and that exists. The generated tests in
+  `tests/features/<slice>/test_mentions.py` add a record with a mention,
+  change it with one more mention, and check the notices, also without
+  a notice for the user of the change and for an ID without a user.
 
 ### The secret links of the FastAPI app
 
@@ -1196,6 +1207,31 @@ bell of the top bar.
 - The UI test `ui-tests/tests/auth.spec.ts` cancels a booking of a
   member as an administrator in the room booking example, signs in as
   the member, and opens the notice in the bell.
+
+The mentions of a `text` field ([ADR 0043](adr/0043-mentions.md)) use
+the same notices:
+
+- `src/shared/lib/mentions.ts` finds the mentions of a text
+  (`mentionParts()`, `mentionedIds()`) and writes one
+  (`mentionToken()`).
+- The form widget `MentionTextarea`
+  (`src/shared/ui/form-widgets/mention-textarea.tsx`) is a text area with
+  a list of the users after `@`: the records of the user entity in the
+  lookups of the form, or the option source of the user entity with
+  `x-react-data: api`. The arrow keys, Enter, Tab, and Escape work in the
+  list.
+- The views show the text with `MentionText`
+  (`src/shared/ui/values/mention-text.tsx`): a mention is a link to the
+  first page with a detail view of the user entity. A table column with
+  `link` shows the text without the links of the mentions.
+- The Next.js repositories call `addMentions()` of
+  `src/shared/db/notices.ts` in `<entity>Notify`, and the React mock
+  stores call `addMentions()` of `src/shared/api/notices.ts` in
+  `withNotices()`. The notice has the name `@mention`, and the texts of
+  `model/notice-texts.ts` have its text.
+- The UI test `ui-tests/tests/auth.spec.ts` mentions a member in the
+  notes of a booking as an administrator, checks the link on the detail
+  page, signs in as the member, and opens the notice in the bell.
 
 ### The secret links of the Next.js app and of the React app
 

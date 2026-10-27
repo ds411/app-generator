@@ -3369,6 +3369,11 @@
             }
           ],
           "default": null
+        },
+        "mentions": {
+          "default": false,
+          "title": "Mentions",
+          "type": "boolean"
         }
       },
       "required": [
