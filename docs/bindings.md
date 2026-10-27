@@ -611,6 +611,34 @@ of the widgets (M36).
   and read each total and each stat or list widget with the token of
   each user and without a token.
 
+### The memberships of the FastAPI app
+
+The `memberships` of `access` give a user a role in the records of a
+scope entity ([ADR 0048](adr/0048-memberships.md)).
+
+- `app/core/access.py` has the operations of each role of the
+  memberships (`MEMBER_ROLES`), the entities of the scope
+  (`SCOPE_ENTITIES`), and `member_scopes(session, user, operation)`:
+  the IDs of the scope records of the memberships of a user, with a
+  role that gives the operation.
+- `check_access` reads the memberships only if the role of the user
+  does not give the operation. The dependency `scope_of` then puts the
+  scopes of the operation (`scopes`) and all scopes of the user
+  (`member_of`) in the `RecordScope` of the request. `rule()` gives the
+  rule `MEMBER_RULE` for an entity of the scope.
+- The repository of an entity of the scope has `in_scopes(scopes)`:
+  the condition of the path to the scope, with `has()` for each step.
+  `owned()` filters the records with it, so the lists, the reads, the
+  changes, and `check_scope` of a create or a change use the scopes.
+  `get()` gives 403 for a record in another scope of the user, and 404
+  for a record out of all scopes.
+- The generated tests in `tests/test_memberships.py` store a user with
+  a role of `roles` that does not give the operation, a membership with
+  a role that gives it, a membership with a role that does not, and a
+  scope record without a membership. They check 200, 403, and 404 for
+  each entity of the scope with a suitable operation, the list, the
+  create, and an operation that no role gives.
+
 ### The lines of the FastAPI app
 
 A create or an update operation with `lines` writes the record and its

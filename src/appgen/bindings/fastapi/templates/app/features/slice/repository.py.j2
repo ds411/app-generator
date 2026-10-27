@@ -84,6 +84,10 @@ def owned[*Ts](statement: Select[*Ts], scope: RecordScope | None) -> Select[*Ts]
     rule = scope.rule("{{ e.name }}") if scope is not None else None
     if scope is None or rule is None:
         return statement
+{% if e.scope_path %}
+    if rule.member:
+        return statement.where(in_scopes(scope.scopes or frozenset[UUID]()))
+{% endif %}
 {% if e.owner_path %}
     if rule.owner:
         statement = statement.where(belongs_to(scope.user))
@@ -100,6 +104,27 @@ def owned[*Ts](statement: Select[*Ts], scope: RecordScope | None) -> Select[*Ts]
 def belongs_to(user: UUID) -> ColumnElement[bool]:
     """Return the condition of the records of a user: `{{ e.owner_path.path }}` (ADR 0025)."""
     {{ e.owner_path.condition("return ", "user") }}
+{% endif %}
+{% if e.scope_path %}
+
+
+{{ trace(py.memberships.id) }}
+{% for id in e.scope_path.ids %}
+{{ trace(id) }}
+{% endfor %}
+def in_scopes(scopes: Collection[UUID]) -> ColumnElement[bool]:
+{% if e.scope_path.steps %}
+    """Return the condition of the records in scopes of the memberships: `{{ e.scope_path.path }}` (ADR 0048)."""
+{% else %}
+    """Return the condition of the scope records of the memberships of a request (ADR 0048)."""
+{% endif %}
+    {{ e.scope_path.condition("return ", "scopes") }}
+
+
+async def _in_member_scope(session: AsyncSession, id: UUID, scope: RecordScope) -> bool:
+    """Return True if a record is in a scope of the memberships of the user, for another role."""
+    statement = select({{ e.name }}.id).where({{ e.name }}.id == id, in_scopes(scope.member_of))
+    return await session.scalar(statement) is not None
 {% endif %}
 {% if e.owner %}
 
@@ -142,6 +167,16 @@ async def get(
     """
     statement = owned(select({{ e.name }}).where({{ e.name }}.id == id), scope)
     record = await session.scalar(statement.execution_options(populate_existing=True))
+{% if e.scope_path %}
+    # A record in another scope of the user: the role of that scope does not allow it.
+    if (
+        record is None
+        and scope is not None
+        and scope.scopes is not None
+        and await _in_member_scope(session, id, scope)
+    ):
+        {{ py.problem(403, "Your role in the scope of the record may not do this operation.", 8) }}
+{% endif %}
     if record is None:
         {{ py.problem(404, "No {entity} has the ID {id}.", 8, entity=e.name | tojson, id="id") }}
     return record

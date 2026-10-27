@@ -33,6 +33,7 @@ from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.me import PyMeTest, me_tests
+from appgen.bindings.fastapi.memberships import PyMemberships, python_memberships
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.notifications import (
     PyNotification,
@@ -67,7 +68,7 @@ from appgen.bindings.fastapi.totals import (
 )
 from appgen.bindings.fastapi.webhooks import python_webhooks
 from appgen.bindings.shared.i18n import i18n_plan
-from appgen.dsl.access import RecordRule
+from appgen.dsl.access import RecordRule, scope_entities
 from appgen.dsl.events import EVENT_NAMES
 from appgen.dsl.expressions import (
     Binary,
@@ -1070,6 +1071,67 @@ class PyOwnerPath:
         return lines
 
 
+@dataclass(slots=True)
+class PyScopePath:
+    """The path of an entity of the scope of the memberships to the scope entity (ADR 0048).
+
+    Each step is a many-to-one relation. The scope entity has no step: its
+    records are the scopes.
+    """
+
+    entity: str
+    """The name of the entity of the path."""
+    path: str
+    """The path in the definition, for example `lesson.course`, or `""` for the scope entity."""
+    steps: list[tuple[PyEntity, PyRelation]]
+    """The entity and the relation of each step, from the entity to the scope entity."""
+
+    @property
+    def ids(self) -> list[str]:
+        """The element IDs of the relations of the path."""
+        return [rel.id for _, rel in self.steps]
+
+    def models(self, entity: PyEntity) -> list[PyEntity]:
+        """Return the other models that the condition of the path uses, in path order."""
+        unique = {e.name: e for e, _ in self.steps[1:] if e.name != entity.name}
+        return list(unique.values())
+
+    def condition(self, prefix: str, ids: str, indent: int = 4) -> str:
+        """Return `<prefix><condition>`: the records in the scope records of the IDs.
+
+        A step before the last is `has()`. The last step compares its
+        foreign key with the IDs.
+        """
+        if not self.steps:
+            return f"{prefix}{self.entity}.id.in_({ids})"
+        return self._condition(0, prefix, ids, indent)
+
+    def _condition(self, index: int, prefix: str, ids: str, indent: int) -> str:
+        entity, rel = self.steps[index]
+        if index == len(self.steps) - 1:
+            return f"{prefix}{entity.name}.{rel.fk_attr}.in_({ids})"
+        inner = self._condition(index + 1, "", ids, indent + 4)
+        return _nested_call(prefix, f"{entity.name}.{rel.attr}.has", inner, indent)
+
+    def scope_lines(self, scope: str) -> list[str]:
+        """Return the statements of a test that store the records of the path to a scope record.
+
+        The last statement returns the values of a new record in the scope,
+        for example `{"lesson_id": str(lesson.id)}`. Without a step, the
+        record is the scope record.
+        """
+        lines: list[str] = []
+        current = scope
+        for index in range(len(self.steps) - 1, 0, -1):
+            entity, rel = self.steps[index]
+            var = f"{entity.snake}_{index}"
+            lines.append(f"{var} = await make_{entity.snake}(session, {_link(rel, current)})")
+            current = f"str({var}.id)"
+        rel = self.steps[0][1]
+        lines.append(f'return {{"{rel.fk_attr}": {current}}}')
+        return lines
+
+
 def _varies(f: PyField) -> bool:
     """Return true if the test sample of a field has another value for the next `n`."""
     return re.search(r"\bn\b", f.sample) is not None
@@ -1300,6 +1362,8 @@ class PyEntity:
     """True if a record rule of a role names the entity (ADR 0018, ADR 0025)."""
     owner_path: PyOwnerPath | None = None
     """The owner path of the record rules of the entity, if a rule has `owner`."""
+    scope_path: PyScopePath | None = None
+    """The path to the scope entity of the memberships (ADR 0048), for an entity of the scope."""
     hides: list[PyRelation] = field(default_factory=list[PyRelation])
     """The embedded relations whose records a record rule can hide, also in a nested embed."""
     translated: bool = False
@@ -2045,12 +2109,14 @@ class PyEntity:
         sqlalchemy = {"select"} if self.lines else set[str]()
         if self.scoped:
             sqlalchemy |= {"Select", "select"}
-            if self.owner_path:
+            if self.owner_path or self.scope_path:
                 sqlalchemy.add("ColumnElement")
             lines.add("from app.core.access import RecordScope")
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
-        if self.scoped or self.lines:
+        if self.scope_path is not None:
+            lines.add("from collections.abc import Collection, Sequence")
+        elif self.scoped or self.lines:
             lines.add("from collections.abc import Sequence")
         line_schemas: dict[str, set[str]] = {}
         for ln in self.lines:
@@ -2072,6 +2138,10 @@ class PyEntity:
                 lines.add(f"from {module} import repository as {target.snake}_repository")
         if self.owner_path is not None:
             for model in self.owner_path.models(self):
+                lines.add(f"from app.features.{model.slice}.models import {model.name}")
+        if self.scope_path is not None:
+            lines.discard("from collections.abc import Sequence")
+            for model in self.scope_path.models(self):
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
         if self.files:
             lines.add("from app.core.storage import Storage, delete_files")
@@ -2497,6 +2567,8 @@ class PyApp:
     """The generated tests of the totals and the widgets with `$me`, the signed-in user."""
     live_tests: PyLiveTests = field(default_factory=PyLiveTests)
     """The data of the generated tests of the live updates (ADR 0051)."""
+    memberships: PyMemberships | None = None
+    """The roles of the users in the records of a scope (ADR 0048), or None."""
 
     @property
     def events(self) -> bool:
@@ -2918,6 +2990,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         user_label_attr=_user_label_attr(definition, entities),
         me_tests=me_tests(definition, entities, dashboards),
         live_tests=_live_tests(definition, entities, rule_tests),
+        memberships=python_memberships(definition, entities),
     )
 
 
@@ -3026,6 +3099,13 @@ def _record_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> N
             entity.scoped = True
             if rule.owner is not None and users is not None:
                 entity.owner_path = _owner_path(entities, entity, rule.owner)
+    # The entities of the scope of the memberships (ADR 0048): a member uses the records of its
+    # scopes.
+    for name, path in scope_entities(definition).items():
+        entity = entities[name]
+        entity.scoped = True
+        steps = _owner_path(entities, entity, path).steps if path else []
+        entity.scope_path = PyScopePath(entity=name, path=path, steps=steps)
     for entity in entities.values():
         entity.hides = [r for r in entity.embedded if _can_hide(entities, r)]
         for rel in entity.hides:

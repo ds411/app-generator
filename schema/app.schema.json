@@ -4,7 +4,7 @@
   "$defs": {
     "Access": {
       "additionalProperties": false,
-      "description": "The roles of the users. It needs the section `auth`.\n\nThe value of `role_field` (an enum field of the user entity) is the\nrole of a user. A user may call the public operations and open the\npublic pages of `auth`, and the operations and the pages of the role.",
+      "description": "The roles of the users. It needs the section `auth`.\n\nThe value of `role_field` (an enum field of the user entity) is the\nrole of a user. A user may call the public operations and open the\npublic pages of `auth`, and the operations and the pages of the role.\nWith `memberships`, a user also has a role in each record of a scope\n(ADR 0048).",
       "patternProperties": {
         "^x-": {}
       },
@@ -22,6 +22,17 @@
           },
           "title": "Roles",
           "type": "object"
+        },
+        "memberships": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Memberships"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -4558,6 +4569,88 @@
     "MemberName": {
       "pattern": "^[a-z][a-z0-9_]*$",
       "type": "string"
+    },
+    "MembershipRole": {
+      "additionalProperties": false,
+      "description": "A role of the memberships (ADR 0048): its operations on the records of its scopes.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operations": {
+          "items": {
+            "pattern": "^([a-z][a-z0-9_]*|\\*)$",
+            "type": "string"
+          },
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "title": "MembershipRole",
+      "type": "object"
+    },
+    "Memberships": {
+      "additionalProperties": false,
+      "description": "The roles of the users in the records of a scope, for example a course (ADR 0048).\n\nA record of the membership entity gives its user (`user`) a role\n(`role_field`) in one record of the scope entity (`scope`). The role\ngives operations on the records of the scope: the scope record, and\nthe records of the entities in `paths`. A user can have other roles\nin other scope records.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "user": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "scope": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "role_field": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "roles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MembershipRole"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Roles",
+          "type": "object"
+        },
+        "paths": {
+          "additionalProperties": {
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+            "type": "string"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/EntityName"
+          },
+          "title": "Paths",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity",
+        "user",
+        "scope",
+        "role_field",
+        "roles"
+      ],
+      "title": "Memberships",
+      "type": "object"
     },
     "Menu": {
       "additionalProperties": false,

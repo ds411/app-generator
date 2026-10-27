@@ -3,7 +3,9 @@
 # submissions of the students. The value `$me` is the signed-in user: the
 # table of the submissions shows the submissions of the user first, the
 # dashboard counts them, a lesson counts the submissions of the user, and
-# a new submission belongs to the user. scripts/check-fastapi.sh checks
+# a new submission belongs to the user. An enrollment gives a person a
+# role in a course (ADR 0048): a teacher changes the course and its
+# lessons, and a student hands in submissions. scripts/check-fastapi.sh checks
 # the FastAPI app of this definition, and scripts/sessions_ui_test.py
 # signs in to the front ends.
 version: 0
@@ -26,6 +28,7 @@ entities:
       role: { type: enum, values: [admin, member], default: member }
     relations:
       submissions: { kind: one_to_many, target: Submission, inverse: student }
+      enrollments: { kind: one_to_many, target: Enrollment, inverse: person }
 
   Course:
     crud:
@@ -36,6 +39,7 @@ entities:
       title: { type: string, required: true, unique: true, max_length: 120 }
     relations:
       lessons: { kind: one_to_many, target: Lesson, inverse: course }
+      enrollments: { kind: one_to_many, target: Enrollment, inverse: course }
 
   Lesson:
     crud:
@@ -82,6 +86,27 @@ entities:
         required: true
         on_delete: cascade
         inverse: submissions
+
+  # The role of a person in a course (ADR 0048).
+  Enrollment:
+    crud:
+      views: [table]
+      forms: [create]
+    fields:
+      role: { type: enum, values: [teacher, student], default: student }
+    relations:
+      person:
+        kind: many_to_one
+        target: Person
+        required: true
+        on_delete: cascade
+        inverse: enrollments
+      course:
+        kind: many_to_one
+        target: Course
+        required: true
+        on_delete: cascade
+        inverse: enrollments
 
 pages:
   home:
@@ -135,6 +160,17 @@ pages:
     content: { view: person_table }
     actions:
       new_person: { kind: form, form: new_person, label: New person, icon: user-plus }
+  enrollments:
+    path: /enrollments
+    title: Enrollments
+    entity: Enrollment
+    content: { view: enrollment_table }
+    actions:
+      new_enrollment:
+        kind: form
+        form: new_enrollment
+        label: New enrollment
+        icon: user-plus
 
 ui:
   navigation:
@@ -145,6 +181,7 @@ ui:
         lessons: { page: lessons, icon: notebook-pen }
         submissions: { page: submissions, icon: inbox }
         people: { page: people, icon: users }
+        enrollments: { page: enrollments, icon: id-card }
   layouts:
     app_shell:
       sidebar: { navigation: main, title: Course Hub, icon: graduation-cap }
@@ -225,6 +262,31 @@ access:
         - create_submission
         - update_submission
       pages: [home, courses, course_detail, lessons, lesson_detail, submissions, submission_detail]
+  # A role in a course: a teacher changes the course and its lessons, sees
+  # its enrollments, and deletes the submissions of its lessons. A student
+  # hands in submissions.
+  memberships:
+    entity: Enrollment
+    user: person
+    scope: course
+    role_field: role
+    roles:
+      teacher:
+        label: Teacher
+        operations:
+          - update_course
+          - create_lesson
+          - update_lesson
+          - list_enrollments
+          - read_enrollment
+          - delete_submission
+      student:
+        label: Student
+        operations: [read_course, list_lessons, read_lesson, create_submission]
+    paths:
+      Lesson: course
+      Submission: lesson.course
+      Enrollment: course
 
 seed:
   Person:
@@ -246,3 +308,8 @@ seed:
       ben_equations: { title: Ben on equations, lesson: equations, student: ben, grade: 2 }
       ben_cells: { title: Ben on cells, lesson: cells, student: ben }
       cleo_equations: { title: Cleo on equations, lesson: equations, student: cleo, grade: 1 }
+  Enrollment:
+    records:
+      ben_algebra: { person: ben, course: algebra, role: teacher }
+      ben_biology: { person: ben, course: biology, role: student }
+      cleo_algebra: { person: cleo, course: algebra, role: student }

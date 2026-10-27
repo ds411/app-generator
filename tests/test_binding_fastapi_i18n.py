@@ -273,6 +273,8 @@ def test_the_docs_list_the_messages_of_the_api() -> None:
     inbound = fixtures / "inbound-email.yaml"
     # So do the connections of the users to the APIs (ADR 0033).
     calendar = fixtures / "api-connections.yaml"
+    # And the memberships (ADR 0048).
+    courses = fixtures / "courses.yaml"
     languages = dedent(
         """\
         translations:
@@ -285,7 +287,8 @@ def test_the_docs_list_the_messages_of_the_api() -> None:
     files = load_definition_text(files_path.read_text() + languages, str(files_path))
     email = load_definition_text(inbound.read_text() + languages, str(inbound))
     connections = load_definition_text(calendar.read_text() + languages, str(calendar))
-    definitions = (room_booking_in_two_languages(), security, files, email, connections)
+    members = load_definition_text(courses.read_text() + languages, str(courses))
+    definitions = (room_booking_in_two_languages(), security, files, email, connections, members)
     for definition in (load_definition(EXAMPLE), *definitions):
         texts |= api_texts(files_of(definition)) - definition_messages(definition)
     docs = (ROOT / "docs" / "dsl.md").read_text(encoding="utf-8")
