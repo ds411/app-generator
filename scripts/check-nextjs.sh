@@ -41,8 +41,9 @@
 # queries of tests/fixtures/listings/extensions/nextjs/ (ADR 0045), and
 # run lint, type check, appgen check, and the queries test
 # (scripts/queries_test.py) on it.
-# The pre-push hook runs this script when a push changes the generator
-# or the Next.js binding. Run it by hand from the repository root:
+# The pre-push hook runs only the sections of this script that a push
+# changes (scripts/check_plan.py). Run it by hand from the repository
+# root, to run all sections:
 #
 #   scripts/check-nextjs.sh [output folder]
 #
@@ -109,6 +110,26 @@ step() {
     echo "check-nextjs: $*"
 }
 
+# Run a section only if the pre-push hook selected it: APPGEN_CHECK_SECTIONS
+# lists the selected sections (scripts/check_plan.py). Without the
+# variable, run all sections. A section passed when the next one starts:
+# then the function adds it to the file APPGEN_CHECK_PASSED of the hook.
+current=""
+section() {
+    if [ -n "$current" ] && [ -n "${APPGEN_CHECK_PASSED:-}" ]; then
+        echo "$current" >>"$APPGEN_CHECK_PASSED"
+    fi
+    current=""
+    case " ${APPGEN_CHECK_SECTIONS-$1} " in
+    *" $1 "*)
+        current=$1
+        return 0
+        ;;
+    esac
+    step "skip $1 (no change)"
+    return 1
+}
+
 # In a cloud session, use the mirror images, start Docker, and build the
 # Node image (NODE_IMAGE). Outside cloud sessions, this does nothing.
 if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
@@ -117,235 +138,257 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     scripts/sandbox-setup.sh
 fi
 
-step "generate $definition in $out"
-# The hand-written code of the example: appgen keeps an extension file
-# that exists.
-cp -R examples/project-tracker/extensions/nextjs/. "$out"/
-uv run --locked appgen generate "$definition" -b nextjs -o "$out" >/dev/null
+if section nextjs:project-tracker; then
+    step "generate $definition in $out"
+    # The hand-written code of the example: appgen keeps an extension file
+    # that exists.
+    cp -R examples/project-tracker/extensions/nextjs/. "$out"/
+    uv run --locked appgen generate "$definition" -b nextjs -o "$out" >/dev/null
 
-cd "$out"
+    cd "$out"
 
-step "pnpm install"
-pnpm install --silent
-step "pnpm lint"
-pnpm --silent lint
-step "pnpm typecheck"
-pnpm --silent typecheck
-step "pnpm build"
-pnpm --silent build >/dev/null
-
-step "docker build"
-set --
-[ -n "${NODE_IMAGE:-}" ] && set -- "$@" --build-arg "NODE_IMAGE=$NODE_IMAGE"
-# shellcheck disable=SC2086
-docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-nextjs . >/dev/null
-
-cd "$root"
-step "appgen check"
-uv run --locked appgen check "$definition" "$out"
-
-step "calls of the third-party APIs"
-uv run --locked scripts/api_calls.py nextjs "$out"
-
-step "smoke test"
-uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-nextjs --ui
-
-step "smoke test with the local database"
-uv run --locked scripts/smoke_test.py nextjs --app "$out" --local
-
-step "shared rate limit"
-rm -rf "$out-rate-limit"
-uv run --locked scripts/check_shared_rate_limit.py nextjs "$out-rate-limit"
-
-step "deployment files"
-uv run --locked scripts/check_deploy_files.py nextjs
-
-step "generate $seed_definition in $seed_out"
-uv run --locked appgen generate "$seed_definition" -b nextjs -o "$seed_out" >/dev/null
-(
-    cd "$seed_out"
-    step "pnpm install (seed data)"
+    step "pnpm install"
     pnpm install --silent
-    step "pnpm lint (seed data)"
+    step "pnpm lint"
     pnpm --silent lint
-    step "pnpm typecheck (seed data)"
+    step "pnpm typecheck"
     pnpm --silent typecheck
-)
-step "appgen check (seed data)"
-uv run --locked appgen check "$seed_definition" "$seed_out"
-
-step "seed test"
-uv run --locked scripts/seed_test.py "$seed_definition" --app "$seed_out"
-
-step "generate $webhooks_definition in $webhooks_out"
-uv run --locked appgen generate "$webhooks_definition" -b nextjs -o "$webhooks_out" >/dev/null
-(
-    cd "$webhooks_out"
-    step "pnpm install (webhooks)"
-    pnpm install --silent
-    step "pnpm lint (webhooks)"
-    pnpm --silent lint
-    step "pnpm typecheck (webhooks)"
-    pnpm --silent typecheck
-    step "pnpm build (webhooks)"
+    step "pnpm build"
     pnpm --silent build >/dev/null
-)
-step "appgen check (webhooks)"
-uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
 
-step "webhook test"
-uv run --locked scripts/webhook_test.py "$webhooks_definition" --app "$webhooks_out"
+    step "docker build"
+    set --
+    [ -n "${NODE_IMAGE:-}" ] && set -- "$@" --build-arg "NODE_IMAGE=$NODE_IMAGE"
+    # shellcheck disable=SC2086
+    docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-nextjs . >/dev/null
 
-step "generate $email_definition in $email_out"
-# The hand-written logic of the fixture: appgen keeps an extension file
-# that exists.
-cp -R tests/fixtures/inbound-email/extensions/nextjs/. "$email_out"/
-uv run --locked appgen generate "$email_definition" -b nextjs -o "$email_out" >/dev/null
-(
-    cd "$email_out"
-    step "pnpm install (inbound email)"
-    pnpm install --silent
-    step "pnpm lint (inbound email)"
-    pnpm --silent lint
-    step "pnpm typecheck (inbound email)"
-    pnpm --silent typecheck
-    step "pnpm build (inbound email)"
-    pnpm --silent build >/dev/null
-)
-step "appgen check (inbound email)"
-uv run --locked appgen check "$email_definition" "$email_out"
+    cd "$root"
+    step "appgen check"
+    uv run --locked appgen check "$definition" "$out"
 
-step "inbound email test"
-uv run --locked scripts/inbound_email_test.py nextjs "$email_definition" --app "$email_out"
+    step "calls of the third-party APIs"
+    uv run --locked scripts/api_calls.py nextjs "$out"
 
-step "generate $jobs_definition in $jobs_out"
-cp -R tests/fixtures/jobs-extensions/nextjs/. "$jobs_out"/
-uv run --locked appgen generate "$jobs_definition" -b nextjs -o "$jobs_out" >/dev/null
-(
-    cd "$jobs_out"
-    step "pnpm install (jobs)"
-    pnpm install --silent
-    step "pnpm lint (jobs)"
-    pnpm --silent lint
-    step "pnpm typecheck (jobs)"
-    pnpm --silent typecheck
-)
-step "appgen check (jobs)"
-uv run --locked appgen check "$jobs_definition" "$jobs_out"
+    step "smoke test"
+    uv run --locked scripts/smoke_test.py nextjs --app "$out" --image appgen-check-nextjs --ui
 
-step "jobs test"
-uv run --locked scripts/jobs_test.py --app "$jobs_out"
+    step "smoke test with the local database"
+    uv run --locked scripts/smoke_test.py nextjs --app "$out" --local
 
-step "generate $files_definition in $files_out"
-uv run --locked appgen generate "$files_definition" -b nextjs -o "$files_out" >/dev/null
-(
-    cd "$files_out"
-    step "pnpm install (files)"
-    pnpm install --silent
-    step "pnpm lint (files)"
-    pnpm --silent lint
-    step "pnpm typecheck (files)"
-    pnpm --silent typecheck
-)
-step "appgen check (files)"
-uv run --locked appgen check "$files_definition" "$files_out"
+    step "shared rate limit"
+    rm -rf "$out-rate-limit"
+    uv run --locked scripts/check_shared_rate_limit.py nextjs "$out-rate-limit"
 
-step "files test"
-uv run --locked scripts/files_test.py "$files_definition" --app "$files_out"
+    step "deployment files"
+    uv run --locked scripts/check_deploy_files.py nextjs
+fi
 
-step "generate $events_definition in $events_out"
-cp -R tests/fixtures/events-extensions/nextjs/. "$events_out"/
-uv run --locked appgen generate "$events_definition" -b nextjs -o "$events_out" >/dev/null
-(
-    cd "$events_out"
-    step "pnpm install (events)"
-    pnpm install --silent
-    step "pnpm lint (events)"
-    pnpm --silent lint
-    step "pnpm typecheck (events)"
-    pnpm --silent typecheck
-)
-step "appgen check (events)"
-uv run --locked appgen check "$events_definition" "$events_out"
+if section nextjs:seed-data; then
+    step "generate $seed_definition in $seed_out"
+    uv run --locked appgen generate "$seed_definition" -b nextjs -o "$seed_out" >/dev/null
+    (
+        cd "$seed_out"
+        step "pnpm install (seed data)"
+        pnpm install --silent
+        step "pnpm lint (seed data)"
+        pnpm --silent lint
+        step "pnpm typecheck (seed data)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (seed data)"
+    uv run --locked appgen check "$seed_definition" "$seed_out"
 
-step "events test"
-uv run --locked scripts/events_test.py --app "$events_out"
+    step "seed test"
+    uv run --locked scripts/seed_test.py "$seed_definition" --app "$seed_out"
+fi
 
-step "generate $live_definition in $live_out"
-uv run --locked appgen generate "$live_definition" -b nextjs -o "$live_out" >/dev/null
-(
-    cd "$live_out"
-    step "pnpm install (live)"
-    pnpm install --silent
-    step "pnpm lint (live)"
-    pnpm --silent lint
-    step "pnpm typecheck (live)"
-    pnpm --silent typecheck
-)
-step "appgen check (live)"
-uv run --locked appgen check "$live_definition" "$live_out"
+if section nextjs:webhooks; then
+    step "generate $webhooks_definition in $webhooks_out"
+    uv run --locked appgen generate "$webhooks_definition" -b nextjs -o "$webhooks_out" >/dev/null
+    (
+        cd "$webhooks_out"
+        step "pnpm install (webhooks)"
+        pnpm install --silent
+        step "pnpm lint (webhooks)"
+        pnpm --silent lint
+        step "pnpm typecheck (webhooks)"
+        pnpm --silent typecheck
+        step "pnpm build (webhooks)"
+        pnpm --silent build >/dev/null
+    )
+    step "appgen check (webhooks)"
+    uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
 
-step "live test"
-uv run --locked scripts/live_test.py --app "$live_out"
+    step "webhook test"
+    uv run --locked scripts/webhook_test.py "$webhooks_definition" --app "$webhooks_out"
+fi
 
-step "generate $invoices_definition in $invoices_out"
-uv run --locked appgen generate "$invoices_definition" -b nextjs -o "$invoices_out" >/dev/null
-(
-    cd "$invoices_out"
-    step "pnpm install (invoices)"
-    pnpm install --silent
-    step "pnpm lint (invoices)"
-    pnpm --silent lint
-    step "pnpm typecheck (invoices)"
-    pnpm --silent typecheck
-)
-step "appgen check (invoices)"
-uv run --locked appgen check "$invoices_definition" "$invoices_out"
+if section nextjs:inbound-email; then
+    step "generate $email_definition in $email_out"
+    # The hand-written logic of the fixture: appgen keeps an extension file
+    # that exists.
+    cp -R tests/fixtures/inbound-email/extensions/nextjs/. "$email_out"/
+    uv run --locked appgen generate "$email_definition" -b nextjs -o "$email_out" >/dev/null
+    (
+        cd "$email_out"
+        step "pnpm install (inbound email)"
+        pnpm install --silent
+        step "pnpm lint (inbound email)"
+        pnpm --silent lint
+        step "pnpm typecheck (inbound email)"
+        pnpm --silent typecheck
+        step "pnpm build (inbound email)"
+        pnpm --silent build >/dev/null
+    )
+    step "appgen check (inbound email)"
+    uv run --locked appgen check "$email_definition" "$email_out"
 
-step "sequence test"
-uv run --locked scripts/sequence_test.py --app "$invoices_out"
+    step "inbound email test"
+    uv run --locked scripts/inbound_email_test.py nextjs "$email_definition" --app "$email_out"
+fi
 
-step "page metadata test"
-uv run --locked scripts/page_meta_test.py --app "$invoices_out"
+if section nextjs:jobs; then
+    step "generate $jobs_definition in $jobs_out"
+    cp -R tests/fixtures/jobs-extensions/nextjs/. "$jobs_out"/
+    uv run --locked appgen generate "$jobs_definition" -b nextjs -o "$jobs_out" >/dev/null
+    (
+        cd "$jobs_out"
+        step "pnpm install (jobs)"
+        pnpm install --silent
+        step "pnpm lint (jobs)"
+        pnpm --silent lint
+        step "pnpm typecheck (jobs)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (jobs)"
+    uv run --locked appgen check "$jobs_definition" "$jobs_out"
 
-step "manual order UI test"
-uv run --locked scripts/order_ui_test.py --app "$invoices_out"
+    step "jobs test"
+    uv run --locked scripts/jobs_test.py --app "$jobs_out"
+fi
 
-step "generate $totals_definition in $totals_out"
-uv run --locked appgen generate "$totals_definition" -b nextjs -o "$totals_out" >/dev/null
-(
-    cd "$totals_out"
-    step "pnpm install (totals)"
-    pnpm install --silent
-    step "pnpm lint (totals)"
-    pnpm --silent lint
-    step "pnpm typecheck (totals)"
-    pnpm --silent typecheck
-)
-step "appgen check (totals)"
-uv run --locked appgen check "$totals_definition" "$totals_out"
+if section nextjs:files; then
+    step "generate $files_definition in $files_out"
+    uv run --locked appgen generate "$files_definition" -b nextjs -o "$files_out" >/dev/null
+    (
+        cd "$files_out"
+        step "pnpm install (files)"
+        pnpm install --silent
+        step "pnpm lint (files)"
+        pnpm --silent lint
+        step "pnpm typecheck (files)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (files)"
+    uv run --locked appgen check "$files_definition" "$files_out"
 
-step "totals test"
-uv run --locked scripts/totals_test.py --app "$totals_out"
+    step "files test"
+    uv run --locked scripts/files_test.py "$files_definition" --app "$files_out"
+fi
 
-step "generate $listings_definition in $listings_out"
-# The hand-written queries of the fixture: appgen keeps an extension file
-# that exists.
-cp -R tests/fixtures/listings/extensions/nextjs/. "$listings_out"/
-uv run --locked appgen generate "$listings_definition" -b nextjs -o "$listings_out" >/dev/null
-(
-    cd "$listings_out"
-    step "pnpm install (listings)"
-    pnpm install --silent
-    step "pnpm lint (listings)"
-    pnpm --silent lint
-    step "pnpm typecheck (listings)"
-    pnpm --silent typecheck
-)
-step "appgen check (listings)"
-uv run --locked appgen check "$listings_definition" "$listings_out"
+if section nextjs:events; then
+    step "generate $events_definition in $events_out"
+    cp -R tests/fixtures/events-extensions/nextjs/. "$events_out"/
+    uv run --locked appgen generate "$events_definition" -b nextjs -o "$events_out" >/dev/null
+    (
+        cd "$events_out"
+        step "pnpm install (events)"
+        pnpm install --silent
+        step "pnpm lint (events)"
+        pnpm --silent lint
+        step "pnpm typecheck (events)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (events)"
+    uv run --locked appgen check "$events_definition" "$events_out"
 
-step "queries test"
-uv run --locked scripts/queries_test.py --app "$listings_out"
+    step "events test"
+    uv run --locked scripts/events_test.py --app "$events_out"
+fi
+
+if section nextjs:record-rules; then
+    step "generate $live_definition in $live_out"
+    uv run --locked appgen generate "$live_definition" -b nextjs -o "$live_out" >/dev/null
+    (
+        cd "$live_out"
+        step "pnpm install (live)"
+        pnpm install --silent
+        step "pnpm lint (live)"
+        pnpm --silent lint
+        step "pnpm typecheck (live)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (live)"
+    uv run --locked appgen check "$live_definition" "$live_out"
+
+    step "live test"
+    uv run --locked scripts/live_test.py --app "$live_out"
+fi
+
+if section nextjs:invoices; then
+    step "generate $invoices_definition in $invoices_out"
+    uv run --locked appgen generate "$invoices_definition" -b nextjs -o "$invoices_out" >/dev/null
+    (
+        cd "$invoices_out"
+        step "pnpm install (invoices)"
+        pnpm install --silent
+        step "pnpm lint (invoices)"
+        pnpm --silent lint
+        step "pnpm typecheck (invoices)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (invoices)"
+    uv run --locked appgen check "$invoices_definition" "$invoices_out"
+
+    step "sequence test"
+    uv run --locked scripts/sequence_test.py --app "$invoices_out"
+
+    step "page metadata test"
+    uv run --locked scripts/page_meta_test.py --app "$invoices_out"
+
+    step "manual order UI test"
+    uv run --locked scripts/order_ui_test.py --app "$invoices_out"
+fi
+
+if section nextjs:totals; then
+    step "generate $totals_definition in $totals_out"
+    uv run --locked appgen generate "$totals_definition" -b nextjs -o "$totals_out" >/dev/null
+    (
+        cd "$totals_out"
+        step "pnpm install (totals)"
+        pnpm install --silent
+        step "pnpm lint (totals)"
+        pnpm --silent lint
+        step "pnpm typecheck (totals)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (totals)"
+    uv run --locked appgen check "$totals_definition" "$totals_out"
+
+    step "totals test"
+    uv run --locked scripts/totals_test.py --app "$totals_out"
+fi
+
+if section nextjs:listings; then
+    step "generate $listings_definition in $listings_out"
+    # The hand-written queries of the fixture: appgen keeps an extension file
+    # that exists.
+    cp -R tests/fixtures/listings/extensions/nextjs/. "$listings_out"/
+    uv run --locked appgen generate "$listings_definition" -b nextjs -o "$listings_out" >/dev/null
+    (
+        cd "$listings_out"
+        step "pnpm install (listings)"
+        pnpm install --silent
+        step "pnpm lint (listings)"
+        pnpm --silent lint
+        step "pnpm typecheck (listings)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (listings)"
+    uv run --locked appgen check "$listings_definition" "$listings_out"
+
+    step "queries test"
+    uv run --locked scripts/queries_test.py --app "$listings_out"
+fi
 
 step "passed"

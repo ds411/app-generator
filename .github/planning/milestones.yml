@@ -645,3 +645,21 @@
     **Demo:** Two browser windows on the task board of the project tracker: move a card in one window, and see it move in the other.
 
     **Depends on:** None.
+
+- title: "M40: Fast pre-push checks"
+  description: |
+    **Goal:** A push waits only for the checks that its change can break, and the checks give the same result on each run.
+
+    **Scope**
+    - In: the selection of the sections of the app checks by their generated apps and their test files, a cache of the passed sections, the Python tests in parallel, and a limit of the app checks that run at the same time.
+    - Out: CI on GitHub Actions (M14). Checks on more than one machine.
+
+    **Exit criteria**
+    - [ ] A push that changes one fixture runs only the sections of that fixture.
+    - [ ] A push without a change of the generated apps or of the test files runs no app check.
+    - [ ] The Python checks take less than 6 minutes on 4 CPUs.
+    - [ ] A full run of the hook (`APPGEN_CHECK_ALL=1`) passes without a second run.
+
+    **Demo:** Change the title of `tests/fixtures/totals.yaml`, and run the hook: it runs only the totals sections.
+
+    **Depends on:** M11.
