@@ -496,6 +496,19 @@ the layout. `scripts/connection_ui_test.py` connects, syncs, and
 disconnects an account on this page with React, Next.js, and React with
 the FastAPI app.
 
+An API with HTTP Basic and `per_user: true` (#487) uses the same table,
+the same extension files, and the same page. The client gets the
+credentials of the user from the token source `UserCredentials`, and
+sends them with `Basic`. The user gives the user name and the password
+in a form on the page, and the server checks them with the operation
+of `check` before it keeps them. After an answer with the status 401,
+the connection is rejected: the request raises `NotConnectedError`
+(409), and the page asks for new credentials. The fixture
+`tests/fixtures/jira-accounts.yaml` has hand-written logic in
+`tests/fixtures/jira-accounts/extensions/` that files an issue in Jira
+in the name of the user, and `scripts/connection_ui_test.py` connects
+an account with a wrong password first, then with the right one.
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration
@@ -632,12 +645,24 @@ scope entity ([ADR 0048](adr/0048-memberships.md)).
   changes, and `check_scope` of a create or a change use the scopes.
   `get()` gives 403 for a record in another scope of the user, and 404
   for a record out of all scopes.
+- `app/features/<slice>/permissions.py` of each entity of the scope has
+  the endpoint `GET /permissions/<entity>?ids=` (the operation ID
+  `read_<entity>_member_permissions`) for the front end. It needs a
+  sign-in, and gives `MemberPermissions`: the operations of the
+  entity that a membership of the user gives in some scope
+  (`operations`), and for each ID the operations on one record that a
+  membership gives in the scope of the record (`records`). The
+  operations that the role gives are not part of the answer. The
+  generator stops with an error if an entity has the path
+  `/permissions`, or if an operation has the operation ID of one of
+  these endpoints.
 - The generated tests in `tests/test_memberships.py` store a user with
   a role of `roles` that does not give the operation, a membership with
   a role that gives it, a membership with a role that does not, and a
-  scope record without a membership. They check 200, 403, and 404 for
-  each entity of the scope with a suitable operation, the list, the
-  create, and an operation that no role gives.
+  scope record without a membership. They check the permissions of the
+  memberships, 200, 403, and 404 for each entity of the scope with a
+  suitable operation, the list, the create, and an operation that no
+  role gives.
 
 ### The lines of the FastAPI app
 
@@ -881,6 +906,33 @@ listeners of the sessions, the broker, and the endpoint `GET /live`.
   Redis. `scripts/check_live_events.py` starts two processes with
   Redis, and checks that both streams get the changes of each process
   in less than 2 s.
+
+### The users on the record pages in the FastAPI app
+
+The slice of an entity with a page with `presence` has `presence.py`
+([ADR 0052](adr/0052-presence.md)): `PUT <path>/{id}/presence` notes
+the signed-in user on the record and returns the other users, and
+`DELETE <path>/{id}/presence` ends the presence of the user. The
+endpoints need the permission of the read operation of the entity
+(`NEEDS` of `app/core/access.py`), and the PUT reads the record with its
+record rules, so a record that the user may not read gives 404.
+
+- The broker of `app/core/live.py` keeps the users on each record in
+  `present`, by entity and ID. `here()` and `leave()` send a `Here`
+  message: without Redis to the broker itself, with Redis through the
+  channel of the changes, so that each replica knows the users of all
+  replicas. `arrive()` notes the message, and a change of the users (a
+  new user, a change of the typing, a user that left) gives the event
+  `presence` to the subscriptions of the other users on the record.
+- A task of the broker calls `forget()` each second: it removes the
+  users without a call in `PRESENCE_SECONDS` (15), and tells the other
+  users on their records.
+- The generated tests in `tests/test_live.py` note two users on a
+  record, and check the answers and the events of the stream, 401 and
+  404, the users that the broker forgets, and the messages of Redis.
+  `scripts/check_live_events.py` runs two brokers of the app of
+  `tests/fixtures/record-rules.yaml` with one Redis: a user on a task of
+  one broker gets a new user on the other broker in less than 2 s.
 
 ### The worker of the FastAPI app
 
@@ -1366,6 +1418,57 @@ does ([ADR 0049](adr/0049-share-links.md)).
   of the course hub as a teacher, opens it without a sign-in, revokes
   it, and sees that the link does not open.
 
+### The memberships of the Next.js app and of the React app
+
+The front ends apply the `memberships` of `access` as the FastAPI app
+does ([ADR 0048](adr/0048-memberships.md)).
+
+- `@/shared/lib/permissions` has the operations of each role of the
+  memberships (`MEMBER_ROLES`), the entity of each of these operations
+  (`MEMBER_OPERATIONS`), the entities of the scope (`SCOPE_ENTITIES`),
+  and `scopesOf(memberships, operation)`. The `RecordScope` of a
+  request has `scopes` and `memberOf` when a membership gives the
+  operation.
+- The Next.js app reads the memberships of the user in
+  `membershipsOf()` of `src/shared/auth/access.ts`. `requireOperation()`
+  passes if a membership gives the operation in some scope, and
+  `recordScope(entity, action, operation)` gives the scopes of the
+  operation. The repository of an entity of the scope has `inScopes`:
+  the condition of the path to the scope, with a subquery for each
+  step. A read, a change, or a delete of a record in another scope of
+  the user gives the error 403 "Your role in the scope of the record may
+  not do this operation.", and of a record out of all scopes "not
+  found".
+- The mock store of the React app has `operations` and `scope` in its
+  `RecordRules`: the operation of each call, and the path to the scope.
+  `recordScope()` of `@/shared/auth` reads the memberships from the
+  mock records of the membership entity (`recordsOf()`), and the store
+  throws a `ScopeError` for a record in another scope of the user.
+  With the FastAPI app, the browser does not know the memberships:
+  `requireOperation()` lets the operations of `MEMBER_OPERATIONS` pass,
+  and the API checks them.
+- The data access of each entity of the scope has
+  `<entity>Permissions(ids)`: the server action
+  `get<Entity>PermissionsAction` in Next.js, `permissions()` of the mock
+  store, and `GET /permissions/<entity>?ids=` with the FastAPI app.
+  `src/app/providers/member-permissions.ts` gives these calls to
+  `@/shared/lib/member-access`, and forgets the answers after a change
+  of the records of an entity of the scope or of the membership entity.
+- `useAccess()` has `canCallOn(operation, ids)`: true if the role gives
+  the operation, or if a membership gives it on each record of the IDs.
+  `canCall(operation)` is true for a create or a list that a membership
+  gives in some scope. `memberGives()` asks the data access once for all
+  records of one render, and the hook renders the component again when
+  the answer comes. The actions of a record, of the rows, and of the
+  detail page, the button "Share", and the restore of the change log
+  use the records of the action.
+- The UI test `ui-tests/tests/sessions.spec.ts` signs in as a user with
+  two roles in two courses of the course hub. The button "Edit" shows
+  and saves on a lesson of the course whose role gives the change, and
+  does not show on a lesson of the other course. The button "New
+  lesson" shows for this user, and not for a user whose roles do not
+  give the create.
+
 ### The live updates of the Next.js app and of the React app
 
 The front ends load their open views again after the changes of the
@@ -1414,6 +1517,43 @@ records of the entities with `live` ([ADR 0051](adr/0051-live-updates.md)).
   checks that the task board of the first browser shows each change in
   less than 2 s: in the Next.js app, and in the React app with the
   FastAPI app (`scripts/api_client_test.py`).
+
+### The users on the record pages in the Next.js app and in the React app
+
+A page with `presence` shows the other users on its record in its
+header ([ADR 0052](adr/0052-presence.md)).
+
+- The shared component `src/features/record-presence/ui/record-presence.tsx`
+  calls `PresenceApi.here()` when the page opens, each 5 seconds, and
+  when the user starts or stops to type in a form of the page (an
+  `input` event in a `form`, and 3 seconds without one). At the end of
+  the page, and at `pagehide`, it calls `leave()`. It shows an avatar
+  with the initials of each user, the name for screen readers and as a
+  tooltip, and the note `<name> is typing.` in a `status` region.
+- `watchPresence()` of `src/shared/lib/live.ts` gives the events
+  `presence` of the stream to the component of the record, and
+  `liveEvents()` sends the other events to `batched()`. After `reset`,
+  the component asks the server again. An answer of `here()` that left
+  before the last event does not replace the users of the event.
+- In the Next.js app, `here<Entity>PresenceAction()` and
+  `leave<Entity>PresenceAction()` of the entity check the read
+  operation and its record rules, as the endpoints of the FastAPI app.
+  The broker of `src/shared/db/live.ts` keeps the users as the broker
+  of the FastAPI app does, with `PRESENCE_MS` and a timer.
+  `notePresence()` reads the name of the user.
+- The React app with the FastAPI app calls the endpoints through
+  `HttpStore.presence()`. The React app with mock data has no
+  component.
+- `scripts/live_test.py` calls the server actions of the task page of
+  `tests/fixtures/record-rules.yaml` as two users with PGlite: the
+  answers, the events, the errors of the users that may not read the
+  task, the users that the broker forgets, and two brokers with one
+  Redis.
+- `scripts/sessions_ui_test.py` opens the page of a lesson of
+  `tests/fixtures/courses.yaml` in two browsers (`sessions.spec.ts`):
+  each browser shows the other user, the member sees the note while the
+  admin types in the form "Edit", and the avatar goes away when the
+  admin goes to another page or closes the browser.
 
 ## Shared templates
 

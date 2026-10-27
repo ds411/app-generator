@@ -19,7 +19,15 @@ of the forms. This test proves it for tests/fixtures/courses.yaml:
    Then a member sees no button "Share" on the page of a lesson, and an
    admin makes a secret link of the lesson (ADR 0049). A guest opens the
    link without a sign-in, the admin revokes it, and the link opens
-   nothing.
+   nothing. In Next.js and react-api, a member and an admin open the page
+   of a lesson in two browsers, and each sees the other (ADR 0052). The
+   member sees a note while the admin types in the form "Edit", and sees
+   no other user after the admin leaves the page or closes the browser.
+   Last, a user with two roles in two courses (ADR 0048) sees and uses
+   the button "Edit" on a lesson of the course whose role gives the
+   change, and not on a lesson of the other course. The button "New
+   lesson" shows for this user, and not for a user whose roles do not
+   give the create.
 
 Run it from the repository root:
 
@@ -57,9 +65,11 @@ from smoke_test import expected_ui
 
 from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
+from appgen.dsl.access import membership_roles, scope_entities
 from appgen.dsl.auth import ME, has_me
 from appgen.dsl.expressions import Total, parse_expression
 from appgen.dsl.model import Page
@@ -212,12 +222,60 @@ def me_totals(
     return found
 
 
+def role_may(definition: AppDefinition, user: Record, operation: str) -> bool:
+    """Return True if the role of `access.roles` of a user gives an operation."""
+    access, auth = definition.access, definition.auth
+    assert access is not None and auth is not None
+    default = definition.entities[auth.user_entity].fields[access.role_field].default
+    role = str(user.get(access.role_field) or default)
+    return Permissions(definition, role).operation(operation)
+
+
+def member_scopes(
+    definition: AppDefinition, data: dict[str, list[Record]], user: Record, operation: str | None
+) -> set[str]:
+    """Return the IDs of the scope records whose memberships of a user give an operation.
+
+    Without an operation, the IDs of all scope records of the memberships of the user.
+    """
+    access = definition.access
+    memberships = access.memberships if access is not None else None
+    if memberships is None:
+        return set()
+    roles = membership_roles(definition)
+    field = definition.entities[memberships.entity].fields[memberships.role_field]
+    return {
+        str(record[memberships.scope])
+        for record in data[memberships.entity]
+        if record[memberships.user] == user["id"]
+        and (
+            operation is None
+            or operation in roles[str(record.get(memberships.role_field) or field.default)]
+        )
+    }
+
+
+def scope_of(
+    definition: AppDefinition, data: dict[str, list[Record]], entity: str, record: Record
+) -> str | None:
+    """Return the ID of the scope record of a record (ADR 0048), or None out of the scope."""
+    path = scope_entities(definition).get(entity)
+    if path is None:
+        return None
+    current, target = record, entity
+    for step in path.split(".") if path else []:
+        target = definition.entities[target].relations[step].target
+        current = next(r for r in data[target] if r["id"] == current[step])
+    return str(current["id"])
+
+
 def expected_share(binding: str, definition: AppDefinition) -> dict[str, Any] | None:
     """Return the values of the test of the secret links (ADR 0049), or None without `share`.
 
-    The admin may call the update operation of the entity, the member may
-    not. The guest sees the title of the record and the display value of
-    a related record.
+    The admin may call the update operation of the entity. The member may
+    not, also not through a membership in the scope of the record
+    (ADR 0048). The guest sees the title of the record and the display
+    value of a related record.
     """
     plans = share_plans(definition)
     auth, access = definition.auth, definition.access
@@ -226,16 +284,16 @@ def expected_share(binding: str, definition: AppDefinition) -> dict[str, Any] | 
     plan = next(iter(plans.values()))
     data = mock_data(definition)
     users = data[auth.user_entity]
-    default = definition.entities[auth.user_entity].fields[access.role_field].default
+    record = data[plan.entity][0]
+    scope = scope_of(definition, data, plan.entity, record)
 
     def may(user: Record) -> bool:
-        return Permissions(definition, str(user.get(access.role_field) or default)).operation(
-            plan.update
+        return role_may(definition, user, plan.update) or (
+            scope in member_scopes(definition, data, user, plan.update)
         )
 
-    admin = next(u for u in users if may(u))
+    admin = next(u for u in users if role_may(definition, u, plan.update))
     member = next(u for u in users if not may(u))
-    record = data[plan.entity][0]
     entity = definition.entities[plan.entity]
     # The record of the first many-to-one relation: the shared view shows its display value.
     relation, target = next(
@@ -252,6 +310,137 @@ def expected_share(binding: str, definition: AppDefinition) -> dict[str, Any] | 
         # Next.js shows its page "not found" for a wrong token, React a message.
         "invalid": "This page does not exist" if binding == "nextjs" else "The link is not valid.",
     }
+
+
+def expected_presence(binding: str, definition: AppDefinition) -> dict[str, Any] | None:
+    """Return the values of the test of the users on a record page (ADR 0052), or None.
+
+    The React app with mock data shows no users. The admin may call the
+    update operation of the entity, so the admin types in the form of the
+    button "Edit". The member reads the record. The page of the list of the
+    entity is a link away from the record page.
+    """
+    plans = presence_plans(definition)
+    auth, access, ui = definition.auth, definition.access, definition.ui
+    if binding == "react" or not plans or auth is None or access is None or ui is None:
+        return None
+    plan = next(iter(plans.values()))
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    default = definition.entities[auth.user_entity].fields[access.role_field].default
+    update = next(
+        name
+        for name, op in definition.operations.items()
+        if op.entity == plan.entity and op.kind == "update"
+    )
+
+    def may(user: Record, operation: str) -> bool:
+        role = str(user.get(access.role_field) or default)
+        return Permissions(definition, role).operation(operation)
+
+    admin = next(u for u in users if may(u, update))
+    member = next(u for u in users if may(u, plan.read) and not may(u, update))
+    record = data[plan.entity][0]
+    display = definition_display(definition.entities[auth.user_entity])
+    page = definition.pages[plan.page]
+    away = next(
+        p
+        for p in definition.pages.values()
+        if p.entity == plan.entity and "{" not in p.path and p.content and p.content.view
+    )
+
+    def user(value: Record) -> dict[str, str]:
+        name = str(value[display])
+        initials = "".join(word[0].upper() for word in name.split()[:2])
+        return {"username": value[auth.username_field], "name": name, "initials": initials}
+
+    return {
+        "admin": user(admin),
+        "member": user(member),
+        "path": page.path.replace("{id}", str(record["id"])),
+        "title": str(record[definition_display(definition.entities[plan.entity])]),
+        "away": {"label": str(away.title), "path": away.path},
+    }
+
+
+def member_record_test(
+    definition: AppDefinition, data: dict[str, list[Record]], page: Page, operation: str
+) -> dict[str, Any] | None:
+    """Return a user with two roles, a record in the scope whose role gives an operation, and a
+    record in the scope whose role does not give it. Return None if no user suits."""
+    auth = definition.auth
+    assert auth is not None and page.entity is not None
+    display = definition_display(definition.entities[page.entity])
+    records = data[page.entity]
+
+    def record_in(scopes: set[str]) -> Record | None:
+        return next(
+            (r for r in records if scope_of(definition, data, page.entity or "", r) in scopes),
+            None,
+        )
+
+    for user in data[auth.user_entity]:
+        if role_may(definition, user, operation):
+            continue
+        allowed = member_scopes(definition, data, user, operation)
+        first = record_in(allowed)
+        second = record_in(member_scopes(definition, data, user, None) - allowed)
+        if first is None or second is None:
+            continue
+        return {
+            "username": user[auth.username_field],
+            "pages": [
+                {"path": page.path.replace("{id}", str(r["id"])), "title": str(r[display])}
+                for r in (first, second)
+            ],
+        }
+    return None
+
+
+def expected_memberships(definition: AppDefinition) -> dict[str, Any] | None:
+    """Return the values of the test of the memberships (ADR 0048), or None without them.
+
+    A user has two roles in two scope records. A form action of a detail
+    page changes the record: it shows on a record in the scope whose role
+    gives the change, and not on a record in the other scope. A form
+    action of a create on a list page shows for the user, and not for a
+    user whose roles do not give the create. The roles of `access.roles`
+    of the users do not give these operations.
+    """
+    access, auth, ui = definition.access, definition.auth, definition.ui
+    if access is None or access.memberships is None or auth is None or ui is None:
+        return None
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    record_test: dict[str, Any] | None = None
+    create_test: dict[str, Any] | None = None
+    for page in definition.pages.values():
+        if page.entity is None or page.entity not in scope_entities(definition):
+            continue
+        for action_name, action in page.actions.items():
+            if not isinstance(action, FormAction):
+                continue
+            operation = ui.forms[action.form].operation
+            kind = definition.operations[operation].kind
+            button = str(action.label or label(action_name))
+            if kind == "update" and "{id}" in page.path and record_test is None:
+                found = member_record_test(definition, data, page, operation)
+                record_test = None if found is None else {**found, "label": button}
+            if kind == "create" and "{id}" not in page.path and create_test is None:
+                others = [u for u in users if not role_may(definition, u, operation)]
+                shown = [u for u in others if member_scopes(definition, data, u, operation)]
+                hidden = [u for u in others if not member_scopes(definition, data, u, operation)]
+                if shown and hidden:
+                    create_test = {
+                        "path": page.path,
+                        "title": str(page.title),
+                        "label": button,
+                        "shown": shown[0][auth.username_field],
+                        "hidden": hidden[0][auth.username_field],
+                    }
+    if record_test is None or create_test is None:
+        raise SessionsUiTestError("The test needs a user with two roles of the memberships.")
+    return {"record": record_test, "create": create_test}
 
 
 def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]:
@@ -299,6 +488,8 @@ def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]
         "password": PASSWORDS["nextjs" if binding == "react-api" else binding],
         "users": users,
         "share": expected_share(binding, definition),
+        "presence": expected_presence(binding, definition),
+        "memberships": expected_memberships(definition),
     }
 
 

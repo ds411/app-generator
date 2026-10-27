@@ -49,6 +49,28 @@ test proves it for the room booking example (`examples/room-booking`):
    the mock provider, and runs only the test of the sign-in with a
    provider: the browser goes through the flow of the FastAPI app, and
    comes back to the React app with a token.
+6. For Next.js and react-api, generate tests/fixtures/cognito-sign-in.yaml
+   too, and run only the test of the sign-in with a provider, through the
+   mock user pool of Amazon Cognito of scripts/mock_oidc.py: the
+   authorization request has `identity_provider`, the endpoints are on
+   another origin than the issuer, and the ID token does not mark the
+   email address as verified (`trust_email`, ADR 0020). One user signs
+   in with a group of each role of `roles` in turn, and then without a
+   group, and sees the menu of the role each time: the test changes the
+   redirect of the start of the sign-in, so that the authorization
+   request has `login_hint` and the mock parameter `groups`. Then the
+   user signs out: the browser goes through the logout endpoint of the
+   mock user pool, with the client ID and the sign-in page as
+   `logout_uri`, and comes back to the sign-in page (`sign_out`).
+7. For Next.js and react-api, generate the example with
+   `auth.delivery: ses` too, and run only the tests of the sign-up with
+   the verification of the email address and of the password reset,
+   without the screenshots. In Next.js, also run the test of the
+   notices: the run of the job `notice_emails` sends the email of the
+   notice (ADR 0044). The apps send the emails to the mock SES server of
+   scripts/mock_ses.py (`AWS_ENDPOINT_URL_SESV2`), and the test reads
+   them in its file. In react-api, the FastAPI app sends them, and the
+   links open the pages of the React app.
 
 Run it from the repository root:
 
@@ -57,8 +79,8 @@ Run it from the repository root:
 Without a binding, the script tests React, Next.js, and react-api. It
 needs uv, pnpm, and the Chromium of Playwright (see scripts/smoke_test.py).
 It uses the ports 5440 (React), 3440 (Next.js), 5441 and 8440 (react-api),
-9440 (the mock provider), and 2440 (the mock SMTP server). It does not need
-Docker.
+9440 (the mock provider), 2440 (the mock SMTP server), and 4440 (the mock
+SES server). It does not need Docker.
 
 Environment variables:
     APPGEN_UPDATE_SCREENSHOTS     1: write the approved screenshots again
@@ -85,6 +107,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import mock_oidc
+import mock_ses
 import mock_smtp
 from smoke_test import expected_ui
 
@@ -114,16 +137,24 @@ OIDC_PORT = 9440
 """The port of the mock OpenID Connect provider. scripts/check-fastapi.sh uses the default port."""
 SMTP_PORT = 2440
 """The port of the mock SMTP server, for the emails of the Next.js app."""
+SES_PORT = 4440
+"""The port of the mock SES server, for the emails of the apps with `auth.delivery: ses`."""
 MAILBOX = "messages.jsonl"
-"""The file in the app folder that gets each email of the mock SMTP server as a JSON line."""
+"""The file in the app folder that gets each email of the mock SMTP or SES server as a JSON
+line."""
 JOBS_SECRET = "auth-ui-test-jobs-secret"
 """The secret of the routes of the jobs of the Next.js app (ADR 0029)."""
+MAIL_TESTS = "a new user signs up|the password reset pages|the receiver of a change finds"
+"""The names of the UI tests of the emails, for `auth.delivery: ses`: the messages of the sign-in,
+and the notice with its email."""
 PROVIDER_TEST = "signs in with the provider"
 """The part of the name of the UI test of the sign-in with a provider, for `react-api`."""
 RULES_DEFINITION = Path("tests/fixtures/record-rules.yaml")
 """The definition with record rules of conditions and owner paths (ADR 0025)."""
 RULES_TEST = "the record rule of the role"
 """The part of the names of the UI tests of the record rules, for RULES_DEFINITION."""
+COGNITO_DEFINITION = Path("tests/fixtures/cognito-sign-in.yaml")
+"""The definition with a user pool of Amazon Cognito as its provider (ADR 0020)."""
 
 
 class AuthUiTestError(Exception):
@@ -212,9 +243,10 @@ def page_actions(definition: AppDefinition, allowed: Permissions) -> list[dict[s
 def expected_sign_up(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any] | None:
     """Return the values of the sign-up: the required fields, and the menu of a new user.
 
-    Only the Next.js app has the page of the verification link: the React
-    app with mock data signs in a new user at once. The Next.js app sends
-    each link in an email to the mock SMTP server.
+    Only the Next.js app and the React app with the FastAPI app have the
+    page of the verification link: the React app with mock data signs in a
+    new user at once. The server sends each link in an email to the mock
+    SMTP or SES server.
     """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
@@ -233,7 +265,8 @@ def expected_sign_up(binding: str, definition: AppDefinition, app: Path) -> dict
     role = auth.sign_up.default_role or str(entity.fields[access.role_field].default)
     address = definition.address_field()
     verify: dict[str, str] | None = None
-    if auth.sign_up.verify_email is not None and binding == "nextjs" and address is not None:
+    server = binding in ("nextjs", "react-api")
+    if auth.sign_up.verify_email is not None and server and address is not None:
         verify = {"addressId": f"sign-up-{kebab(address)}", "mailbox": str(app / MAILBOX)}
     return {
         "fields": fields,
@@ -249,18 +282,46 @@ def expected_password_reset(
 ) -> dict[str, Any] | None:
     """Return the values of the password reset: a user apart from the users of the other tests.
 
-    Only the Next.js app has the reset pages: the React app with mock data
-    has no server that sends the links. The Next.js app sends each link in
-    an email to the mock SMTP server, and the test reads it in its file.
+    Only the Next.js app and the React app with the FastAPI app have the
+    reset pages: the React app with mock data has no server that sends the
+    links. The server sends each link in an email to the mock SMTP or SES
+    server, and the test reads it in its file.
     """
     auth = definition.auth
     assert auth is not None
-    if auth.password_reset is None or binding != "nextjs":
+    if auth.password_reset is None or binding not in ("nextjs", "react-api"):
         return None
     users = [
         u for u in mock_data(definition)[auth.user_entity] if u[auth.username_field] not in used
     ]
     return {"username": users[-1][auth.username_field], "mailbox": str(app / MAILBOX)}
+
+
+def expected_mail(binding: str, definition: AppDefinition, app: Path) -> dict[str, Any]:
+    """Return the values of the tests of the emails: the sign-up with the verification of the
+    email address, the password reset, and in Next.js the notice with its email (ADR 0044).
+
+    The sign-up test needs a user name that exists: the first mock user,
+    in the role list. The password reset changes the password of a user
+    apart from the users of the notice. The other tests do not run.
+    """
+    auth = definition.auth
+    assert auth is not None
+    first = str(mock_data(definition)[auth.user_entity][0][auth.username_field])
+    # In react-api, the worker of the FastAPI app sends the emails of the notices: it does not run.
+    notice = expected_notice(definition, {first}) if binding == "nextjs" else None
+    used = {first} | ({notice["actor"], notice["receiver"]} if notice is not None else set())
+    return {
+        "app": definition.app.name,
+        "password": PASSWORDS.get(binding, ""),
+        "roles": [{"role": "", "username": first, "menu": [], "deniedPaths": [], "actions": []}],
+        "signUp": expected_sign_up(binding, definition, app),
+        "passwordReset": expected_password_reset(binding, definition, app, used),
+        "providers": [],
+        "notice": notice,
+        "noticeEmails": expected_notice_emails(binding, definition, app, notice),
+        "screenshots": False,
+    }
 
 
 def expected_second_factor(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
@@ -368,14 +429,14 @@ def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any]
             continue
         record, user = records[0]
         values: dict[str, str] = {}
-        for name in notification.values():
-            if name in entity.fields:
-                values[name] = str(record.get(name) or "")
+        for key in notification.values():
+            if key in entity.fields:
+                values[key] = str(record.get(key) or "")
                 continue
-            target = entity.relations[name].target
+            target = entity.relations[key].target
             display = definition_display(definition.entities[target])
-            related = next((r for r in data[target] if r["id"] == record.get(name)), {})
-            values[name] = str(related.get(display) or "")
+            related = next((r for r in data[target] if r["id"] == record.get(key)), {})
+            values[key] = str(related.get(display) or "")
         return {
             "notification": name,
             "actor": actor[auth.username_field],
@@ -658,30 +719,61 @@ def expected_record_rules(binding: str, definition: AppDefinition) -> list[dict[
 
 
 def expected_providers(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
-    """Return the sign-in with each provider that makes users: the button, and the menu after it.
+    """Return the sign-ins with each provider that makes users: the button, and the menus.
 
     Through the mock provider, the user is a new user with the default
-    role of the provider. With mock data, the React app signs in the mock
-    user of the provider: the first one with the default role.
+    role of the provider. With `roles`, one user signs in with a group of
+    each role in turn, and then without a group: the user gets the role of
+    the group each time, and at last the default role. With mock data, the
+    React app signs in the mock user of the provider: the first one with
+    the first role of `roles`, or else with the default role. With
+    `sign_out`, the sign-out after the last sign-in goes through the
+    logout endpoint of the mock provider (`signOut`).
     """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
     users = mock_data(definition)[auth.user_entity]
     default = definition.entities[auth.user_entity].fields[access.role_field].default
+
+    def menu(role: str | None) -> list[str]:
+        return menu_labels(definition, Permissions(definition, role))
+
     checks: list[dict[str, Any]] = []
     for name, provider in auth.providers.items():
         if not provider.create_users:
             continue
         role = provider.default_role or default
+        roles = provider.roles
         if binding == "react":
-            user = next((u for u in users if u.get(access.role_field) == role), users[0])
+            wanted = next(iter(roles.map.values())) if roles else role
+            user = next((u for u in users if u.get(access.role_field) == wanted), users[0])
             value = user.get(access.role_field)
             role = value if isinstance(value, str) else None
+        sign_ins: list[dict[str, Any]] = [{"menu": menu(role)}]
+        if roles is not None and binding != "react":
+            email = f"{name}.grouped@example.com"
+            groups = {group_role: group for group, group_role in reversed(roles.map.items())}
+            sign_ins = [
+                {"loginHint": email, "groups": [groups[r]], "menu": menu(r)}
+                for r in dict.fromkeys(roles.map.values())
+            ]
+            if provider.default_role is not None:
+                sign_ins.append(
+                    {"loginHint": email, "groups": [], "menu": menu(provider.default_role)}
+                )
+        sign_out: dict[str, str] | None = None
+        if provider.sign_out is not None and binding != "react":
+            sign_out = {
+                "url": mock_oidc.sign_out_url_of(OIDC_PORT, provider.authorize_params),
+                "clientId": mock_oidc.DEFAULT_CLIENT_ID,
+                "returnParam": provider.sign_out.return_param,
+            }
         checks.append(
             {
                 "name": name,
                 "title": str(provider.title or name),
-                "menu": menu_labels(definition, Permissions(definition, role)),
+                "signIns": sign_ins,
+                "signOut": sign_out,
             }
         )
     return checks
@@ -765,8 +857,14 @@ def wait_for(binding: str, url: str) -> None:
 
 
 @contextmanager
-def started(binding: str, app: Path) -> Generator[None]:
-    """Start the built app, and stop it at the end."""
+def started(
+    binding: str, app: Path, definition: Path = DEFINITION, ses: bool = False
+) -> Generator[None]:
+    """Start the built app of a definition, and stop it at the end.
+
+    With `ses`, the Next.js app sends its emails to the mock SES server, not
+    to the mock SMTP server.
+    """
     port = str(PORTS[binding])
     env = {**os.environ, "PORT": port}
     if binding in ("react", "react-api"):
@@ -788,8 +886,10 @@ def started(binding: str, app: Path) -> Generator[None]:
             "SMTP_FROM": "no-reply@example.com",
             # The test calls the route of the job of the emails of the notices.
             "JOBS_SECRET": JOBS_SECRET,
-            **provider_env(load_definition(DEFINITION)),
+            **provider_env(load_definition(definition)),
         }
+        if ses:
+            env |= mock_ses.app_env(SES_PORT)
         command = ["pnpm", "--silent", "start"]
     log_file = app / "server.log"
     with log_file.open("w") as output:
@@ -820,19 +920,38 @@ def provider_env(definition: AppDefinition) -> dict[str, str]:
     assert definition.auth is not None
     env: dict[str, str] = {}
     for name, provider in definition.auth.providers.items():
-        env[f"{name.upper()}_ISSUER"] = f"http://127.0.0.1:{OIDC_PORT}"
+        env[f"{name.upper()}_ISSUER"] = mock_oidc.issuer_of(OIDC_PORT, provider.authorize_params)
+        if provider.sign_out is not None and provider.sign_out.endpoint is not None:
+            url = mock_oidc.sign_out_url_of(OIDC_PORT, provider.authorize_params)
+            env[f"{name.upper()}_SIGN_OUT_URL"] = url
         env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
         env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
     return env
 
 
-def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = False) -> None:
+def check_ui(
+    binding: str,
+    definition: AppDefinition,
+    app: Path,
+    rules: bool = False,
+    providers_only: bool = False,
+    mail_only: bool = False,
+) -> None:
     """Run the UI test of the sign-in and the permissions on the app that runs.
 
     With `rules`, run only the tests of the record rules: the app is of
-    RULES_DEFINITION.
+    RULES_DEFINITION. With `providers_only`, run only the test of the
+    sign-in with a provider: the app is of COGNITO_DEFINITION. With
+    `mail_only`, run only the tests of the messages of the sign-in,
+    without the screenshots: the app has `auth.delivery: ses`.
     """
-    name = f"{binding}-record-rules" if rules else f"{binding}-auth"
+    if rules:
+        name = f"{binding}-record-rules"
+    elif mail_only:
+        name = f"{binding}-ses"
+    else:
+        name = f"{binding}-cognito" if providers_only else f"{binding}-auth"
+    providers_only = not mail_only and (providers_only or binding == "react-api")
     expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
     expected_file.parent.mkdir(exist_ok=True)
     if rules:
@@ -844,7 +963,12 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
             "providers": [],
         }
         expected = {**expected_ui(binding, definition), "auth": auth}
-    elif binding == "react-api":
+    elif mail_only:
+        expected = {
+            **expected_ui("react" if binding == "react-api" else binding, definition),
+            "auth": expected_mail(binding, definition, app),
+        }
+    elif providers_only:
         # Only the test of the sign-in with a provider: the FastAPI app has no seed users.
         auth = {
             "app": definition.app.name,
@@ -852,7 +976,8 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
             "roles": [],
             "providers": expected_providers(binding, definition),
         }
-        expected = {**expected_ui("react", definition), "auth": auth}
+        ui_binding = "react" if binding == "react-api" else binding
+        expected = {**expected_ui(ui_binding, definition), "auth": auth}
     else:
         expected = {
             **expected_ui(binding, definition),
@@ -871,7 +996,9 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
     command = ["pnpm", "exec", "playwright", "test", "tests/auth.spec.ts"]
     if rules:
         command += ["--grep", RULES_TEST]
-    elif binding == "react-api":
+    elif mail_only:
+        command += ["--grep", MAIL_TESTS, "--project", "light"]
+    elif providers_only:
         command += ["--grep", PROVIDER_TEST]
     if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
         command.append("--update-snapshots")
@@ -896,8 +1023,11 @@ def generate(definition: Path, binding: str, app: Path) -> None:
 
 
 @contextmanager
-def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[None]:
-    """Start the FastAPI app with SQLite and the mock provider, and stop it at the end.
+def started_api(
+    app: Path, settings: dict[str, str] | None = None, definition: Path = DEFINITION
+) -> Generator[None]:
+    """Start the FastAPI app of a definition with SQLite and the mock provider, and stop it at
+    the end.
 
     `settings` are more environment variables of the app, for example the seed.
     """
@@ -909,7 +1039,7 @@ def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[
         "CORS_ORIGINS": json.dumps([web]),
         "PUBLIC_URL": f"http://127.0.0.1:{port}",
         "LOG_JSON": "false",
-        **provider_env(load_definition(DEFINITION)),
+        **provider_env(load_definition(definition)),
         **(settings or {}),
     }
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
@@ -934,16 +1064,20 @@ def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[
         process.wait(timeout=30)
 
 
-def react_api_test(out: Path) -> None:
-    """Sign in to the React app with the FastAPI app through the mock provider (ADR 0020)."""
-    binding, definition = "react-api", load_definition(DEFINITION)
-    source = out / "app.yaml"
+def react_api_test(out: Path, path: Path = DEFINITION) -> None:
+    """Sign in to the React app with the FastAPI app through the mock provider (ADR 0020).
+
+    With COGNITO_DEFINITION, the provider is the mock user pool.
+    """
+    binding, definition = "react-api", load_definition(path)
+    suffix = "-cognito" if path == COGNITO_DEFINITION else ""
+    source = out / f"app{suffix}.yaml"
     marker = "\napp:\n"
-    text = DEFINITION.read_text()
+    text = path.read_text()
     if marker not in text:
-        raise AuthUiTestError(f"{DEFINITION} has no 'app:' line.")
+        raise AuthUiTestError(f"{path} has no 'app:' line.")
     source.write_text(text.replace(marker, f"{marker}  {DATA_KEY}: api\n", 1))
-    api, web = out / "react-api-fastapi", out / binding
+    api, web = out / f"react-api{suffix}-fastapi", out / f"{binding}{suffix}"
     generate(source, "fastapi", api)
     generate(source, "react", web)
     log(binding, "uv sync, pnpm install, and pnpm build")
@@ -952,16 +1086,92 @@ def react_api_test(out: Path) -> None:
     subprocess.run(["uv", "sync", "--quiet"], cwd=api, env=env, check=True)
     run("pnpm", "install", "--silent", cwd=web)
     run("pnpm", "--silent", "build", cwd=web, env={"VITE_API_URL": f"http://127.0.0.1:{API_PORT}"})
-    with mock_oidc.serving(port=OIDC_PORT), started_api(api), started(binding, web):
+    with (
+        mock_oidc.serving(port=OIDC_PORT),
+        started_api(api, definition=path),
+        started(binding, web, path),
+    ):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
-        log(binding, "UI test of the sign-in with a provider (Playwright)")
-        check_ui(binding, definition, web)
-    log(binding, "passed")
+        log(binding, f"UI test of the sign-in with a provider of {path} (Playwright)")
+        check_ui(binding, definition, web, providers_only=bool(suffix))
+    log(binding, f"{path}: passed")
+
+
+def cognito_test(binding: str, out: Path) -> None:
+    """Sign in to the app of COGNITO_DEFINITION through the mock user pool (ADR 0020)."""
+    if binding == "react-api":
+        react_api_test(out, COGNITO_DEFINITION)
+        return
+    definition = load_definition(COGNITO_DEFINITION)
+    app = out / f"{binding}-cognito"
+    generate(COGNITO_DEFINITION, binding, app)
+    log(binding, "cognito: pnpm install and pnpm build")
+    run("pnpm", "install", "--silent", cwd=app)
+    run("pnpm", "--silent", "build", cwd=app)
+    with mock_oidc.serving(port=OIDC_PORT), started(binding, app, COGNITO_DEFINITION):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the sign-in through the mock user pool (Playwright)")
+        check_ui(binding, definition, app, providers_only=True)
+
+
+def ses_test(binding: str, out: Path) -> None:
+    """Send the messages of the sign-in of the example with `auth.delivery: ses` to the mock SES
+    server, and open their links (ADR 0017, ADR 0023)."""
+    marker = "  delivery: smtp\n"
+    text = DEFINITION.read_text()
+    if marker not in text:
+        raise AuthUiTestError(f"{DEFINITION} has no line {marker.strip()!r}.")
+    text = text.replace(marker, "  delivery: ses\n")
+    if binding == "react-api":
+        text = text.replace("\napp:\n", f"\napp:\n  {DATA_KEY}: api\n", 1)
+    source = out / f"app-ses-{binding}.yaml"
+    source.write_text(text)
+    definition = load_definition(source)
+    app = out / f"{binding}-ses"
+    mailbox = app / MAILBOX
+    if binding != "react-api":
+        generate(source, binding, app)
+        log(binding, "ses: pnpm install and pnpm build")
+        run("pnpm", "install", "--silent", cwd=app)
+        run("pnpm", "--silent", "build", cwd=app)
+        with (
+            mock_ses.serving(port=SES_PORT, out=mailbox),
+            started(binding, app, source, ses=True),
+        ):
+            wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+            log(binding, "UI test of the messages of the sign-in with SES (Playwright)")
+            check_ui(binding, definition, app, mail_only=True)
+        return
+    api = out / f"{binding}-ses-fastapi"
+    generate(source, "fastapi", api)
+    generate(source, "react", app)
+    log(binding, "ses: uv sync, pnpm install, and pnpm build")
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    subprocess.run(["uv", "sync", "--quiet"], cwd=api, env=env, check=True)
+    run("pnpm", "install", "--silent", cwd=app)
+    run("pnpm", "--silent", "build", cwd=app, env={"VITE_API_URL": f"http://127.0.0.1:{API_PORT}"})
+    web = f"http://localhost:{PORTS[binding]}"
+    settings = {
+        "DATABASE_SEED": "true",
+        "PASSWORD_RESET_URL": f"{web}/reset-password",
+        "EMAIL_VERIFY_URL": f"{web}/verify-email",
+        **mock_ses.app_env(SES_PORT),
+    }
+    with (
+        mock_ses.serving(port=SES_PORT, out=mailbox),
+        started_api(api, settings, source),
+        started(binding, app, source),
+    ):
+        wait_for(binding, f"{web}/sign-in")
+        log(binding, "UI test of the messages of the sign-in with SES (Playwright)")
+        check_ui(binding, definition, app, mail_only=True)
 
 
 def auth_ui_test(binding: str, out: Path) -> None:
     if binding == "react-api":
         react_api_test(out)
+        cognito_test(binding, out)
+        ses_test(binding, out)
         return
     definition = load_definition(DEFINITION)
     app = out / binding
@@ -979,6 +1189,9 @@ def auth_ui_test(binding: str, out: Path) -> None:
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
         check_ui(binding, definition, app)
     record_rules_test(binding, out)
+    if binding == "nextjs":
+        cognito_test(binding, out)
+        ses_test(binding, out)
     log(binding, "passed")
 
 

@@ -9,7 +9,7 @@ dependencies = [
     "aiosqlite>=0.22",
     "alembic>=1.20",
     "asyncpg>=0.32",
-{% if py.storage and py.storage.s3 %}
+{% if (py.storage and py.storage.s3) or py.ses %}
     "boto3>=1.43",
 {% endif %}
 {% if py_connections %}
@@ -39,8 +39,12 @@ dev = [
     "pytest>=9.1",
     "ruff>=0.17",
     "testcontainers[postgres]>=4.14",
-{% if py.storage and py.storage.s3 %}
+{% if py.storage and py.storage.s3 and py.ses %}
+    "types-boto3-lite[s3,sesv2]>=1.43",
+{% elif py.storage and py.storage.s3 %}
     "types-boto3-lite[s3]>=1.43",
+{% elif py.ses %}
+    "types-boto3-lite[sesv2]>=1.43",
 {% endif %}
 ]
 
@@ -55,11 +59,17 @@ target-version = "py314"
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 # The formatter keeps the code lines short. Trace comments can be longer.
 ignore = ["E501"]
-{% if i18n %}
+{% if i18n or py_apis %}
 
 [tool.ruff.lint.per-file-ignores]
+{% if i18n %}
 # The translations can have any character, also one that looks like another.
 "app/core/i18n.py" = ["RUF001"]
+{% endif %}
+{% if py_apis %}
+# The texts of the OpenAPI documents can have any character, also one that looks like another.
+"app/integrations/*/*.py" = ["RUF001", "RUF002", "RUF003"]
+{% endif %}
 {% endif %}
 
 [tool.pyright]

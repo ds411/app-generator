@@ -43,6 +43,7 @@ from appgen.bindings.fastapi.notifications import (
     python_notice_emails,
     python_notifications,
 )
+from appgen.bindings.fastapi.presence import PyPresence, python_presences
 from appgen.bindings.fastapi.pysource import (
     LINE_LENGTH,
     call,
@@ -1157,6 +1158,18 @@ def _braces(prefix: str, items: list[str], indent: int) -> str:
     return f"{prefix}{{\n{inner}{pad}}}"
 
 
+def _pairs(prefix: str, pairs: list[tuple[str, str]], indent: int) -> str:
+    """Return `<prefix>((<a>, <b>), ...)`, a tuple of pairs of texts, on one line if it fits,
+    else with one pair on each line. A tuple of one pair ends with a comma."""
+    items = [f"({string(a)}, {string(b)})" for a, b in pairs]
+    one_line = f"{prefix}({items[0]},)" if len(items) == 1 else f"{prefix}({', '.join(items)})"
+    if indent + len(one_line) + 1 <= LINE_LENGTH:
+        return one_line
+    pad = " " * indent
+    inner = "".join(f"{pad}    {item},\n" for item in items)
+    return f"{prefix}(\n{inner}{pad})"
+
+
 def _link(rel: PyRelation, value: str) -> str:
     """Return the keyword argument of a factory that links a record to the record of an ID."""
     if rel.side == "fk":
@@ -1397,6 +1410,8 @@ class PyEntity:
     """The live updates of the records (ADR 0051), or None."""
     mentions: list[PyMention] = field(default_factory=list[PyMention])
     """The `text` fields with mentions (ADR 0043)."""
+    presence: PyPresence | None = None
+    """The endpoints of the users on the pages of the records (ADR 0052), or None."""
 
     @property
     def guard_module(self) -> str:
@@ -2313,6 +2328,10 @@ class PyEntity:
             modules.add("history")
         if self.share is not None:
             modules.add("share")
+        if self.scope_path is not None:
+            modules.add("permissions")
+        if self.presence is not None:
+            modules.add("presence")
         if modules:
             lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)
@@ -2494,9 +2513,32 @@ class PyProvider:
     username_claim: str
     create_users: bool
     default_role: str | None
-    """With `create_users` and `access`: the role of a new user."""
+    """With `create_users` and `access`: the role of a new user. With `roles`: the role of a user
+    whose groups have no role."""
     claims: list[tuple[PyField, str]]
     """With `create_users`: the fields of a new user, and the claims that give their values."""
+    authorize_params: list[tuple[str, str]]
+    """The fixed parameters of the authorization request, in source order."""
+    trust_email: bool
+    """Accept an email address that the ID token does not mark as verified."""
+    roles_claim: str | None = None
+    """With `roles`: the claim with the groups of the user."""
+    role_map: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    """With `roles`: each group and its role, in the order of the check."""
+    roles_id: str | None = None
+    """With `roles`: the ID of the element `roles`, for its trace."""
+    sign_out_id: str | None = None
+    """With `sign_out`: the ID of the element `sign_out`, for its trace."""
+    sign_out_endpoint: str = ""
+    """With `sign_out`: the logout URL, or empty for the `end_session_endpoint` of the discovery
+    document."""
+    sign_out_return_param: str = "post_logout_redirect_uri"
+    """With `sign_out`: the parameter of the logout URL with the page after the sign-out."""
+
+    def pairs_arg(self, key: str, pairs: list[tuple[str, str]]) -> str:
+        """Return the keyword argument `<key>=` of the provider in `provider_of`: a tuple of
+        pairs of texts, in the format of the Ruff formatter at the indent 12."""
+        return _pairs(f"{key}=", pairs, 12) + ","
 
 
 @dataclass(frozen=True, slots=True)
@@ -2539,6 +2581,9 @@ class PyLiveTests:
     """A live entity, and a role that may not read it: its stream gives 403."""
     rules: list[PyRuleTest] = field(default_factory=list[PyRuleTest])
     """The tests of the record rules (ADR 0025) of the reads of the live entities."""
+    presence: list[PyLiveReader] = field(default_factory=list[PyLiveReader])
+    """Each entity with a page with `presence` (ADR 0052), with a role that reads all its
+    records (None without roles). An entity without such a role has no test."""
 
 
 @dataclass(slots=True)
@@ -2570,6 +2615,8 @@ class PyApp:
     """True if the app sends emails by SMTP (`auth.delivery: smtp`): the messages of the
     sign-in, not with the extension file `app/core/messages_ext.py`, and the emails of the
     notices (ADR 0044)."""
+    ses: bool = False
+    """True if the app sends the same emails with the API of Amazon SES (`auth.delivery: ses`)."""
     dashboards: dict[str, PyDashboard] = field(default_factory=dict[str, PyDashboard])
     """The dashboards with the endpoints of their widgets, by name."""
     access: bool = False
@@ -2629,6 +2676,16 @@ class PyApp:
     def notification_ids(self) -> list[str]:
         """The IDs of the notifications, in the order of `notifications`."""
         return [n.id for n in self.notifications]
+
+    @property
+    def presences(self) -> list[PyEntity]:
+        """The entities with a page with `presence` (ADR 0052), in the order of the tables."""
+        return [e for e in self.entity_order() if e.presence is not None]
+
+    @property
+    def presence_ids(self) -> list[str]:
+        """The IDs of the pages with `presence`, in the order of `presences`."""
+        return [i for e in self.presences if e.presence is not None for i in e.presence.ids]
 
     @property
     def shares(self) -> list[PyEntity]:
@@ -2823,6 +2880,11 @@ class PyApp:
             assert share is not None
             if share.update.protected:
                 found += [(op, share.update.name, share.id) for op in share.guarded]
+        for entity in self.presences:
+            presence = entity.presence
+            assert presence is not None
+            if presence.read.protected:
+                found += [(op, presence.read.name, presence.id) for op in presence.guarded]
         return found
 
     @property
@@ -2996,6 +3058,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _history(definition, entities)
     python_shares(definition, entities)
     _live(definition, entities)
+    python_presences(definition, entities, _user_label_attr(definition, entities))
     python_notifications(definition, entities)
     for entity in entities.values():
         for notification in entity.notifications:
@@ -3038,6 +3101,9 @@ def python_app(definition: AppDefinition) -> PyApp:
         smtp=(bool(_message_elements(definition)) or notice_emails is not None)
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
+        ses=(bool(_message_elements(definition)) or notice_emails is not None)
+        and definition.auth is not None
+        and definition.auth.delivery == "ses",
         dashboards=dashboards,
         access=definition.access is not None,
         auth=auth is not None,
@@ -3136,8 +3202,9 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
     found: list[PyProvider] = []
     for name, provider in auth.providers.items():
         default_role = provider.default_role
+        # With `roles`, a user whose groups have no role gets only `default_role`.
         if default_role is None and role is not None and provider.create_users:
-            value = users.fields[role].default
+            value = users.fields[role].default if provider.roles is None else None
             default_role = str(value) if value is not None else None
         found.append(
             PyProvider(
@@ -3152,6 +3219,18 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
                 create_users=provider.create_users,
                 default_role=default_role,
                 claims=[(fields[f], claim) for f, claim in provider.claims.items()],
+                authorize_params=list(provider.authorize_params.items()),
+                trust_email=provider.trust_email,
+                roles_claim=provider.roles.claim if provider.roles else None,
+                role_map=list(provider.roles.map.items()) if provider.roles else [],
+                roles_id=provider.roles.id if provider.roles else None,
+                sign_out_id=provider.sign_out.id if provider.sign_out else None,
+                sign_out_endpoint=(provider.sign_out.endpoint or "") if provider.sign_out else "",
+                sign_out_return_param=(
+                    provider.sign_out.return_param
+                    if provider.sign_out
+                    else "post_logout_redirect_uri"
+                ),
             )
         )
     return found
@@ -3615,6 +3694,21 @@ def _live_tests(
             if tests.denied is None and not live.public and not reads:
                 tests.denied = (entity, name)
     tests.readers.sort(key=lambda item: item[0].snake)
+    for entity in entities.values():
+        presence = entity.presence
+        if presence is None:
+            continue
+        if access is None:
+            tests.presence.append((entity, None))
+            continue
+        for name, role in access.roles.items():
+            rule = role.records.get(entity.name)
+            if role.allows_operation(presence.read.name) and (
+                rule is None or "read" not in rule.operations or not presence.scope
+            ):
+                tests.presence.append((entity, name))
+                break
+    tests.presence.sort(key=lambda item: item[0].snake)
     tests.rules = [
         t
         for t in rule_tests
@@ -4239,6 +4333,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py_api_mocks_imports": mocks_imports(apis),
         "py_api_features": py_features(apis),
         "py_connections": python_connections(apis),
+        "py_code_flows": [api for api in python_connections(apis) if not api.user_basic],
         "i18n": plan,
         "i18n_test": language_test(plan) if plan is not None else None,
     }

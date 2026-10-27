@@ -56,7 +56,7 @@ services:
 {% if definition.auth.password %}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
 {% endif %}
-{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition) %}
+{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_code_flows or has_notice_emails(definition) %}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
 {% endif %}
 {% if nextjs.smtp %}
@@ -68,11 +68,20 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TLS: ${SMTP_TLS:-starttls}
 {% endif %}
+{% if nextjs.ses %}
+      # Amazon SES sends the messages of the sign-in (see .env.example).
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM: ${SES_FROM:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+{% endif %}
 {% for name, p in definition.auth.providers.items() %}
       {{ trace(p.id) }}
       {{ name | upper }}_ISSUER: ${{ "{" }}{{ name | upper }}_ISSUER:-{{ p.issuer }}{{ "}" }}
       {{ p.client_id_env }}: ${{ "{" }}{{ p.client_id_env }}:-{{ "}" }}
       {{ p.client_secret_env }}: ${{ "{" }}{{ p.client_secret_env }}:-{{ "}" }}
+{% if p.sign_out %}
+      {{ name | upper }}_SIGN_OUT_URL: ${{ "{" }}{{ name | upper }}_SIGN_OUT_URL:-{{ p.sign_out.endpoint or "" }}{{ "}" }}
+{% endif %}
 {% endfor %}
 {% endif %}
 {% if definition.storage %}
@@ -88,9 +97,9 @@ services:
 {% if api.client_id_env %}
       {{ api.client_id_env }}: ${{ "{" }}{{ api.client_id_env }}:-{{ "}" }}
 {% endif %}
-{% if api.secret_env %}
-      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
-{% endif %}
+{% for env in api.secret_envs %}
+      {{ env }}: ${{ "{" }}{{ env }}:-{{ "}" }}
+{% endfor %}
 {% endfor %}
     ports:
       - "3000:3000"

@@ -38,7 +38,10 @@ function errorText(error: unknown, fallback: string): string {
  * stops the old link, and a revoke stops the link.
  */
 export function ShareButton({ sharing, id, path{{ ", operation" if definition.access }} }: ShareButtonProps) {
-{% if definition.access %}
+{% if memberships %}
+  // The role, or a membership in the scope of the record (ADR 0048).
+  const { canCallOn } = useAccess(); {{ trace(memberships.element_id) }}
+{% elif definition.access %}
   const { canCall } = useAccess(); {{ trace(definition.access.id) }}
 {% endif %}
   const [open, setOpen] = useState(false);
@@ -47,7 +50,7 @@ export function ShareButton({ sharing, id, path{{ ", operation" if definition.ac
   const [busy, setBusy] = useState(false);
 {% if definition.access %}
 
-  if (!canCall(operation)) return null;
+  if (!{{ "canCallOn(operation, [id])" if memberships else "canCall(operation)" }}) return null;
 {% endif %}
 
   const load = async () => {

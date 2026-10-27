@@ -21,6 +21,7 @@ from appgen.dsl.access import ALL, Memberships, RecordRule, membership_scope
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
     CONNECTIONS_PATH,
+    FLOW_PARAMS,
     FORGOT_PASSWORD_PATH,
     ME,
     NOTICE_SETTINGS_PATH,
@@ -1498,13 +1499,15 @@ def check_notifications(definition: AppDefinition) -> Iterator[Diagnostic]:
                     what="receiver",
                 )
         yield from _check_notification_text(notification, entity)
-        if notification.email and auth is not None and auth.delivery != "smtp":
+        if notification.email and auth is not None and auth.delivery not in ("smtp", "ses"):
             yield _error(
                 "invalid-option",
-                "The emails of a notification need the delivery 'smtp' of the section 'auth'.",
+                "The emails of a notification need the delivery 'smtp' or 'ses' of the section "
+                "'auth'.",
                 notification,
                 at="email",
-                hint="Set 'delivery: smtp' in the section 'auth', or remove 'email'.",
+                hint="Set 'delivery: smtp' or 'delivery: ses' in the section 'auth', or remove "
+                "'email'.",
             )
 
 
@@ -1742,10 +1745,10 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     for name in auth.public_operations:
         if name not in definition.operations:
             yield _missing(auth, "public_operations", "operation", name, definition.operations)
-    if auth.delivery == "smtp" and definition.address_field() is None:
+    if auth.delivery in ("smtp", "ses") and definition.address_field() is None:
         yield _error(
             "unsuitable-field",
-            "The delivery 'smtp' needs a field of the type 'email' in "
+            f"The delivery '{auth.delivery}' needs a field of the type 'email' in "
             f"'{auth.user_entity}' for the address of the messages.",
             auth,
             at="delivery",
@@ -1761,7 +1764,7 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
         reserved[VERIFY_EMAIL_PATH] = "email verification"
     if auth.second_factor is not None:
         reserved[SECOND_FACTOR_PATH] = "second factor"
-    connections = any(api.user_flow for api in definition.apis.values())
+    connections = any(api.per_user for api in definition.apis.values())
     if connections:
         reserved[CONNECTIONS_PATH] = "connections"
     if any(n.email for n in definition.notifications.values()):
@@ -1987,7 +1990,8 @@ def _check_password_off(auth: Auth) -> Iterator[Diagnostic]:
 def _check_provider(
     definition: AppDefinition, auth: Auth, provider: Provider, entity: Entity
 ) -> Iterator[Diagnostic]:
-    """A provider asks for `openid`, and with `create_users` gives each required field."""
+    """A provider asks for `openid`, its roles exist, and with `create_users` it gives each
+    required field."""
     if "openid" not in provider.scopes:
         yield _error(
             "invalid-value",
@@ -1995,8 +1999,28 @@ def _check_provider(
             provider,
             at="scopes",
         )
+    for name in provider.authorize_params:
+        if name in FLOW_PARAMS:
+            yield _error(
+                "reserved-name",
+                f"The flow sets the parameter '{name}' of the authorization request.",
+                provider,
+                at="authorize_params",
+                hint="Remove the parameter. Use 'scopes' for the scopes.",
+            )
+    if provider.sign_out is not None and provider.sign_out.return_param == "client_id":
+        yield _error(
+            "reserved-name",
+            "The sign-out sets the parameter 'client_id' of the logout URL.",
+            provider.sign_out,
+            at="return_param",
+            hint="Name the parameter of the URL after the sign-out, for example 'logout_uri'.",
+        )
+    yield from _check_provider_roles(definition, provider)
     if not provider.create_users:
-        for key in ("default_role", "claims"):
+        # With `roles`, the default role is the role of a user whose groups have no role.
+        keys = ("claims",) if provider.roles is not None else ("default_role", "claims")
+        for key in keys:
             if getattr(provider, key):
                 yield _error(
                     "invalid-option",
@@ -2051,7 +2075,26 @@ def _check_provider(
                 provider,
                 hint="Make the relation optional, or remove 'create_users'.",
             )
-    yield from _check_default_role(definition, provider, provider.default_role, entity, "provider")
+    if provider.roles is None:
+        yield from _check_default_role(
+            definition, provider, provider.default_role, entity, "provider"
+        )
+
+
+def _check_provider_roles(definition: AppDefinition, provider: Provider) -> Iterator[Diagnostic]:
+    """The roles of the groups of a provider need `access`, and each role exists, as the default
+    role of the provider does. Without a role, the app refuses the sign-in."""
+    if provider.roles is None:
+        return
+    access = definition.access
+    if access is None:
+        yield _error("invalid-option", "'roles' needs the section 'access'.", provider, at="roles")
+        return
+    for role in provider.roles.map.values():
+        if role not in access.roles:
+            yield _missing(provider, "roles", "role", role, access.roles)
+    if provider.default_role is not None and provider.default_role not in access.roles:
+        yield _missing(provider, "default_role", "role", provider.default_role, access.roles)
 
 
 def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -2398,7 +2441,7 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Use a name with the name of the API, for example 'HOLIDAYS_API_URL'.",
                 )
                 continue
-            secret = name in ("security", "security.client_secret_env")
+            secret = name in ("security", "security.username_env", "security.client_secret_env")
             if secret and env.startswith(PUBLIC_ENV_PREFIXES):
                 yield _error(
                     "reserved-name",
@@ -2468,8 +2511,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             yield _error(
                 "unsuitable-security",
                 f"The security scheme '{security.scheme}' is not an API key in a header or a "
-                "query parameter, a bearer token, or OAuth 2.0 with the client credentials flow "
-                "or the authorization code flow." + flows,
+                "query parameter, a bearer token, HTTP Basic, or OAuth 2.0 with the client "
+                "credentials flow or the authorization code flow." + flows,
                 api,
                 at="security",
                 hint="The clients support only these schemes. Call the API from hand-written "
@@ -2477,7 +2520,7 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
         else:
             yield from _check_security_keys(api, security, scheme)
-            if api.user_flow:
+            if api.per_user:
                 yield from _check_user_flow(definition, api)
     for operation in definition.operations.values():
         if len(set(operation.apis)) != len(operation.apis):
@@ -2718,6 +2761,65 @@ def _check_page_share(definition: AppDefinition, name: str, page: Page) -> Itera
         )
 
 
+def _check_page_presence(definition: AppDefinition, name: str, page: Page) -> Iterator[Diagnostic]:
+    """A page with `presence` is a detail page with the path parameter `id` only, of a live
+    entity, in an app with `auth`, and not public (ADR 0052)."""
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "invalid-option",
+            "The page shows the names of the signed-in users, so 'presence' needs the section "
+            "'auth'.",
+            page,
+            at="presence",
+            hint="Add the section 'auth', or remove the key 'presence'.",
+        )
+        return
+    if name in auth.public_pages:
+        yield _error(
+            "invalid-option",
+            "A public page has no signed-in user, so it does not take 'presence'.",
+            page,
+            at="presence",
+            hint=f"Remove '{name}' from 'auth.public_pages', or remove the key 'presence'.",
+        )
+    ui = definition.ui
+    view_name = page.content.view if page.content is not None else None
+    view = ui.views.get(view_name) if ui is not None and view_name is not None else None
+    if not isinstance(view, DetailView):
+        yield _error(
+            "invalid-option",
+            "The page shows the users on one record, so 'presence' needs a page with a "
+            "detail view.",
+            page,
+            at="presence",
+            hint="Show a detail view on the page, or remove the key 'presence'.",
+        )
+        return
+    if set(re.findall(r"\{([a-z][a-z0-9_]*)\}", page.path)) != {"id"} or not page.path.endswith(
+        "/{id}"
+    ):
+        yield _error(
+            "invalid-option",
+            "The ID in the path names the record of the users, so the path of a page with "
+            f"'presence' ends with '/{{id}}' and has no other parameter. The path is "
+            f"'{page.path}'.",
+            page,
+            at="path",
+            hint="Use a path such as /lessons/{id}.",
+        )
+    entity = definition.entities.get(view.entity)
+    if entity is not None and entity.live is None:
+        yield _error(
+            "invalid-option",
+            "The users on a record get the changes through the live updates (ADR 0051), so "
+            f"'presence' needs 'live' on the entity '{view.entity}'.",
+            page,
+            at="presence",
+            hint=f"Add 'live: true' to the entity '{view.entity}', or remove the key 'presence'.",
+        )
+
+
 def _check_shared_paths(definition: AppDefinition) -> Iterator[Diagnostic]:
     """An entity has one page with `share` at most, and no page has the path of a shared page."""
     ui = definition.ui
@@ -2752,12 +2854,14 @@ def _check_shared_paths(definition: AppDefinition) -> Iterator[Diagnostic]:
 def check_pages(definition: AppDefinition) -> Iterator[Diagnostic]:
     """A page with `embed` is public, has no layout, and names https origins (ADR 0032). The
     metadata of a page reads fields of the record of a page of a record. A page with `share` is
-    a detail page (ADR 0049)."""
+    a detail page (ADR 0049), and a page with `presence` too (ADR 0052)."""
     auth = definition.auth
     yield from _check_shared_paths(definition)
     for name, page in definition.pages.items():
         if page.share:
             yield from _check_page_share(definition, name, page)
+        if page.presence:
+            yield from _check_page_presence(definition, name, page)
         if page.meta is not None:
             yield from _check_page_meta(definition, name, page, page.meta)
         if page.embed is None:
@@ -3445,10 +3549,18 @@ def _check_seed_targets(definition: AppDefinition) -> Iterator[Diagnostic]:
 def _check_security_keys(
     api: Api, security: ApiSecurity, scheme: SecurityScheme
 ) -> Iterator[Diagnostic]:
-    """The security has the keys of its scheme: `env`, or the keys of OAuth 2.0."""
+    """The security has the keys of its scheme: `env`, the keys of HTTP Basic, or the keys of
+    OAuth 2.0. With `per_user`, HTTP Basic has no variables (ADR 0033)."""
     oauth = scheme.type == "oauth2"
-    needed = ("client_id_env", "client_secret_env") if oauth else ("env",)
-    kind = "OAuth 2.0" if oauth else "an API key or a bearer token"
+    basic = scheme.type == "http" and scheme.scheme == "basic"
+    if oauth:
+        needed, kind = ("client_id_env", "client_secret_env"), "OAuth 2.0"
+    elif basic and security.per_user:
+        needed, kind = (), "HTTP Basic with the credentials of each user"
+    elif basic:
+        needed, kind = ("username_env", "env"), "HTTP Basic"
+    else:
+        needed, kind = ("env",), "an API key or a bearer token"
     for key in needed:
         if getattr(security, key) is None:
             yield _error(
@@ -3457,16 +3569,35 @@ def _check_security_keys(
                 api,
                 at="security",
             )
-    other = ("env",) if oauth else ("client_id_env", "client_secret_env", "scopes", "flow")
-    for key in other:
+    keys = (
+        "username_env",
+        "env",
+        "client_id_env",
+        "client_secret_env",
+        "scopes",
+        "flow",
+        "per_user",
+        "check",
+    )
+    if oauth:
+        allowed = (*needed, "scopes", "flow")
+    elif basic:
+        allowed = (*needed, "per_user", "check") if security.per_user else (*needed, "per_user")
+    else:
+        allowed = needed
+    for key in (key for key in keys if key not in allowed):
         if getattr(security, key):
             yield _error(
                 "invalid-option",
                 f"The key '{key}' does not suit the scheme '{scheme.name}' ({kind}).",
                 api,
                 at="security",
-                hint=f"Use {', '.join(repr(k) for k in needed)}.",
+                hint=f"Use {', '.join(repr(k) for k in needed)}."
+                if needed
+                else "Each user gives the user name and the password on the page '/connections'.",
             )
+    if basic and security.per_user:
+        yield from _check_account_check(api, security)
     if not oauth:
         return
     code = scheme.authorization_code
@@ -3498,19 +3629,53 @@ def _check_security_keys(
             )
 
 
+def _check_account_check(api: Api, security: ApiSecurity) -> Iterator[Diagnostic]:
+    """The check of the credentials of a user is an operation of the API without required
+    parameters and without a required body (ADR 0033)."""
+    if security.check is None:
+        return
+    if security.check not in api.operations:
+        yield _error(
+            "unknown-reference",
+            f"The check '{security.check}' is not an operation in 'operations' of the API.",
+            api,
+            at="security",
+            hint=_did_you_mean(security.check, list(api.operations))
+            or f"Add '{security.check}' to 'operations'.",
+        )
+        return
+    operation = api.check_operation
+    if operation is None:
+        return
+    required = [p.name for p in operation.parameters if p.required]
+    if required or operation.body_required:
+        what = f"the required parameter '{required[0]}'" if required else "a required body"
+        yield _error(
+            "unsuitable-operation",
+            f"The check '{security.check}' has {what}, but the app calls it without values.",
+            api,
+            at="security",
+            hint="Use an operation without required values, for example the operation that "
+            "gives the current user.",
+        )
+
+
 def _check_user_flow(definition: AppDefinition, api: Api) -> Iterator[Diagnostic]:
-    """An API with the authorization code flow has a signed-in user (ADR 0033): the app has
-    `auth`, no public operation calls the API, and a job that calls it names the user."""
+    """An API that the app calls in the name of a user (the authorization code flow, or
+    `per_user`) has a signed-in user (ADR 0033): the app has `auth`, no public operation calls
+    the API, and a job that calls it names the user."""
     name = api.id.rpartition(".")[2]
     auth = definition.auth
     if auth is None:
+        how = "The authorization code flow" if api.user_flow else "'per_user'"
+        other = "use the client credentials flow" if api.user_flow else "remove 'per_user'"
         yield _error(
             "unsuitable-security",
-            "The authorization code flow calls the API in the name of a user, so the app needs "
-            "the sign-in of the users ('auth').",
+            f"{how} calls the API in the name of a user, so the app needs the sign-in of the "
+            "users ('auth').",
             api,
             at="security",
-            hint="Add the section 'auth', or use the client credentials flow.",
+            hint=f"Add the section 'auth', or {other}.",
         )
         return
     for op_name, operation in definition.operations.items():

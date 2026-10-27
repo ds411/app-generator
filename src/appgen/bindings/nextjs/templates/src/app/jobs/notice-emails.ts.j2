@@ -16,7 +16,7 @@ import { type JobResult, runDue, Schedule{{ ", span" if "span(" in job.schedule.
  *
  * Each run sends the emails of the oldest notices that wait, up to {{ e.batch }},
  * and marks them done. A user that turned off the emails of a notification
- * gets none. At the first error of the SMTP server, the run stops, and the
+ * gets none. At the first error of {{ "Amazon SES" if nextjs.ses else "the SMTP server" }}, the run stops, and the
  * other notices wait for the next run. The emails have the default
  * language of the app.
  */

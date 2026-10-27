@@ -2,6 +2,7 @@
 {% set sf = definition.auth.second_factor %}
 {# The sign-in returns a status: only the password reset and the verification return an ActionResult. #}
 {% set results = definition.auth.password_reset or verify %}
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {{ trace_header(definition.auth.id) }}
 "use server";
 
@@ -27,7 +28,7 @@ import { findCredential, makeChallenge, secondFactorStep } from "./second-factor
 {% endif %}
 {% if definition.auth.password_reset %}
 import { passwordResetMessage } from "./messages";
-import { deliverMessage } from "{{ "./mail" if nextjs.smtp else "./messages.ext" }}";
+import { deliverMessage } from "{{ "./mail" if nextjs.smtp or nextjs.ses else "./messages.ext" }}";
 import {
   MIN_PASSWORD_LENGTH,
   RESET_SECONDS,
@@ -36,11 +37,16 @@ import {
   readResetToken,
   resetTokenMatches,
 } from "./password-reset";
-import { SESSION_COOKIE, checkPassword, publicUrl, setPassword, startSession } from "./session";
+{% endif %}
+{% if signs_out %}
+import { providerSignOutUrl } from "./providers";
+{% endif %}
+{% if definition.auth.password_reset %}
+import { SESSION_COOKIE, checkPassword, publicUrl, {{ "sessionProvider, " if signs_out }}setPassword, startSession } from "./session";
 {% elif definition.auth.password %}
-import { SESSION_COOKIE, checkPassword, startSession } from "./session";
+import { SESSION_COOKIE, checkPassword, {{ "sessionProvider, " if signs_out }}startSession } from "./session";
 {% else %}
-import { SESSION_COOKIE } from "./session";
+import { SESSION_COOKIE{{ ", sessionProvider" if signs_out }} } from "./session";
 {% endif %}
 {% if definition.auth.password %}
 
@@ -102,10 +108,30 @@ export async function signInAction(
 }
 {% endif %}
 
+{% if signs_out %}
+/**
+ * Sign out: delete the session cookie. After a sign-in with a provider
+ * with `sign_out`, return the logout URL of the provider, which ends the
+ * session there too. Else return null.
+ */
+export async function signOutAction(): Promise<string | null> {
+  const provider = await sessionProvider();
+  (await cookies()).delete(SESSION_COOKIE);
+  if (provider === null) return null;
+  try {
+    return await providerSignOutUrl(provider);
+  } catch (error) {
+    // The session of the app has ended. The provider did not answer.
+    console.error(error);
+    return null;
+  }
+}
+{% else %}
 /** Sign out: delete the session cookie. */
 export async function signOutAction(): Promise<void> {
   (await cookies()).delete(SESSION_COOKIE);
 }
+{% endif %}
 {% if definition.auth.password_reset %}
 
 const resetRequestSchema = z.object({ username: z.string().min(1).max(320) });

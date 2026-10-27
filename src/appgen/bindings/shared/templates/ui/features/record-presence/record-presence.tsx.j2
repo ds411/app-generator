@@ -1,0 +1,146 @@
+{{ trace_header(*(presences.values() | map(attribute="page_id"))) }}
+"use client";
+
+import { useEffect, useState } from "react";
+
+import type { PresenceApi, PresentUser } from "@/shared/api";
+import { watchPresence } from "@/shared/lib/live";
+
+/** The time between two calls of an open page, in milliseconds. */
+const HEARTBEAT_MS = 5_000;
+/** The time after the last input when the typing of the user stops, in milliseconds. */
+const TYPING_MS = 3_000;
+/** The avatars that the page shows. The other users show as a count. */
+const AVATARS = 5;
+
+export type RecordPresenceProps = {
+  presence: PresenceApi;
+  /** The ID of the record. */
+  id: string;
+};
+
+/** Return the initials of a name: the first letters of its first two words. */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter((word) => word !== "");
+  return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
+}
+
+/** Return the note of the users that type, or null. */
+function typingNote(users: PresentUser[]): string | null {
+  const names = users.filter((user) => user.typing).map((user) => user.name);
+  const [first, second] = names;
+  if (first === undefined) {
+    return null;
+  }
+  if (second === undefined) {
+    return {{ js_format("{name} is typing.", name="first") }};
+  }
+  if (names.length === 2) {
+    return {{ js_format("{first} and {second} are typing.", first="first", second="second") }};
+  }
+  return {{ js_format("{count} users are typing.", count="names.length") }};
+}
+
+/**
+ * The other signed-in users on the page of a record (ADR 0052): an avatar
+ * for each user, and a note when one of them types in a form. The page
+ * tells the server that the user is on it when it opens, when the user
+ * starts or stops to type in a form, and each HEARTBEAT_MS. When the page
+ * closes, the user leaves. The events `presence` of the live stream give
+ * the changes of the other users.
+ */
+export function RecordPresence({ presence, id }: RecordPresenceProps) {
+  const [users, setUsers] = useState<PresentUser[]>([]);
+
+  useEffect(() => {
+    if (id === "") {
+      return;
+    }
+    let typing = false;
+    let stopped = false;
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    // The count of the events: an answer that left before the last event is older than it.
+    let events = 0;
+
+    const call = async () => {
+      const seen = events;
+      try {
+        const others = await presence.here(id, typing);
+        if (!stopped && seen === events) {
+          setUsers(others);
+        }
+      } catch {
+        // The next heartbeat tries again.
+      }
+    };
+    const onInput = (event: Event) => {
+      if (!(event.target instanceof Element) || event.target.closest("form") === null) {
+        return;
+      }
+      clearTimeout(idle);
+      idle = setTimeout(() => {
+        typing = false;
+        void call();
+      }, TYPING_MS);
+      if (!typing) {
+        typing = true;
+        void call();
+      }
+    };
+    const leave = () => {
+      presence.leave(id).catch(() => {
+        // The server forgets the user without a heartbeat.
+      });
+    };
+
+    void call();
+    const heartbeat = setInterval(() => void call(), HEARTBEAT_MS);
+    const stop = watchPresence(presence.entity, id, (next) => {
+      events += 1;
+      if (next === null) {
+        void call();
+      } else {
+        setUsers(next);
+      }
+    });
+    document.addEventListener("input", onInput, true);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      stopped = true;
+      clearInterval(heartbeat);
+      clearTimeout(idle);
+      stop();
+      document.removeEventListener("input", onInput, true);
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [presence, id]);
+
+  const note = typingNote(users);
+  return (
+    <div className="flex items-center gap-3">
+      <p role="status" className={note === null ? "sr-only" : "text-sm text-muted-foreground"}>
+        {note}
+      </p>
+      {users.length > 0 && (
+        <ul className="flex -space-x-2" aria-label={ {{- tr(js("Other users on this page")) -}} }>
+          {users.slice(0, AVATARS).map((user) => (
+            <li
+              key={user.id}
+              title={user.name}
+              className="flex size-8 items-center justify-center rounded-full border-2 border-background bg-muted text-xs font-medium"
+            >
+              <span aria-hidden="true">{initials(user.name)}</span>
+              <span className="sr-only">{user.name}</span>
+            </li>
+          ))}
+          {users.length > AVATARS && (
+            <li className="flex size-8 items-center justify-center rounded-full border-2 border-background bg-muted text-xs font-medium">
+              +{users.length - AVATARS}
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}

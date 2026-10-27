@@ -1181,6 +1181,7 @@ ignores the pages.
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 | `embed`       | The origins of the websites that can show the page in a frame, for example `[https://www.example.com]` (see [Pages in frames](#pages-in-frames)). |
 | `share`       | `true`: a user that may change the record of a detail page makes a secret link of it, for a guest without a sign-in (see [Secret links](#secret-links)). |
+| `presence`    | `true`: a detail page shows the other signed-in users on the page of the same record, and a note when one of them types (see [Users on a record page](#users-on-a-record-page)). |
 | `meta`        | The `description` and the `image` of the page for search engines and the previews of links (see [Page metadata](#page-metadata)). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
@@ -1340,6 +1341,46 @@ change log.
 - The link gives all fields of the record and of the related records
   that the view shows, also to a guest. A link does not expire.
 
+### Users on a record page
+
+A detail page shows the other signed-in users on the page of the same
+record, so that two users do not change the record at the same time
+([ADR 0052](adr/0052-presence.md)). The page takes `presence: true`,
+and the entity of its view is live ([Live updates](#live-updates)):
+
+```yaml
+# example: room-booking
+entities:
+  Booking:
+    live: true
+pages:
+  booking_detail:
+    presence: true
+```
+
+The header of the page then shows the avatar of each other user on the
+record: the initials of the name, with the name as its tooltip. When a
+user types in a form on the page, for example in the form of the button
+"Edit", the other users see the note `<name> is typing.`. The name is
+the display field of the user entity, else the user name.
+
+- The app has `auth`, and the page is not in `auth.public_pages`.
+- The content of the page is a detail view. Its path ends with `{id}`
+  and has no other parameter, and its entity has `live`.
+- The page calls the server when it opens, when the user starts or
+  stops to type, and each 5 seconds. The typing stops 3 seconds after
+  the last input. The server forgets a user 15 seconds after the last
+  call, for example after a crash of the browser, and at once when the
+  user leaves the page.
+- The FastAPI app has `PUT /<entity>/{id}/presence` (with
+  `{"typing": false}`, the answer has the other users) and
+  `DELETE /<entity>/{id}/presence`. They need a read operation of the
+  entity and its record rules. The Next.js app has server actions with
+  the same checks. The changes of the users come to the other users on
+  the record through the stream of the live updates, also through Redis
+  with `LIVE_EVENTS_URL`.
+- The React app with mock data shows no users.
+
 ## workflows
 
 A workflow is a state machine on an enum field of an entity. The values
@@ -1432,9 +1473,11 @@ jobs:
 - `user` names the user of each record: a `many_to_one` or `one_to_one`
   relation of `entity` to the user entity of `auth`, or `id` when
   `entity` is the user entity. A job whose operation calls an API with
-  the authorization code flow needs it: the clients send the token of
-  this user ([ADR 0033](adr/0033-api-connections.md)). A run for a
-  record whose user has no connection to the API does nothing.
+  the authorization code flow or with `per_user` needs it: the clients
+  send the token or the credentials of this user
+  ([ADR 0033](adr/0033-api-connections.md)). A run for a record whose
+  user has no connection to the API, or a rejected connection, does
+  nothing.
 - A job without `entity` has a `schedule`, and no `at`, `filter`,
   `operation`, or `user`.
 
@@ -1540,8 +1583,9 @@ notifications:
 
 A notification with `email: true` also sends each notice to the email
 address of the receiver ([ADR 0044](adr/0044-notice-emails.md)). It
-needs `auth.delivery: smtp` (see [auth](#auth)): the apps send the
-emails with the SMTP server of the settings `SMTP_*`.
+needs `auth.delivery: smtp` or `ses` (see [auth](#auth)): the apps send
+the emails with the SMTP server of the settings `SMTP_*`, or with
+Amazon SES.
 
 - The notice waits for its email in the table `notices`. The built-in
   job `notice_emails` runs each minute (see [jobs](#jobs)), and sends
@@ -1623,7 +1667,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For HTTP Basic: `username_env`, the environment variable of the user name, and `env`, the one of the password, or `per_user: true` and the optional `check` (see below). For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
 | `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
@@ -1634,8 +1678,8 @@ apis:
 - Each operation ID must exist in the document, and must be a valid ID
   segment (letters, digits, and `_`).
 - The clients support an API key in a header or a query parameter, a
-  bearer token, and OAuth 2.0 with the client credentials flow or the
-  authorization code flow.
+  bearer token, HTTP Basic, and OAuth 2.0 with the client credentials
+  flow or the authorization code flow.
 - They send path, query, header, and cookie parameters. A cookie
   parameter is a text, a number, or a boolean, and goes in the header
   `Cookie`.
@@ -1721,9 +1765,64 @@ apis:
     operations: [listEvents]
 ```
 
+- With HTTP Basic (a scheme with `type: http` and `scheme: basic`), the
+  client sends the header `Authorization: Basic` with the Base64 of the
+  UTF-8 bytes of `<user name>:<password>` (RFC 7617). `username_env`
+  gives the user name, and `env` the password. Both are secrets: the
+  deployment files read them from secrets, and a browser app has no
+  client for the API (use `expose: true`). Without a password, the
+  client sends no credential. For example, the Jira Cloud REST API takes
+  the email address of an Atlassian account as the user name and an API
+  token as the password, and its base URL is the URL of the site, for
+  example `https://acme.atlassian.net`.
+
+```yaml
+# not valid alone: the definition is tests/fixtures/jira.yaml.
+apis:
+  jira:
+    document: jira/jira.openapi.json
+    base_url_env: JIRA_API_URL
+    security: { scheme: basicAuth, username_env: JIRA_EMAIL, env: JIRA_API_TOKEN }
+    operations: [getIssue, searchAndReconsileIssuesUsingJql, createIssue, addComment]
+```
+
+- With HTTP Basic and `per_user: true`, the app calls the API in the
+  name of a user ([ADR 0033](adr/0033-api-connections.md)), with the
+  credentials of this user, for example the email address of the
+  Atlassian account of each agent and an API token. The security has no
+  `username_env` and no `env`. A signed-in user gives the user name and
+  the password on the page `/connections`. The server keeps them in the
+  table `api_connections`, with the password encrypted with a key from
+  `AUTH_SECRET`, and never sends the password back. `check` names an
+  operation in `operations` without required parameters and without a
+  required body, for example the operation that gives the current user:
+  the server calls it with the new credentials, and keeps them only if
+  the API accepts them (else 422). Without `check`, the server keeps the
+  credentials without a call. An answer with the status 401 marks the
+  connection as rejected: the call gives 409, and the page asks for new
+  credentials. The FastAPI app has the route `POST
+  /auth/connections/<api>` (in kebab case) with `username` and
+  `password`. The rest is the same as with the authorization code flow:
+  the custom operations, the jobs with `user`, the page, the React app
+  with mock data, which keeps only the user name, and the React app with
+  `x-react-data: api`. The app needs no `PUBLIC_URL` for these APIs.
+
+```yaml
+# not valid alone: the definition is tests/fixtures/jira-accounts.yaml.
+apis:
+  jira:
+    document: jira/jira.openapi.json
+    base_url_env: JIRA_API_URL
+    security: { scheme: basicAuth, per_user: true, check: getCurrentUser }
+    operations: [getCurrentUser, createIssue, addComment]
+```
+
 - The client has only the selected operations and the schemas that they
   use. Each answer has an example: the example of the document, or a
-  sample from the schema.
+  sample from the schema. Some documents, for example the document of
+  Jira Cloud, give the example of a JSON answer as a string with the
+  JSON text. If the answer cannot be a string, the client reads the
+  JSON text, or uses a sample when the text is not JSON.
 - A custom operation names the APIs of its logic in `apis`. In the
   FastAPI app, its extension function then gets the clients of these
   APIs as arguments. The Next.js app has a server-only client for each
@@ -2859,9 +2958,22 @@ auth:
   `SMTP_PASSWORD`, `SMTP_FROM` (the sender), and `SMTP_TLS` (`starttls`
   by default, `tls`, or `none`) select the server. Without `SMTP_HOST`,
   the apps write the links to the log with `ENVIRONMENT=development`,
-  and give an error in production. `smtp` needs an address: the user
-  name field of the type `email`, or a required `email` field of the
-  user entity.
+  and give an error in production. With `ses`, the apps send them with
+  `SendEmail` of the API v2 of Amazon SES, and the delivery is not a
+  gap either. The apps read the AWS credentials from the default chain
+  of the AWS SDK (for example EKS Pod Identity, IRSA, or the role of an
+  ECS task), so the settings have no secret for the email. The settings
+  `AWS_REGION`, `SES_FROM` (a verified sender), and the optional
+  `SES_CONFIGURATION_SET` select the service, and the role needs the
+  IAM permission `ses:SendEmail`. Without `SES_FROM`, the apps write the
+  links to the log with `ENVIRONMENT=development`, and give an error in
+  production. When SES does not send a message, for example
+  `MessageRejected` in the sandbox of SES, the apps answer as for an
+  error of the SMTP server, and the log has the error code of SES but
+  not the link. `smtp` and `ses` also send the emails of the notices
+  (see [Emails of the notices](#emails-of-the-notices)). `smtp` and
+  `ses` need an address: the user name field of the type `email`, or a
+  required `email` field of the user entity.
 - `second_factor` lets each user with a password turn on a second factor
   of the sign-in: the codes of an authenticator app
   ([ADR 0024](adr/0024-second-factor.md)). It is off by default.
@@ -2884,8 +2996,84 @@ auth:
   user must exist. With `create_users: true`, the first sign-in makes a
   new user: `claims` gives the other fields of the new user from claims
   (field name: claim name), and it must give each required field without
-  a default. With `access`, `default_role` is the role of a new user.
+  a default. With `access`, `default_role` is the role of a new user
+  (with `roles`, see below).
   `title` (default: the name) is the text on the sign-in button.
+- `authorize_params` adds fixed parameters to the authorization request
+  of a provider, for example `{ identity_provider: EntraID }` for a user
+  pool of Amazon Cognito: the user pool then sends the users at once to
+  that identity provider, not to its own sign-in page. A parameter that
+  the flow sets (`response_type`, `client_id`, `redirect_uri`, `scope`,
+  `state`, `nonce`, `code_challenge`, and `code_challenge_method`) is
+  not valid (`reserved-name`).
+- `trust_email: true` makes the apps accept the email address of an ID
+  token also when the token does not mark it as verified
+  (`email_verified` is missing, `false`, or `"false"`). Use it only for a
+  provider that gives only the addresses of the company, for example a
+  user pool of Amazon Cognito with a single-tenant Entra ID as its SAML
+  identity provider: the user pool does not mark the address of a SAML
+  user as verified. See [Sign-in with Amazon Cognito and Entra
+  ID](cognito-entra-id.md).
+- `roles` sets the role of the user at each sign-in with a provider,
+  from the groups in a claim of the ID token. It needs `access`.
+  `claim` names the claim, for example `groups`, or `custom:groups` for
+  the groups of Entra ID in a user pool of Amazon Cognito. The value of
+  the claim is a list, or a text in the form `[a, b]`, `a,b`, or `a`: a
+  SAML attribute with more than one value arrives as such a text. `map`
+  gives the role of each group, for example of the object ID of a group
+  of Entra ID. The user gets the first role of `map`, in the order of
+  the definition, whose group is in the claim. Without such a group, the
+  user gets `default_role`, also without `create_users`. Without
+  `default_role`, the apps refuse the sign-in (403). A change of the
+  groups at the provider changes the role at the next sign-in. With
+  mock data, the React app signs in a mock user with the first role of
+  `map`.
+
+  ```yaml
+  providers:
+    company:
+      issuer: https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Example
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      authorize_params: { identity_provider: EntraID }
+      trust_email: true
+      create_users: true
+      default_role: staff
+      roles:
+        claim: "custom:groups"
+        map:
+          0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
+          5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
+  ```
+- `sign_out: true` makes the sign-out of the app also end the session
+  of the user at the provider. Without it, the sign-out ends only the
+  session of the app, and the next sign-in with the provider can go
+  through without a password. The Next.js app keeps the provider of the
+  sign-in in the session, and the button sends the browser to the logout
+  URL of the provider with `client_id` and the sign-in page of the app
+  (`<PUBLIC_URL>/sign-in`). The React app with `x-react-data: api`
+  deletes its token, and opens `GET /auth/providers/<name>/sign-out` of
+  the FastAPI app with `return_to`, a page in `CORS_ORIGINS`, as the
+  start of the sign-in does. The provider ends its session, and sends
+  the browser back to the sign-in page: register this page as a sign-out
+  URL of the app at the provider. `true` uses the `end_session_endpoint`
+  of the discovery document, with the page in
+  `post_logout_redirect_uri` (OpenID Connect RP-Initiated Logout). The
+  mapping form sets another logout URL: `endpoint`, an `https` URL, and
+  `return_param`, the parameter of the page (default
+  `post_logout_redirect_uri`, not `client_id`). The setting
+  `<NAME>_SIGN_OUT_URL` changes the URL. A user pool of Amazon Cognito
+  has no `end_session_endpoint`:
+
+  ```yaml
+  sign_out:
+    endpoint: https://staff-portal.auth.eu-west-1.amazoncognito.com/logout
+    return_param: logout_uri
+  ```
+
+  Without a logout URL, the apps end only the session of the app, and
+  write a warning to the log. With mock data, the React app has no
+  session at the provider.
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up`, `password_reset`, or `second_factor`.
@@ -2893,9 +3081,10 @@ auth:
   `/verify-email` with `verify_email`, `/forgot-password` and
   `/reset-password` with a password reset, `/second-factor` with a
   second factor, a path under `/auth/` with providers, or
-  `/connections` and a path under `/connections/` with an API with the
-  authorization code flow, or `/notice-settings` with a notification
-  with `email: true`: they are the pages of the front ends.
+  `/connections` and a path under `/connections/` with an API that the
+  app calls in the name of a user (the authorization code flow or
+  `per_user`), or `/notice-settings` with a notification with
+  `email: true`: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -2918,7 +3107,9 @@ kinds: its stub writes the link to the log with
 `ENVIRONMENT=development`, and gives 501 in production. With
 `delivery: smtp`, the app has no extension file: `app/core/mail.py`
 sends each message with `smtplib` in a thread, so that the request does
-not block the other requests. The subject and the text of a message are
+not block the other requests. With `delivery: ses`, `app/core/mail.py`
+sends each message with boto3 in a thread, and the app has the
+dependency `boto3`. The subject and the text of a message are
 in the language of the request. With
 `second_factor`, `POST /auth/second-factor/setup` gives a new secret
 and its `otpauth://` URI, and `POST /auth/second-factor/confirm` with a
@@ -2971,7 +3162,8 @@ the same token rules as the FastAPI app, and the link starts with
 (`deliverMessage`) delivers the messages of the verification and of the
 password reset, with the stub of the FastAPI app. With `delivery:
 smtp`, `src/shared/auth/mail.ts` sends them with the package
-`nodemailer` instead. The React app calls
+`nodemailer` instead, and with `delivery: ses`, with the package
+`@aws-sdk/client-sesv2`. The React app calls
 the endpoints of the FastAPI app: set `EMAIL_VERIFY_URL` to its page
 `/verify-email`. The React app with mock data has no verification: the
 sign-up signs in at once.
@@ -3204,10 +3396,17 @@ operation that no role of the user gives. A list gives the records of
 these scopes. A read, a change, or a delete of a record in another
 scope of the user gives 403, and of a record out of all scopes of the
 user gives 404. A create or a change that puts a record out of these
-scopes gives 403, and the record does not change. The front ends do not
-apply the memberships yet: the trace check of the Next.js app reports
-them as gaps, and the trace check of the React app as uncovered
-elements.
+scopes gives 403, and the record does not change.
+
+The front ends apply the memberships too. The server actions of the
+Next.js app use only the records of the scopes, with the same errors. The
+React app shows the records that the FastAPI app gives, and with mock
+data the mock store applies the memberships in the browser, as a
+demonstration. An action of an operation that only a membership gives
+shows on a record in a scope whose role gives the operation, and not on
+the other records: the UI asks the server for the operations of the
+memberships of the user on the records of the page. An action of a
+create or a list shows if a membership in some scope gives it.
 
 ## translations
 
@@ -3367,7 +3566,8 @@ use in the app does not show.
   `Do you have an account?`.
 - The sign-in with a provider: `or`,
   `No user has this user name. Ask an administrator.`,
-  `The sign-in with the provider failed.`.
+  `The sign-in with the provider failed.`,
+  `Your groups at the provider give you no role in this app. Ask an administrator.`.
 - The password reset: `Did you forget the password?`,
   `Reset the password`,
   `Enter your user name. The app sends you a link to set a new password.`,
@@ -3487,6 +3687,7 @@ use in the app does not show.
   `Another record has the same value, and the value must be unique.`,
   `Sign in to do this.`, `Your role may not do this operation.`,
   `Your role may not give a record these values.`,
+  `Your role in the scope of the record may not do this operation.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.
@@ -3519,6 +3720,14 @@ use in the app does not show.
   `The token endpoint of the API {api} did not answer correctly.`,
   `The state of the callback is not correct. Connect the account again.`,
   `The connection failed.`.
+- The page of the connections to the APIs with the credentials of each
+  user: `User name`, `Password or API token`,
+  `Connected as {username}`,
+  `The API did not accept the credentials. Enter new credentials.`. The
+  check of the Next.js app:
+  `The API {api} did not accept the user name and the password.`,
+  `The API {api} gave no valid answer.`,
+  `The API {api} did not accept the credentials of the account. Connect the account again.`.
 - The secret links of the records (ADR 0049): the button `Share`, its
   dialog `Share the record`,
   `A person with the link sees the record without a sign-in.`, `Link`,
@@ -3531,6 +3740,9 @@ use in the app does not show.
   shared page: `The link is not valid.`,
   `The record is not shared, or its link was revoked.`,
   `Something went wrong`.
+- The other users on a record page (ADR 0052): the list
+  `Other users on this page`, and the notes `{name} is typing.`,
+  `{first} and {second} are typing.`, and `{count} users are typing.`.
 
 ### Messages of the FastAPI app
 
@@ -3619,6 +3831,10 @@ to translate one. The rules and the workflows give their own messages.
   `The token endpoint of the API {api} did not answer correctly.`,
   `The state of the callback is not correct. Connect the account again.`,
   `The connection failed.`.
+- The connections of the users to the APIs with the credentials of each
+  user:
+  `The API {api} did not accept the user name and the password.`,
+  `The API {api} did not accept the credentials of the account. Connect the account again.`.
 - The webhooks: `The server has no secret for the webhook {name}.`,
   `The signature of the webhook is not valid.`,
   `The body of the webhook is not valid JSON.`,

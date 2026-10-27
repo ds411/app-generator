@@ -3,7 +3,9 @@
 {% set owned = scoped | selectattr("owner_path") | list %}
 {% set auth = definition.auth %}
 {% set access = definition.access %}
-{% set ns = namespace(tables=[]) %}
+{% set presence = presences | length > 0 %}
+{% set users = nextjs.tables_by_entity[auth.user_entity] if presence else none %}
+{% set ns = namespace(tables=[users.const] if presence else []) %}
 {% for e in scoped %}
 {% set ns.tables = ns.tables + [nextjs.tables_by_entity[e.name].const] + (e.tables | list) %}
 {% endfor %}
@@ -17,7 +19,7 @@
 {% else %}
 {% set readers = "all clients" %}
 {% endif %}
-{{ trace_header(*(live | map(attribute="id"))) }}
+{{ trace_header(*((live | map(attribute="id") | list) + (presences.values() | map(attribute="page_id") | list))) }}
 import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -26,13 +28,15 @@ import { createClient } from "@redis/client";
 {% if scoped %}
 import { eq, getTableColumns } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+{% elif presence %}
+import { eq } from "drizzle-orm";
 {% endif %}
 
 {% if access %}
 import { roleMayCall } from "@/shared/lib/permissions";
 
 {% endif %}
-import { afterCommit{{ ", type Database" if scoped }} } from "./client";
+import { afterCommit{{ ", type Database" if scoped }}{{ ", getDb" if presence }} } from "./client";
 {% if owned %}
 import { pathUsers, type PathStep } from "./paths";
 {% endif %}
@@ -41,6 +45,14 @@ import { {{ tables | join(", ") }} } from "./schema";
 {% endif %}
 
 {{ ("// The live updates of the records (ADR 0051). A create, a change, and a delete of a record of a live entity in a repository give a change after the commit of the transaction. The route `/api/live` sends the changes as server-sent events to the clients that may read the records: " ~ readers ~ ". An event has the entity and the ID of the record, but no values: a client reads the record again. With the setting LIVE_EVENTS_URL, the processes send the changes through Redis, so that each replica gets the changes of all replicas. Without it, each process sends only its own changes.") | wordwrap(72, break_long_words=False, wrapstring="\n// ") }}
+{% if presence %}
+//
+// The broker also keeps the signed-in users on the pages of the records
+// (ADR 0052). A page notes its user each few seconds, and the broker
+// forgets a user after PRESENCE_MS without a call. A change of the users
+// on a record gives the event `presence` to the other users on it. With
+// Redis, the calls of the pages go through the channel too.
+{% endif %}
 
 /** The Redis channel of the changes. */
 const CHANNEL = {{ (app.name ~ ":live") | tojson }};
@@ -53,8 +65,28 @@ export const PING_MS = 15_000;
  * Redis, the changes go to the clients of the process.
  */
 const CONNECT_TIMEOUT_MS = 1_000;
+{% if presence %}
+/** The time after the last call of a page when the broker forgets its user, in milliseconds. */
+const PRESENCE_MS = 15_000;
+{% endif %}
 
 export type LiveAction = "created" | "changed" | "deleted";
+{% if presence %}
+
+/** A signed-in user on the page of a record (ADR 0052). */
+export type PresentUser = { id: string; name: string; typing: boolean };
+
+/**
+ * An event of the stream. `open`: the stream is open, and the changes from
+ * now on follow. `created`, `changed`, `deleted`: a change of a record.
+ * `reset`: the stream lost events, so read all records again. `presence`:
+ * the other users on the page of a record changed.
+ */
+export type LiveEvent =
+  | { type: "open" | "reset" }
+  | { type: LiveAction; entity: string; id: string }
+  | { type: "presence"; entity: string; id: string; users: PresentUser[] };
+{% else %}
 
 /**
  * An event of the stream. `open`: the stream is open, and the changes from
@@ -62,6 +94,7 @@ export type LiveAction = "created" | "changed" | "deleted";
  * `reset`: the stream lost events, so read all records again.
  */
 export type LiveEvent = { type: "open" | "reset" } | { type: LiveAction; entity: string; id: string };
+{% endif %}
 {% if scoped %}
 
 /** A value of a condition of a record rule. */
@@ -142,6 +175,21 @@ export type Change = {
   audiences: Audience[] | null;
 {% endif %}
 };
+{% if presence %}
+
+/** A call of the page of a record: its user is on the record, or left it (ADR 0052). */
+export type Here = { entity: string; id: string; user: string; name: string; typing: boolean; left: boolean };
+
+/** A message of the Redis channel: a change of a record, or a call of a record page. */
+type Message = Change | { presence: Here };
+
+/** A user on the page of a record: its name, its typing, and the end of its presence. */
+type Present = { name: string; typing: boolean; until: number };
+{% else %}
+
+/** A message of the Redis channel: a change of a record. */
+type Message = Change;
+{% endif %}
 
 /** A client of the stream: the entities whose events it gets{{ ", and its user" if auth }}. */
 export type Viewer = {
@@ -238,6 +286,13 @@ export class Subscription {
   reset(): void {
     this.put({ type: "reset" });
   }
+{% if presence %}
+
+  /** Add the users on the page of a record to the queue, without the user of the client. */
+  show(entity: string, id: string, users: PresentUser[]): void {
+    this.put({ type: "presence", entity, id, users: users.filter((user) => user.id !== this.viewer.user) });
+  }
+{% endif %}
 
   /** End the stream. The client opens a new one, for example at another replica. */
   end(): void {
@@ -314,9 +369,21 @@ function messageOf(error: unknown): string {
  * start with the first change or subscription. When Redis is not
  * available, the process logs a warning and gives its changes to its own
  * subscriptions. When Redis is back, the subscriptions get `reset`.
+{% if presence %}
+ *
+ * `here` and `leave` send the calls of the record pages in the same way.
+ * Each broker keeps the users on the records from the calls, and forgets
+ * a user after PRESENCE_MS without a call.
+{% endif %}
  */
 export class Broker {
   private readonly subscriptions = new Set<Subscription>();
+{% if presence %}
+  /** The users on the pages of the records, by entity and ID (`<entity>:<id>`), and by user. */
+  private readonly present = new Map<string, Map<string, Present>>();
+  /** The timer that forgets the users without a call. */
+  private sweeper: ReturnType<typeof setInterval> | undefined;
+{% endif %}
   private publisher: Promise<RedisClient | undefined> | undefined;
   private subscriber: RedisClient | undefined;
   /** False after an error of Redis, until Redis is back: one warning for each loss. */
@@ -327,25 +394,107 @@ export class Broker {
   constructor(private readonly url: string | null) {}
 
   /** Send the changes of a transaction after its commit. */
-  publish(changes: Change[]): void {
+  publish(messages: Message[]): void {
     if (this.url === null) {
-      this.deliver(changes);
+      this.deliver(messages);
       return;
     }
     this.start();
-    for (const change of changes) {
-      void this.send(change);
+    for (const message of messages) {
+      void this.send(message);
     }
   }
 
-  /** Give changes to the subscriptions of the process. */
-  deliver(changes: Change[]): void {
-    for (const change of changes) {
+  /** Give the messages to the subscriptions of the process. */
+  deliver(messages: Message[]): void {
+    for (const message of messages) {
+{% if presence %}
+      if ("presence" in message) {
+        this.arrive(message.presence);
+        continue;
+      }
+{% endif %}
       for (const subscription of this.subscriptions) {
-        subscription.offer(change);
+        subscription.offer(message);
       }
     }
   }
+{% if presence %}
+
+  /** Note a user on the page of a record, and return the other users on the record. */
+  here(entity: string, id: string, user: string, name: string, typing: boolean): PresentUser[] {
+    this.publish([{ presence: { entity, id, user, name, typing, left: false } }]);
+    return this.users(entity, id).filter((other) => other.id !== user);
+  }
+
+  /** End the presence of a user on a record: the page closed. */
+  leave(entity: string, id: string, user: string): void {
+    this.publish([{ presence: { entity, id, user, name: "", typing: false, left: true } }]);
+  }
+
+  /** Return the users on the page of a record. */
+  users(entity: string, id: string): PresentUser[] {
+    const present = this.present.get(`${entity}:${id}`) ?? new Map<string, Present>();
+    return [...present].map(([user, state]) => ({ id: user, name: state.name, typing: state.typing }));
+  }
+
+  /** Note a call of a page in the users on its record, and tell the other users of a change. */
+  arrive(here: Here): void {
+    const key = `${here.entity}:${here.id}`;
+    const present = this.present.get(key) ?? new Map<string, Present>();
+    const before = present.get(here.user);
+    present.delete(here.user);
+    if (!here.left) {
+      present.set(here.user, { name: here.name, typing: here.typing, until: Date.now() + PRESENCE_MS });
+    }
+    if (present.size > 0) {
+      this.present.set(key, present);
+    } else {
+      this.present.delete(key);
+    }
+    if (before === undefined && here.left) {
+      return;
+    }
+    if (before === undefined || here.left || before.name !== here.name || before.typing !== here.typing) {
+      this.tell(here.entity, here.id, new Set([here.user]));
+    }
+    if (this.sweeper === undefined) {
+      this.sweeper = setInterval(() => this.forget(), 1_000);
+      // The timer does not keep the process alive.
+      this.sweeper.unref();
+    }
+  }
+
+  /** Forget the users without a call in PRESENCE_MS, and tell the other users. */
+  forget(now: number = Date.now()): void {
+    for (const [key, present] of this.present) {
+      const gone = new Set([...present].filter(([, state]) => state.until <= now).map(([user]) => user));
+      if (gone.size === 0) {
+        continue;
+      }
+      for (const user of gone) {
+        present.delete(user);
+      }
+      if (present.size === 0) {
+        this.present.delete(key);
+      }
+      const split = key.indexOf(":");
+      this.tell(key.slice(0, split), key.slice(split + 1), gone);
+    }
+  }
+
+  /** Send the users on a record to the streams of its other users. */
+  private tell(entity: string, id: string, changed: ReadonlySet<string>): void {
+    const users = this.users(entity, id);
+    const others = new Set(users.map((user) => user.id).filter((user) => !changed.has(user)));
+    for (const subscription of this.subscriptions) {
+      const viewer = subscription.viewer;
+      if (viewer.user !== null && others.has(viewer.user) && viewer.entities.has(entity)) {
+        subscription.show(entity, id, users);
+      }
+    }
+  }
+{% endif %}
 
   /** Return a new subscription of a client. */
   subscribe(viewer: Viewer): Subscription {
@@ -376,6 +525,10 @@ export class Broker {
    * connection, for example the subscription to the channel, fails.
    */
   async close(): Promise<void> {
+{% if presence %}
+    clearInterval(this.sweeper);
+    this.sweeper = undefined;
+{% endif %}
     const publisher = await this.publisher;
     this.publisher = undefined;
     const subscriber = this.subscriber;
@@ -402,7 +555,7 @@ export class Broker {
     this.subscriber = subscriber;
     void subscriber.connect().catch((error: unknown) => this.failed(error));
     void subscriber
-      .subscribe(CHANNEL, (message) => this.deliver([JSON.parse(message) as Change]))
+      .subscribe(CHANNEL, (message) => this.deliver([JSON.parse(message) as Message]))
       .catch((error: unknown) => this.failed(error));
   }
 
@@ -426,19 +579,19 @@ export class Broker {
     }
   }
 
-  /** Send a change to the channel. Without Redis, give it to the subscriptions of the process. */
-  private async send(change: Change): Promise<void> {
+  /** Send a message to the channel. Without Redis, give it to the subscriptions of the process. */
+  private async send(message: Message): Promise<void> {
     try {
       const publisher = await this.publisher;
       if (publisher !== undefined && this.available && publisher.isReady) {
-        await publisher.publish(CHANNEL, JSON.stringify(change));
+        await publisher.publish(CHANNEL, JSON.stringify(message));
         return;
       }
       this.failed(new Error("The client of Redis is not connected."));
     } catch (error) {
       this.failed(error);
     }
-    this.deliver([change]);
+    this.deliver([message]);
   }
 
   private failed(error: unknown): void {
@@ -466,6 +619,22 @@ export function liveBroker(): Broker {
   globalForLive.appgenLive ??= new Broker(process.env.LIVE_EVENTS_URL || null);
   return globalForLive.appgenLive;
 }
+{% if presence %}
+
+/**
+ * Note the signed-in user on the page of a record, with its name, and
+ * return the other users on the record (ADR 0052). The caller checks that
+ * the user may read the record.
+ */
+export async function notePresence(entity: string, id: string, user: string, typing: boolean): Promise<PresentUser[]> {
+  const [row] = await getDb()
+    .select({ name: {{ users.const }}.{{ history_user_key(definition) }} })
+    .from({{ users.const }})
+    .where(eq({{ users.const }}.id, user))
+    .limit(1);
+  return liveBroker().here(entity, id, user, String(row?.name ?? ""), typing);
+}
+{% endif %}
 {% if scoped %}
 
 /**

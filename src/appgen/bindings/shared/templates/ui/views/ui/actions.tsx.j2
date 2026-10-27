@@ -60,7 +60,28 @@ export type ActionSpec<T> = {
 };
 
 type Pending<T> = { action: ActionSpec<T>; records: T[] };
-{% if definition.access %}
+{% if memberships %}
+
+/** Return the IDs of the records of an action. */
+function idsOf<T>(records: readonly T[]): string[] {
+  return records.flatMap((record) => {
+    const id = (record as { id?: unknown }).id;
+    return typeof id === "string" ? [id] : [];
+  });
+}
+
+/**
+ * Return a check of the actions: true if the role of the user allows the
+ * page of an action, and the role or a membership in the scope of each
+ * record (ADR 0048) allows its operation.
+ */
+function useAllowed<T>(): (action: ActionSpec<T>, records?: readonly T[]) => boolean {
+  const { canOpenPage, canCallOn } = useAccess(); {{ trace(memberships.element_id) }}
+  return (action, records = []) =>
+    (action.page === undefined || canOpenPage(action.page)) &&
+    (action.operation === undefined || canCallOn(action.operation, idsOf(records)));
+}
+{% elif definition.access %}
 
 /** Return a check of the actions: true if the role of the user allows the page and the operation of an action. */
 function useAllowed<T>(): (action: ActionSpec<T>) => boolean {
@@ -154,7 +175,7 @@ export function ActionButton<T>({
 }) {
 {% if definition.access %}
   const allowed = useAllowed<T>();
-  if (!allowed(action)) return null;
+  if (!allowed(action{{ ", records" if memberships }})) return null;
 {% endif %}
   const Icon = action.icon;
   return (
@@ -181,7 +202,11 @@ export function RowActionsMenu<T>({
 {% set shown = "shown" if definition.access else "actions" %}
 {% if definition.access %}
   const allowed = useAllowed<T>();
+{% if memberships %}
+  const shown = actions.filter((action) => allowed(action, [record]));
+{% else %}
   const shown = actions.filter(allowed);
+{% endif %}
 {% endif %}
   if ({{ shown }}.length === 0 && !children) return null;
   return (

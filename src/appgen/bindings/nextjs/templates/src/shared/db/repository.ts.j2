@@ -275,6 +275,13 @@ export type RepositoryOptions<T> = {
    */
   belongsTo?: (user: string) => SQL;
 {% endif %}
+{% if memberships %}
+  /**
+   * The condition of the records in some scopes of the memberships, for an
+   * entity of the scope (ADR 0048): the path to the scope record.
+   */
+  inScopes?: (scopes: readonly string[]) => SQL;
+{% endif %}
 {% if storage %}
   /**
    * The file fields (ADR 0027): the key of each one in the record, and the
@@ -402,6 +409,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if record_rules %}
   private readonly belongsTo: ((user: string) => SQL) | undefined;
 {% endif %}
+{% if memberships %}
+  private readonly inScopes: ((scopes: readonly string[]) => SQL) | undefined;
+{% endif %}
 {% if storage %}
   private readonly files: Record<string, string>;
 {% endif %}
@@ -445,6 +455,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if record_rules %}
     const owner = options.owner === undefined ? undefined : this.columns[options.owner];
     this.belongsTo = options.belongsTo ?? (owner === undefined ? undefined : (user) => eq(owner, user));
+{% endif %}
+{% if memberships %}
+    this.inScopes = options.inScopes;
 {% endif %}
     this.manyToMany = (options.manyToMany ?? []).map((relation) => {
       const columns = getTableColumns(relation.table);
@@ -495,6 +508,21 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return (await getDb().$count(this.table, this.byId(id, scope))) > 0;
   }
 
+{% if memberships %}
+  /** Return the IDs of the records in some scopes of the memberships, of the IDs (ADR 0048). */
+  async inScopesOf(ids: string[], scopes: readonly string[]): Promise<Set<string>> {
+    const wanted = ids.filter((id) => UUID.test(id));
+    if (this.inScopes === undefined || wanted.length === 0) {
+      return new Set();
+    }
+    const rows = await getDb()
+      .select({ id: this.table.id })
+      .from(this.table)
+      .where(and(inArray(this.table.id, wanted), this.inScopes(scopes)));
+    return new Set(rows.map((row) => String(row.id)));
+  }
+
+{% endif %}
   /** Return the IDs of the records of the scope, of the IDs (the rows of a query, ADR 0045). */
   async visible(ids: string[], scope: RecordScope | null): Promise<Set<string>> {
     if (scope === null || ids.length === 0) {
@@ -508,6 +536,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
   }
 
   async get(id: string, scope: RecordScope | null = null): Promise<T> {
+{% if memberships %}
+    await this.checkMemberScope(id, scope);
+{% endif %}
     const db = getDb();
     const rows: Row[] = await db.select().from(this.table).where(this.byId(id, scope)).limit(1);
 {% else %}
@@ -621,10 +652,16 @@ export class Repository<T extends EntityRecord, TInput extends object>
     scope: RecordScope | null = null,
     action: HistoryAction = "changed",
   ): Promise<T> {
+{% if memberships %}
+    await this.checkMemberScope(id, scope);
+{% endif %}
     const where = this.byId(id, scope);
 {% elif record_rules %}
   /** Change a record. With a scope, the record must be in the scope before and after the change. */
   async update(id: string, patch: Partial<TInput>, scope: RecordScope | null = null): Promise<T> {
+{% if memberships %}
+    await this.checkMemberScope(id, scope);
+{% endif %}
     const where = this.byId(id, scope);
 {% elif history %}
   /** Change a record. The entry of the change log has the action `action` (ADR 0040). */
@@ -718,6 +755,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if record_rules %}
   async remove(id: string, scope: RecordScope | null = null): Promise<void> {
 {% set where = "this.byId(id, scope)" %}
+{% if memberships %}
+    await this.checkMemberScope(id, scope);
+{% endif %}
 {% else %}
   async remove(id: string): Promise<void> {
 {% set where = "eq(this.table.id, id)" %}
@@ -1078,6 +1118,12 @@ export class Repository<T extends EntityRecord, TInput extends object>
     if (scope === null) {
       return undefined;
     }
+{% if memberships %}
+    if (scope.scopes !== undefined) {
+      // A membership gives the operation (ADR 0048): the records of its scopes.
+      return this.inScopes?.(scope.scopes) ?? inArray(this.table.id, []);
+    }
+{% endif %}
     const conditions = Object.entries(scope.where).map(([key, values]) => inArray(this.column(key), [...values]));
     if (scope.owner && this.belongsTo !== undefined) {
       conditions.push(this.belongsTo(scope.user));
@@ -1100,6 +1146,26 @@ export class Repository<T extends EntityRecord, TInput extends object>
     }
   }
 
+{% if memberships %}
+  /**
+   * Throw a ForbiddenError for a record in another scope of the memberships
+   * of the user (ADR 0048): the role of that scope does not give the
+   * operation. A record out of all scopes of the user does not exist.
+   */
+  private async checkMemberScope(id: string, scope: RecordScope | null): Promise<void> {
+    if (scope?.scopes === undefined || this.inScopes === undefined || !UUID.test(id)) {
+      return;
+    }
+    const db = getDb();
+    if ((await db.$count(this.table, and(eq(this.table.id, id), this.inScopes(scope.scopes)))) > 0) {
+      return;
+    }
+    if ((await db.$count(this.table, and(eq(this.table.id, id), this.inScopes(scope.memberOf ?? [])))) > 0) {
+      throw new ForbiddenError({{ tr(js("Your role in the scope of the record may not do this operation.")) }});
+    }
+  }
+
+{% endif %}
 {% endif %}
   private found(rows: Row[], id: string): Row[] {
     if (rows.length === 0) {

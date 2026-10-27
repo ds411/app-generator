@@ -24,6 +24,7 @@ from uuid import UUID
 {% endif %}
 from fastapi import Request
 {% if m %}
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 {% endif %}
@@ -162,6 +163,19 @@ async def member_scopes(
         roles = [role for role, operations in MEMBER_ROLES.items() if operation in operations]
         statement = statement.where({{ m.entity.name }}.{{ m.role.attr }}.in_(roles))
     return frozenset(await session.scalars(statement))
+
+
+class MemberPermissions(BaseModel):
+    """The operations that the memberships of a user give on the records of an entity (ADR 0048).
+
+    The front end shows the actions of these operations. The endpoints of
+    the operations check each request again.
+    """
+
+    operations: list[str]
+    """The operations that a membership gives in some scope."""
+    records: dict[str, list[str]]
+    """The operations on one record that a membership gives in the scope of each record."""
 
 
 async def check_access(request: Request, user: CurrentUser, session: SessionDep) -> None:

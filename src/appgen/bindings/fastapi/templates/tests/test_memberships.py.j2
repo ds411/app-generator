@@ -21,7 +21,8 @@ await anonymous_client.get(f"{path}{records[{{ index }}].id}", headers=headers)
 
 A user has one role in a {{ s.name }} record, another role in a second one,
 and no membership in a third one. An operation of the first role gives
-403 in the second record, and 404 in the third.
+403 in the second record, and 404 in the third. The permissions of the
+memberships give the operation on the first record only.
 """
 
 {% if paths %}
@@ -90,6 +91,14 @@ async def test_a_role_of_a_membership_gives_{{ op.name }}_in_its_scope(
 ) -> None:
     {{ py.call("headers, scopes, " ~ ("members" if members else "_") ~ " = await ", "_member", ["session", py.string(t.app_role), py.string(t.allowed), py.string(t.other)]) }}
     {{ t.records() }}
+
+    # The permissions of the memberships give the operation on the first record only.
+    ids = [str(record.id) for record in records]
+    {{ py.call("response = await ", "anonymous_client.get", ['"/permissions' ~ e.path ~ '"', 'params={"ids": ids}', "headers=headers"]) }}
+    assert response.status_code == 200, response.text
+    given = response.json()
+    assert "{{ op.name }}" in given["operations"]
+    assert ["{{ op.name }}" in given["records"][id] for id in ids] == [True, False, False]
 
     path = "{{ e.path }}{{ op.path | replace('{id}', '') }}"
     response = {{ call(op.kind, 0) }}

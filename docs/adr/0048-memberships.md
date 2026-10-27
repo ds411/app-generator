@@ -71,9 +71,25 @@ request that needs them: a query of the membership entity, filtered by
 the user and by the roles that give the operation. A change of a
 membership applies at the next request, without a new token.
 
-The front ends apply the memberships in a later change. Until
-then, they show the pages and the actions of the role of
-`access.roles` only, and the trace check reports the memberships.
+The Next.js app does the same checks in its server actions: they read
+the memberships of the user from the database in each call that needs
+them. The React app with mock data does them in the mock store, as a
+demonstration. The menus and the pages stay the pages of the role of
+`access.roles`: a membership gives operations, not pages.
+
+The UI shows an action of an operation that only a membership gives if
+the membership gives it on the records of the action. For an operation
+on one record (a read, a change, a delete, or a custom operation), the
+record must be in a scope whose role gives the operation. For a create
+or a list, some scope must give it. The data access of each entity of
+the scope has the call `permissions`: for the IDs of some records, it
+gives the operations of the memberships of the user in some scope, and
+on each record. The Next.js app has a server action for it, the FastAPI
+app the endpoint `GET /permissions/<entity>?ids=`, and the mock store
+reads its records. The UI asks once for the records of one render, keeps
+the answers, and forgets them after a change of the records of an
+entity of the scope or of the memberships. The server checks each call
+again.
 
 ## Consequences
 
@@ -85,6 +101,9 @@ then, they show the pages and the actions of the role of
   with few operations, and the memberships give the rest.
 - Each request that the memberships allow has one more query, or two
   for an operation on one record.
+- A page with records of an entity of the scope has one more request
+  for the permissions of the memberships, for a user whose role does not
+  give all operations of its actions.
 - A user has one role in a scope record at most if the app makes the
   pair of the user and the scope unique, for example with a unique rule.
   With two memberships in one scope, the roles add up.

@@ -9,14 +9,20 @@
 # search and its migration on Postgres (scripts/check_full_text_search.py),
 # the rate limit that two processes share in Redis
 # (scripts/check_shared_rate_limit.py), the live events that two
-# processes send through Redis (scripts/check_live_events.py),
+# processes send through Redis, and the users on a record that two
+# brokers know through Redis (scripts/check_live_events.py),
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
 # example, which has the sign-in, the sign-up, the roles, and a
-# provider, and check its code and run its tests. Last, generate
+# provider, and check its code and run its tests. Generate it again with
+# `auth.delivery: ses` (Amazon SES), and check its code and run its tests
+# on SQLite. Last, generate
 # tests/fixtures/provider-sign-in.yaml (only the sign-in with
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
+# Then generate tests/fixtures/cognito-sign-in.yaml (a user pool of
+# Amazon Cognito with Entra ID as its SAML provider), check it, and sign
+# in through the mock user pool of scripts/mock_oidc.py.
 # Then generate tests/fixtures/account-security.yaml (the verification
 # of the email address, the delivery hook of the messages, and the
 # second factor), and check its code and run its tests. Then generate
@@ -40,7 +46,13 @@
 # tests/fixtures/api-connections.yaml with its hand-written logic (an API
 # with the authorization code flow), check it, run its tests on Postgres
 # and SQLite, and connect a user at the mock OAuth server
-# (scripts/api_connection_test.py). Then generate tests/fixtures/totals.yaml
+# (scripts/api_connection_test.py). Then generate tests/fixtures/jira.yaml
+# (an API with HTTP Basic), check it, run its tests on SQLite, and call
+# the mock Jira API from the app (scripts/api_calls.py). Then generate
+# tests/fixtures/jira-accounts.yaml with its hand-written logic (an API
+# with HTTP Basic and the credentials of each user), check it, and run
+# its tests on Postgres and SQLite. Then generate
+# tests/fixtures/totals.yaml
 # (the totals of the relations in computed fields, and the compare rules
 # over totals), and check it and run its tests on Postgres and SQLite.
 # Then generate
@@ -64,11 +76,14 @@
 #
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The other apps go to the folders
-# "<output folder>-room-booking", "<output folder>-provider-sign-in",
+# "<output folder>-room-booking", "<output folder>-room-booking-ses",
+# "<output folder>-provider-sign-in",
+# "<output folder>-cognito-sign-in",
 # "<output folder>-account-security", "<output folder>-seed-data",
 # "<output folder>-record-rules", "<output folder>-webhooks",
 # "<output folder>-jobs", "<output folder>-files",
 # "<output folder>-inbound-email", "<output folder>-api-connections",
+# "<output folder>-jira", "<output folder>-jira-accounts",
 # "<output folder>-totals", "<output folder>-invoices",
 # "<output folder>-listings", "<output folder>-courses",
 # "<output folder>-places", "<output folder>-rate-limit" (the app of
@@ -90,6 +105,7 @@ set -eu
 definition=examples/project-tracker/app.yaml
 auth_definition=examples/room-booking/app.yaml
 provider_definition=tests/fixtures/provider-sign-in.yaml
+cognito_definition=tests/fixtures/cognito-sign-in.yaml
 security_definition=tests/fixtures/account-security.yaml
 seed_definition=tests/fixtures/seed-data.yaml
 rules_definition=tests/fixtures/record-rules.yaml
@@ -98,6 +114,8 @@ jobs_definition=tests/fixtures/jobs.yaml
 files_definition=tests/fixtures/files.yaml
 email_definition=tests/fixtures/inbound-email.yaml
 connections_definition=tests/fixtures/api-connections.yaml
+jira_definition=tests/fixtures/jira.yaml
+accounts_definition=tests/fixtures/jira-accounts.yaml
 totals_definition=tests/fixtures/totals.yaml
 invoices_definition=tests/fixtures/invoices.yaml
 listings_definition=tests/fixtures/listings.yaml
@@ -110,10 +128,12 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-room-booking-ses" "$out-room-booking-ses.yaml" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-jira" "$out-jira-accounts" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
 fi
 auth_out="$out-room-booking"
+ses_out="$out-room-booking-ses"
 provider_out="$out-provider-sign-in"
+cognito_out="$out-cognito-sign-in"
 security_out="$out-account-security"
 seed_out="$out-seed-data"
 rules_out="$out-record-rules"
@@ -122,6 +142,8 @@ jobs_out="$out-jobs"
 files_out="$out-files"
 email_out="$out-inbound-email"
 connections_out="$out-api-connections"
+jira_out="$out-jira"
+accounts_out="$out-jira-accounts"
 totals_out="$out-totals"
 invoices_out="$out-invoices"
 listings_out="$out-listings"
@@ -245,6 +267,26 @@ if section fastapi:room-booking; then
     uv run --locked scripts/check_provider_sign_in.py "$auth_definition" "$auth_out"
 fi
 
+if section fastapi:room-booking-ses; then
+    step "room booking with SES: generate in $ses_out"
+    rm -rf "$ses_out"
+    mkdir -p "$ses_out"
+    ses_definition="$ses_out.yaml"
+    sed 's/^  delivery: smtp$/  delivery: ses/' "$auth_definition" >"$ses_definition"
+    grep -q '^  delivery: ses$' "$ses_definition"
+    uv run --locked appgen generate "$ses_definition" -b fastapi -o "$ses_out" >/dev/null
+    uv run --locked appgen check "$ses_definition" "$ses_out"
+    cd "$ses_out"
+    step "room booking with SES: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
+
 if section fastapi:provider-sign-in; then
     step "generate $provider_definition in $provider_out"
     rm -rf "$provider_out"
@@ -261,6 +303,24 @@ if section fastapi:provider-sign-in; then
     cd "$root"
     step "provider sign-in: the sign-in with the mock provider"
     uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
+fi
+
+if section fastapi:cognito-sign-in; then
+    step "generate $cognito_definition in $cognito_out"
+    rm -rf "$cognito_out"
+    uv run --locked appgen generate "$cognito_definition" -b fastapi -o "$cognito_out" >/dev/null
+    uv run --locked appgen check "$cognito_definition" "$cognito_out"
+    cd "$cognito_out"
+    step "cognito sign-in: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "cognito sign-in: the sign-in with the mock user pool"
+    uv run --locked scripts/check_provider_sign_in.py "$cognito_definition" "$cognito_out"
 fi
 
 if section fastapi:account-security; then
@@ -422,6 +482,45 @@ if section fastapi:api-connections; then
     cd "$root"
     step "api connection test"
     uv run --locked scripts/api_connection_test.py "$connections_definition" --app "$connections_out"
+fi
+
+if section fastapi:jira; then
+    step "generate $jira_definition in $jira_out"
+    rm -rf "$jira_out"
+    uv run --locked appgen generate "$jira_definition" -b fastapi -o "$jira_out" >/dev/null
+    uv run --locked appgen check "$jira_definition" "$jira_out"
+    cd "$jira_out"
+    step "jira: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "jira: the calls of the mock Jira API with HTTP Basic"
+    uv run --locked scripts/api_calls.py fastapi "$jira_out" "$jira_definition"
+fi
+
+if section fastapi:jira-accounts; then
+    step "jira accounts: generate $accounts_definition in $accounts_out"
+    rm -rf "$accounts_out"
+    mkdir -p "$accounts_out"
+    cp -R tests/fixtures/jira-accounts/extensions/fastapi/. "$accounts_out"/
+    uv run --locked appgen generate "$accounts_definition" -b fastapi -o "$accounts_out" >/dev/null
+    uv run --locked appgen check "$accounts_definition" "$accounts_out"
+    cd "$accounts_out"
+    step "jira accounts: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "jira accounts: pytest"
+    uv run pytest -q
+    step "jira accounts: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
 fi
 
 if section fastapi:totals; then

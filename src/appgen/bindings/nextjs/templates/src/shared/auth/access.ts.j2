@@ -1,4 +1,6 @@
 {% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set m = memberships %}
+{% set member_table = nextjs.tables_by_entity[m.entity] if m else none %}
 {% set role = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.access.role_field].id) | first %}
 {{ trace_header(definition.access.id) }}
 import "server-only";
@@ -6,9 +8,25 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
+{% if m %}
+import type { MemberPermissions } from "@/shared/api";
+{% endif %}
 import type { PageName } from "@/shared/config/pages";
-import { getDb, {{ table.const }} } from "@/shared/db";
-{% if record_rules %}
+import { getDb, {{ ([table.const] + ([member_table.const] if m else [])) | unique | sort | join(", ") }} } from "@/shared/db";
+{% if m %}
+import {
+  MEMBER_OPERATIONS,
+  type Membership,
+  onRecord,
+  type RecordAction,
+  type RecordScope,
+  recordScopeOf,
+  roleMayCall,
+  roleMayOpenPage,
+  SCOPE_ENTITIES,
+  scopesOf,
+} from "@/shared/lib/permissions";
+{% elif record_rules %}
 import {
   type RecordAction,
   type RecordScope,
@@ -49,6 +67,31 @@ export async function currentRole(): Promise<string | null> {
   return userId === null ? null : roleOf(userId);
 }
 
+{% if m %}
+/** Return the memberships of a user (ADR 0048): the scope record of {{ m.scope }} and the role of each. */
+export async function membershipsOf(userId: string): Promise<Membership[]> {
+  const rows = await getDb()
+    .select({ scope: {{ member_table.const }}.{{ m.scope_key }}, role: {{ member_table.const }}.{{ m.role_key }} })
+    .from({{ member_table.const }})
+    .where(eq({{ member_table.const }}.{{ m.user_key }}, userId));
+  return rows.map((row) => ({ scope: row.scope, role: String(row.role) }));
+}
+
+/**
+ * Throw a ForbiddenError if the signed-in user may not call an operation.
+ * A role of a membership of the user (ADR 0048) also gives its operations,
+ * on the records of its scopes: the data access filters the records.
+ */
+export async function requireOperation(operation: string): Promise<void> {
+  const userId = await requireUser();
+  if (roleMayCall(await roleOf(userId), operation)) {
+    return;
+  }
+  if (MEMBER_OPERATIONS[operation] === undefined || scopesOf(await membershipsOf(userId), operation).length === 0) {
+    throw new ForbiddenError();
+  }
+}
+{% else %}
 /** Throw a ForbiddenError if the signed-in user may not call an operation. */
 export async function requireOperation(operation: string): Promise<void> {
   const role = await roleOf(await requireUser());
@@ -56,8 +99,61 @@ export async function requireOperation(operation: string): Promise<void> {
     throw new ForbiddenError();
   }
 }
+{% endif %}
 
-{% if record_rules %}
+{% if m %}
+/**
+ * Return the records that the signed-in user may use for an action on the
+ * records of an entity: the record rule of its role (ADR 0018, ADR 0025).
+ * If the role does not give the operation, a membership gives it (ADR 0048):
+ * the records of the scopes of the operation. The data access then uses
+ * only these records. Return null for all records.
+ */
+export async function recordScope(entity: string, action: RecordAction, operation?: string): Promise<RecordScope | null> {
+  const userId = await sessionUserId();
+  if (userId === null) {
+    return null;
+  }
+  const role = await roleOf(userId);
+  if (operation !== undefined && !roleMayCall(role, operation) && SCOPE_ENTITIES.includes(entity) && MEMBER_OPERATIONS[operation] !== undefined) {
+    const memberships = await membershipsOf(userId);
+    return { user: userId, owner: false, where: {}, scopes: scopesOf(memberships, operation), memberOf: memberships.map((item) => item.scope) };
+  }
+  return recordScopeOf(role, userId, entity, action);
+}
+
+/**
+ * Return the operations that the memberships of the signed-in user give on
+ * the records of an entity of the scope (ADR 0048): on some records, and on
+ * each record of the IDs. `inScopes` gives the IDs of the records in some
+ * scopes. The operations that the role gives are not part of the answer.
+ */
+export async function memberPermissions(
+  entity: string,
+  ids: string[],
+  inScopes: (ids: string[], scopes: readonly string[]) => Promise<Set<string>>,
+): Promise<MemberPermissions> {
+  const userId = await requireUser();
+  const role = await roleOf(userId);
+  const memberships = await membershipsOf(userId);
+  const records: Record<string, string[]> = Object.fromEntries(ids.map((id) => [id, []]));
+  const operations: string[] = [];
+  for (const [operation, owner] of Object.entries(MEMBER_OPERATIONS)) {
+    const scopes = scopesOf(memberships, operation);
+    if (owner !== entity || roleMayCall(role, operation) || scopes.length === 0) {
+      continue;
+    }
+    operations.push(operation);
+    if (onRecord(operation) && ids.length > 0) {
+      for (const id of await inScopes(ids, scopes)) {
+        records[id]?.push(operation);
+      }
+    }
+  }
+  return { operations, records };
+}
+
+{% elif record_rules %}
 /**
  * Return the records that the signed-in user may use for an action on the
  * records of an entity: the record rule of its role (ADR 0018, ADR 0025).

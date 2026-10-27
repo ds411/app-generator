@@ -5,18 +5,41 @@ authorization endpoint sends the browser back to the app with a code.
 The user is the email address in the parameter `login_hint` of the
 authorization request, or else `mock.user@example.com`. The ID tokens
 have the claims `sub`, `email`, `email_verified`, and `name`, and an RS256
-signature with a key that the provider makes when it starts.
+signature with a key that the provider makes when it starts. The
+parameter `groups` of the authorization request (a mock parameter, `a,b`)
+gives the groups of the user: the claim `groups`, a list. Its discovery
+document has an `end_session_endpoint` (`/logout`), which takes
+`client_id` and `post_logout_redirect_uri` (OpenID Connect RP-Initiated
+Logout), and sends the browser to that URL.
 
 The provider checks the client ID and the client secret (the basic
 scheme or the form), the redirect URI, the one-time code, and the PKCE
 verifier (S256). It uses only the standard library: the RSA key and the
 signatures are in pure Python.
 
+The same server also acts as a user pool of Amazon Cognito with a SAML
+identity provider (`COGNITO_IDP`, as Microsoft Entra ID): its issuer has
+the path of the user pool (`COGNITO_POOL`), and its authorization and
+token endpoints are under `/oauth2/` on another origin (`localhost` in
+place of `127.0.0.1`), as on the domain of a user pool. Its
+authorization endpoint refuses a request without the parameter
+`identity_provider` of the SAML provider. Its ID tokens have the
+claims of a federated user: `email_verified` is the text `"false"`,
+because no attribute of the SAML provider gives it, and the claims
+`cognito:username`, `cognito:groups`, and `identities` are there. The
+groups of the parameter `groups` are in the claim `custom:groups`, as the
+text `[a, b]`: a SAML attribute with more than one value (the groups of
+Entra ID) arrives in this form in a custom attribute of the user pool.
+As a real user pool, its discovery document has no `end_session_endpoint`:
+its logout endpoint `/logout` on the domain takes `client_id` and
+`logout_uri`. Both logout endpoints keep each request in `logouts`.
+
 Run it from the repository root:
 
     uv run scripts/mock_oidc.py [--port 9430] [--client-id ID] [--client-secret SECRET]
 
-The issuer is `http://127.0.0.1:<port>`. Stop it with Ctrl-C.
+The issuer is `http://127.0.0.1:<port>`, and the issuer of the user pool
+is `http://127.0.0.1:<port>/<COGNITO_POOL>`. Stop it with Ctrl-C.
 `scripts/check_provider_sign_in.py` starts it in a thread.
 """
 
@@ -39,6 +62,10 @@ DEFAULT_PORT = 9430
 DEFAULT_CLIENT_ID = "mock-client"
 DEFAULT_CLIENT_SECRET = "mock-client-secret"
 DEFAULT_EMAIL = "mock.user@example.com"
+COGNITO_POOL = "us-east-1_MockPool"
+"""The ID of the mock user pool: the path of its issuer."""
+COGNITO_IDP = "EntraID"
+"""The name of the SAML identity provider of the mock user pool."""
 TOKEN_SECONDS = 300
 # The DER prefix of a SHA-256 digest in a PKCS #1 v1.5 signature (RFC 8017, section 9.2).
 SHA256_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
@@ -111,9 +138,28 @@ class RsaKey:
         return {"kty": "RSA", "kid": kid, "use": "sig", "alg": "RS256", "n": _b64(n), "e": _b64(e)}
 
 
+def issuer_of(port: int, authorize_params: dict[str, str]) -> str:
+    """Return the mock issuer for a provider of a definition: the user pool for a provider
+    with the parameter `identity_provider`, else the plain provider."""
+    base = f"http://127.0.0.1:{port}"
+    return f"{base}/{COGNITO_POOL}" if "identity_provider" in authorize_params else base
+
+
+def sign_out_url_of(port: int, authorize_params: dict[str, str]) -> str:
+    """Return the mock logout URL for a provider of a definition: the logout endpoint on the
+    domain of the user pool, or the `end_session_endpoint` of the plain provider."""
+    if "identity_provider" in authorize_params:
+        return f"http://localhost:{port}/logout"
+    return f"http://127.0.0.1:{port}/logout"
+
+
 @dataclass
 class MockProvider:
-    """The state of the mock provider: the key, the client, and the open codes."""
+    """The state of the mock provider: the key, the client, and the open codes.
+
+    With `identity_provider`, the provider is the mock user pool of Amazon
+    Cognito: `endpoints` is the URL of the domain of the user pool.
+    """
 
     issuer: str
     client_id: str = DEFAULT_CLIENT_ID
@@ -121,13 +167,35 @@ class MockProvider:
     key: RsaKey = field(default_factory=RsaKey.generate)
     codes: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     lock: threading.Lock = field(default_factory=threading.Lock)
+    identity_provider: str | None = None
+    endpoints: str | None = None
+    cognito: MockProvider | None = None
+    """The mock user pool on the same server, for the plain provider."""
+    logouts: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+    """The query of each request to the logout endpoint."""
+
+    @property
+    def authorization_endpoint(self) -> str:
+        if self.endpoints:
+            return f"{self.endpoints}/oauth2/authorize"
+        return f"{self.issuer}/authorize"
+
+    @property
+    def token_endpoint(self) -> str:
+        return f"{self.endpoints}/oauth2/token" if self.endpoints else f"{self.issuer}/token"
+
+    @property
+    def jwks_uri(self) -> str:
+        return f"{self.issuer}/.well-known/jwks.json" if self.endpoints else f"{self.issuer}/jwks"
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        # A user pool has no end_session_endpoint in its discovery document.
+        logout = {} if self.endpoints else {"end_session_endpoint": f"{self.issuer}/logout"}
+        return logout | {
             "issuer": self.issuer,
-            "authorization_endpoint": f"{self.issuer}/authorize",
-            "token_endpoint": f"{self.issuer}/token",
-            "jwks_uri": f"{self.issuer}/jwks",
+            "authorization_endpoint": self.authorization_endpoint,
+            "token_endpoint": self.token_endpoint,
+            "jwks_uri": self.jwks_uri,
             "response_types_supported": ["code"],
             "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": ["RS256"],
@@ -146,6 +214,10 @@ class MockProvider:
         redirect_uri = query.get("redirect_uri", "")
         if not redirect_uri.startswith(("http://", "https://")):
             return 400, {"error": "invalid_request", "error_description": "No redirect_uri."}
+        if self.identity_provider and query.get("identity_provider") != self.identity_provider:
+            # A real user pool shows its own sign-in page with a button for each provider.
+            description = f"The mock user pool needs identity_provider={self.identity_provider}."
+            return 400, {"error": "invalid_request", "error_description": description}
         code = secrets.token_urlsafe(24)
         with self.lock:
             self.codes[code] = {
@@ -153,10 +225,23 @@ class MockProvider:
                 "challenge": query["code_challenge"],
                 "nonce": query.get("nonce", ""),
                 "email": query.get("login_hint") or DEFAULT_EMAIL,
+                "groups": query.get("groups", ""),
             }
         answer = {"code": code} | ({"state": query["state"]} if "state" in query else {})
         separator = "&" if "?" in redirect_uri else "?"
         return 302, f"{redirect_uri}{separator}{urlencode(answer)}"
+
+    def logout(self, query: dict[str, str]) -> tuple[int, dict[str, Any] | str]:
+        """End the session of the user, and send the browser to the page after the sign-out."""
+        name = "logout_uri" if self.endpoints else "post_logout_redirect_uri"
+        if query.get("client_id") != self.client_id:
+            return 400, {"error": "unauthorized_client"}
+        target = query.get(name, "")
+        if not target.startswith(("http://", "https://")):
+            return 400, {"error": "invalid_request", "error_description": f"No {name}."}
+        with self.lock:
+            self.logouts.append(query)
+        return 302, target
 
     def token(self, form: dict[str, str], authorization: str | None) -> tuple[int, dict[str, Any]]:
         """Change a code for an ID token."""
@@ -185,13 +270,14 @@ class MockProvider:
             "access_token": secrets.token_urlsafe(24),
             "token_type": "Bearer",
             "expires_in": TOKEN_SECONDS,
-            "id_token": self.id_token(flow["email"], flow["nonce"]),
+            "id_token": self.id_token(flow["email"], flow["nonce"], flow["groups"]),
         }
 
-    def id_token(self, email: str, nonce: str) -> str:
+    def id_token(self, email: str, nonce: str, groups: str = "") -> str:
+        """Return a signed ID token. `groups` is the parameter `groups`: `a,b`, or empty."""
         now = int(time.time())
         name = email.partition("@")[0].replace(".", " ").title()
-        claims = {
+        claims: dict[str, Any] = {
             "iss": self.issuer,
             "sub": hashlib.sha256(email.encode()).hexdigest()[:24],
             "aud": self.client_id,
@@ -202,13 +288,42 @@ class MockProvider:
             "email_verified": True,
             "name": name,
         }
+        group_list = [group for group in groups.split(",") if group]
+        if group_list:
+            claims["groups"] = group_list
+        if self.identity_provider:
+            pool = self.issuer.rpartition("/")[2]
+            claims |= {
+                "email_verified": "false",
+                "cognito:username": f"{self.identity_provider}_{email}",
+                "cognito:groups": [f"{pool}_{self.identity_provider}"],
+                "identities": [
+                    {
+                        "userId": email,
+                        "providerName": self.identity_provider,
+                        "providerType": "SAML",
+                        "issuer": "https://sts.windows.net/mock-tenant/",
+                        "primary": "true",
+                        "dateCreated": str(now * 1000),
+                    }
+                ],
+                "token_use": "id",
+                "auth_time": now,
+            }
+            if group_list:
+                del claims["groups"]
+                claims["custom:groups"] = f"[{', '.join(group_list)}]"
         header = {"alg": "RS256", "typ": "JWT", "kid": "mock-key"}
         parts = [json.dumps(part, separators=(",", ":")).encode() for part in (header, claims)]
         signing_input = ".".join(_b64(part) for part in parts).encode()
         return f"{signing_input.decode()}.{_b64(self.key.sign(signing_input))}"
 
 
-def _handler(provider: MockProvider) -> type[BaseHTTPRequestHandler]:
+def _handler(plain: MockProvider) -> type[BaseHTTPRequestHandler]:
+    pool = plain.cognito
+    assert pool is not None
+    prefix = f"/{COGNITO_POOL}"
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
             pass
@@ -231,23 +346,33 @@ def _handler(provider: MockProvider) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             url = urlsplit(self.path)
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
-            if url.path == "/.well-known/openid-configuration":
+            provider, path = plain, url.path
+            if url.path.startswith("/oauth2/"):
+                provider = pool
+            elif url.path.startswith(prefix + "/"):
+                provider, path = pool, url.path.removeprefix(prefix)
+            if path == "/.well-known/openid-configuration":
                 self._answer(200, provider.metadata())
-            elif url.path == "/jwks":
+            elif path in ("/jwks", "/.well-known/jwks.json"):
                 self._answer(200, {"keys": [provider.key.jwk("mock-key")]})
-            elif url.path == "/authorize":
+            elif path in ("/authorize", "/oauth2/authorize"):
                 self._answer(*provider.authorize(query))
+            elif path == "/logout":
+                # The logout endpoint of the user pool takes `logout_uri`.
+                self._answer(*(pool if "logout_uri" in query else plain).logout(query))
             else:
                 self._answer(404, {"error": "not_found"})
 
         def do_POST(self) -> None:
-            if urlsplit(self.path).path != "/token":
+            path = urlsplit(self.path).path
+            providers = {"/token": plain, "/oauth2/token": pool}
+            if path not in providers:
                 self._answer(404, {"error": "not_found"})
                 return
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode()
             form = {k: v[0] for k, v in parse_qs(body).items()}
-            self._answer(*provider.token(form, self.headers.get("Authorization")))
+            self._answer(*providers[path].token(form, self.headers.get("Authorization")))
 
     return Handler
 
@@ -258,8 +383,20 @@ def serving(
     client_id: str = DEFAULT_CLIENT_ID,
     client_secret: str = DEFAULT_CLIENT_SECRET,
 ) -> Generator[MockProvider]:
-    """Run the mock provider in a thread, and stop it at the end."""
-    provider = MockProvider(f"http://127.0.0.1:{port}", client_id, client_secret)
+    """Run the mock provider and the mock user pool in a thread, and stop them at the end."""
+    # One key for both: a key in pure Python takes some seconds.
+    key = RsaKey.generate()
+    pool = MockProvider(
+        f"http://127.0.0.1:{port}/{COGNITO_POOL}",
+        client_id,
+        client_secret,
+        key=key,
+        identity_provider=COGNITO_IDP,
+        endpoints=f"http://localhost:{port}",
+    )
+    provider = MockProvider(
+        f"http://127.0.0.1:{port}", client_id, client_secret, key=key, cognito=pool
+    )
     server = ThreadingHTTPServer(("127.0.0.1", port), _handler(provider))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -277,7 +414,9 @@ def main() -> None:
     parser.add_argument("--client-secret", default=DEFAULT_CLIENT_SECRET)
     args = parser.parse_args()
     with serving(args.port, args.client_id, args.client_secret) as provider:
+        assert provider.cognito is not None
         print(f"mock-oidc: the issuer {provider.issuer} is ready.", flush=True)
+        print(f"mock-oidc: the issuer {provider.cognito.issuer} (user pool) is ready.", flush=True)
         with suppress(KeyboardInterrupt):
             threading.Event().wait()
 

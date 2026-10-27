@@ -304,6 +304,9 @@ class Page(Element):
     share: bool = False
     """True if a user that may change the record of a detail page makes a secret link of it
     (ADR 0049). A guest opens the link without a sign-in, and sees the record read-only."""
+    presence: bool = False
+    """True if a detail page shows the other signed-in users on the page of the same record, and
+    a note when one of them types in a form (ADR 0052). The entity of the view is live."""
 
     @property
     def shared_path(self) -> str:

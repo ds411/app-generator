@@ -1,12 +1,15 @@
 // The front ends show the values of the signed-in user (M36): the value
 // `$me` of the filters of the widgets and the views, of the totals, and of
 // the defaults of the forms. A user shares a record with a secret link
-// (ADR 0049). scripts/sessions_ui_test.py starts the app of
-// tests/fixtures/courses.yaml, and runs this file. Without the values of
-// the users (`expected.sessions`), the tests skip.
+// (ADR 0049). The page of a record shows the other users on it, in two
+// browsers (ADR 0052). The actions of a page follow the role of the user
+// in the scope of the record (ADR 0048). scripts/sessions_ui_test.py
+// starts the app of tests/fixtures/courses.yaml, and runs this file.
+// Without the values of the users (`expected.sessions`), the tests skip.
 import { expect, type Page, test } from "@playwright/test";
 
 import { expected } from "./expected";
+import { saveAndClose } from "./forms";
 
 const sessions = expected.sessions;
 
@@ -130,4 +133,107 @@ test("a guest opens the secret link of a record without a sign-in", async ({ pag
   await page.goto(link.pathname);
   await expect(page.getByText(share.invalid, { exact: true })).toBeVisible();
   await expect(heading).toHaveCount(0);
+});
+
+test("the page of a record shows the other users on it, and their typing", async ({ page, browser }, testInfo) => {
+  const presence = sessions?.presence;
+  test.skip(!presence || testInfo.project.name !== "light", "The app has no page with `presence`.");
+  if (!presence) return;
+  test.setTimeout(120_000);
+  const password = sessions?.password ?? "";
+  const heading = (on: Page) => on.getByRole("heading", { name: presence.title, exact: true });
+  const users = (on: Page) => on.getByRole("list", { name: "Other users on this page" });
+  const typing = page.getByText(`${presence.admin.name} is typing.`, { exact: true });
+
+  // The member opens the record in the first browser, and sees no other user. The test of
+  // the secret links leaves the admin on the page: the server forgets the admin some seconds
+  // after the last call.
+  await signIn(page, presence.member.username, password);
+  await page.goto(presence.path);
+  await expect(heading(page)).toBeVisible();
+  await expect(users(page)).toHaveCount(0, { timeout: 30_000 });
+
+  // The admin opens it in a second browser: each browser shows the other user.
+  const other = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    colorScheme: testInfo.project.use.colorScheme,
+    locale: "en-US",
+    timezoneId: "UTC",
+  });
+  const admin = await other.newPage();
+  try {
+    await signIn(admin, presence.admin.username, password);
+    await admin.goto(presence.path);
+    await expect(heading(admin)).toBeVisible();
+    await expect(users(page)).toContainText(presence.admin.initials);
+    await expect(users(page)).toContainText(presence.admin.name);
+    await expect(users(admin)).toContainText(presence.member.name);
+
+    // The admin types in the form of the button "Edit": the member sees a note, which ends
+    // some seconds after the last input.
+    await admin.getByRole("button", { name: "Edit", exact: true }).first().click();
+    const field = admin.getByRole("dialog").getByRole("textbox", { name: /^Title/ }).first();
+    await field.pressSequentially(" draft", { delay: 50 });
+    await expect(typing).toBeVisible();
+    await expect(typing).toBeHidden();
+    await admin.keyboard.press("Escape");
+
+    // The admin goes to another page: the member sees no other user.
+    await admin.getByRole("link", { name: presence.away.label, exact: true }).first().click();
+    await expect.poll(() => new URL(admin.url()).pathname).toBe(presence.away.path);
+    await expect(users(page)).toHaveCount(0);
+
+    // The admin comes back, and closes the browser: the server forgets the admin at the
+    // latest some seconds after the last call.
+    await admin.goto(presence.path);
+    await expect(users(page)).toContainText(presence.admin.name);
+  } finally {
+    await other.close();
+  }
+  await expect(users(page)).toHaveCount(0, { timeout: 30_000 });
+});
+
+test("the actions of a page follow the role of the user in the scope of the record", async ({ page }, testInfo) => {
+  const memberships = sessions?.memberships;
+  test.skip(!memberships || testInfo.project.name !== "light", "The app has no memberships.");
+  if (!memberships) return;
+  const password = sessions?.password ?? "";
+  const { record, create } = memberships;
+  const [allowed, denied] = record.pages;
+  if (!allowed || !denied) throw new Error("The test needs two records.");
+  const button = page.getByRole("button", { name: record.label, exact: true });
+
+  // The role of the scope of the first record gives the change: the button shows, and the save passes.
+  await signIn(page, record.username, password);
+  await page.goto(allowed.path);
+  await expect(page.getByRole("heading", { name: allowed.title, exact: true })).toBeVisible();
+  await expect(button).toBeVisible();
+  const sheet = page.getByRole("dialog");
+  await expect(async () => {
+    if (!(await sheet.isVisible())) {
+      await button.click({ timeout: 2_000 });
+    }
+    await expect(sheet).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+  await saveAndClose(sheet);
+
+  // The role of the scope of the second record does not give the change.
+  await page.goto(denied.path);
+  await expect(page.getByRole("heading", { name: denied.title, exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(button).toHaveCount(0);
+  await signOut(page);
+
+  // A role of a membership gives the create to one user, and no role gives it to the other.
+  const createButton = page.getByRole("button", { name: create.label, exact: true });
+  await signIn(page, create.shown, password);
+  await page.goto(create.path);
+  await expect(page.locator("h1").first()).toHaveText(create.title);
+  await expect(createButton).toBeVisible();
+  await signOut(page);
+  await signIn(page, create.hidden, password);
+  await page.goto(create.path);
+  await expect(page.locator("h1").first()).toHaveText(create.title);
+  await page.waitForLoadState("networkidle");
+  await expect(createButton).toHaveCount(0);
 });

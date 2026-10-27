@@ -180,7 +180,8 @@ def test_the_reader_gives_the_title_the_server_and_the_operation_ids(tmp_path: P
 
     assert document.hash.startswith("sha256:")
     assert document.security_schemes["token"].scheme == "bearer"
-    assert [n for n, s in document.security_schemes.items() if s.supported] == ["key", "token"]
+    supported = [n for n, s in document.security_schemes.items() if s.supported]
+    assert supported == ["key", "token", "basic"]
 
 
 def test_the_selection_keeps_only_the_schemas_that_the_operations_need(tmp_path: Path) -> None:
@@ -199,6 +200,32 @@ def test_the_selection_keeps_only_the_schemas_that_the_operations_need(tmp_path:
     assert add_pet.body_required
     assert add_pet.status == "201"
     assert add_pet.example == {"id": "p1", "name": "Rex", "kind": "dog"}
+
+
+def test_an_example_of_a_json_answer_can_be_json_text(tmp_path: Path) -> None:
+    # The document of Jira Cloud gives each example as a string with the JSON text.
+    document = copy.deepcopy(DOCUMENT)
+    added = document["paths"]["/pets"]["post"]["responses"]["201"]["content"]
+    added["application/json"].pop("examples")
+    added["application/json"]["example"] = '{"id": "p2", "name": "Tom"}'
+
+    spec = read_document(write_document(tmp_path, document)).select(["addPet"])
+    assert spec.operations[0].example == {"id": "p2", "name": "Tom"}
+
+    # A string that is not JSON text gives the sample of the schema.
+    added["application/json"]["example"] = "Tom"
+    spec = read_document(write_document(tmp_path, document)).select(["addPet"])
+    assert spec.operations[0].example == {"id": "string", "name": "string"}
+
+
+def test_a_string_example_of_a_string_answer_stays_a_string(tmp_path: Path) -> None:
+    document = copy.deepcopy(DOCUMENT)
+    content = document["paths"]["/pets"]["post"]["responses"]["201"]["content"]
+    content["application/json"] = {"schema": {"type": "string"}, "example": '{"id": "p2"}'}
+
+    spec = read_document(write_document(tmp_path, document)).select(["addPet"])
+
+    assert spec.operations[0].example == '{"id": "p2"}'
 
 
 def test_the_normal_form_names_each_object_schema(tmp_path: Path) -> None:
@@ -397,7 +424,29 @@ def test_a_document_must_be_a_local_file(tmp_path: Path) -> None:
         ("{ scheme: key, env: PETS_API_KEY }", []),
         ("{ scheme: token, env: PETS_TOKEN }", []),
         ("{ scheme: keys, env: PETS_API_KEY }", [("unknown-reference", "apis.pets")]),
-        ("{ scheme: basic, env: PETS_PASSWORD }", [("unsuitable-security", "apis.pets")]),
+        ("{ scheme: basic, username_env: PETS_USER, env: PETS_PASSWORD }", []),
+        ("{ scheme: basic, env: PETS_PASSWORD }", [("missing-key", "apis.pets")]),
+        ("{ scheme: basic, username_env: PETS_USER }", [("missing-key", "apis.pets")]),
+        (
+            "{ scheme: basic, username_env: PETS_USER, env: PETS_PASSWORD, scopes: [a] }",
+            [("invalid-option", "apis.pets")],
+        ),
+        (
+            "{ scheme: key, username_env: PETS_USER, env: PETS_KEY }",
+            [("invalid-option", "apis.pets")],
+        ),
+        (
+            "{ scheme: basic, username_env: DATABASE_URL, env: PETS_PASSWORD }",
+            [("reserved-name", "apis.pets")],
+        ),
+        (
+            "{ scheme: basic, username_env: NEXT_PUBLIC_PETS_USER, env: PETS_PASSWORD }",
+            [("reserved-name", "apis.pets")],
+        ),
+        (
+            "{ scheme: basic, username_env: PETS_PASSWORD, env: PETS_PASSWORD }",
+            [("duplicate-name", "apis.pets")],
+        ),
         ("{ scheme: cookie, env: PETS_SESSION }", [("unsuitable-security", "apis.pets")]),
         ("{ scheme: key, env: PETS_API_URL }", [("duplicate-name", "apis.pets")]),
         ("{ scheme: key, env: DATABASE_URL }", [("reserved-name", "apis.pets")]),

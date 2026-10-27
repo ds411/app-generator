@@ -1,6 +1,13 @@
 {{ trace_header(*(py_connections | map(attribute="id"))) }}
 {% set u = py.entity(definition.auth.user_entity) %}
+{% set oauth = py_connections | rejectattr("user_basic") | list %}
+{% set basic = py_connections | selectattr("user_basic") | list %}
+{% if basic %}
+"""The connections of the users to the APIs that the app calls in their name (ADR 0033).
+{% else %}
 """The connections of the users to the APIs with the authorization code flow (ADR 0033).
+{% endif %}
+{% if oauth %}
 
 A user connects an account of a third-party service, and the app calls
 the API of the service with the access token of the user. `POST
@@ -20,40 +27,62 @@ verifier is an HMAC of the nonce, so no URL has it. With `return_to`, the
 callback sends the browser back to the page with `#connected=<api>` or
 `#error=...` in the fragment of the URL. Without `return_to`, the callback
 returns the connection as JSON.
+{% endif %}
+{% if basic %}
+
+An API with HTTP Basic and `per_user` takes the user name and the password
+of each user, for example the email address and an API token of Jira.
+`POST /auth/connections/<api>` with the credentials calls the check
+operation of the API with them, if the API has one, and keeps them in the
+table `api_connections`: the password encrypted with a key from
+`AUTH_SECRET`. No answer contains the password. A client of the API sends
+the credentials of the user (`UserCredentials`). After an answer with the
+status 401, the connection is rejected: the user gives new credentials.
+{% endif %}
 """
 
 {{ py.imports(
-    ["import asyncio", "import base64", "import datetime as dt", "import hashlib", "import hmac",
-     "import secrets", "import time",
+    ["import base64", "import datetime as dt", "import hashlib", "import hmac", "import secrets",
      "from collections.abc import AsyncIterator",
      "from dataclasses import dataclass",
-     "from typing import Annotated, Any, Literal",
-     "from urllib.parse import quote, urlencode, urlsplit",
      "from uuid import UUID, uuid4",
      "import httpx",
      "from cryptography.exceptions import InvalidTag",
      "from cryptography.hazmat.primitives.ciphers.aead import AESGCM",
-     "from fastapi import APIRouter, Depends, Query, Request, Response",
-     "from fastapi.responses import RedirectResponse",
-     "from pydantic import BaseModel, Field",
+     py.from_import("fastapi", ["APIRouter", "Depends", "Request", "Response"] + (["Query"] if oauth else [])),
+     py.from_import("pydantic", ["BaseModel"] + (["Field"] if oauth or basic else [])),
      py.from_import("sqlalchemy", ["BigInteger", "DateTime", "ForeignKey", "String", "Text", "UniqueConstraint", "func", "select"]),
      "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
      "from sqlalchemy.orm import Mapped, mapped_column",
-     "from app.core.auth import CurrentUser, sign, signing_key, unsign",
+     py.from_import("app.core.auth", ["CurrentUser"] + (["sign", "signing_key", "unsign"] if oauth else [])),
      "from app.core.config import Settings",
      "from app.core.db import Base, SessionDep, commit",
      "from app.core.errors import ProblemError, problem_responses",
-     "from app.integrations.http import ApiError"]
+     py.from_import("app.integrations.http", (["ApiError"] if oauth else []) + (["basic_authorization"] if basic else []))]
+    + (["import asyncio", "import time", "from typing import Annotated, Any, Literal",
+        "from urllib.parse import quote, urlencode, urlsplit",
+        "from fastapi.responses import RedirectResponse"] if oauth else
+       ["from typing import Annotated, Literal"])
     + (["from app.core.i18n import t"] if py.translated else [])
 ) }}
+{% if oauth %}
 
 FLOW_SECONDS = 600
 """The time that a user has to allow the access at the authorization server."""
 EARLY_SECONDS = 30
 """A client gets a new access token this time before the token ends."""
+{% endif %}
 
 ApiName = Literal[{{ py_connections | map(attribute="connection_name") | map("tojson") | join(", ") }}]
+{% if basic %}
+"""The APIs that the users connect, in the paths of the connections."""
+{% else %}
 """The APIs with the authorization code flow, in the paths of the connections."""
+{% endif %}
+{% if oauth and basic %}
+FlowApiName = Literal[{{ oauth | map(attribute="connection_name") | map("tojson") | join(", ") }}]
+"""The APIs with the authorization code flow, in the paths of the connections."""
+{% endif %}
 NAMES: dict[str, str] = {
 {% for api in py_connections %}
     {{ api.connection_name | tojson }}: {{ api.name | tojson }},
@@ -66,6 +95,11 @@ TITLES: dict[str, str] = {
 {% endfor %}
 }
 """The title of each API, by its name in the definition."""
+{% if basic %}
+BASIC_APIS = frozenset({ {{- basic | map(attribute="name") | map("tojson") | join(", ") -}} })
+"""The APIs with HTTP Basic and the credentials of each user, by their names in the definition."""
+{% endif %}
+{% if oauth %}
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +129,7 @@ class OAuthApp:
 def oauth_app(settings: Settings, api: str) -> OAuthApp:
     """Return the client of the app at the authorization server of an API."""
     apps = {
-{% for api in py_connections %}
+{% for api in oauth %}
         {{ trace(api.id) }}
         {{ api.name | tojson }}: OAuthApp(
             api={{ api.name | tojson }},
@@ -110,10 +144,44 @@ def oauth_app(settings: Settings, api: str) -> OAuthApp:
 {% endfor %}
     }
     return apps[api]
+{% endif %}
+{% if basic %}
+
+
+@dataclass(frozen=True, slots=True)
+class BasicApi:
+    """An API with HTTP Basic and the credentials of each user, with its settings."""
+
+    api: str
+    """The name of the API in the definition."""
+    base_url: str
+    check: tuple[str, str] | None
+    """The method and the path of the operation that checks new credentials, or None."""
+
+
+def basic_api(settings: Settings, api: str) -> BasicApi:
+    """Return an API with HTTP Basic and the credentials of each user."""
+    apis = {
+{% for api in basic %}
+        {{ trace(api.id) }}
+        {{ api.name | tojson }}: BasicApi(
+            api={{ api.name | tojson }},
+            base_url=settings.{{ api.url_setting }},
+            check={{ "(" ~ (api.check_method | tojson) ~ ", " ~ (api.check_path | tojson) ~ ")" if api.check_method else "None" }},
+        ),
+{% endfor %}
+    }
+    return apis[api]
+{% endif %}
 
 
 class ApiConnection(Base):
+{% if basic %}
+    """The tokens or the credentials of a user for an API, encrypted with a key from
+    `AUTH_SECRET`."""
+{% else %}
     """The tokens of a user for an API, encrypted with a key from `AUTH_SECRET`."""
+{% endif %}
 
     __tablename__ = "api_connections"
     __table_args__ = (UniqueConstraint("user_id", "api", name="uq_api_connections_user_id_api"),)
@@ -123,18 +191,54 @@ class ApiConnection(Base):
     api: Mapped[str] = mapped_column(String(100))
     """The name of the API in the definition."""
     access_token: Mapped[str] = mapped_column(Text)
+{% if basic %}
+    """The access token, or the password of HTTP Basic."""
+{% endif %}
     refresh_token: Mapped[str | None] = mapped_column(Text)
     """The refresh token, or None if the authorization server gave none."""
     expires_at: Mapped[int | None] = mapped_column(BigInteger)
     """The time (in seconds) at which the access token ends, or None if the server gave no time."""
     scope: Mapped[str] = mapped_column(Text)
     """The scopes that the user allowed, with spaces between."""
+{% if basic %}
+    username: Mapped[str | None] = mapped_column(String(320))
+    """HTTP Basic: the user name, or None for a token."""
+    rejected_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    """HTTP Basic: the time at which the API did not accept the credentials, or None."""
+{% endif %}
     connected_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
 
 class NotConnectedError(ProblemError):
+{% if basic %}
+    """The user has no connection to an API, or the API did not accept its credentials (409):
+    the user connects an account first."""
+
+    def __init__(self, api: str, *, rejected: bool = False) -> None:
+{% if py.translated %}
+        if rejected:
+            message = t(
+                "The API {api} did not accept the credentials of the account. "
+                "Connect the account again.",
+                api=api,
+            )
+        else:
+            message = t("Connect an account of the API {api} first.", api=api)
+{% else %}
+        if rejected:
+            message = (
+                f"The API {api} did not accept the credentials of the account. "
+                "Connect the account again."
+            )
+        else:
+            message = f"Connect an account of the API {api} first."
+{% endif %}
+        super().__init__(409, message)
+        self.api = api
+        self.rejected = rejected
+{% else %}
     """The user has no connection to an API (409): the user connects an account first."""
 
     def __init__(self, api: str) -> None:
@@ -144,6 +248,8 @@ class NotConnectedError(ProblemError):
         super().__init__(409, f"Connect an account of the API {api} first.")
 {% endif %}
         self.api = api
+{% endif %}
+{% if oauth %}
 
 
 class GrantError(Exception):
@@ -157,6 +263,7 @@ class TokenAnswer(BaseModel):
     refresh_token: str | None = None
     expires_in: int | None = None
     scope: str | None = None
+{% endif %}
 
 
 def encryption_key(settings: Settings) -> bytes:
@@ -190,6 +297,7 @@ def _context(connection: ApiConnection, column: str) -> str:
     return f"{connection.api}.{connection.user_id}.{column}"
 
 
+{% if oauth %}
 def store(key: bytes, connection: ApiConnection, answer: TokenAnswer) -> None:
     """Keep the tokens of an answer of the token endpoint in a connection."""
     connection.access_token = seal(key, answer.access_token, _context(connection, "access_token"))
@@ -204,6 +312,7 @@ def store(key: bytes, connection: ApiConnection, answer: TokenAnswer) -> None:
         connection.scope = answer.scope
 
 
+{% endif %}
 async def find_connection(
     session: AsyncSession, api: str, user_id: UUID, *, lock: bool = False
 ) -> ApiConnection | None:
@@ -216,6 +325,23 @@ async def find_connection(
     return await session.scalar(statement)
 
 
+{% if basic %}
+async def connected(session: AsyncSession, api: str, user_id: UUID | None) -> bool:
+    """Return True if the user has a connection to the API, and the API did not reject it."""
+    if user_id is None:
+        return False
+    connection = await find_connection(session, api, user_id)
+    return connection is not None and connection.rejected_at is None
+
+
+async def require_connection(session: AsyncSession, api: str, user_id: UUID) -> None:
+    """Give 409 if the user has no connection to the API, or the API rejected it."""
+    connection = await find_connection(session, api, user_id)
+    if connection is None:
+        raise NotConnectedError(api)
+    if connection.rejected_at is not None:
+        raise NotConnectedError(api, rejected=True)
+{% else %}
 async def connected(session: AsyncSession, api: str, user_id: UUID | None) -> bool:
     """Return True if the user has a connection to the API."""
     return user_id is not None and await find_connection(session, api, user_id) is not None
@@ -225,6 +351,8 @@ async def require_connection(session: AsyncSession, api: str, user_id: UUID) -> 
     """Give 409 if the user has no connection to the API."""
     if not await connected(session, api, user_id):
         raise NotConnectedError(api)
+{% endif %}
+{% if oauth %}
 
 
 async def request_tokens(
@@ -348,15 +476,81 @@ class UserToken:
             return await request_tokens(http, app, app.refresh_url, data)
         except GrantError:
             return None
+{% endif %}
+{% if basic %}
+
+
+class UserCredentials:
+    """The user name and the password of a user for an API with HTTP Basic: the token source
+    of a client.
+
+    The source reads the credentials of the user in the table `api_connections`, and gives the
+    Base64 of `<user name>:<password>` (RFC 7617): the client sends it with the scheme
+    `Basic`. If the API does not accept the credentials (401), the source marks the connection
+    as rejected, and the user gives new credentials.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        api: str,
+        sessions: async_sessionmaker[AsyncSession],
+        user_id: UUID | None,
+    ) -> None:
+        self.settings = settings
+        self.api = api
+        self.sessions = sessions
+        self.user_id = user_id
+        self._rejected: str | None = None
+
+    async def get(self, http: httpx.AsyncClient) -> str:
+        """Return the credentials of the user. Raise NotConnectedError without a connection, or
+        when the API did not accept the credentials."""
+        if self.user_id is None:
+            raise NotConnectedError(self.api)
+        key = encryption_key(self.settings)
+        async with self.sessions() as session:
+            connection = await find_connection(session, self.api, self.user_id)
+            if connection is None:
+                raise NotConnectedError(self.api)
+            value = self._value(key, connection)
+            if value is None or value == self._rejected:
+                # The API did not accept the credentials, or a new AUTH_SECRET ended them.
+                if connection.rejected_at is None:
+                    connection.rejected_at = dt.datetime.now(dt.UTC)
+                    await session.commit()
+                raise NotConnectedError(self.api, rejected=True)
+        return value
+
+    def reset(self, token: str) -> None:
+        """Keep credentials that the API did not accept: `get` rejects the connection."""
+        self._rejected = token
+
+    @staticmethod
+    def _value(key: bytes, connection: ApiConnection) -> str | None:
+        """Return the Base64 of the credentials of a connection, or None if it is rejected."""
+        if connection.rejected_at is not None or connection.username is None:
+            return None
+        password = unseal(key, connection.access_token, _context(connection, "access_token"))
+        if password is None:
+            return None
+        return base64.b64encode(f"{connection.username}:{password}".encode()).decode()
+{% endif %}
 
 
 async def connection_client() -> AsyncIterator[httpx.AsyncClient]:
+{% if basic %}
+    """The HTTP client for the requests to the token endpoints and to the checks of the
+    credentials. The tests replace it."""
+{% else %}
     """The HTTP client for the requests to the token endpoints. The tests replace it."""
+{% endif %}
     async with httpx.AsyncClient(timeout=10) as client:
         yield client
 
 
 ConnectionClient = Annotated[httpx.AsyncClient, Depends(connection_client)]
+{% if oauth %}
 
 
 class ConnectionStart(BaseModel):
@@ -371,33 +565,78 @@ class AuthorizationLink(BaseModel):
 
     authorization_url: str
     """Send the browser to this URL."""
+{% endif %}
+{% if basic %}
+
+
+class ConnectionCredentials(BaseModel):
+    """The user name and the password of an account of an API with HTTP Basic."""
+
+    username: str = Field(min_length=1, max_length=320)
+    """The user name, for Jira the email address of the account."""
+    password: str = Field(min_length=1, max_length=2000)
+    """The password, for Jira an API token. No answer contains it."""
+{% endif %}
 
 
 class ConnectionRead(BaseModel):
+{% if basic %}
+    """An API that the users connect, and the connection of the signed-in user."""
+{% else %}
     """An API with the authorization code flow, and the connection of the signed-in user."""
+{% endif %}
 
     api: str
     """The name of the API in the paths of the connections."""
     title: str
+{% if basic %}
+    kind: Literal["oauth", "basic"]
+    """`oauth`: the authorization code flow. `basic`: the user name and the password of the
+    user."""
+{% endif %}
     connected: bool
+{% if oauth %}
     scope: str | None = None
     """The scopes that the user allowed, with spaces between."""
+{% endif %}
+{% if basic %}
+    username: str | None = None
+    """HTTP Basic: the user name of the connection. No answer contains the password."""
+    rejected: bool = False
+    """HTTP Basic: True if the API did not accept the credentials. The user gives new ones."""
+{% endif %}
     connected_at: dt.datetime | None = None
 
 
 def _read(api: str, connection: ApiConnection | None) -> ConnectionRead:
     name = NAMES[api]
+{% if basic %}
+    kind: Literal["oauth", "basic"] = "basic" if name in BASIC_APIS else "oauth"
+    if connection is None:
+        return ConnectionRead(api=api, title=TITLES[name], kind=kind, connected=False)
+{% else %}
     if connection is None:
         return ConnectionRead(api=api, title=TITLES[name], connected=False)
+{% endif %}
     return ConnectionRead(
         api=api,
         title=TITLES[name],
+{% if basic %}
+        kind=kind,
+{% endif %}
         connected=True,
+{% if oauth %}
         scope=connection.scope,
+{% endif %}
+{% if basic %}
+        username=connection.username,
+        rejected=connection.rejected_at is not None,
+{% endif %}
         connected_at=connection.connected_at,
     )
 
 
+{% if oauth %}
 def callback_url(request: Request, api: str) -> str:
     """Return the URL that the authorization server sends the browser back to."""
     public_url: str = request.app.state.settings.public_url
@@ -424,15 +663,95 @@ def _with_fragment(url: str, values: dict[str, Any]) -> str:
     return f"{url.partition('#')[0]}#{urlencode(values)}"
 
 
+{% endif %}
+{% if basic %}
+async def check_credentials(
+    http: httpx.AsyncClient, target: BasicApi, username: str, password: str
+) -> None:
+    """Call the check operation of an API with new credentials, if the API has one.
+
+    Give 422 if the API does not accept them (401 or 403), and 502 if it
+    gives another error or no answer.
+    """
+    if target.check is None:
+        return
+    method, path = target.check
+    url = target.base_url.rstrip("/") + path
+    headers = {
+        "Accept": "application/json",
+        "Authorization": basic_authorization(username, password),
+    }
+    try:
+        response = await http.request(method, url, headers=headers)
+    except httpx.HTTPError:
+        response = None
+    if response is not None and response.status_code in (401, 403):
+        {{ py.problem(422, "The API {api} did not accept the user name and the password.", 8, api="target.api") }}
+    if response is None or response.is_error:
+        {{ py.problem(502, "The API {api} gave no valid answer.", 8, api="target.api") }}
+
+
+async def connect_with_credentials(
+    request: Request,
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    api: str,
+    user_id: UUID,
+    data: ConnectionCredentials,
+) -> ConnectionRead:
+    """Check the credentials of a user at an API with HTTP Basic, and keep them."""
+    name = NAMES[api]
+    settings: Settings = request.app.state.settings
+    key = encryption_key(settings)
+    await check_credentials(client, basic_api(settings, name), data.username, data.password)
+    connection = await find_connection(session, name, user_id)
+    if connection is None:
+        connection = ApiConnection(user_id=user_id, api=name, scope="")
+        session.add(connection)
+    else:
+        connection.connected_at = dt.datetime.now(dt.UTC)
+    connection.username = data.username
+    connection.access_token = seal(key, data.password, _context(connection, "access_token"))
+    connection.rejected_at = None
+    await commit(session)
+    await session.refresh(connection)
+    return _read(api, connection)
+
+
+{% endif %}
 router = APIRouter(prefix="/auth/connections", tags=["Connections"])
 
 
 @router.get("", responses=problem_responses(401), operation_id="list_connections")
 async def list_connections(user: CurrentUser, session: SessionDep) -> list[ConnectionRead]:
+{% if basic %}
+    """List the APIs that the users connect, with the connections of the user."""
+{% else %}
     """List the APIs with the authorization code flow, with the connections of the user."""
+{% endif %}
     rows = await session.scalars(select(ApiConnection).where(ApiConnection.user_id == user.id))
     found = {row.api: row for row in rows}
     return [_read(api, found.get(name)) for api, name in NAMES.items()]
+{% for api in basic %}
+
+
+{{ trace(api.id) }}
+@router.post(
+    "/{{ api.connection_name }}",
+    responses=problem_responses(401, 422, 500, 502),
+    operation_id="connect_{{ api.module }}",
+)
+async def connect_{{ api.module }}(
+    data: ConnectionCredentials,
+    request: Request,
+    user: CurrentUser,
+    session: SessionDep,
+    client: ConnectionClient,
+) -> ConnectionRead:
+    """Check and keep the credentials of the signed-in user for the API {{ api.name }}."""
+    {{ api.connect_call() }}
+{% endfor %}
+{% if oauth %}
 
 
 @router.post(
@@ -441,7 +760,7 @@ async def list_connections(user: CurrentUser, session: SessionDep) -> list[Conne
     operation_id="start_connection",
 )
 async def start_connection(
-    api: ApiName, data: ConnectionStart, request: Request, user: CurrentUser
+    api: {{ "FlowApiName" if basic else "ApiName" }}, data: ConnectionStart, request: Request, user: CurrentUser
 ) -> AuthorizationLink:
     """Give the page where the signed-in user allows the app to use the API in their name."""
     app = oauth_app(request.app.state.settings, NAMES[api])
@@ -526,7 +845,7 @@ async def _connect(
     operation_id="finish_connection",
 )
 async def finish_connection(
-    api: ApiName,
+    api: {{ "FlowApiName" if basic else "ApiName" }},
     request: Request,
     session: SessionDep,
     client: ConnectionClient,
@@ -551,6 +870,7 @@ async def finish_connection(
             return connection
         target = _with_fragment(return_to, {"connected": api})
     return RedirectResponse(target, status_code=303)
+{% endif %}
 
 
 @router.delete(
@@ -560,7 +880,11 @@ async def finish_connection(
     operation_id="delete_connection",
 )
 async def delete_connection(api: ApiName, user: CurrentUser, session: SessionDep) -> Response:
+{% if basic %}
+    """Delete the connection of the signed-in user to the API, and its tokens or credentials."""
+{% else %}
     """Delete the connection of the signed-in user to the API, and its tokens."""
+{% endif %}
     connection = await find_connection(session, NAMES[api], user.id)
     if connection is not None:
         await session.delete(connection)

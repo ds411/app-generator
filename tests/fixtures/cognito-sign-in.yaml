@@ -1,0 +1,104 @@
+# The sign-in with a user pool of Amazon Cognito, whose identity provider
+# is Microsoft Entra ID over SAML (ADR 0020). The apps speak only
+# OpenID Connect: the user pool does the SAML part. The parameter
+# `identity_provider` sends the users at once to Entra ID, not to the
+# sign-in page of the user pool. The user pool does not mark the email
+# address of a SAML user as verified, so the provider has `trust_email`.
+# The user pool maps the group claim of Entra ID to the attribute
+# `custom:groups`, a text such as `[id1, id2]`: `roles` gives the role
+# of the user at each sign-in from the object IDs of the groups. The
+# sign-out of the app also ends the session at the user pool.
+# scripts/check-fastapi.sh signs in to the FastAPI app through the mock
+# user pool of scripts/mock_oidc.py, and scripts/check-auth-ui.sh signs
+# in to the Next.js app and to the React app with the FastAPI app.
+version: 0
+app:
+  name: staff-portal
+  title: Staff portal
+  description: The notes of the staff of a company.
+entities:
+  Person:
+    crud:
+      views: [table]
+    display_field: name
+    plural_label: People
+    fields:
+      email: { type: email, required: true, unique: true }
+      name: { type: string, required: true, max_length: 120 }
+      role: { type: enum, values: [admin, staff], default: staff }
+  Note:
+    crud:
+      views: [table, detail]
+      forms: [create]
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      text: { type: text }
+    relations:
+      author: { kind: many_to_one, target: Person, on_delete: set_null }
+pages:
+  notes:
+    path: /
+    title: Notes
+    entity: Note
+    content: { view: note_table }
+    actions:
+      new_note: { kind: form, form: new_note, label: New note, icon: plus }
+  note_detail:
+    path: "/notes/{id}"
+    title: Note
+    entity: Note
+    content: { view: note_detail }
+  people:
+    path: /people
+    title: People
+    entity: Person
+    content: { view: person_table }
+ui:
+  navigation:
+    main:
+      items:
+        notes: { page: notes, icon: notebook-pen }
+        people: { page: people, icon: users }
+  layouts:
+    app_shell:
+      sidebar: { navigation: main, title: Staff portal, icon: building-2 }
+      # The top bar has the sign-out button.
+      topbar: { breadcrumbs: true }
+  defaults:
+    layout: app_shell
+auth:
+  user_entity: Person
+  username_field: email
+  password: false
+  providers:
+    company:
+      title: Company account
+      # The issuer of the user pool. The setting COMPANY_ISSUER changes it.
+      issuer: https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Example
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      authorize_params: { identity_provider: EntraID }
+      trust_email: true
+      create_users: true
+      # A user whose groups have no role gets this role.
+      default_role: staff
+      claims: { name: name }
+      roles:
+        claim: "custom:groups"
+        map:
+          # The object IDs of the groups in Entra ID.
+          0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
+          5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
+      # The sign-out also ends the session at the user pool: the logout
+      # endpoint on the domain of the user pool. COMPANY_SIGN_OUT_URL changes it.
+      sign_out:
+        endpoint: https://staff-portal.auth.eu-west-1.amazoncognito.com/logout
+        return_param: logout_uri
+access:
+  role_field: role
+  roles:
+    admin: { operations: ["*"], pages: ["*"] }
+    staff:
+      operations: [list_notes, read_note, create_note, list_people]
+      pages: [notes, note_detail]

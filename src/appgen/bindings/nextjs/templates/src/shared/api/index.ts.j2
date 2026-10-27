@@ -1,5 +1,5 @@
 {{ trace_header("app") }}
-{% set client_names = ["createEntityApi"] + (["createFileApi"] if definition.storage else []) + (["createHistoryApi"] if has_history(definition) else []) + (["createSharingApi"] if shares else []) + ["type EntityActions"] + (["type FileActions"] if definition.storage else []) + (["type HistoryActions"] if has_history(definition) else []) + (["type SharingActions"] if shares else []) + ["notifyChange"] %}
+{% set client_names = ["createEntityApi"] + (["createFileApi"] if definition.storage else []) + (["createHistoryApi"] if has_history(definition) else []) + (["createPresenceApi"] if presences else []) + (["createSharingApi"] if shares else []) + ["type EntityActions"] + (["type FileActions"] if definition.storage else []) + (["type HistoryActions"] if has_history(definition) else []) + (["type PresenceActions"] if presences else []) + (["type SharingActions"] if shares else []) + ["notifyChange"] %}
 export { {{ client_names | join(", ") }} } from "./client";
 export {
   type ActionError,
@@ -27,6 +27,9 @@ export type {
 {% endif %}
   ListQuery,
   ListResult,
+{% if memberships %}
+  MemberPermissions,
+{% endif %}
 {% if has_notices(definition) %}
   Notice,
   NoticeApi,
@@ -36,6 +39,10 @@ export type {
 {% endif %}
 {% if has_available(definition) %}
   OwnerRange,
+{% endif %}
+{% if presences %}
+  PresenceApi,
+  PresentUser,
 {% endif %}
   Search,
 {% if shares %}

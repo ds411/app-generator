@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 
 import { notifyChange } from "@/shared/api";
-import { batched, watchLive } from "@/shared/lib/live";
+import { batched, {{ "liveEvents, " if presences }}watchLive } from "@/shared/lib/live";
 
 /**
  * Load the open views again after the changes of their records in other
@@ -14,6 +14,10 @@ import { batched, watchLive } from "@/shared/lib/live";
 
  */
 export function LiveUpdates() {
+{% if presences %}
+  useEffect(() => watchLive(() => Promise.resolve("/api/live"), liveEvents(batched(notifyChange))), []);
+{% else %}
   useEffect(() => watchLive(() => Promise.resolve("/api/live"), batched(notifyChange)), []);
+{% endif %}
   return null;
 }

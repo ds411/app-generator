@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
-from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
+from appgen.bindings.nextjs.db import belongs_to, build_tables, in_scopes, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.live import live_entities
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notice_emails, ts_notify
@@ -25,12 +25,14 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
+from appgen.bindings.shared.memberships import member_plan
 from appgen.bindings.shared.notices import (
     has_notice_emails,
     has_notices,
     mention_plans,
     notice_plans,
 )
+from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
@@ -240,6 +242,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.S3_PACKAGES
     if uses_smtp(definition):
         dependencies |= versions.SMTP_PACKAGES
+    if uses_ses(definition):
+        dependencies |= versions.SES_PACKAGES
     if uses_redis(definition) or any(e.live for e in definition.entities.values()):
         dependencies |= versions.REDIS_PACKAGES
     return {
@@ -277,14 +281,26 @@ def uses_smtp(definition: AppDefinition) -> bool:
     verification of the email address, and the emails of the notices with
     a notification with `email: true` (ADR 0044).
     """
+    return _delivery(definition) == "smtp"
+
+
+def uses_ses(definition: AppDefinition) -> bool:
+    """Return True if the app sends the same emails with Amazon SES (`auth.delivery: ses`)."""
+    return _delivery(definition) == "ses"
+
+
+def _delivery(definition: AppDefinition) -> str | None:
+    """Return the delivery of the emails of the app, or None if the app sends no emails."""
     auth = definition.auth
-    if auth is None or auth.delivery != "smtp":
-        return False
-    return (
+    if auth is None:
+        return None
+    if not (
         auth.password_reset is not None
         or (auth.sign_up is not None and auth.sign_up.verify_email is not None)
         or has_notice_emails(definition)
-    )
+    ):
+        return None
+    return auth.delivery
 
 
 def uses_redis(definition: AppDefinition) -> bool:
@@ -349,6 +365,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     return {
         "ts_apis": apis,
         "ts_connections": ts_connections(apis),
+        "ts_code_flows": [api for api in ts_connections(apis) if not api.user_basic],
         "ts_webhooks": ts_webhooks(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -357,8 +374,12 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The roles of the users in the records of a scope (ADR 0048), or None.
+        "memberships": member_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": shares,
+        # The pages with `presence` by name: the other users on the records (ADR 0052).
+        "presences": presence_plans(definition),
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
         "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
@@ -393,6 +414,12 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 for entity, r in rules.items()
                 if r.path and not r.direct
             },
+            # The conditions of the scope paths of the memberships (ADR 0048).
+            "scope_conditions": {
+                entity: in_scopes(entity, r.scope, by_entity, 4)
+                for entity, r in rules.items()
+                if r.scope is not None
+            },
             "seed": seed,
             "seed_files": any(table.files for table in seed),
             "pages": pages,
@@ -401,6 +428,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "curl_version": versions.CURL_VERSION,
             "redis": uses_redis(definition),
             "smtp": uses_smtp(definition),
+            "ses": uses_ses(definition),
             "deploy": deploy_targets(definition),
             # The jobs (ADR 0029): a route handler and a module for each job, and the CronJobs
             # that call the routes.

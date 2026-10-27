@@ -1,0 +1,86 @@
+{% set m = py.memberships %}
+{{ trace_header(m.id) }}
+{% set e = py.entity(name) %}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+{% set ops = m.operations_of(name) %}
+{% set record_ops = ops | select("in", m.record_operations) | list %}
+"""The operations that the memberships of a user give on the records of {{ e.name }} (ADR 0048).
+
+The front end shows the actions of these operations. The endpoints of the
+operations check each request again.
+"""
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Query
+{% if record_ops %}
+from sqlalchemy import select
+{% endif %}
+
+from app.core.access import MemberPermissions, allows, member_scopes
+from app.core.auth import CurrentUser
+from app.core.db import SessionDep
+{% if record_ops %}
+from app.features.{{ e.slice }}.models import {{ e.name }}
+from app.features.{{ e.slice }}.repository import in_scopes
+{% endif %}
+
+router = APIRouter()
+
+{% if ops %}
+OPERATIONS = (
+{% for op_name in ops %}
+    "{{ op_name }}",
+{% endfor %}
+)
+{% else %}
+OPERATIONS: tuple[str, ...] = ()
+{% endif %}
+"""The operations of the roles of the memberships on the records of {{ e.name }}."""
+{% if record_ops %}
+RECORD_OPERATIONS = frozenset(
+    {
+{% for op_name in record_ops %}
+        "{{ op_name }}",
+{% endfor %}
+    }
+)
+"""The operations on one record: a membership gives them in the scope of the record."""
+{% endif %}
+
+
+{{ trace(m.id) }}
+@router.get(
+    "/permissions{{ e.path }}",
+    summary="Read the {{ e.snake | replace('_', ' ') }} permissions of the memberships",
+    operation_id="read_{{ e.snake }}_member_permissions",
+)
+async def read_{{ e.snake }}_member_permissions(
+    session: SessionDep,
+    user: CurrentUser,
+    ids: Annotated[list[UUID] | None, Query(max_length=1000)] = None,
+) -> MemberPermissions:
+    """Return the operations of the memberships of the user: in some scope, and on each record.
+
+    `ids` gives the records. The operations that the role of the user gives
+    are not part of the answer.
+    """
+    wanted = ids or []
+    records: dict[str, list[str]] = {str(record_id): [] for record_id in wanted}
+    operations: list[str] = []
+    for operation in OPERATIONS:
+        if allows(user.{{ role.attr }}, operation):
+            continue
+        scopes = await member_scopes(session, user.id, operation)
+        if not scopes:
+            continue
+        operations.append(operation)
+{% if record_ops %}
+        if operation in RECORD_OPERATIONS and wanted:
+            {{ py.call("statement = ", "select(" ~ e.name ~ ".id).where", [e.name ~ ".id.in_(wanted)", "in_scopes(scopes)"], 12) }}
+            for record_id in await session.scalars(statement):
+                records[str(record_id)].append(operation)
+{% endif %}
+    return MemberPermissions(operations=operations, records=records)
