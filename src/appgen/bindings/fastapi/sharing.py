@@ -106,11 +106,14 @@ class PyShare:
         }
         if self.update.protected or self.scope or e.translations_query:
             fastapi.add("Depends")
+        # The guard and the scope can come from one module: `app.core.access`.
+        guards: dict[str, set[str]] = {}
         if self.update.protected:
-            lines.add(from_import(f"app.core.{e.guard_module}", {e.guard}))
+            guards.setdefault(f"app.core.{e.guard_module}", set()).add(e.guard)
         if self.scope:
             lines.add("from typing import Annotated")
-            lines.add(from_import("app.core.access", {"RecordScope", "scope_of"}))
+            guards.setdefault("app.core.access", set()).update({"RecordScope", "scope_of"})
+        lines |= {from_import(module, names) for module, names in guards.items()}
         lines.add(f"from app.features.{e.slice} import repository")
         if e.translations_query:
             lines.add("from app.core.i18n import translations_query")

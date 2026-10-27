@@ -161,6 +161,11 @@ BINDING = Binding(
             path="tests/test_access.py",
             when="definition.access",
         ),
+        Output(
+            template="tests/test_memberships.py.j2",
+            path="tests/test_memberships.py",
+            when="py.memberships and py.memberships.tests",
+        ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
         Output(template="tests/test_me.py.j2", path="tests/test_me.py", when="py.me_tests"),
         Output(
@@ -559,7 +564,7 @@ BINDING = Binding(
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
-        | {"access", "role", "record_rule"}
+        | {"access", "role", "record_rule", "memberships", "membership_role"}
         | {"api", "api_operation"}
         | {"webhook"}
         | {"translations", "language"}

@@ -61,5 +61,6 @@ gives the rules.
 | 0043   | [Mentions of users in a text](0043-mentions.md)                        | Accepted |
 | 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |
 | 0046   | [Places: point fields and the geo filters](0046-geo-points.md)          | Accepted |
+| 0048   | [Roles from membership records](0048-memberships.md)                    | Accepted |
 | 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |
 | 0051   | [Live updates of the records](0051-live-updates.md)                     | Accepted |

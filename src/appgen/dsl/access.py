@@ -1,10 +1,13 @@
 """The roles of the users and their permissions: the operations and the pages of each role."""
 
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import pydantic
 
 from appgen.dsl.element import Element, EntityName, MemberName, Text
+
+if TYPE_CHECKING:
+    from appgen.dsl.model import AppDefinition
 
 ALL = "*"
 """In a list of operations or pages: all of them."""
@@ -80,14 +83,87 @@ class Role(Element):
         return ALL in self.pages or name in self.pages
 
 
+SCOPE_PATH_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$"
+"""A many-to-one relation, or a path of them with dots, for example `lesson.course`."""
+
+
+class MembershipRole(Element):
+    """A role of the memberships (ADR 0048): its operations on the records of its scopes."""
+
+    label: Text | None = None
+    operations: list[
+        Annotated[str, pydantic.StringConstraints(pattern=r"^([a-z][a-z0-9_]*|\*)$")]
+    ] = pydantic.Field(default_factory=list[str])
+    """The operations of the entities of the scope, or `["*"]` for all of them."""
+
+    def allows_operation(self, name: str) -> bool:
+        """Return True if the role may call an operation on the records of its scope."""
+        return ALL in self.operations or name in self.operations
+
+
+class Memberships(Element):
+    """The roles of the users in the records of a scope, for example a course (ADR 0048).
+
+    A record of the membership entity gives its user (`user`) a role
+    (`role_field`) in one record of the scope entity (`scope`). The role
+    gives operations on the records of the scope: the scope record, and
+    the records of the entities in `paths`. A user can have other roles
+    in other scope records.
+    """
+
+    entity: EntityName
+    """The membership entity, for example `Enrollment`."""
+    user: MemberName
+    """The many-to-one relation of the membership entity to the user entity."""
+    scope: MemberName
+    """The many-to-one relation to the scope entity, for example `course`."""
+    role_field: MemberName
+    """The enum field of the membership entity: its value is the role of the member."""
+    roles: Annotated[dict[MemberName, MembershipRole], pydantic.Field(min_length=1)]
+    """The roles by value of the role field."""
+    paths: dict[
+        EntityName, Annotated[str, pydantic.StringConstraints(pattern=SCOPE_PATH_PATTERN)]
+    ] = pydantic.Field(default_factory=dict[str, str])
+    """The path of many-to-one relations from each other entity of the scope to the scope entity."""
+
+
 class Access(Element):
     """The roles of the users. It needs the section `auth`.
 
     The value of `role_field` (an enum field of the user entity) is the
     role of a user. A user may call the public operations and open the
     public pages of `auth`, and the operations and the pages of the role.
+    With `memberships`, a user also has a role in each record of a scope
+    (ADR 0048).
     """
 
     role_field: MemberName
     roles: Annotated[dict[MemberName, Role], pydantic.Field(min_length=1)]
     """The roles by value of the role field."""
+    memberships: Memberships | None = None
+    """The roles of the users in the records of a scope entity, from the membership records."""
+
+
+def membership_scope(definition: AppDefinition) -> str | None:
+    """Return the scope entity of the memberships (ADR 0048), or None.
+
+    None if the definition has no memberships, or if the membership entity
+    or its relation `scope` does not exist (the validator reports it).
+    """
+    memberships = definition.access.memberships if definition.access is not None else None
+    entity = definition.entities.get(memberships.entity) if memberships is not None else None
+    if memberships is None or entity is None:
+        return None
+    relation = entity.relations.get(memberships.scope)
+    return relation.target if relation is not None else None
+
+
+def scope_entities(definition: AppDefinition) -> dict[str, str]:
+    """Return the entities of the scope of the memberships, and the path of each to the scope.
+
+    The scope entity has the path `""`: its records are the scopes.
+    """
+    scope = membership_scope(definition)
+    if scope is None or definition.access is None or definition.access.memberships is None:
+        return {}
+    return {scope: "", **definition.access.memberships.paths}

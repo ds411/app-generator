@@ -3075,6 +3075,59 @@ forms do not show the owner field of one relation and the fields of a
 condition with one value: a new record belongs to the user, and gets
 the value of the condition.
 
+### Memberships
+
+`memberships` gives a user a role in one record of a scope entity, for
+example a team or a course ([ADR 0048](https://github.com/ds411/app-generator/blob/main/docs/adr/0048-memberships.md)). A
+record of the membership entity has the user, the scope record, and the
+role. A user can be a teacher in one course and a student in another.
+
+```yaml
+# not valid alone: the entities Course, Lesson, and Enrollment are not in the base example
+memberships:
+  entity: Enrollment
+  user: person
+  scope: course
+  role_field: role
+  roles:
+    teacher:
+      label: Teacher
+      operations: [update_course, create_lesson, update_lesson]
+    student:
+      label: Student
+      operations: [read_course, list_lessons, read_lesson]
+  paths:
+    Lesson: course
+```
+
+- `entity` is the membership entity. `user` is its `many_to_one`
+  relation to the user entity, and `scope` its `many_to_one` relation
+  to the scope entity. The scope entity is not the user entity.
+- `role_field` is an `enum` field of the membership entity. Each key of
+  `roles` is a value of that field.
+- `operations` names the operations that the role gives on the records
+  of its scopes, or `*` for all operations of the entities of the scope.
+  An operation is an operation of the scope entity or of an entity in
+  `paths`, and not a query.
+- `paths` gives the other entities of the scope: for each entity, the
+  path of `many_to_one` relations with dots to the scope entity, for
+  example `lesson.course`. The scope entity has no path: its records are
+  the scopes. The membership entity can have a path too, for example
+  `course`: then a role can list the memberships of its scopes.
+
+The role of `roles` comes first: if it gives the operation, the
+memberships do not apply. Else a membership of the user with a role
+that gives the operation lets the user call it, on the records of the
+scopes of these memberships only. The FastAPI app gives 403 for an
+operation that no role of the user gives. A list gives the records of
+these scopes. A read, a change, or a delete of a record in another
+scope of the user gives 403, and of a record out of all scopes of the
+user gives 404. A create or a change that puts a record out of these
+scopes gives 403, and the record does not change. The front ends do not
+apply the memberships yet: the trace check of the Next.js app reports
+them as gaps, and the trace check of the React app as uncovered
+elements.
+
 ## translations
 
 The optional `translations` section gives the UI text in more than one
@@ -3423,6 +3476,7 @@ to translate one. The rules and the workflows give their own messages.
   `The current password is not correct.`,
   `Your role may not do this operation.`,
   `Your role may not give a record these values.`,
+  `Your role in the scope of the record may not do this operation.`,
   `The server has no AUTH_SECRET.`,
   `If the user name exists, the user gets a message with a reset link.`,
   `The reset link is not valid, was used, or has ended.`.
@@ -3431,6 +3485,7 @@ to translate one. The rules and the workflows give their own messages.
   `Confirm the email address first: open the link in the message.`,
   `If the user name needs a confirmation, the user gets a message with a link.`,
   `The link is not valid, or has ended.`.
+- The secret links of the records: `The link is not valid.`.
 - The second factor: `The code is not correct.`,
   `Too many wrong codes. Try again later.`,
   `The sign-in has ended. Sign in again.`,
