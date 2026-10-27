@@ -861,6 +861,33 @@ class PyHistory:
     """The attribute of the user entity that names the user of an entry."""
 
 
+@dataclass(frozen=True, slots=True)
+class PyLive:
+    """The live updates of the records of an entity (ADR 0051)."""
+
+    id: str
+    readers: tuple[str, ...]
+    """The list and the read operations of the entity: a role that may call one of them gets
+    the events of the records."""
+    public: bool = False
+    """True if a list or a read operation is public: all clients get the events, without the
+    record rules."""
+    owner: tuple[str, ...] = ()
+    """The attributes of the owner path of the record rules (ADR 0025), or none."""
+
+    def entry(self, entity: str) -> str:
+        """Return the entry of the entity in the table `LIVE` of `app/core/live.py`.
+
+        For example `Task: LiveEntity("Task", ("list_tasks", "read_task")),`.
+        """
+        args = [string(entity), _python_tuple(list(self.readers))]
+        if self.public:
+            args.append("public=True")
+        if self.owner:
+            args.append(f"owner={_python_tuple(list(self.owner))}")
+        return call(f"{entity}: ", "LiveEntity", args, 4, ",")
+
+
 @dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
@@ -1258,6 +1285,8 @@ class PyEntity:
     """The change log of the records (ADR 0040), or None."""
     notifications: list[PyNotification] = field(default_factory=list[PyNotification])
     """The notifications of the changes of the records (ADR 0041)."""
+    live: PyLive | None = None
+    """The live updates of the records (ADR 0051), or None."""
 
     @property
     def guard_module(self) -> str:
@@ -2332,6 +2361,24 @@ class PyStorage:
         return self.kind == "s3"
 
 
+type PyLiveReader = tuple[PyEntity, str | None]
+"""A live entity, and a role that reads all its records (None without roles)."""
+
+
+@dataclass(slots=True)
+class PyLiveTests:
+    """The data of the generated tests of the live updates (ADR 0051)."""
+
+    readers: list[PyLiveReader] = field(default_factory=list[PyLiveReader])
+    """Each live entity that a test can read, with a role that reads all its records (None
+    without roles). An entity whose readers all have a record rule has no test of its own:
+    the tests of the rules check it."""
+    denied: tuple[PyEntity, str] | None = None
+    """A live entity, and a role that may not read it: its stream gives 403."""
+    rules: list[PyRuleTest] = field(default_factory=list[PyRuleTest])
+    """The tests of the record rules (ADR 0025) of the reads of the live entities."""
+
+
 @dataclass(slots=True)
 class PyApp:
     """The whole app definition in the terms of the binding."""
@@ -2374,6 +2421,8 @@ class PyApp:
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
     user_label_attr: str | None = None
     """The attribute of the user entity that names a user, for example in the change log."""
+    live_tests: PyLiveTests = field(default_factory=PyLiveTests)
+    """The data of the generated tests of the live updates (ADR 0051)."""
 
     @property
     def events(self) -> bool:
@@ -2389,6 +2438,16 @@ class PyApp:
     def history_ids(self) -> list[str]:
         """The IDs of the change logs of the entities, in the order of the tables."""
         return [e.history.id for e in self.history if e.history is not None]
+
+    @property
+    def live(self) -> list[PyEntity]:
+        """The entities with live updates (ADR 0051), in the order of the tables."""
+        return [e for e in self.entity_order() if e.live is not None]
+
+    @property
+    def live_ids(self) -> list[str]:
+        """The IDs of the live updates of the entities, in the order of `live`."""
+        return [e.live.id for e in self.live if e.live is not None]
 
     @property
     def notifications(self) -> list[PyNotification]:
@@ -2680,6 +2739,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     total_rule_cases(definition, entities)
     _record_rules(definition, entities)
     _history(definition, entities)
+    _live(definition, entities)
     python_notifications(definition, entities)
     for entity in entities.values():
         for notification in entity.notifications:
@@ -2701,6 +2761,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         entity.full_text = search_config is not None
         entity.query = list_query(definition, entity)
         entity.totals_test = totals_test(definition, entity)
+    rule_tests = _rule_tests(definition, entities)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -2713,7 +2774,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         providers=_providers(definition, entities),
         translated=definition.translations is not None,
         message_elements=_message_elements(definition),
-        rule_tests=_rule_tests(definition, entities),
+        rule_tests=rule_tests,
         embed_tests=_embed_tests(definition, entities),
         smtp=bool(_message_elements(definition))
         and definition.auth is not None
@@ -2725,6 +2786,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         jobs=_jobs(definition, entities, operations),
         storage=_storage(definition, entities),
         user_label_attr=_user_label_attr(definition, entities),
+        live_tests=_live_tests(definition, entities, rule_tests),
     )
 
 
@@ -3231,6 +3293,57 @@ def _history(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
             user_entity=definition.auth.user_entity if definition.auth else None,
             user_label=_user_label_attr(definition, entities),
         )
+
+
+def _live(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Give the entities with `live` their live updates (ADR 0051)."""
+    for name, entity in definition.entities.items():
+        if entity.live is None:
+            continue
+        py_entity = entities[name]
+        readers = [op for op in py_entity.operations if op.kind in ("list", "read")]
+        path = py_entity.owner_path
+        py_entity.live = PyLive(
+            id=entity.live.id,
+            readers=tuple(op.name for op in readers),
+            public=definition.auth is not None and any(not op.protected for op in readers),
+            owner=tuple(rel.attr for _, rel in path.steps) if path is not None else (),
+        )
+
+
+def _live_tests(
+    definition: AppDefinition, entities: dict[str, PyEntity], rule_tests: list[PyRuleTest]
+) -> PyLiveTests:
+    """Return the data of the tests of the live updates: the roles that read the entities."""
+    tests = PyLiveTests()
+    access = definition.access
+    for entity in entities.values():
+        live = entity.live
+        if live is None:
+            continue
+        if access is None:
+            tests.readers.append((entity, None))
+            continue
+        for name, role in access.roles.items():
+            reads = any(role.allows_operation(op) for op in live.readers)
+            rule = role.records.get(entity.name)
+            if reads and (rule is None or "read" not in rule.operations or live.public):
+                tests.readers.append((entity, name))
+                break
+        for name, role in access.roles.items():
+            reads = any(role.allows_operation(op) for op in live.readers)
+            if tests.denied is None and not live.public and not reads:
+                tests.denied = (entity, name)
+    tests.readers.sort(key=lambda item: item[0].snake)
+    tests.rules = [
+        t
+        for t in rule_tests
+        if t.entity.live is not None
+        and not t.entity.live.public
+        and t.reads
+        and ("list" in t.ops or "read" in t.ops)
+    ]
+    return tests
 
 
 def _user_label_attr(definition: AppDefinition, entities: dict[str, PyEntity]) -> str | None:

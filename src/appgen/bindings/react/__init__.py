@@ -419,6 +419,8 @@ BINDING = Binding(
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook", "job"}
+        # The live updates of the React app follow with the events of the views (#405).
+        | {"live"}
     ),
     context=context,
     warnings=warnings,

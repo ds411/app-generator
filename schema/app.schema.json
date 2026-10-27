@@ -2804,6 +2804,10 @@
         "history": {
           "$ref": "#/$defs/HistoryInput",
           "default": null
+        },
+        "live": {
+          "$ref": "#/$defs/LiveInput",
+          "default": null
         }
       },
       "required": [
@@ -4410,6 +4414,41 @@
       ],
       "title": "ListWidget",
       "type": "object"
+    },
+    "Live": {
+      "additionalProperties": false,
+      "description": "The live updates of the records of an entity.\n\nThe apps send an event for each create, change, and delete of a record\nto the users that may read the record, and the open views of the\nentity show the change. The short form is `live: true`.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Live",
+      "type": "object"
+    },
+    "LiveInput": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/Live"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "LoadingState": {
       "additionalProperties": false,

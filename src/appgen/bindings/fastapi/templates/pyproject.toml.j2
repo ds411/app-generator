@@ -23,7 +23,7 @@ dependencies = [
 {% if py.providers %}
     "pyjwt[crypto]>=2.15",
 {% endif %}
-{% if py.redis %}
+{% if py.redis or py.live %}
     "redis>=8.0",
 {% endif %}
     "sqlalchemy[asyncio]>=2.1",

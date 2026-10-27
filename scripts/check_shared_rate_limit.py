@@ -35,6 +35,7 @@ Environment variables:
 """
 
 import argparse
+import contextlib
 import os
 import re
 import shutil
@@ -155,8 +156,8 @@ def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) 
 @contextmanager
 def started(
     command: list[str], app: Path, port: int, env: dict[str, str], log_file: Path
-) -> Generator[None]:
-    """Start a process of the app, and stop it at the end."""
+) -> Generator[subprocess.Popen[bytes]]:
+    """Start a process of the app, and stop it at the end, if it did not stop."""
     with log_file.open("w") as output:
         # A new session, so that the stop also ends the child processes of pnpm and uv.
         process = subprocess.Popen(
@@ -169,12 +170,13 @@ def started(
         )
         try:
             wait_for(f"http://127.0.0.1:{port}/health")
-            yield
+            yield process
         except BaseException:
             print(log_file.read_text()[-4000:], file=sys.stderr)
             raise
         finally:
-            os.killpg(process.pid, signal.SIGTERM)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=20)
             except subprocess.TimeoutExpired:

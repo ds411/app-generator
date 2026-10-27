@@ -1,0 +1,676 @@
+{{ trace_header(*py.live_ids) }}
+{% set scoped = py.live | selectattr("scoped") | list %}
+{% set auth = definition.auth %}
+{% set access = definition.access %}
+{% set u = py.entity(auth.user_entity) if auth else none %}
+{% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
+{% if access and scoped %}
+{% set readers = "the role of the user may call a list or a read operation of the entity, and the record rules of the role apply (ADR 0025)" %}
+{% elif access %}
+{% set readers = "the role of the user may call a list or a read operation of the entity" %}
+{% elif auth %}
+{% set readers = "the signed-in users, and all clients for an entity with a public list or read operation" %}
+{% else %}
+{% set readers = "all clients" %}
+{% endif %}
+"""The live updates of the records (ADR 0051): the changes as server-sent events.
+
+{{ ("A create, a change, and a delete of a record of a live entity give an event after the commit of the transaction. Listeners of the sessions find the changes when a session writes them to the database, so that the generated and the custom operations both give the events. `GET /live` sends the events to the users that may read the records: " ~ readers ~ ". An event has the entity and the ID of the record, but no values: a client reads the record again.") | wordwrap(72, break_long_words=False) }}
+
+With the setting `LIVE_EVENTS_URL`, the processes send the events
+through Redis, so that each replica gets the events of all replicas.
+Without it, each process sends only its own events.
+"""
+
+{% set ns = namespace(lines=[
+    "import asyncio",
+    "import contextlib",
+    "import json",
+    "import logging",
+    "import signal",
+    "import threading",
+    "from collections.abc import AsyncIterable, Generator, Iterable" ~ (", Sequence" if scoped),
+    "from dataclasses import dataclass",
+    "from types import FrameType",
+    "from typing import Annotated, Any, Literal, cast",
+    "from uuid import UUID",
+    "from fastapi import APIRouter, Depends, Query, Request",
+    "from fastapi.sse import EventSourceResponse",
+    "from pydantic import BaseModel, Field",
+    "from redis.asyncio import Redis",
+    "from redis.asyncio.retry import Retry",
+    "from redis.backoff import NoBackoff",
+    "from redis.exceptions import RedisError",
+    "from sqlalchemy import event" ~ (", select" if scoped),
+    "from sqlalchemy.orm import " ~ ("Session, UOWTransaction, aliased" if scoped else "Session, UOWTransaction"),
+]) %}
+{% if auth %}
+{% set ns.lines = ns.lines + [
+    "from app.core.errors import ProblemError, problem_responses",
+    "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
+    "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
+    "from app.core.auth import read_token, signing_key",
+] %}
+{% if i18n %}
+{% set ns.lines = ns.lines + ["from app.core.i18n import t"] %}
+{% endif %}
+{% endif %}
+{% if access %}
+{% set ns.lines = ns.lines + [py.from_import("app.core.access", ["allows"] + (["RECORD_RULES"] if scoped else []))] %}
+{% endif %}
+{% set models = {} %}
+{% for e in py.live %}
+{% set _ = models.update({e.name: e}) %}
+{% endfor %}
+{% if u and u.name not in models %}
+{% set _ = models.update({u.name: u}) %}
+{% endif %}
+{% for e in models.values() %}
+{% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".models import " ~ e.name] %}
+{% endfor %}
+{{ py.imports(ns.lines) }}
+
+logger = logging.getLogger(__name__)
+
+CHANNEL = "{{ py.package }}:live"
+"""The Redis channel of the events."""
+PENDING_KEY = "appgen.live"
+"""The key of `session.info` with the changes of the open transaction."""
+BROKER_KEY = "appgen.live.broker"
+"""The key of `session.info` with the broker that sends the changes after the commit."""
+QUEUE_SIZE = 100
+"""The events that wait for a slow client. With more, the client gets `reset`."""
+
+type Action = Literal["created", "changed", "deleted"]
+
+
+@dataclass(frozen=True, slots=True)
+class LiveEntity:
+    """An entity with live updates: its name, and the operations that read its records."""
+
+    name: str
+    readers: tuple[str, ...]
+    """The list and the read operations: a {{ "role" if access else "user" }} that may call one of them gets the events."""
+    public: bool = False
+    """True if a list or a read operation is public: all clients get the events."""
+{% if scoped %}
+    owner: tuple[str, ...] = ()
+    """The attributes of the owner path of the record rules (ADR 0025), or none."""
+{% endif %}
+
+
+LIVE: dict[type[Any], LiveEntity] = {
+{% for e in py.live %}
+    {{ trace(e.live.id) }}
+    {{ e.live.entry(e.name) }}
+{% endfor %}
+}
+"""The live entities, by model."""
+NAMES = {entity.name: entity for entity in LIVE.values()}
+"""The live entities, by name."""
+type LiveName = Literal[{{ py.live | map(attribute="name") | map("tojson") | join(", ") }}]
+{% if scoped %}
+
+
+@dataclass(frozen=True, slots=True)
+class Audience:
+    """The users that may read a record at one time, by the record rules of the roles."""
+
+    roles: frozenset[str]
+    """The roles whose rule conditions the record meets."""
+    owners: frozenset[UUID] = frozenset()
+    """The users at the end of the owner path of the record."""
+{% endif %}
+
+
+@dataclass(frozen=True, slots=True)
+class Change:
+    """A create, a change, or a delete of a record of a live entity, after the commit."""
+
+    entity: str
+    id: UUID
+    action: Action
+{% if scoped %}
+    audiences: tuple[Audience, ...] | None = None
+    """The audiences of the record before and after the change, or None without a record
+    rule for the reads of the entity: all users that may read the entity see the change."""
+{% endif %}
+
+    def to_json(self) -> str:
+        """Return the change as JSON, for the Redis channel."""
+{% if scoped %}
+        audiences = None
+        if self.audiences is not None:
+            audiences = [
+                {"roles": sorted(a.roles), "owners": sorted(str(o) for o in a.owners)}
+                for a in self.audiences
+            ]
+        data = {"entity": self.entity, "id": str(self.id), "action": self.action}
+        return json.dumps({**data, "audiences": audiences})
+{% else %}
+        return json.dumps({"entity": self.entity, "id": str(self.id), "action": self.action})
+{% endif %}
+
+    @classmethod
+    def from_json(cls, text: str | bytes) -> Change:
+        """Return a change of the Redis channel."""
+        data = json.loads(text)
+{% if scoped %}
+        audiences = None
+        if data["audiences"] is not None:
+            audiences = tuple(
+                Audience(frozenset(a["roles"]), frozenset(UUID(o) for o in a["owners"]))
+                for a in data["audiences"]
+            )
+        return cls(data["entity"], UUID(data["id"]), data["action"], audiences)
+{% else %}
+        return cls(data["entity"], UUID(data["id"]), data["action"])
+{% endif %}
+
+
+class LiveEvent(BaseModel):
+    """An event of the stream of `GET /live`."""
+
+    type: Literal["open", "created", "changed", "deleted", "reset"] = Field(
+        description=(
+            "`open`: the stream is open, and the changes from now on follow. `created`, "
+            "`changed`, `deleted`: a change of a record. `reset`: the stream lost events, "
+            "so read all records again."
+        )
+    )
+    entity: str | None = Field(default=None, description="The entity of the record.")
+    id: UUID | None = Field(default=None, description="The ID of the record.")
+
+
+@dataclass(frozen=True, slots=True)
+class Viewer:
+    """A client of the stream: its user, and the entities whose events it gets."""
+
+    entities: frozenset[str]
+{% if auth %}
+    user: UUID | None = None
+    """The signed-in user, or None."""
+{% endif %}
+{% if access %}
+    role: str | None = None
+    """The role of the signed-in user, or None."""
+{% endif %}
+
+    def sees(self, change: Change) -> bool:
+        """Return True if the client may see a change: it may read the record."""
+{% if scoped %}
+        if change.entity not in self.entities:
+            return False
+        rule = RECORD_RULES.get(self.role, {}).get(change.entity) if self.role else None
+        if change.audiences is None or rule is None or not rule.applies("read"):
+            return True
+        if NAMES[change.entity].public:
+            # A record rule does not apply to the public operations (ADR 0025).
+            return True
+        return any(
+            self.role in audience.roles and (not rule.owner or self.user in audience.owners)
+            for audience in change.audiences
+        )
+{% else %}
+        return change.entity in self.entities
+{% endif %}
+
+
+class Subscription:
+    """The events of one client: the changes that it may see, in a queue."""
+
+    def __init__(self, viewer: Viewer, size: int = QUEUE_SIZE) -> None:
+        self.viewer = viewer
+        self.queue: asyncio.Queue[LiveEvent | None] = asyncio.Queue(size)
+        self.lost = False
+        """True if the queue was full: the client gets `reset`."""
+        self.ended = False
+        """True if the stream ends, for example because the server stops."""
+
+    def offer(self, change: Change) -> None:
+        """Add a change to the queue if the client may see it."""
+        if self.viewer.sees(change):
+            self._put(LiveEvent(type=change.action, entity=change.entity, id=change.id))
+
+    def reset(self) -> None:
+        """Tell the client to read all records again, for example after a loss of events."""
+        self._put(LiveEvent(type="reset"))
+
+    def end(self) -> None:
+        """End the stream. The client opens a new one, for example at another replica."""
+        self.ended = True
+        # Wake the stream if it waits. A full queue has no waiting stream.
+        with contextlib.suppress(asyncio.QueueFull):
+            self.queue.put_nowait(None)
+
+    def _put(self, event: LiveEvent) -> None:
+        try:
+            self.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self.lost = True
+
+    async def next(self) -> LiveEvent | None:
+        """Return the next event, or None at the end of the stream.
+
+        After a full queue, return `reset` and drop the queue.
+        """
+        if self.ended:
+            return None
+        if self.lost:
+            self.lost = False
+            while not self.queue.empty():
+                self.queue.get_nowait()
+            return LiveEvent(type="reset")
+        return await self.queue.get()
+
+
+class Broker:
+    """The events of the process, and with Redis the events of all replicas.
+
+    Without a URL, `publish` gives the changes to the subscriptions of the
+    process. With a URL, a task sends them to the Redis channel, and
+    another task gives the events of the channel to the subscriptions, so
+    that each replica gets the events of all replicas. The tasks start
+    with the first change or subscription.
+    """
+
+    def __init__(self, url: str | None = None) -> None:
+        self.url = url or None
+        self.subscriptions: set[Subscription] = set()
+        self.outbox: asyncio.Queue[Change] = asyncio.Queue()
+        self.redis: Redis | None = None
+        self.tasks: list[asyncio.Task[None]] = []
+        self.available = True
+        """False after an error of Redis, until the next success: one warning for each loss."""
+        self.ended = False
+        """True when the server stops: the streams end."""
+
+    def publish(self, changes: Iterable[Change]) -> None:
+        """Send the changes of a transaction after its commit."""
+        if self.url is None:
+            self.deliver(changes)
+            return
+        self._start()
+        for change in changes:
+            self.outbox.put_nowait(change)
+
+    def deliver(self, changes: Iterable[Change]) -> None:
+        """Give changes to the subscriptions of the process."""
+        for change in changes:
+            for subscription in list(self.subscriptions):
+                subscription.offer(change)
+
+    def subscribe(self, viewer: Viewer) -> Subscription:
+        """Return a new subscription of a client."""
+        self._start()
+        subscription = Subscription(viewer)
+        self.subscriptions.add(subscription)
+        if self.ended:
+            subscription.end()
+        return subscription
+
+    def unsubscribe(self, subscription: Subscription) -> None:
+        """Remove the subscription of a client that left."""
+        self.subscriptions.discard(subscription)
+
+    def end_streams(self) -> None:
+        """End the open streams and the new ones, so that the server can stop."""
+        self.ended = True
+        for subscription in list(self.subscriptions):
+            subscription.end()
+
+    def _start(self) -> None:
+        """Start the tasks of Redis, if the broker has a URL and they do not run."""
+        if self.url is None or self.tasks:
+            return
+        # One retry at once, for a connection that Redis closed: without Redis, the changes
+        # go to the subscriptions of the process without a wait.
+        retry = Retry(NoBackoff(), 1)
+        # redis-py does not give the types of the keyword arguments of from_url.
+        self.redis = Redis.from_url(self.url, socket_connect_timeout=1, retry=retry)  # pyright: ignore[reportUnknownMemberType]
+        self.tasks = [asyncio.create_task(self._send()), asyncio.create_task(self._listen())]
+
+    def _failed(self, error: Exception) -> None:
+        if self.available:
+            self.available = False
+            logger.warning("The Redis of the live events is not available: %s", error)
+
+    async def _send(self) -> None:
+        """Send the changes of the outbox to the channel. Without Redis, give them to the process."""
+        assert self.redis is not None
+        while True:
+            change = await self.outbox.get()
+            try:
+                if not self.available:
+                    # The listener tries Redis again each second.
+                    self.deliver([change])
+                    continue
+                await self.redis.publish(CHANNEL, change.to_json())  # pyright: ignore[reportUnknownMemberType]
+            except RedisError as error:
+                self._failed(error)
+                self.deliver([change])
+            finally:
+                self.outbox.task_done()
+
+    async def _listen(self) -> None:
+        """Give the events of the channel to the subscriptions. Connect again after an error."""
+        assert self.redis is not None
+        while True:
+            try:
+                async with self.redis.pubsub() as pubsub:  # pyright: ignore[reportUnknownMemberType]
+                    await pubsub.subscribe(CHANNEL)
+                    if not self.available:
+                        # The subscriptions can miss the events of the time without Redis.
+                        self.available = True
+                        for subscription in list(self.subscriptions):
+                            subscription.reset()
+                    while True:
+                        message = cast(
+                            dict[str, Any] | None,
+                            await pubsub.get_message(ignore_subscribe_messages=True, timeout=None),
+                        )
+                        if message is not None:
+                            self.deliver([Change.from_json(message["data"])])
+            except RedisError as error:
+                self._failed(error)
+                await asyncio.sleep(1)
+
+    async def close(self, timeout: float = 5) -> None:
+        """Send the waiting changes, stop the tasks, and close the connection of Redis."""
+        if self.tasks:
+            try:
+                await asyncio.wait_for(self.outbox.join(), timeout)
+            except TimeoutError:
+                logger.warning("The live events of %d changes were not sent.", self.outbox.qsize())
+            for task in self.tasks:
+                task.cancel()
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+            self.tasks = []
+        if self.redis is not None:
+            await self.redis.aclose()
+            self.redis = None
+
+
+@dataclass(slots=True)
+class _Pending:
+    """A change of a record in the open transaction."""
+
+    entity: LiveEntity
+    action: Action | None = None
+    """None for a record that the transaction did not change yet."""
+{% if scoped %}
+    before: Audience | None = None
+    """The audience before the first change in the transaction, or None for a new record."""
+    after: Audience | None = None
+    """The audience after the last change, or None for a deleted record."""
+{% endif %}
+
+
+def _pending(session: Session) -> dict[tuple[type[Any], UUID], _Pending]:
+    """Return the changes of the open transaction of a session, by model and ID."""
+    pending: dict[tuple[type[Any], UUID], _Pending] | None = session.info.get(PENDING_KEY)
+    if pending is None:
+        pending = session.info[PENDING_KEY] = {}
+    return pending
+{% if scoped %}
+
+
+def _path_users(session: Session, model: type[Any], id: UUID, path: Sequence[str]) -> list[UUID]:
+    """Return the IDs of the users at the end of a path of relations of a record."""
+    ids = [id]
+    for attr in path:
+        relation = getattr(model, attr)
+        target: type[Any] = relation.property.mapper.class_
+        step = aliased(target)
+        statement = (
+            select(step.id).join_from(model, relation.of_type(step)).where(model.id.in_(ids))
+        )
+        ids = list(session.scalars(statement))
+        model = target
+    return ids
+
+
+def _audience(session: Session, model: type[Any], id: UUID) -> Audience:
+    """Return who may read a record now, from the database (ADR 0025).
+
+    The roles are the roles with a rule for the reads of the entity whose
+    conditions the record meets. The owners are the users at the end of
+    the owner path, if a rule of these roles has `owner`.
+    """
+    live = LIVE[model]
+    rules = {
+        role: rule
+        for role, entities in RECORD_RULES.items()
+        if (rule := entities.get(live.name)) is not None and rule.applies("read")
+    }
+    attrs = sorted({attr for rule in rules.values() for attr in rule.where})
+    if attrs:
+        statement = select(*(getattr(model, attr) for attr in attrs)).where(model.id == id)
+        row = session.execute(statement).one_or_none()
+        if row is None:
+            return Audience(frozenset())
+        values = dict(zip(attrs, row, strict=True))
+        rules = {
+            role: rule
+            for role, rule in rules.items()
+            if all(values[attr] in allowed for attr, allowed in rule.where.items())
+        }
+    owners: frozenset[UUID] = frozenset()
+    if live.owner and any(rule.owner for rule in rules.values()):
+        owners = frozenset(_path_users(session, model, id, live.owner))
+    return Audience(frozenset(rules), owners)
+
+
+@event.listens_for(Session, "before_flush")
+def _before_flush(session: Session, context: UOWTransaction, instances: object) -> None:
+    """Keep the audience of each changed or deleted record before its first change."""
+    if BROKER_KEY not in session.info:
+        return
+    pending = _pending(session)
+    records: list[Any] = [*session.dirty, *session.deleted]
+    for record in records:
+        model: type[Any] = record.__class__
+        live = LIVE.get(model)
+        if live is None or (model, record.id) in pending:
+            continue
+        pending[model, record.id] = _Pending(live, before=_audience(session, model, record.id))
+{% endif %}
+
+
+@event.listens_for(Session, "after_flush")
+def _after_flush(session: Session, context: UOWTransaction) -> None:
+    """Note the creates, the changes, and the deletes of the records of the live entities."""
+    if BROKER_KEY not in session.info:
+        return
+    for record in session.new:
+        _note(session, record, "created")
+    for record in session.dirty:
+        if session.is_modified(record):
+            _note(session, record, "changed")
+    for record in session.deleted:
+        _note(session, record, "deleted")
+
+
+def _note(session: Session, record: Any, action: Action) -> None:
+    """Note a change of a record in the changes of the transaction, if its entity is live."""
+    model: type[Any] = record.__class__
+    live = LIVE.get(model)
+    if live is None:
+        return
+    pending = _pending(session)
+    key = (model, record.id)
+    item = pending.setdefault(key, _Pending(live))
+    if item.action == "created" and action == "deleted":
+        # A record of the transaction only: the clients never saw it.
+        del pending[key]
+        return
+    if item.action != "created" or action == "deleted":
+        item.action = action
+{% if scoped %}
+    if action != "deleted":
+        item.after = _audience(session, model, record.id)
+{% endif %}
+
+
+@event.listens_for(Session, "after_commit")
+def _after_commit(session: Session) -> None:
+    """Send the changes of the transaction, after the commit."""
+    pending: dict[tuple[type[Any], UUID], _Pending] | None = session.info.pop(PENDING_KEY, None)
+    broker: Broker | None = session.info.get(BROKER_KEY)
+    if not pending or broker is None:
+        return
+    changes = [
+{% if scoped %}
+        Change(item.entity.name, id, item.action, _audiences(item))
+{% else %}
+        Change(item.entity.name, id, item.action)
+{% endif %}
+        for (_, id), item in pending.items()
+        if item.action is not None
+    ]
+    if changes:
+        broker.publish(changes)
+
+
+@event.listens_for(Session, "after_rollback")
+def _after_rollback(session: Session) -> None:
+    """Forget the changes of a transaction that rolls back."""
+    session.info.pop(PENDING_KEY, None)
+{% if scoped %}
+
+
+def _audiences(item: _Pending) -> tuple[Audience, ...] | None:
+    """Return the audiences of a change, or None if no record rule limits the reads."""
+    limited = any(
+        (rule := entities.get(item.entity.name)) is not None and rule.applies("read")
+        for entities in RECORD_RULES.values()
+    )
+    if not limited:
+        return None
+    return tuple(a for a in (item.before, item.after) if a is not None)
+{% endif %}
+
+
+router = APIRouter(tags=["live"])
+{% if auth %}
+_bearer = HTTPBearer(auto_error=False)
+{% endif %}
+
+
+async def live_viewer(
+    request: Request,
+{% if auth %}
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+{% endif %}
+    entity: Annotated[
+        list[LiveName] | None,
+        Query(description="The entities. The default is all that the client may read."),
+    ] = None,
+) -> Viewer:
+{% if auth %}
+    """Return the client of a stream: its user, and the entities whose events it gets.
+
+    Without `entity`, the client gets the events of all live entities that
+    it may read. An entity that it may not read gives 401 without a user,
+    else 403.
+    """
+    names = set(entity or NAMES)
+    user: {{ u.name }} | None = None
+    user_id = read_token(signing_key(request), credentials.credentials) if credentials else None
+    if user_id is not None:
+        # A session of its own: the stream keeps no connection of the database.
+        sessions: async_sessionmaker[AsyncSession] = request.app.state.sessions
+        async with sessions() as session:
+            user = await session.get({{ u.name }}, user_id)
+{% if access %}
+    role = str(getattr(user.{{ role.attr }}, "value", user.{{ role.attr }})) if user else None
+    readable = {
+        name
+        for name in names
+        if NAMES[name].public
+        or (role is not None and any(allows(role, op) for op in NAMES[name].readers))
+    }
+{% else %}
+    readable = {name for name in names if NAMES[name].public or user is not None}
+{% endif %}
+    if not readable or (entity and readable != names):
+{% if access %}
+        if user is None:
+            {{ py.problem(401, "Sign in to use this endpoint.", 12) }}
+        {{ py.problem(403, "Your role may not do this operation.", 8) }}
+    return Viewer(frozenset(readable), user.id if user else None, role)
+{% else %}
+        {{ py.problem(401, "Sign in to use this endpoint.", 8) }}
+    return Viewer(frozenset(readable), user.id if user else None)
+{% endif %}
+{% else %}
+    """Return the client of a stream: the entities whose events it gets, by default all."""
+    return Viewer(frozenset(entity or NAMES))
+{% endif %}
+
+
+{% for id in py.live_ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.get(
+    "/live",
+    response_class=EventSourceResponse,
+    response_model_exclude_none=True,
+{% if access %}
+    responses=problem_responses(401, 403),
+{% elif auth %}
+    responses=problem_responses(401),
+{% endif %}
+    summary="Stream the changes of the records",
+    operation_id="live_events",
+)
+async def live_events(
+    request: Request, viewer: Annotated[Viewer, Depends(live_viewer)]
+) -> AsyncIterable[LiveEvent]:
+    """Send the creates, the changes, and the deletes of the records that the client may read.
+
+    The first event is `open`. An event has the entity and the ID of a
+    record, but no values: the client reads the record again.
+    """
+    broker: Broker = request.app.state.live
+    subscription = broker.subscribe(viewer)
+    try:
+        yield LiveEvent(type="open")
+        while (event := await subscription.next()) is not None:
+            yield event
+    finally:
+        broker.unsubscribe(subscription)
+
+
+@contextlib.contextmanager
+def end_streams_on_exit(broker: Broker) -> Generator[None]:
+    """End the open streams at SIGINT and SIGTERM, and then call the handler of the server.
+
+    The server waits for the open requests before it stops, but a stream
+    does not end by itself: without this handler, a stream stops a
+    deployment or a reload. The server handles the signals in the main
+    thread, so the handler does nothing in another thread.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    previous = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
+
+    def handle(number: int, frame: FrameType | None) -> None:
+        loop.call_soon_threadsafe(broker.end_streams)
+        handler = previous[signal.Signals(number)]
+        if callable(handler):
+            handler(number, frame)
+        elif handler is signal.SIG_DFL:
+            signal.signal(number, signal.SIG_DFL)
+            signal.raise_signal(number)
+
+    for number in previous:
+        signal.signal(number, handle)
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            if handler is not None:
+                signal.signal(number, handler)

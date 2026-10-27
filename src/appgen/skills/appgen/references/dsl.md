@@ -178,6 +178,7 @@ the React app.
 | `rules`         | No       | Rules over more than one field or record (see [Entity rules](#entity-rules)). |
 | `events`        | No       | Custom operations that run after a record is created, changed, or deleted (see [Events](#events)). |
 | `history`       | No       | The change log of the records: `true`, or a mapping (see [History](#history)). |
+| `live`          | No       | The live updates of the records in the open views: `true`, or a mapping (see [Live updates](#live-updates)). |
 
 ### The CRUD shorthand
 
@@ -696,6 +697,51 @@ Booking:
   (`x-react-data: api`) reads them from the endpoints.
 - A tab of a detail view with `history: true` shows the entries (see
   [views](#views)).
+
+### Live updates
+
+`live` sends the creates, the changes, and the deletes of the records
+of the entity to the open views of the apps, so that a user sees the
+changes of the other users at once
+([ADR 0051](https://github.com/ds411/app-generator/blob/main/docs/adr/0051-live-updates.md)).
+
+| Key           | Required | Content |
+| ------------- | -------- | ------- |
+| `description` | No       | Text.   |
+
+`live: true` is the short form. The entity needs a list or a read
+operation (the validator reports `missing-key`).
+
+```yaml
+# in: entities.Task
+# The open views show the changes of the tasks at once.
+live: true
+```
+
+- An event has the type (`created`, `changed`, or `deleted`), the
+  entity, and the ID of the record, but no values: a view reads the
+  record again with the operations of the entity. The event comes after
+  the commit of the transaction. A transaction that rolls back gives no
+  event.
+- All the code that writes through the database sessions of the app
+  gives the events: the generated and the custom operations, the
+  [events](#events), the restores of the [history](#history), and the
+  jobs. A change outside these sessions gives none: SQL in a script, a
+  record that the database deletes with `on_delete: cascade`, and an
+  `update` or a `delete` statement of many records.
+- A user gets the events of an entity if the role of the user may call
+  a list or a read operation of the entity. With a
+  record rule ([access](#access)) for the reads, a user gets only the
+  events of the records that the user may read before or after the
+  change.
+- The FastAPI app has the endpoint `GET /live`: a stream of
+  server-sent events. The first event is `open`. The event `reset`
+  tells the client to read its views again, for example after a loss of
+  events. With Redis in the setting `LIVE_EVENTS_URL`, all replicas and
+  the worker of the jobs send their changes to the streams of all
+  replicas. Without it, each process sends only its own changes.
+- The Next.js app and the React app do not show the live updates yet:
+  `appgen check` lists `live` as excluded by design.
 
 ### Relations
 

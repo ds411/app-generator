@@ -9,6 +9,9 @@
       RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
 {% endif %}
 {% endif %}
+{% if py.live %}
+      LIVE_EVENTS_URL: ${LIVE_EVENTS_URL:-}
+{% endif %}
 {% if definition.auth %}
       # Set AUTH_SECRET in the shell or in .env: a long random text.
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
@@ -43,6 +46,10 @@
 {% if py.redis %}
 # With Redis for the rate limit of all replicas:
 #   RATE_LIMIT_STORE_URL=redis://redis:6379/0 docker compose --profile redis up --build
+{% endif %}
+{% if py.live %}
+# With Redis for the live events of all replicas{{ " and of the worker" if py.jobs }}:
+#   LIVE_EVENTS_URL=redis://redis:6379/0 docker compose --profile redis up --build
 {% endif %}
 
 name: {{ app.name | tojson }}
@@ -100,7 +107,7 @@ services:
       migrate:
         condition: service_completed_successfully
 {% endif %}
-{% if py.redis %}
+{% if py.redis or py.live %}
 
   redis:
     image: ${REDIS_IMAGE:-redis:8-alpine}

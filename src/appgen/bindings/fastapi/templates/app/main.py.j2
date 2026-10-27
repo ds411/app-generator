@@ -29,6 +29,10 @@ from app.core.health import router as health_router
 {% if i18n %}
 from app.core.i18n import LanguageMiddleware
 {% endif %}
+{% if py.live %}
+from app.core.live import BROKER_KEY, Broker, end_streams_on_exit
+from app.core.live import router as live_router
+{% endif %}
 from app.core.logging import RequestLogMiddleware, configure_logging
 {% if py.notifications %}
 from app.core.notices import router as notices_router
@@ -81,7 +85,7 @@ logger = logging.getLogger("app.seed")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Add the seed records with DATABASE_SEED=true when the app starts. Close the
-    connections of the database{{ " and of Redis" if py.redis }} when the app stops."""
+    connections of the database{{ " and of Redis" if py.redis or py.live }} when the app stops."""
     settings: Settings = app.state.settings
     if settings.database_seed:
         async with app.state.sessions() as session:
@@ -95,8 +99,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             added = await seed_database(session)
 {% endif %}
         logger.info("The seed added %d records.", added)
+{% if py.live %}
+    with end_streams_on_exit(app.state.live):
+        yield
+{% else %}
     yield
+{% endif %}
     await app.state.engine.dispose()
+{% if py.live %}
+    await app.state.live.close()
+{% endif %}
 {% if py.redis %}
     limiter = getattr(app.state, "rate_limiter", None)
     if isinstance(limiter, RedisRateLimiter):
@@ -120,6 +132,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = make_engine(settings.database_url)
     app.state.sessions = make_sessions(app.state.engine)
+{% if py.live %}
+{% for id in py.live_ids %}
+    {{ trace(id) }}
+{% endfor %}
+    # The sessions give the changes of the live entities to the broker (ADR 0051).
+    app.state.live = Broker(settings.live_events_url)
+    app.state.sessions.configure(info={BROKER_KEY: app.state.live})
+{% endif %}
 {% if py.storage %}
     {{ trace(py.storage.id) }}
     app.state.storage = make_storage(settings)
@@ -189,6 +209,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% endfor %}
 {% if py.notifications %}
     app.include_router(notices_router)
+{% endif %}
+{% for id in py.live_ids %}
+    {{ trace(id) }}
+{% endfor %}
+{% if py.live %}
+    app.include_router(live_router)
 {% endif %}
 {% for api in exposed %}
     {{ trace(api.id) }}
