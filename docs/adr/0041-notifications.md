@@ -72,8 +72,22 @@ text in the language of the request, and `unread=true` gives only the
 unread notices. `POST /notices/{id}/read` marks one notice read, and
 `POST /notices/read` all notices of the user.
 
-The Next.js and the React apps exclude the notifications until the bell
-of the top bar (#410).
+The Next.js app keeps the notices in the same table `notices`, and its
+repositories add them in the transaction of the change, as the FastAPI
+app does. The server actions give the notices of the signed-in user and
+mark them read. The React app with mock data keeps the notices in the
+session storage of the browser tab, so that a user that signs in after
+the change sees them. With `x-react-data: api`, the React app reads them
+from the FastAPI app.
+
+The top bar of a layout, and the header of the pages without a layout,
+show a bell: the count of the unread notices of the signed-in user, and
+a list of the newest notices. Without a signed-in user, the bell does not
+show. The front ends
+write the text of a notice from the name of the notification and the
+values, in the selected language. A click on a notice marks it read and
+opens the detail page of its record: the first page with a detail view
+of the entity and one parameter in its path.
 
 ## Consequences
 
@@ -89,3 +103,10 @@ of the top bar (#410).
   a job can do it.
 - A notification without users at the end of its paths gives no
   notice. The validator cannot see that.
+- The bell loads the notices again when the page changes, when it
+  opens, and after a read. A notice of a change by another user shows
+  after the next page change: the apps do not push the notices to the
+  browser.
+- The React app with mock data shows the notices of the changes in the
+  browser tab only. The records go back to the mock data when the page
+  reloads, so the record of a notice can have its old values again.

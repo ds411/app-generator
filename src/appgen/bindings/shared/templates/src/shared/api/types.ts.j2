@@ -94,6 +94,39 @@ export interface HistoryApi<T extends EntityRecord> {
 }
 
 {% endif %}
+{% if has_notices(definition) %}
+/** A notice for the signed-in user: a change of a record that concerns the user (ADR 0041). */
+export type Notice = {
+  id: string;
+  /** The name of the notification in the app definition: its text is a key of the translations. */
+  notification: string;
+  entity: string;
+  recordId: string;
+  /** The ID of the user that made the change, or null. */
+  actorId: string | null;
+  /** The display value of the user that made the change, or null. */
+  actor: string | null;
+  /** The values of the text, by name, as text from the time of the change. */
+  values: Record<string, string>;
+  /** The time of the change (ISO 8601). */
+  at: string;
+  /** The time that the user marked the notice read (ISO 8601), or null. */
+  readAt: string | null;
+};
+
+/** The notices of the signed-in user (ADR 0041). */
+export interface NoticeApi {
+  /** Return a page of the notices, the newest first. `unread`: only the unread notices. It fails without a signed-in user. */
+  list(query?: { unread?: boolean; page?: number; pageSize?: number }): Promise<ListResult<Notice>>;
+  /** Mark a notice read, and return it. */
+  read(id: string): Promise<Notice>;
+  /** Mark all notices of the user read. */
+  readAll(): Promise<void>;
+  /** Call the listener after a change of the notices. Return the function that stops it. */
+  subscribe(listener: () => void): () => void;
+}
+
+{% endif %}
 {% if definition.storage %}
 /** A file of a record (ADR 0027): the name, the size in bytes, the media type, and the URL of the file. */
 export type FileValue = {

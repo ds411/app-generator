@@ -1,0 +1,38 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+import { unwrap } from "./errors";
+import { listNoticesAction, readAllNoticesAction, readNoticeAction } from "./notice-actions";
+import type { NoticeApi } from "./types";
+
+/** The listeners of the notices in this browser tab. */
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/**
+ * The notices of the signed-in user (ADR 0041): it calls the server
+ * actions, and after a read it calls the listeners in this browser tab.
+ */
+export const notices: NoticeApi = {
+  async list(query) {
+    return unwrap(await listNoticesAction(query));
+  },
+  async read(id) {
+    const notice = unwrap(await readNoticeAction(id));
+    notifyListeners();
+    return notice;
+  },
+  async readAll() {
+    unwrap(await readAllNoticesAction());
+    notifyListeners();
+  },
+  subscribe(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+};

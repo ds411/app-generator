@@ -164,6 +164,34 @@ reloads.
 {% endif %}
 
 {% endif %}
+{% if react.notices %}
+## Notices
+
+A change of a record gives each user that it concerns a notice, except
+the user that made the change.
+{% if react.api %}
+The FastAPI app adds the notices, and the app reads them with the
+endpoints `/notices`.
+{% else %}
+With mock data, the mock stores add the notices after a change, and the
+app keeps them in the session storage of the browser tab. The records
+go back to the mock data when the page reloads, so the record of a
+notice can have its old values again.
+{% endif %}
+
+| Notification | Change | Receivers | Text |
+| ------------ | ------ | --------- | ---- |
+{% for name, n in definition.notifications.items() %}
+| `{{ name }}` | {{ notice_summary(n) }} | {% for r in n.receivers %}`{{ r }}`{{ ", " if not loop.last }}{% endfor %} | {{ n.text }} |
+{% endfor %}
+
+- The bell in the top bar shows the count of the unread notices of the
+  signed-in user, and the newest notices. A click on a notice marks it
+  read, and opens the detail page of its record. "Mark all read" marks
+  all notices of the user read.
+- A notice keeps the values of its text from the time of the change.
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 

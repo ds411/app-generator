@@ -202,6 +202,14 @@ export type RepositoryOptions<T> = {
    */
   history?: HistoryMember[];
 {% endif %}
+{% if nextjs.notices %}
+  /**
+   * Add the notices of a change of a record (ADR 0041): the row after the
+   * change, and the row before it, or undefined for a new record. The
+   * repository calls it after the change log.
+   */
+  notify?: (tx: Database, row: Row, before: Row | undefined) => Promise<void>;
+{% endif %}
 {% if nextjs.events %}
   /** The events of the entity. An error of an operation rolls back the change. */
   events?: Events<T>;
@@ -348,6 +356,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if history %}
   private readonly history: HistoryMember[];
 {% endif %}
+{% if nextjs.notices %}
+  private readonly notify: RepositoryOptions<T>["notify"];
+{% endif %}
 {% if nextjs.events %}
   private readonly events: Events<T>;
 {% endif %}
@@ -378,6 +389,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
     this.workflows = options.workflows ?? [];
 {% if history %}
     this.history = options.history ?? [];
+{% endif %}
+{% if nextjs.notices %}
+    this.notify = options.notify;
 {% endif %}
 {% if nextjs.events %}
     this.events = options.events ?? {};
@@ -523,11 +537,17 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if history %}
         await this.log(tx, String(row.id), "created", undefined);
 {% endif %}
+{% if nextjs.notices %}
+        await this.addNotices(tx, String(row.id), undefined);
+{% endif %}
         return this.reread(tx, String(row.id));
       }
 {% endif %}
 {% if history %}
       await this.log(tx, String(row.id), "created", undefined);
+{% endif %}
+{% if nextjs.notices %}
+      await this.addNotices(tx, String(row.id), undefined);
 {% endif %}
       return record as T;
     });
@@ -559,7 +579,7 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const where = eq(this.table.id, id);
 {% endif %}
     return getDb().transaction(async (tx) => {
-{% set reads_history = " || this.history.length > 0" if history else "" %}
+{% set reads_history = (" || this.history.length > 0" if history else "") ~ (" || this.notify !== undefined" if nextjs.notices else "") %}
 {% if translatable %}
       const reads = this.workflows.length > 0 || this.translatable.length > 0{{ " || this.events.changed !== undefined" if nextjs.events }}{{ reads_history }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
@@ -567,12 +587,16 @@ export class Repository<T extends EntityRecord, TInput extends object>
         before[0] ? { ...patch, ...storeTranslations(before[0], patch, this.translatable) } : patch,
       );
 {% elif nextjs.events %}
-      // The workflows{{ ", the change log," if history }} and the event `changed` compare the record before and after the change.
+      // The workflows{{ ", the change log" if history }}{{ ", the notices" if nextjs.notices }}{{ "," if history or nextjs.notices }} and the event `changed` compare the record before and after the change.
       const reads = this.workflows.length > 0 || this.events.changed !== undefined{{ reads_history }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(patch);
-{% elif history %}
-      // The workflows and the change log compare the record before and after the change.
+{% elif history or nextjs.notices %}
+{% if history and nextjs.notices %}
+      // The workflows, the change log, and the notices compare the record before and after the change.
+{% else %}
+      // The workflows and the {{ "change log" if history else "notices" }} compare the record before and after the change.
+{% endif %}
       const reads = this.workflows.length > 0{{ reads_history }};
       const before: Row[] = reads ? await tx.select().from(this.table).where(where).limit(1) : [];
       const values = this.toRow(patch);
@@ -602,11 +626,17 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if history %}
         await this.log(tx, id, action, before[0]);
 {% endif %}
+{% if nextjs.notices %}
+        await this.addNotices(tx, id, before[0]);
+{% endif %}
         return this.reread(tx, id);
       }
 {% endif %}
 {% if history %}
       await this.log(tx, id, action, before[0]);
+{% endif %}
+{% if nextjs.notices %}
+      await this.addNotices(tx, id, before[0]);
 {% endif %}
       return record as T;
     });
@@ -784,6 +814,19 @@ export class Repository<T extends EntityRecord, TInput extends object>
       action === "deleted" ? [] : await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
     const old = before === undefined ? null : snapshot(before, this.history);
     await addEntry(tx, this.entity, id, action, old, rows[0] === undefined ? null : snapshot(rows[0], this.history));
+  }
+{% endif %}
+{% if nextjs.notices %}
+
+  /** Add the notices of a change of a record (ADR 0041), with the row as the transaction has it now. */
+  private async addNotices(tx: Transaction, id: string, before: Row | undefined): Promise<void> {
+    if (this.notify === undefined) {
+      return;
+    }
+    const rows: Row[] = await tx.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+    if (rows[0] !== undefined) {
+      await this.notify(tx, rows[0], before);
+    }
   }
 {% endif %}
 

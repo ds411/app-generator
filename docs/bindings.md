@@ -933,9 +933,10 @@ tab of a detail view with `history: true`.
   (`<entity>HistoryMembers`). `create`, `update`, and `remove` add the
   entries in their transaction, after the events. A change without a
   new value adds no entry.
-- With `auth`, `runAction` runs the action with `asUser()`, so that the
-  entries have the signed-in user. The page of the entries gives the
-  display value of each user, or the user name.
+- With `auth`, `runAction` runs the action with `asUser()`
+  (`src/shared/db/acting-user.ts`), so that the entries have the
+  signed-in user. The page of the entries gives the display value of
+  each user, or the user name. The notices use the same user.
 - The server actions `list<Entity>HistoryAction` (the access of the
   read) and `restore<Entity>HistoryEntryAction` (the access of the
   update) give the entries and the restore. The restore checks the old
@@ -964,6 +965,46 @@ tab of a detail view with `history: true`.
   task of the project tracker in both front ends, sees the entry in the
   tab "History", and restores the old title. `scripts/api_client_test.py`
   does the same with the FastAPI app.
+
+### The notices of the Next.js app and of the React app
+
+The front ends add the notices of the `notifications` as the FastAPI
+app does ([ADR 0041](adr/0041-notifications.md)), and show them in a
+bell of the top bar.
+
+- The Next.js app has the table `notices`
+  (`src/shared/db/schema/notices.ts`), with the same columns as the
+  FastAPI app, and the helpers in `src/shared/db/notices.ts`:
+  `pathUsers()` follows a receiver path in the transaction,
+  `addNotices()` adds one notice for each user except the user of
+  `asUser()`, and `textValue()` and `recordText()` give the values of
+  the text. The repository of an entity with a notification has the
+  option `notify` (`<entity>Notify`): `create` and `update` call it
+  after the events and the change log, with the row before the change.
+- The server actions `listNoticesAction`, `readNoticeAction`, and
+  `readAllNoticesAction` (`src/shared/api/notice-actions.ts`) use only
+  the notices of the signed-in user. `notices` of
+  `@/shared/api/notices` is the `NoticeApi` of the bell: `list`,
+  `read`, `readAll`, and `subscribe`.
+- The mock store of the React app calls the function of
+  `withNotices()` in `src/entities/<entity>/api/<entity>-api.ts` after
+  a change. `pathIds()` follows a receiver path through the records of
+  the other mock stores. `src/shared/api/notices.ts` keeps the notices
+  in the session storage of the browser tab, because the sign-in
+  reloads the page. With the FastAPI app (`x-react-data: api`), it
+  reads the endpoints `/notices` of the FastAPI app.
+- The feature `src/features/notices` has the bell (`NoticeBell`) and
+  the texts of the notifications (`model/notice-texts.ts`). The top bar
+  of a layout and the header of the pages without a layout show the
+  bell. It shows the count of the unread notices and the newest notices,
+  after the first load: without a signed-in user, the list fails, and
+  the bell does not show. It
+  writes the text of a notice in the selected language, from the name
+  of the notification and the values. A click marks the notice read
+  and opens the detail page of its record.
+- The UI test `ui-tests/tests/auth.spec.ts` cancels a booking of a
+  member as an administrator in the room booking example, signs in as
+  the member, and opens the notice in the bell.
 
 ## Shared templates
 

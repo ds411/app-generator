@@ -1,0 +1,184 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
+import "server-only";
+
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+import { z } from "zod";
+
+import { type ListResult, type Notice, NotFoundError } from "@/shared/api";
+
+import { actingUserId } from "./acting-user";
+import { type Database, getDb } from "./client";
+import { noticesTable, {{ users.const }} } from "./schema";
+
+// The notices of the users (ADR 0041). The repositories add the notices
+// of a change of a record in the transaction of the change, after the
+// events and the change log. Each user at the end of a receiver path gets
+// one notice, except the user that made the change.
+
+type Row = Record<string, unknown>;
+
+/**
+ * A step of a receiver path: the table of the step, the column of the IDs
+ * of the step before, and the column of the next IDs. A many-to-one step
+ * reads the foreign key of the records, and a many-to-many step reads its
+ * join table.
+ */
+export type PathStep = readonly [table: PgTable, from: PgColumn, to: PgColumn];
+
+/** Return the IDs of the users at the end of a receiver path of a record, as the transaction has them. */
+export async function pathUsers(tx: Database, recordId: string, steps: readonly PathStep[]): Promise<string[]> {
+  let ids = [recordId];
+  for (const [table, from, to] of steps) {
+    if (ids.length === 0) {
+      return [];
+    }
+    const rows = await tx.select({ id: to }).from(table).where(inArray(from, ids));
+    ids = rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  }
+  return ids;
+}
+
+/** Return a value of a record as text, for the text of a notice: a time is in UTC, without the seconds. */
+export function textValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return `${value.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  }
+  return String(value);
+}
+
+/** Return the display value of the record of a relation: the column `label` of the row with the ID. */
+export async function recordText(
+  tx: Database,
+  table: PgTable,
+  key: PgColumn,
+  label: PgColumn,
+  id: unknown,
+): Promise<string> {
+  if (typeof id !== "string") {
+    return "";
+  }
+  const rows = await tx.select({ value: label }).from(table).where(eq(key, id)).limit(1);
+  return textValue(rows[0]?.value);
+}
+
+/** Return a value of a row to compare: a time as its number. */
+function comparable(value: unknown): unknown {
+  return value instanceof Date ? value.getTime() : (value ?? null);
+}
+
+/** Return true if a change gave one of the keys of a row a new value. */
+export function changed(row: Row, before: Row | undefined, keys: readonly string[]): boolean {
+  return (
+    before !== undefined &&
+    keys.some((key) => JSON.stringify(comparable(row[key])) !== JSON.stringify(comparable(before[key])))
+  );
+}
+
+/**
+ * Add a notice for each user, in the transaction of a change. Each user
+ * gets one notice. The user of the change (`asUser`) gets none.
+ */
+export async function addNotices(
+  tx: Database,
+  notification: string,
+  entity: string,
+  recordId: string,
+  users: readonly unknown[],
+  values: Record<string, string>,
+): Promise<void> {
+  const actorId = actingUserId();
+  const ids = [...new Set(users)].filter((id): id is string => typeof id === "string" && id !== actorId);
+  if (ids.length === 0) {
+    return;
+  }
+  const at = new Date();
+  await tx
+    .insert(noticesTable)
+    .values(ids.map((userId) => ({ userId, notification, entity, recordId, actorId, values, at })));
+}
+
+type NoticeRow = typeof noticesTable.$inferSelect;
+
+/** The query of the notices of a user: only the unread notices, and the page. */
+const querySchema = z.object({
+  unread: z.boolean().default(false),
+  page: z.int().min(1).default(1),
+  pageSize: z.int().min(1).max(100).default(20),
+});
+
+/** Return a notice as the API gives it, with the display value of the user of the change. */
+function toNotice(row: NoticeRow, actors: Map<string, string | null>): Notice {
+  return {
+    id: row.id,
+    notification: row.notification,
+    entity: row.entity,
+    recordId: row.recordId,
+    actorId: row.actorId,
+    actor: row.actorId === null ? null : (actors.get(row.actorId) ?? null),
+    values: row.values,
+    at: row.at.toISOString(),
+    readAt: row.readAt === null ? null : row.readAt.toISOString(),
+  };
+}
+
+/** Return the display values of the users of the changes of the notices. */
+async function actorsOf(rows: readonly NoticeRow[]): Promise<Map<string, string | null>> {
+  const ids = [...new Set(rows.map((row) => row.actorId).filter((id) => id !== null))];
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const users = await getDb()
+    .select({ id: {{ users.const }}.id, label: {{ users.const }}.{{ history_user_key(definition) }} })
+    .from({{ users.const }})
+    .where(inArray({{ users.const }}.id, ids));
+  return new Map(users.map((user) => [user.id, user.label === null ? null : String(user.label)]));
+}
+
+/** Return a page of the notices of a user, the newest first. */
+export async function noticesPage(userId: string, query: unknown): Promise<ListResult<Notice>> {
+  const { unread, page, pageSize } = querySchema.parse(query ?? {});
+  const db = getDb();
+  const where = unread
+    ? and(eq(noticesTable.userId, userId), isNull(noticesTable.readAt))
+    : eq(noticesTable.userId, userId);
+  const total = await db.$count(noticesTable, where);
+  const rows: NoticeRow[] = await db
+    .select()
+    .from(noticesTable)
+    .where(where)
+    .orderBy(desc(noticesTable.at), desc(noticesTable.id))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const actors = await actorsOf(rows);
+  return { items: rows.map((row) => toNotice(row, actors)), total, page, pageSize };
+}
+
+/** Mark a notice of a user read, and return it. A notice of another user does not exist. */
+export async function readNotice(userId: string, id: string): Promise<Notice> {
+  const parsed = z.uuid().safeParse(id);
+  const rows: NoticeRow[] = parsed.success
+    ? await getDb()
+        .update(noticesTable)
+        .set({ readAt: new Date() })
+        .where(and(eq(noticesTable.id, parsed.data), eq(noticesTable.userId, userId)))
+        .returning()
+    : [];
+  const [row] = rows;
+  if (row === undefined) {
+    throw new NotFoundError("Notice", id);
+  }
+  return toNotice(row, await actorsOf(rows));
+}
+
+/** Mark all unread notices of a user read. */
+export async function readAllNotices(userId: string): Promise<void> {
+  await getDb()
+    .update(noticesTable)
+    .set({ readAt: new Date() })
+    .where(and(eq(noticesTable.userId, userId), isNull(noticesTable.readAt)));
+}

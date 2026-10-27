@@ -10,12 +10,12 @@ import { ForbiddenError, requireOperation } from "@/shared/auth/access";
 {% if ts_connections %}
 import { NotConnectedError } from "@/shared/auth/connections";
 {% endif %}
-{% set acting = has_history(definition) and definition.auth %}
+{% set acting = (has_history(definition) or has_notices(definition)) and definition.auth %}
 {% if definition.auth %}
 import { UnauthorizedError, requireUser{{ ", sessionUserId" if acting }} } from "@/shared/auth/session";
 {% endif %}
 {% if acting %}
-import { asUser } from "@/shared/db/history";
+import { asUser } from "@/shared/db/acting-user";
 {% endif %}
 {% if i18n and ui_forms.names %}
 import { issueMessage } from "@/shared/lib/form";
@@ -112,7 +112,7 @@ export async function runAction<T>(
 {% endif %}
 {% endif %}
 {% if acting %}
-    // The entries of the change log have the signed-in user (ADR 0040).
+    // The change log (ADR 0040) and the notices (ADR 0041) name the signed-in user.
     const data = await asUser(await sessionUserId(), body);
 {% else %}
     const data = await body();

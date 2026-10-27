@@ -1,0 +1,132 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+"use client";
+
+import { BellIcon } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import type { Notice } from "@/shared/api";
+import { notices } from "@/shared/api/notices";
+{% if i18n %}
+import { getLocale } from "@/shared/lib/i18n";
+{% endif %}
+import { useNavigate, usePathname } from "@/shared/lib/router";
+import { useResource } from "@/shared/lib/use-resource";
+import { Button } from "@/shared/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+
+import { noticeHref, noticeText } from "../model/notice-texts";
+
+/** The count of the newest notices in the list. */
+const PAGE_SIZE = 10;
+
+type Notices = { items: Notice[]; unread: number };
+
+/** Return the time of a notice as text. */
+function timeText(at: string): string {
+  return new Date(at).toLocaleString({{ "getLocale()" if i18n else "undefined" }}, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * The bell of the top bar (ADR 0041): the count of the unread notices of
+ * the signed-in user, and the newest notices. A click on a notice marks it
+ * read and opens the detail page of its record. The bell loads the
+ * notices again when the page or the notices change, and when it opens.
+ * It shows after the first load.
+ */
+export function NoticeBell() {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const navigate = useNavigate();
+  const resource = useResource(
+    `notices:${pathname}:${String(open)}`,
+    async (): Promise<Notices> => {
+      const [items, unread] = await Promise.all([
+        notices.list({ pageSize: PAGE_SIZE }),
+        notices.list({ unread: true, pageSize: 1 }),
+      ]);
+      return { items: items.items, unread: unread.total };
+    },
+    notices.subscribe,
+    { keep: true },
+  );
+
+  const openNotice = async (notice: Notice) => {
+    setOpen(false);
+    if (notice.readAt === null) {
+      try {
+        await notices.read(notice.id);
+      } catch {
+        // The notice stays unread.
+      }
+    }
+    const href = noticeHref(notice);
+    if (href !== null) navigate(href);
+  };
+
+  const readAll = async () => {
+    try {
+      await notices.readAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The action did not succeed.")) }});
+    }
+  };
+
+  // Without a signed-in user, the notices do not load, and the bell does not show.
+  if (resource.status !== "success") return null;
+  const { items, unread } = resource.data;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative size-8 text-muted-foreground"
+          aria-label={unread > 0 ? {{ js_format("Notices: {count} unread", count="unread") }} : {{ tr(js("Notices")) }}}
+          title={{ jsx_attr("Notices") }}
+        >
+          <BellIcon className="size-4" />
+          {unread > 0 && (
+            <span
+              data-testid="notice-count"
+              className="absolute -end-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-0">
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+          <span className="text-sm font-medium">{{ jsx_text("Notices") }}</span>
+          <Button size="sm" variant="ghost" disabled={unread === 0} onClick={() => void readAll()}>
+            {{ jsx_text("Mark all read") }}
+          </Button>
+        </div>
+        {items.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{{ jsx_text("No notices yet.") }}</p>
+        ) : (
+          <ul className="max-h-96 overflow-y-auto" aria-label={{ jsx_attr("Notices") }}>
+            {items.map((notice) => (
+              <li key={notice.id} className="border-b last:border-0">
+                <button
+                  type="button"
+                  data-unread={notice.readAt === null ? "" : undefined}
+                  className="flex w-full flex-col items-start gap-1 px-4 py-3 text-start text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                  onClick={() => void openNotice(notice)}
+                >
+                  <span className={notice.readAt === null ? "font-medium" : "text-muted-foreground"}>{noticeText(notice)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {notice.actor !== null ? `${notice.actor} · ` : ""}
+                    {timeText(notice.at)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}

@@ -1,0 +1,21 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/**
+ * The signed-in user of the request. The change log (ADR 0040) and the
+ * notices (ADR 0041) name the user of a change, and the user of a change
+ * gets no notice of it.
+ */
+const actingUser = new AsyncLocalStorage<string | null>();
+
+/** Run work for a user: the changes of the work have the user. */
+export function asUser<T>(user: string | null, work: () => Promise<T>): Promise<T> {
+  return actingUser.run(user, work);
+}
+
+/** Return the user of the work that `asUser` runs, or null. */
+export function actingUserId(): string | null {
+  return actingUser.getStore() ?? null;
+}

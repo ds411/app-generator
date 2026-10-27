@@ -59,13 +59,16 @@ export class RecordRuleError extends Error {
 }
 
 {% endif %}
-{% if record_rules or react.totals %}
+{% set reads_others = record_rules or react.totals or react.notices %}
+{% if reads_others %}
 {% if record_rules and react.totals %}
 /** The records of each store by entity: an owner path and a total read the records of other entities. */
 {% elif record_rules %}
 /** The records of each store by entity: an owner path reads the records of other entities. */
-{% else %}
+{% elif react.totals %}
 /** The records of each store by entity: a total reads the records of another entity. */
+{% else %}
+/** The records of each store by entity: a receiver path of a notice reads the records of other entities. */
 {% endif %}
 const recordsByEntity = new Map<string, () => readonly EntityRecord[]>();
 
@@ -73,6 +76,33 @@ const recordsByEntity = new Map<string, () => readonly EntityRecord[]>();
 function idsOf(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
   return typeof value === "string" ? [value] : [];
+}
+
+{% endif %}
+{% if record_rules or react.notices %}
+/** A step of a path of relations: the key of the relation in the record, and the target entity. */
+export type PathStep = { key: string; target: string };
+
+/**
+ * Return the IDs at the end of a path of relations of a record: the users
+ * of an owner path (ADR 0025), or of a receiver path of a notice (ADR 0041).
+ */
+export function pathIds(record: object, path: readonly PathStep[]): string[] {
+  let records: readonly object[] = [record];
+  for (const [index, step] of path.entries()) {
+    const ids = records.flatMap((item) => idsOf((item as Record<string, unknown>)[step.key]));
+    if (index === path.length - 1) return ids;
+    records = (recordsByEntity.get(step.target)?.() ?? []).filter((item) => ids.includes(item.id));
+  }
+  return [];
+}
+
+{% endif %}
+{% if react.notices %}
+/** Return a value of the record of an entity with an ID, or null: the display value of a relation. */
+export function recordValue(entity: string, id: unknown, key: string): unknown {
+  const record = (recordsByEntity.get(entity)?.() ?? []).find((item) => item.id === id);
+  return record === undefined ? null : ((record as Record<string, unknown>)[key] ?? null);
 }
 
 {% endif %}
@@ -316,6 +346,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   private historyUsers: HistoryUsers | undefined;
   private entries: StoredEntry[] = [];
 {% endif %}
+{% if react.notices %}
+  private addNotices: ((record: T, before: T | undefined) => void) | undefined;
+{% endif %}
 
   constructor(
     private readonly entity: string,
@@ -331,7 +364,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
   ) {
     this.records = data.map((record) => ({ ...record }));
-{% if record_rules or react.totals %}
+{% if record_rules or react.totals or react.notices %}
     recordsByEntity.set(entity, () => this.records);
 {% endif %}
 {% if lines_ops %}
@@ -400,10 +433,16 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.history %}
     this.log(record.id, "created", undefined, this.current(record));
 {% endif %}
+{% if react.notices %}
+    this.addNotices?.(this.current(record), undefined);
+{% endif %}
     return this.show(this.current(record));
 {% else %}
 {% if react.history %}
     this.log(record.id, "created", undefined, record);
+{% endif %}
+{% if react.notices %}
+    this.addNotices?.(record, undefined);
 {% endif %}
     return this.show(record);
 {% endif %}
@@ -434,10 +473,16 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.history %}
     this.log(id, action, before, this.current(record));
 {% endif %}
+{% if react.notices %}
+    this.addNotices?.(this.current(record), before);
+{% endif %}
     return this.show(this.current(record));
 {% else %}
 {% if react.history %}
     this.log(id, action, before, record);
+{% endif %}
+{% if react.notices %}
+    this.addNotices?.(record, before);
 {% endif %}
     return this.show(record);
 {% endif %}
@@ -570,6 +615,18 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 
 {% endif %}
+{% if react.notices %}
+  /**
+   * Add the notices of the changes of the records (ADR 0041): the store
+   * calls `add` after each create and change, with the record before the
+   * change, or undefined for a new record.
+   */
+  withNotices(add: (record: T, before: T | undefined) => void): this {
+    this.addNotices = add;
+    return this;
+  }
+
+{% endif %}
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -654,14 +711,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   /** Return the IDs of the users that a record belongs to: the records at the end of the owner path. */
   private ownersOf(record: T): string[] {
-    const path = this.rules?.path ?? [];
-    let records: readonly object[] = [record];
-    for (const [index, step] of path.entries()) {
-      const ids = records.flatMap((item) => idsOf((item as Record<string, unknown>)[step.key]));
-      if (index === path.length - 1) return ids;
-      records = (recordsByEntity.get(step.target)?.() ?? []).filter((item) => ids.includes(item.id));
-    }
-    return [];
+    return pathIds(record, this.rules?.path ?? []);
   }
 
   /** Throw a RecordRuleError if a new or changed record is not part of the record rule of the user. */

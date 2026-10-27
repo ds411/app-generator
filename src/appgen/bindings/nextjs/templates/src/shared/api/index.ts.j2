@@ -24,6 +24,10 @@ export type {
 {% endif %}
   ListQuery,
   ListResult,
+{% if has_notices(definition) %}
+  Notice,
+  NoticeApi,
+{% endif %}
   Search,
   Sort,
   SortDirection,

@@ -125,6 +125,23 @@ export type ExpectedAuth = {
   }[];
   /** The sign-in with each provider that makes users (ADR 0020): the button, and the menu of the user. */
   providers?: { name: string; title: string; menu: string[] }[];
+  /**
+   * The notices (ADR 0041): a user with all operations changes the state
+   * of a record of the receiver with the edit form of its detail page.
+   * The receiver finds the notice in the bell of the top bar.
+   */
+  notice?: {
+    /** The user names of the user of the change and of the receiver. */
+    actor: string;
+    receiver: string;
+    /** The detail page of the record. */
+    path: string;
+    /** The label of the field of the state, and the label of the new state. */
+    field: string;
+    value: string;
+    /** The text of the notice. */
+    text: string;
+  } | null;
 };
 
 /** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */

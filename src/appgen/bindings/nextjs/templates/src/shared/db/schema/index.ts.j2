@@ -30,3 +30,7 @@ export * from "./history-entries";
 {{ trace(entity.history.id) }}
 {% endfor %}
 {% endif %}
+{% if has_notices(definition) %}
+// The notices of the users (ADR 0041).
+export * from "./notices";
+{% endif %}

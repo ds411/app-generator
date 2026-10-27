@@ -2,8 +2,9 @@
 // the user allows (ADR 0012), a new user can sign up (ADR 0016) and
 // confirm the email address (ADR 0023), a user can reset the password
 // (ADR 0017), a user of a record rule sees only the records of the rule
-// (ADR 0018, ADR 0025), a user signs in with a provider (ADR 0020), and a
-// user turns on a second factor and signs in with a code (ADR 0024).
+// (ADR 0018, ADR 0025), a user signs in with a provider (ADR 0020), a
+// user turns on a second factor and signs in with a code (ADR 0024), and
+// the receiver of a change gets a notice in the bell (ADR 0041).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -336,4 +337,35 @@ test("a user turns on the second factor, and signs in with a code", async ({ pag
   await code.fill(second);
   await page.getByRole("button", { name: "Turn off" }).click();
   await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
+});
+
+test("the receiver of a change finds the notice in the bell of the top bar", async ({ page }, testInfo) => {
+  const notice = auth?.notice;
+  test.skip(!notice || testInfo.project.name !== "light", "One check in the light mode.");
+  if (!notice) return;
+  const password = auth?.password ?? "";
+  const count = page.getByTestId("notice-count");
+  await signIn(page, notice.actor, password);
+  await page.goto(notice.path);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("combobox", { name: notice.field, exact: true }).click();
+  await page.getByRole("option", { name: notice.value, exact: true }).click();
+  await sheet.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  // The user of the change gets no notice.
+  await expect(count).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/sign-in");
+  await signIn(page, notice.receiver, password);
+  await expect(count).toHaveText("1");
+  await page.getByRole("button", { name: "Notices: 1 unread", exact: true }).click();
+  const item = page.getByRole("list", { name: "Notices", exact: true }).getByRole("button").filter({ hasText: notice.text });
+  await expect(item).toBeVisible();
+  // A click opens the detail page of the record, and marks the notice read.
+  await item.click();
+  await page.waitForURL((url) => url.pathname === notice.path);
+  await expect(count).toHaveCount(0);
 });

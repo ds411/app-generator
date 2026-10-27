@@ -1,0 +1,34 @@
+{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+"use server";
+
+import { requireUser } from "@/shared/auth/session";
+import { noticesPage, readAllNotices, readNotice } from "@/shared/db/notices";
+
+import type { ActionResult } from "./errors";
+import { runAction } from "./server";
+import type { ListResult, Notice } from "./types";
+
+// The server actions of the notices of the signed-in user (ADR 0041). A
+// user reads and marks only the own notices.
+
+/** Return a page of the notices of the signed-in user, the newest first. */
+export async function listNoticesAction(query?: {
+  unread?: boolean;
+  page?: number;
+  pageSize?: number;
+}): Promise<ActionResult<ListResult<Notice>>> {
+  return runAction(async () => noticesPage(await requireUser(), query));
+}
+
+/** Mark a notice of the signed-in user read, and return it. */
+export async function readNoticeAction(id: string): Promise<ActionResult<Notice>> {
+  return runAction(async () => readNotice(await requireUser(), id));
+}
+
+/** Mark all notices of the signed-in user read. */
+export async function readAllNoticesAction(): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    await readAllNotices(await requireUser());
+    return null;
+  });
+}

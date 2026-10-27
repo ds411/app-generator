@@ -14,6 +14,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from appgen.bindings.shared import TEMPLATE_DIR
+from appgen.bindings.shared.notices import has_notices
 from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.dashboards import ChartWidget, ListWidget, StatWidget
@@ -167,6 +168,9 @@ def used_components(
     for page in definition.pages.values():
         names.update(_action_components(page.actions.values()))
     names.update(_sign_up_components(definition))
+    if has_notices(definition):
+        # The bell of the notices (ADR 0041).
+        names.add("popover")
     return with_dependencies(names)
 
 

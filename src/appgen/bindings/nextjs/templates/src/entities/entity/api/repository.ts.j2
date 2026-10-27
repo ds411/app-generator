@@ -4,7 +4,8 @@
 {% set rules = record_rules.get(name) %}
 {% set condition = nextjs.owner_conditions.get(name) %}
 {% set totals = nextjs.totals.get(name) %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) %}
+{% set notify = nextjs.notify.get(name) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) %}
 {% set operators = (condition.operators if condition else []) + (totals.operators if totals else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
@@ -16,6 +17,9 @@ import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
 {% if element.history %}
 import type { HistoryMember } from "@/shared/db/history";
+{% endif %}
+{% if notify %}
+import { {{ notify.helpers | sort | join(", ") }} } from "@/shared/db/notices";
 {% endif %}
 import { Repository{{ ", total" if totals }} } from "@/shared/db/repository";
 
@@ -35,6 +39,42 @@ export const {{ var }}HistoryMembers: HistoryMember[] = [ {{ trace(element.histo
 ];
 
 {% endif %}
+{% if notify %}
+type Row = Record<string, unknown>;
+
+{% for const, steps in notify.paths.items() %}
+/** A receiver path of the notifications (ADR 0041): the steps from the record to the users. */
+const {{ const }}: PathStep[] = [
+{% for step in steps %}
+  {{ step }},
+{% endfor %}
+];
+
+{% endfor %}
+/**
+ * Add the notices of a change of {{ type }} (ADR 0041): for each notification
+ * of the change, a notice for each user at the end of its receiver paths,
+ * with the values of its text.
+ */
+async function {{ var }}Notify(tx: Database, row: Row, before: Row | undefined): Promise<void> {
+  const id = String(row.id);
+{% for n in notify.notices %}
+  {{ trace(n.id) }}
+{% for element_id in n.element_ids | unique %}
+  {{ trace(element_id) }}
+{% endfor %}
+  if ({{ n.condition }}) {
+    const users = {{ n.users }};
+    await addNotices(tx, {{ ts_value(n.name) }}, {{ ts_value(name) }}, id, users, {
+{% for value_name, code in n.values %}
+      {{ value_name }}: {{ code }},
+{% endfor %}
+    });
+  }
+{% endfor %}
+}
+
+{% endif %}
 /** The data access of {{ type }} in the database. Use it only on the server. */
 export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   entity: {{ ts_value(name) }},
@@ -46,6 +86,9 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endif %}
 {% if element.history %}
   history: {{ var }}HistoryMembers,
+{% endif %}
+{% if notify %}
+  notify: {{ var }}Notify,
 {% endif %}
 {% if element.file_fields %}
   // The URLs of the files: app/files/{{ name | kebab }}/[id]/[field]/route.ts (ADR 0027).
