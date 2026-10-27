@@ -1111,6 +1111,28 @@ A point field ([ADR 0046](adr/0046-geo-points.md)) is a `GeoPoint`
   the map with the keyboard, a near filter, the links of the list and of
   a marker, and the form of a new place.
 
+### The available filters of the Next.js app and of the React app
+
+An available filter ([ADR 0047](adr/0047-available-filter.md)) shows the
+widget of a date range, `src/shared/ui/filters/date-range-filter.tsx`:
+
+- A view that filters in the browser reads the ranges of the related
+  records with `<entity>Ranges(<relation>.<rule>)` of the slice of its
+  entity: `[id, start, end]` (`OwnerRange` of `@/shared/api`) for each
+  related record. `rangesById` and `isFree` of `src/shared/lib/query.ts`
+  keep the records without a range in the picked days.
+- Next.js: `list<Entity>RangesAction` has the access of the list
+  operation of the entity, and runs a query of `<entity>RangeQueries` in
+  the repository: all related records, also the records that a record
+  rule hides. A date-time is an ISO text.
+- React with mock data: `ranges` of the mock store reads the records of
+  the store of the related entity, without its record rules.
+- React with the FastAPI app: the view sends `<relation>_free_from` and
+  `<relation>_free_to` to the list endpoint.
+- `scripts/listings_ui_test.py` runs the test of the available filter of
+  `tests/fixtures/listings.yaml` in `ui-tests/tests/listings.spec.ts`:
+  two picks of days, and the listings without a booking in them.
+
 ### The lines of the Next.js app and of the React app
 
 A create or an update operation with `lines` writes the record and its

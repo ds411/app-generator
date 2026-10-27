@@ -22,8 +22,9 @@ await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "
 
 {% set history = element.history %}
 {% set share = shares.get(name) %}
-{% if files %}
-import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, NotFoundError, {{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
+{% set ranges = nextjs.ranges.get(name) %}
+{% if files or ranges %}
+import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, {{ "NotFoundError, " if files }}{{ "type OwnerRange, " if ranges }}{{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
 {% else %}
 import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
 {% endif %}
@@ -50,7 +51,7 @@ import { deleteFiles, type FileRule, uploadFile } from "@/shared/storage";
 
 import { {{ var }}InputSchema, {{ var }}PatchSchema } from "../model/schema";
 import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
-import { {{ var }}{{ "HistoryMembers, " ~ var if history }}Repository } from "./{{ name | kebab }}-repository";
+import { {{ var }}{{ "HistoryMembers, " ~ var if history }}{{ "RangeQueries, " ~ var if ranges }}Repository } from "./{{ name | kebab }}-repository";
 
 // The server actions of the data access of {{ type }}. Each action checks
 // its input, because a browser can call it with any values.{% if owned %} A user of a
@@ -73,6 +74,26 @@ export async function list{{ type }}Action(
   return runAction(() => {{ var }}Repository.list(parseListQuery<{{ type }}>(query)){{ opt("list", false) }});
 {% endif %}
 }
+
+{% if ranges %}
+
+/**
+ * Return the ranges of the related records of an available filter (ADR
+ * 0047): `key` is the relation and the rule. A user who may list the
+ * records gets the ranges of all related records, also of the records
+ * that a record rule hides: a record is not free when another user has a
+ * booking. The ranges have only the IDs of the records and the times.
+ */
+export async function list{{ type }}RangesAction(key: string): Promise<ActionResult<OwnerRange[]>> {
+  return runAction(async () => {
+    const query = Object.hasOwn({{ var }}RangeQueries, key) ? {{ var }}RangeQueries[key] : undefined;
+    if (query === undefined) {
+      throw new ValidationError(`{{ type }} has no available filter ${key}.`);
+    }
+    return query();
+  }{{ opt("list", false) }});
+}
+{% endif %}
 
 export async function get{{ type }}Action(id: string): Promise<ActionResult<{{ type }}>> {
 {% if "read" in owned %}

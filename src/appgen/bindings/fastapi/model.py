@@ -2206,7 +2206,9 @@ class PyEntity:
         code += "\n".join(k.entry() for k in query.sort_keys)
         pagination = {"Page", "PageQuery", "sort_order"}
         pagination |= {
-            n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
+            n
+            for n in ("contains", "day_start", "lookup", "range_end", "search_words")
+            if n + "(" in code
         }
         search = {
             n
@@ -2228,7 +2230,11 @@ class PyEntity:
                 if self.translations_query or any("Field(" in d for d in declarations)
                 else ""
             ),
-            "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
+            "from sqlalchemy import "
+            + ("and_, " if "and_(" in code else "")
+            + "func, "
+            + ("or_, " if query.search else "")
+            + "select",
             "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
             from_import("app.core.pagination", pagination),
@@ -2762,6 +2768,16 @@ class PyApp:
         """True if a list endpoint has a `near` or an `area` filter: `app/core/geo.py` has them."""
         return any(
             p.kind in ("near", "area") for e in self.entities.values() for p in e.query.params
+        )
+
+    @property
+    def free_dates(self) -> bool:
+        """True if a list endpoint has an available filter of date fields (ADR 0047):
+        `app/core/pagination.py` has `range_end`."""
+        return any(
+            p.kind == "free_from" and p.free is not None and p.free.dates
+            for e in self.entities.values()
+            for p in e.query.params
         )
 
     @property

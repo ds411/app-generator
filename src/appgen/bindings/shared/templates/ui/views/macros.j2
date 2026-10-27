@@ -22,7 +22,10 @@ import { type ApiParams, {{ "type ApiQuery, " if shape in ("table", "cards") }}l
 import type { ApiParams{{ ", ApiQuery" if shape in ("table", "cards") }} } from "@/shared/api";
 {% endif %}
 {% for entity in ([plan.entity] + plan.lookups) | unique %}
-import { {{ entity | camel }}Api, {{ (entity | camel) ~ "Options, " if entity in plan.sources }}type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+import { {{ entity | camel }}Api, {{ (entity | camel) ~ "Options, " if entity in plan.sources }}{{ (entity | camel) ~ "Ranges, " if entity == plan.entity and plan.ranges }}type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+{% for entity in plan.ranges | map(attribute="target") | unique | reject("in", [plan.entity] + plan.lookups) %}
+import { {{ entity | camel }}Api } from "@/entities/{{ entity | kebab }}";
 {% endfor %}
 {% for line in plan.imports %}
 {{ line }}
@@ -54,9 +57,11 @@ import { pageHref } from "@/shared/lib/pages";
 {% if plan.lookups and not plan.server %}{% set query = query + ["byId"] %}{% endif %}
 {% if plan.needs("matchesSearch") %}{% set query = query + ["matchesSearch"] %}{% endif %}
 {% if plan.needs("inDateRange") %}{% set query = query + ["inDateRange"] %}{% endif %}
+{% if plan.needs("isFree") %}{% set query = query + ["isFree"] %}{% endif %}
 {% if shape == "cards" and not plan.scroll %}{% set query = query + (["pageCount"] if plan.server else ["pageCount", "pageOf"]) %}{% endif %}
 {% if plan.filters | selectattr("kind", "eq", "date_range") | list %}{% set query = query + ["type DateRange"] %}{% endif %}
 {% if plan.filters | selectattr("options") | list %}{% set query = query + ["type Option"] %}{% endif %}
+{% if plan.ranges %}{% set query = query + ["rangesById", "type BusyRange"] %}{% endif %}
 {% if query %}
 import { {{ query | join(", ") }} } from "@/shared/lib/query";
 {% endif %}
@@ -143,10 +148,14 @@ import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
 {% if plan.server %}
 {{ server_data(plan, entities) }}
 {%- else %}
-{% if plan.lookups %}
+{% if plan.lookups or plan.ranges %}
 type Lookups = {
 {% for entity in plan.lookups %}
   {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+{% for r in plan.ranges %}
+  /** The ranges of the related records of {{ r.key }} (ADR 0047), by the ID of the record. */
+  {{ r.lookup }}: Map<string, BusyRange[]>;
 {% endfor %}
 };
 {% else %}
@@ -155,22 +164,30 @@ type Lookups = Record<string, never>;
 
 type ViewData = { records: {{ plan.type }}[]; lookups: Lookups };
 
+{% if plan.ranges %}
+/** Read the records of the view, the related records that its fields show, and the ranges of the available filters. */
+{% else %}
 /** Read the records of the view, and the related records that its fields show. */
+{% endif %}
 async function load(): Promise<ViewData> {
-  const [{% for entity in entities %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+  const [{% for entity in entities %}{{ entity | camel }}List{{ ", " if not loop.last or plan.ranges }}{% endfor %}{% for r in plan.ranges %}{{ r.lookup }}{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
 {% for entity in entities %}
     {{ entity | camel }}Api.list(),
+{% endfor %}
+{% for r in plan.ranges %}
+    {{ plan.var }}Ranges({{ js(r.key) }}),
 {% endfor %}
   ]);
   return {
     records: {{ plan.var }}List.items,
-    lookups: { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+    lookups: { {% for entity in plan.lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last or plan.ranges }}{% endfor %}{% for r in plan.ranges %}{{ r.lookup }}: rangesById({{ r.lookup }}){{ ", " if not loop.last }}{% endfor %} },
   };
 }
 
 /** Load the data again after a change of the records. */
 function subscribe(listener: () => void): () => void {
-  const stops = [{% for entity in entities %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
+{% set targets = plan.ranges | map(attribute="target") | reject("in", entities) | unique | list %}
+  const stops = [{% for entity in entities + targets %}{{ entity | camel }}Api.subscribe(listener){{ ", " if not loop.last }}{% endfor %}];
   return () => stops.forEach((stop) => stop());
 }
 {%- endif %}

@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from appgen.bindings.shared.available import has_available
 from appgen.bindings.shared.geo import has_points
 from appgen.bindings.shared.integrations import ts_features
 from appgen.bindings.shared.lines import line_items, lines_operations
@@ -356,6 +357,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "history_members": history_members,
     "has_history": has_history,
     "has_points": has_points,
+    "has_available": has_available,
     "history_user_key": history_user_key,
     "has_notices": has_notices,
     "notice_plans": notice_plans,

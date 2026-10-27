@@ -14,6 +14,7 @@ from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Operation, Page, Relation
 from appgen.dsl.openapi import accepts, object_properties, property_chain, query_value
+from appgen.dsl.rules import EntityOverlapRule
 from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.api_data import api_data
 from appgen.dsl.ui.common import (
@@ -63,6 +64,7 @@ from appgen.dsl.ui.views import (
     ApiView,
     ApiViewBase,
     AreaFilter,
+    AvailableFilter,
     BadgeRef,
     BadgeSet,
     BoardView,
@@ -1608,6 +1610,9 @@ def _is_enum(definition: AppDefinition, field: str) -> bool:
 
 def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> Iterator[Diagnostic]:
     match filter_:
+        case AvailableFilter():
+            yield from _check_available(definition, entity, filter_)
+            return
         case SearchFilter():
             for path in filter_.fields:
                 target = yield from _resolve(definition, filter_, "fields", entity, path)
@@ -1641,6 +1646,45 @@ def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> It
     defaults = filter_.default if isinstance(filter_.default, list) else [filter_.default]
     if ME in defaults:
         yield from check_me(definition, filter_, "default", target)
+
+
+def _check_available(
+    definition: AppDefinition, entity: str, filter_: AvailableFilter
+) -> Iterator[Diagnostic]:
+    """The rule of an available filter is a `no_overlap` rule of a relation to many (ADR 0047)."""
+    relations = definition.entities[entity].relations
+    relation = relations.get(filter_.relation)
+    if relation is None:
+        choices = [f"{entity}.{name}" for name in relations]
+        yield _missing(filter_, "rule", "relation", f"{entity}.{filter_.relation}", choices)
+        return
+    if relation.kind not in MANY_KINDS:
+        yield _error(
+            "unsuitable-field",
+            f"An available filter needs a one_to_many or a many_to_many relation, but "
+            f"'{entity}.{filter_.relation}' is {relation.kind}.",
+            filter_,
+            at="rule",
+            hint="Use the relation to the records with the time ranges, for example the "
+            "bookings of a listing.",
+        )
+        return
+    target = definition.entities.get(relation.target)
+    if target is None:
+        return
+    rule = target.rules.get(filter_.rule_name)
+    if rule is None:
+        choices = [f"{relation.target}.{name}" for name in target.rules]
+        yield _missing(filter_, "rule", "rule", f"{relation.target}.{filter_.rule_name}", choices)
+    elif not isinstance(rule, EntityOverlapRule):
+        yield _error(
+            "invalid-option",
+            f"An available filter needs a 'no_overlap' rule, but the rule "
+            f"'{relation.target}.{filter_.rule_name}' is a '{rule.kind}' rule.",
+            filter_,
+            at="rule",
+            hint="Use a 'no_overlap' rule: its start and its end give the range of a record.",
+        )
 
 
 def _check_sort(

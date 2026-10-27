@@ -30,6 +30,14 @@ filter adds `<field>_area` (a box `<south>,<west>,<north>,<east>`), with
 the conditions of `app/core/geo.py` (ADR 0046). A map view adds the area
 of its point and the parameters of its filters, so that it loads the
 records in the visible area of the map.
+
+An `available` filter adds `<relation>_free_from` and `<relation>_free_to`
+(ADR 0047): the records without a related record whose range (the start
+and the end of the `no_overlap` rule) overlaps the picked days, with a
+`NOT EXISTS` subquery. On date fields, the days are a range as the ranges
+of the related records: from the first day up to the end day, for
+example a check-in and a check-out. On date-time fields, they are whole
+days, from the start of the first day to the end of the last day.
 """
 
 from dataclasses import dataclass, field
@@ -39,10 +47,12 @@ from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, string
 from appgen.bindings.shared.views import definition_display
 from appgen.dsl.geo import MAX_DISTANCE
 from appgen.dsl.model import AppDefinition
+from appgen.dsl.rules import EntityOverlapRule
 from appgen.dsl.ui.fields import TEXT_TYPES
 from appgen.dsl.ui.views import (
     ApiViewBase,
     AreaFilter,
+    AvailableFilter,
     BoardView,
     BooleanFilter,
     CalendarView,
@@ -186,6 +196,46 @@ class TestPlan:
     ids: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FreeRange:
+    """The related records of an available filter (ADR 0047), and the fields of their range."""
+
+    rule: str
+    """The relation and the rule, for example `bookings.no_double_booking`."""
+    relation: str
+    """The relation on the class of the entity, for example `Listing.bookings`."""
+    target: PyEntity
+    start: PyField
+    end: PyField
+    to: str
+    """The attribute of the parameter of the end day."""
+    link: str | None = None
+    """For a `one_to_many` relation: the foreign key of the related records, for the tests."""
+    ids: str | None = None
+    """For a `many_to_many` relation: the field of the IDs of the related records, for the tests."""
+
+    @property
+    def dates(self) -> bool:
+        """True for a range of date fields: the end day is the first day after the range."""
+        return self.start.type == "date"
+
+    def where_lines(self, first: str) -> list[str]:
+        """Return the statements that keep the records without a related record in the days."""
+        start, end = (f"{self.target.name}.{f.attr}" for f in (self.start, self.end))
+        last = f"query.{self.to}"
+        if self.dates:
+            bounds = [f"low = {first}", f"high = range_end({first}, {last})"]
+        else:
+            bounds = [f"low = day_start({first})", f"high = day_start({last} or {first}, 1)"]
+        overlap = Call("and_", (f"{start} < high", f"{end} > low"))
+        where = Call("statement.where", (Call(f"~{self.relation}.any", (overlap,)),))
+        return [
+            f"if {first} is not None:",
+            *(f"    {b}" for b in bounds),
+            f"    {render(where, 8, 'statement = ')}",
+        ]
+
+
 @dataclass(slots=True)
 class PyParam:
     """A query parameter of a list endpoint for a filter."""
@@ -198,7 +248,8 @@ class PyParam:
     """The Python type of the value, without None, for example `list[TaskStatus]`."""
     kind: str
     """`eq` (equality), `in` (select), `from` and `to` (date range), `search`, `near` and
-    `distance` (the point and the distance of a `near` filter), or `area` (ADR 0046)."""
+    `distance` (the point and the distance of a `near` filter), `area` (ADR 0046), or
+    `free_from` and `free_to` (the days of an `available` filter, ADR 0047)."""
     path: PyPath
     """The path of the value. For the search, the first of its paths."""
     ids: list[str] = field(default_factory=list[str])
@@ -218,6 +269,8 @@ class PyParam:
     """More arguments of `Field`, for example `gt=0`."""
     distance: str | None = None
     """For `near`: the attribute of the parameter of the distance."""
+    free: FreeRange | None = None
+    """For `free_from` and `free_to`: the related records of the available filter."""
 
     @property
     def rank_field(self) -> PyField | None:
@@ -262,9 +315,13 @@ class PyParam:
         value = f"query.{self.attr}"
         if self.kind == "search":
             return self._search_lines(value)
-        if self.kind == "distance":
-            # The condition of the `near` parameter uses the distance.
+        if self.kind in ("distance", "free_to"):
+            # The condition of the `near` parameter uses the distance, and the condition of
+            # `free_from` the end day.
             return []
+        if self.kind == "free_from":
+            assert self.free is not None
+            return self.free.where_lines(value)
         path = self.path
         match self.kind:
             case "in":
@@ -555,6 +612,9 @@ class _Builder:
                 self.search.setdefault(path, self.resolve(path))
             self.search_ids.append(filter_.id)
             return
+        if isinstance(filter_, AvailableFilter):
+            self.available(filter_)
+            return
         path = self.resolve(filter_.field)
         if isinstance(filter_, NearFilter | AreaFilter):
             self.geo(path, filter_)
@@ -588,6 +648,45 @@ class _Builder:
             description = f"The {word} day of `{path.path}`."
             param = PyParam(f"{name}_{end}", f"{attr}_{end}", "dt.date", end, path)
             param.ids, param.description, param.test = [element_id], description, _test(path)
+            self.add(param)
+
+    def available(self, filter_: AvailableFilter) -> None:
+        """Add the first and the end day of an `available` filter (ADR 0047)."""
+        path = self.resolve(filter_.relation)
+        relation = path.relation
+        assert relation is not None
+        target = self.entity.target(relation)
+        rule = self.definition.entities[target.name].rules[filter_.rule_name]
+        assert isinstance(rule, EntityOverlapRule)
+        start, end = (next(f for f in target.fields if f.name == n) for n in (rule.start, rule.end))
+        name = filter_.relation
+        free = FreeRange(
+            rule=filter_.rule,
+            relation=f"{self.entity.name}.{relation.attr}",
+            target=target,
+            start=start,
+            end=end,
+            to=f"{relation.attr}_free_to",
+            link=relation.remote_fk if relation.side == "back" else None,
+            ids=relation.ids_field if relation.side == "m2m" else None,
+        )
+        words = {
+            "free_from": f"The first day of a range of days without `{name}`.",
+            "free_to": "The end of the range: the day after the last day (default: one day)."
+            if free.dates
+            else "The last day of the range (default: the first day).",
+        }
+        for kind, description in words.items():
+            existing = self.params.get(f"{name}_{kind}")
+            if (
+                existing is not None
+                and existing.free is not None
+                and existing.free.rule == free.rule
+            ):
+                existing.ids.append(filter_.id)
+                continue
+            param = PyParam(f"{name}_{kind}", f"{relation.attr}_{kind}", "dt.date", kind, path)
+            param.ids, param.description, param.free = [filter_.id], description, free
             self.add(param)
 
     def geo(self, path: PyPath, filter_: NearFilter | AreaFilter | MapView) -> None:

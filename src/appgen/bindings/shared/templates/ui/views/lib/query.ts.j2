@@ -2,6 +2,10 @@
 // The search, the filters, the sort, and the pages of the list views. The
 // views read all records and apply these functions in the browser.
 
+{% if "available" in ui_views.features %}
+import type { OwnerRange } from "@/shared/api";
+
+{% endif %}
 import { toDate } from "./format";
 
 export type DateRange = { from?: string; to?: string };
@@ -24,6 +28,48 @@ export function inDateRange(value: string | null | undefined, range: DateRange):
   return (!range.from || day >= range.from) && (!range.to || day <= range.to);
 }
 
+{% if "available" in ui_views.features %}
+/** The range of a related record of an available filter (ADR 0047): its start and its end. */
+export type BusyRange = [start: string | null, end: string | null];
+
+/** Return the ranges of the related records by the ID of their record. */
+export function rangesById(ranges: readonly OwnerRange[]): Map<string, BusyRange[]> {
+  const found = new Map<string, BusyRange[]>();
+  for (const [id, start, end] of ranges) {
+    const list = found.get(id) ?? [];
+    list.push([start, end]);
+    found.set(id, list);
+  }
+  return found;
+}
+
+/** Return the time of the start of a day `YYYY-MM-DD` in UTC, a number of days later. */
+function dayStart(day: string, days = 0): number {
+  return Date.parse(`${day}T00:00:00Z`) + days * 86_400_000;
+}
+
+/**
+ * Return true if no range of the related records of a record overlaps the
+ * picked days (ADR 0047). On date fields, the days are a range as the
+ * ranges of the related records: from the first day up to the end day,
+ * for example a check-in and a check-out. On date-time fields, they are
+ * whole days, from the start of the first day to the end of the last day.
+ * Without a first day, all records are free.
+ */
+export function isFree(ranges: readonly BusyRange[] | undefined, days: DateRange, dates: boolean): boolean {
+  if (!days.from) return true;
+  const low = dayStart(days.from);
+  const high = dates
+    ? days.to && days.to > days.from
+      ? dayStart(days.to)
+      : dayStart(days.from, 1)
+    : dayStart(days.to ?? days.from, 1);
+  return !(ranges ?? []).some(
+    ([start, end]) => start !== null && end !== null && Date.parse(start) < high && Date.parse(end) > low,
+  );
+}
+
+{% endif %}
 /** Compare two values for a sort. Empty values come last. */
 export function compareValues(a: unknown, b: unknown): number {
   const emptyA = a === null || a === undefined || a === "";

@@ -13,6 +13,7 @@ from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
+from appgen.bindings.nextjs.ranges import repository_ranges
 from appgen.bindings.nextjs.snapshots import ts_snapshots
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
@@ -399,6 +400,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "events": has_events(definition),
             # The totals of the related records (ADR 0034): the subqueries of the repositories.
             "totals": totals,
+            # The ranges of the related records of the available filters (ADR 0047): the
+            # queries of the repositories.
+            "ranges": repository_ranges(definition, by_entity),
             # The totals of the signed-in user (`$me`): the repositories read the user of the
             # request.
             "me_totals": any(t.me for t in totals.values()),

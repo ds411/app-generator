@@ -39,10 +39,14 @@
 {% set share_guard = share and not react.api and share.update not in definition.auth.public_operations %}
 {# The notices of the changes (ADR 0041): with mock data, the store adds them. #}
 {% set notify = mock_notify(notice_plans(definition, name), mention_plans(definition, name), definition.auth.user_entity if definition.auth else "") if not react.api else none %}
-{% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards or share_guard else []) + (["userLabel"] if history_users else []) %}
-{% set typed = not react.api and not has_files and not history and not notify and not share %}
-{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
-{% set mock_names = notify.store if notify else [] %}
+{# The available filters (ADR 0047): with mock data, the store reads the ranges of the related records. #}
+{% set ranges = react.ranges.get(name, []) %}
+{% set list_op = file_kinds.get("list") %}
+{% set ranges_guard = ranges and definition.access and list_op and list_op not in definition.auth.public_operations %}
+{% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards or share_guard or ranges_guard else []) + (["userLabel"] if history_users else []) %}
+{% set typed = not react.api and not has_files and not history and not notify and not share and not ranges %}
+{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type OwnerRange"] if ranges else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
+{% set mock_names = (notify.store | list if notify else []) + (["type RangeSpec"] if ranges else []) %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
 import { {% for t in api_types %}{{ t }}, {% endfor %}{{ store }}, type ListQuery, type ListResult{% for n in mock_names %}, {{ n }}{% endfor %} } from "@/shared/api";
 {% else %}
@@ -368,3 +372,33 @@ export function list{{ relation_name | pascal }}Of{{ owner | pascal }}( {{ trace
   return {{ var }}Api.list({ ...query, filters });
 }
 {% endfor %}
+{% if ranges %}
+
+/** The related records of the available filters of {{ type }} (ADR 0047), by the relation and the rule. */
+const RANGES = {
+{% for r in ranges %}
+  {{ ts_value(r.key) }}: { {{ trace(r.ids[0], scope="begin") }}
+{% for id in r.ids[1:] %}
+    {{ trace(id) }}
+{% endfor %}
+    target: {{ ts_value(r.target) }},
+    start: {{ ts_value(r.start | camel) }},
+    end: {{ ts_value(r.end | camel) }},
+{% if r.many_to_many %}
+    list: {{ ts_value(r.relation | camel) }},
+{% else %}
+    link: {{ ts_value(r.link) }},
+{% endif %}
+  }, {{ trace(r.ids[0], scope="end") }}
+{% endfor %}
+} satisfies Record<string, RangeSpec>;
+
+/** Return the ranges of the related records of an available filter of {{ type }} (ADR 0047). */
+export function {{ var }}Ranges(key: keyof typeof RANGES): Promise<OwnerRange[]> {
+{% if ranges_guard %}
+  return {{ var }}Api.ranges(RANGES[key], () => requireOperation({{ list_op | tojson }})); {{ trace(definition.access.id) }}
+{% else %}
+  return {{ var }}Api.ranges(RANGES[key]);
+{% endif %}
+}
+{% endif %}

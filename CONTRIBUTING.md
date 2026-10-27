@@ -264,7 +264,7 @@ git config core.hooksPath .githooks
   example `tests/fixtures/totals.yaml` (the totals of the relations),
   `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037),
   `tests/fixtures/listings.yaml` (queries with hand-written logic, ADR
-  0045), `tests/fixtures/courses.yaml` (the totals and the widgets of
+  0045, and the available filters, ADR 0047), `tests/fixtures/courses.yaml` (the totals and the widgets of
   the signed-in user, `$me`), and `tests/fixtures/places.yaml` (point
   fields and the filters `near` and `area`, ADR 0046), and runs the
   same checks on them. It needs Docker.
@@ -337,8 +337,9 @@ git config core.hooksPath .githooks
   the account on the page `/connections` (`scripts/connection_ui_test.py`).
   Then it builds `tests/fixtures/listings.yaml` with React, Next.js, and
   react-api, and checks the views of its queries: a table that pages the
-  rows of its filters, a card list of a path parameter, and a calendar
-  (`scripts/listings_ui_test.py`). Then it builds
+  rows of its filters, a card list of a path parameter, a calendar, and
+  the available filter of the listings without a booking in the picked
+  days (`scripts/listings_ui_test.py`). Then it builds
   `tests/fixtures/courses.yaml` with React, Next.js, and react-api, signs
   in as two users, and checks the widgets, the lists, the totals, and the
   forms of the signed-in user (`$me`, `scripts/sessions_ui_test.py`).
