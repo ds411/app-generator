@@ -20,7 +20,6 @@ from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules, uses_me
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
-from appgen.bindings.shared.geo import reject_point_fields
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -210,8 +209,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
     The app gets the npm packages of the shadcn/ui components that it uses,
     with providers `jose` (ADR 0020), with the delivery by SMTP
     `nodemailer`, with the rate limit in Redis `@redis/client`
-    (ADR 0013), and with the storage kind `s3` `@aws-sdk/client-s3`
-    (ADR 0027).
+    (ADR 0013), with the storage kind `s3` `@aws-sdk/client-s3` (ADR
+    0027), and with a map Leaflet (ADR 0046).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -219,8 +218,13 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         **versions.UI_DEPENDENCIES,
         **{name: versions.COMPONENT_PACKAGES[name] for name in shadcn.packages(components)},
     }
-    if "table" in ViewContext(definition).features:
+    views = ViewContext(definition)
+    dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
+    if "table" in views.features:
         dependencies |= versions.TABLE_PACKAGES
+    if views.map_tiles:
+        dependencies |= versions.MAP_PACKAGES
+        dev_dependencies |= versions.MAP_DEV_PACKAGES
     if definition.auth is not None and definition.auth.providers:
         dependencies |= versions.PROVIDER_PACKAGES
     if definition.auth is not None and definition.auth.second_factor is not None:
@@ -231,7 +235,6 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.SMTP_PACKAGES
     if uses_redis(definition):
         dependencies |= versions.REDIS_PACKAGES
-    dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
         "name": definition.app.name,
         "version": "0.1.0",
@@ -304,7 +307,6 @@ def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
-    reject_point_fields(definition, "nextjs")
     plan = ui_plan(definition)
     pages = {
         name: page_info(name, page, plan.pages[name].layout)

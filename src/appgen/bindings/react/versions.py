@@ -61,6 +61,12 @@ A test checks that this mapping has a version for each of them.
 TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 """The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
 
+MAP_PACKAGES: dict[str, str] = {"leaflet": "1.9.4"}
+"""The packages of the maps (ADR 0046): the map views and the area filters use Leaflet."""
+
+MAP_DEV_PACKAGES: dict[str, str] = {"@types/leaflet": "1.9.22"}
+"""The types of Leaflet, for the type check."""
+
 FORM_PACKAGES: dict[str, str] = {"zod": "4.6.7"}
 """The packages of the forms: the forms check their input with the zod schemas of the entities."""
 

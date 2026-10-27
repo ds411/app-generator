@@ -207,6 +207,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/api-connections*' 'scripts/connection_ui_test.py' 'scripts/mock_api.py' \
     'tests/fixtures/listings*' 'scripts/listings_ui_test.py' \
     'tests/fixtures/courses*' 'scripts/sessions_ui_test.py' \
+    'tests/fixtures/places.yaml' 'scripts/places_ui_test.py' \
     'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps auth-ui"
 fi

@@ -2,8 +2,9 @@
 {% set type = name | pascal %}
 {% set all = members(name, element) %}
 {% set files = all | selectattr("is_file") | list %}
-{% if files %}
-import type { FileValue } from "@/shared/api";
+{% set points = all | selectattr("ts_type", "eq", "GeoPoint") | list %}
+{% if files or points %}
+import type { {{ (["FileValue"] if files else []) | join }}{{ ", " if files and points }}{{ "GeoPoint" if points }} } from "@/shared/api";
 {% endif %}
 {% for m in all if m.field and m.field.type == "enum" %}
 {% if loop.first %}

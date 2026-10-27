@@ -1,14 +1,22 @@
 {{ trace_header("app") }}
 /// <reference types="vite/client" />
-{% if react.api %}
+{% if react.api or ui_views.map_tiles %}
 
 interface ImportMetaEnv {
+{% if react.api %}
   /** The URL of the FastAPI app, for example `http://localhost:8000`. */
   readonly VITE_API_URL?: string;
 {% for api in ts_apis.values() | rejectattr("exposed") %}
   /** The base URL of the API `{{ api.name }}` (default: `{{ api.base_url }}`). */
   readonly {{ api.browser_env }}?: string;
 {% endfor %}
+{% endif %}
+{% if ui_views.map_tiles %}
+  /** The URL of the map tiles, with `{z}`, `{x}`, and `{y}` (default: the tiles of OpenStreetMap). */
+  readonly VITE_MAP_TILES?: string;
+  /** The attribution of the map tiles, as HTML. */
+  readonly VITE_MAP_ATTRIBUTION?: string;
+{% endif %}
 }
 
 interface ImportMeta {

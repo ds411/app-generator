@@ -1,0 +1,137 @@
+{{ trace_header("app") }}
+{% set next = binding.name == "nextjs" %}
+{% set env = "process.env.NEXT_PUBLIC_" if next else "import.meta.env.VITE_" %}
+"use client";
+
+import "leaflet/dist/leaflet.css";
+
+import type * as Leaflet from "leaflet";
+import { useEffect, useRef, useState } from "react";
+
+import type { GeoPoint } from "@/shared/api";
+import { type GeoBox, mapBox } from "@/shared/lib/geo";
+import { cn } from "@/shared/lib/utils";
+
+/**
+ * The URL of the map tiles, with `{z}`, `{x}`, and `{y}`. The setting
+ * `{{ "NEXT_PUBLIC_" if next else "VITE_" }}MAP_TILES` changes it when the app builds. The default is the
+ * standard tiles of OpenStreetMap: read their tile usage policy before a
+ * production use.
+ */
+const TILES = {{ env }}MAP_TILES || {{ js(ui_views.default_tiles) }};
+
+/** The attribution of the tiles, as HTML (`{{ "NEXT_PUBLIC_" if next else "VITE_" }}MAP_ATTRIBUTION`). */
+const ATTRIBUTION =
+  {{ env }}MAP_ATTRIBUTION || ({{ env }}MAP_TILES ? "" : {{ js(ui_views.default_attribution) }});
+
+/** A marker of a map: a record with a point. */
+export type GeoMarker = { id: string; point: GeoPoint; label: string };
+
+/**
+ * A map with a marker for each point, with Leaflet. The map shows all
+ * markers at its first data, else the box `bounds`, else the world. After
+ * each move, it gives its visible area to `onMove`. A click on a marker, or
+ * Enter on a focused marker, calls `onOpen`.
+ */
+export function GeoMap({
+  markers,
+  bounds,
+  label,
+  onMove,
+  onOpen,
+  className,
+}: {
+  markers: readonly GeoMarker[];
+  bounds?: GeoBox | null;
+  label: string;
+  onMove?: (box: GeoBox) => void;
+  onOpen?: (id: string) => void;
+  className?: string;
+}) {
+  const element = useRef<HTMLDivElement>(null);
+  const map = useRef<{ leaflet: typeof Leaflet; map: Leaflet.Map; layer: Leaflet.LayerGroup } | null>(null);
+  const fitted = useRef(false);
+  const handlers = useRef({ onMove, onOpen });
+  const first = useRef(bounds);
+  const [ready, setReady] = useState(false);
+  // The markers effect depends on the content of the markers, not on the
+  // array: a render with the same markers keeps them on the map.
+  const signature = JSON.stringify(markers);
+
+  useEffect(() => {
+    handlers.current = { onMove, onOpen };
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    // Leaflet needs the browser: the map loads it after the first render.
+    void import("leaflet").then((leaflet) => {
+      if (cancelled || element.current === null) return;
+      const instance = leaflet.map(element.current, { worldCopyJump: true }).setView([20, 0], 2);
+      leaflet.tileLayer(TILES, { attribution: ATTRIBUTION, maxZoom: 19 }).addTo(instance);
+      const report = () => {
+        const bounds = instance.getBounds();
+        handlers.current.onMove?.(mapBox(bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()));
+      };
+      instance.on("moveend", report);
+      map.current = { leaflet, map: instance, layer: leaflet.layerGroup().addTo(instance) };
+      setReady(true);
+    });
+    return () => {
+      cancelled = true;
+      map.current?.map.remove();
+      map.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const current = map.current;
+    if (!ready || current === null) return;
+    const { leaflet, layer } = current;
+    const items = JSON.parse(signature) as GeoMarker[];
+    layer.clearLayers();
+    const icon = leaflet.divIcon({
+      className: "",
+      html: '<span class="block size-4 rounded-full border-2 border-white bg-primary shadow-md"></span>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+    for (const marker of items) {
+      // A text node: the label is data of a record, not HTML.
+      const tooltip = document.createElement("span");
+      tooltip.textContent = marker.label;
+      leaflet
+        .marker([marker.point.lat, marker.point.lng], { icon, title: marker.label, keyboard: true })
+        .bindTooltip(tooltip)
+        .on("click", () => handlers.current.onOpen?.(marker.id))
+        .on("keypress", (event: Leaflet.LeafletKeyboardEvent) => {
+          if (event.originalEvent.key === "Enter") handlers.current.onOpen?.(marker.id);
+        })
+        .addTo(layer);
+    }
+    if (!fitted.current) {
+      fitted.current = true;
+      const box = first.current;
+      if (items.length > 0) {
+        const area = leaflet.latLngBounds(items.map((marker) => [marker.point.lat, marker.point.lng]));
+        current.map.fitBounds(area, { padding: [32, 32], maxZoom: 15 });
+      } else if (box) {
+        current.map.fitBounds([
+          [box.south, box.west],
+          [box.north, box.west > box.east ? box.east + 360 : box.east],
+        ]);
+      } else {
+        current.map.fire("moveend");
+      }
+    }
+  }, [ready, signature]);
+
+  return (
+    <div
+      ref={element}
+      role="region"
+      aria-label={label}
+      className={cn("z-0 h-96 w-full overflow-hidden rounded-md border", className)}
+    />
+  );
+}

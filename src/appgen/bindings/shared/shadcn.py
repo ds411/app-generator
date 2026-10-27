@@ -26,6 +26,7 @@ from appgen.dsl.ui.views import (
     BoardView,
     CalendarView,
     CardsView,
+    MapView,
     QueryViewBase,
     TableView,
     View,
@@ -49,6 +50,7 @@ _WIDGET_COMPONENTS: dict[str, tuple[str, ...]] = {
     "datetime": ("popover", "calendar", "input"),
     "relation": ("popover", "command", "badge"),
     "file": ("button",),
+    "point": ("input",),
     "custom": (),
 }
 # A form in `page` mode without a page that shows it opens in a dialog.
@@ -207,7 +209,7 @@ def _view_components(view: View) -> set[str]:
     if isinstance(view, QueryViewBase):
         return set()
     names = _action_components(view.actions.values())
-    if isinstance(view, TableView | CardsView | BoardView | CalendarView):
+    if isinstance(view, TableView | CardsView | BoardView | CalendarView | MapView):
         return names
     names.update(("card", "separator"))
     if view.tabs:
@@ -223,6 +225,7 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "cards": ("card", "select"),
     "board": ("card", "badge", "scroll-area"),
     "calendar": ("button",),
+    "map": ("button",),
     "search": ("input",),
     "param": ("input",),
     "boolean": ("switch",),
@@ -230,6 +233,8 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "select": ("select",),
     "multi_select": ("popover", "command"),
     "record_select": ("popover", "command"),
+    "near": ("input", "select"),
+    "area": ("popover", "button"),
     "badge": ("badge",),
     "avatar": ("avatar",),
     "period": ("select",),

@@ -1,0 +1,56 @@
+{{ trace_header("app") }}
+"use client";
+
+import { MapPinIcon } from "lucide-react";
+
+import { type NearValue, parsePoint } from "@/shared/lib/geo";
+import { Input } from "@/shared/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+
+/** The distances of the choice, in kilometers. The default distance of the filter is also a choice. */
+const DISTANCES = [1, 2, 5, 10, 25, 50, 100, 250];
+
+/**
+ * A point (`<lat>,<lng>`) and a distance for a near filter (ADR 0046). An
+ * empty point keeps all records, and a point that is not valid shows as an
+ * error and keeps all records.
+ */
+export function NearFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: NearValue;
+  onChange: (value: NearValue) => void;
+}) {
+  const invalid = value.point.trim() !== "" && parsePoint(value.point) === null;
+  const distances = [...new Set([...DISTANCES, value.distance])].sort((a, b) => a - b);
+  return (
+    <div className="flex items-center gap-1">
+      <div className="relative w-full sm:w-52">
+        <MapPinIcon className="pointer-events-none absolute top-1/2 start-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label={label}
+          placeholder={{ "{" ~ js_format("{label}: lat, lng", label="label") ~ "}" }}
+          value={value.point}
+          onChange={(event) => onChange({ ...value, point: event.target.value })}
+          aria-invalid={invalid}
+          className="h-8 ps-8"
+        />
+      </div>
+      <Select value={String(value.distance)} onValueChange={(next) => onChange({ ...value, distance: Number(next) })}>
+        <SelectTrigger size="sm" aria-label={{ "{" ~ js_format("Distance from {label}", label="label") ~ "}" }} className="w-24">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {distances.map((distance) => (
+            <SelectItem key={distance} value={String(distance)}>
+              {{ "{" ~ js_format("{distance} km", distance="String(distance)") ~ "}" }}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}

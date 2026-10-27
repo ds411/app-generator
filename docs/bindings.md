@@ -1041,6 +1041,37 @@ widgets, and the totals, and in the defaults of the forms (M36).
   stat widgets, the list of the submissions, the student of a new
   submission, and the totals of the lessons of each user.
 
+### The points and the maps of the Next.js app and of the React app
+
+A point field ([ADR 0046](adr/0046-geo-points.md)) is a `GeoPoint`
+(`{ lat, lng }`) of `@/shared/api`:
+
+- The Next.js app keeps a point in a `jsonb` column
+  (`jsonb("<column>").$type<GeoPoint>()`). The views filter the points
+  in the browser, so the column has no index.
+- A view shows a point with the format `point` of
+  `src/shared/lib/format.ts`. The form widget is
+  `src/shared/ui/form-widgets/point-input.tsx`: two empty inputs give
+  `null`, and one empty input gives `NaN`, which the zod schema reports.
+- The filters `near` and `area` are `src/shared/ui/filters/near-filter.tsx`
+  and `area-filter.tsx`, with the helpers of `src/shared/lib/geo.ts`
+  (`isNear`, `inBox`, and the query parameters `nearParam` and
+  `boxText` of the FastAPI app).
+- A map view is a widget with `src/shared/ui/geo-map.tsx`: Leaflet,
+  loaded in the browser after the first render, with HTML markers. The
+  view gives the visible area to its list after each move. With
+  `x-react-data: api`, it loads the records with
+  `<entity>Api.all({ ...params, <point>_area })`.
+- The tile URL is `NEXT_PUBLIC_MAP_TILES` or `VITE_MAP_TILES` at build
+  time (the README of the app, `.env.example`, and the build arguments
+  of the Dockerfile). The default is the tiles of OpenStreetMap.
+- `scripts/places_ui_test.py` (run by `scripts/check-auth-ui.sh`) builds
+  the app of `tests/fixtures/places.yaml` in the three front ends with a
+  local tile server on the port 8471, and runs
+  `ui-tests/tests/places.spec.ts`: the markers and the tiles, a move of
+  the map with the keyboard, a near filter, the links of the list and of
+  a marker, and the form of a new place.
+
 ### The lines of the Next.js app and of the React app
 
 A create or an update operation with `lines` writes the record and its

@@ -1,4 +1,4 @@
-"""Badges and views: tables, card lists, boards, and detail views (ADR 0003)."""
+"""Badges and views: tables, card lists, boards, calendars, maps, and detail views (ADR 0003)."""
 
 from typing import Annotated, Any, Literal, Self
 
@@ -295,6 +295,23 @@ class CalendarView(ViewBase):
     """The first mode. The user can switch between the week and the month."""
     link: MemberName | None = None
     """A page that a record opens, with the ID of the record."""
+
+
+class MapView(ViewBase):
+    """The records on a map, by a `point` field, with a list of the records in the visible area
+    (ADR 0046)."""
+
+    kind: Literal["map"]
+    point: FieldPath
+    """A `point` field: the place of the marker of each record."""
+    label: FieldPath | None = None
+    """The text of a record. The default is the display field of the entity."""
+    link: MemberName | None = None
+    """A page that a record opens, with the ID of the record."""
+    filters: dict[MemberName, Filter] = pydantic.Field(default_factory=dict[str, Filter])
+    """The filters above the map. The map itself filters by its visible area."""
+    sort: Sort | None = None
+    """The order of the list of the records in the visible area."""
 
 
 class DetailHeader(Element):
@@ -613,7 +630,7 @@ type ApiView = ApiTableView | ApiCardsView | ApiDetailView
 type QueryView = QueryTableView | QueryCardsView | QueryCalendarView
 """A view of the rows of a query (`query`)."""
 
-type EntityView = TableView | CardsView | BoardView | CalendarView | DetailView
+type EntityView = TableView | CardsView | BoardView | CalendarView | MapView | DetailView
 """A view of the records of an entity."""
 
 
@@ -633,6 +650,7 @@ type View = Annotated[
     | Annotated[CardsView, Tag("tag-cards")]
     | Annotated[BoardView, Tag("tag-board")]
     | Annotated[CalendarView, Tag("tag-calendar")]
+    | Annotated[MapView, Tag("tag-map")]
     | Annotated[DetailView, Tag("tag-detail")]
     | Annotated[ApiTableView, Tag("tag-api-table")]
     | Annotated[ApiCardsView, Tag("tag-api-cards")]

@@ -27,7 +27,9 @@ start (and of its end), so that it loads the records of the shown dates.
 A `near` filter of a point field adds `<field>_near` (a point
 `<lat>,<lng>`) and `<field>_distance` (in kilometers), and an `area`
 filter adds `<field>_area` (a box `<south>,<west>,<north>,<east>`), with
-the conditions of `app/core/geo.py` (ADR 0046).
+the conditions of `app/core/geo.py` (ADR 0046). A map view adds the area
+of its point and the parameters of its filters, so that it loads the
+records in the visible area of the map.
 """
 
 from dataclasses import dataclass, field
@@ -49,6 +51,7 @@ from appgen.dsl.ui.views import (
     DetailTab,
     DetailView,
     Filter,
+    MapView,
     NearFilter,
     QueryViewBase,
     SearchFilter,
@@ -508,9 +511,11 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
                 builder.tab(view.entity, tab)
         if view.entity != entity.name:
             continue
-        if isinstance(view, TableView | CardsView):
+        if isinstance(view, TableView | CardsView | MapView):
             for filter_ in view.filters.values():
                 builder.filter(filter_)
+        if isinstance(view, MapView):
+            builder.geo(builder.resolve(view.point), view)
         if isinstance(view, BoardView):
             builder.board(view)
         if isinstance(view, CalendarView):
@@ -518,7 +523,7 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
         if isinstance(view, TableView | BoardView) and view.order_field is not None:
             # A manual order (ADR 0039): the view sorts by its order field.
             builder.sort_key(view.order_field, view.id)
-        if isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
+        if isinstance(view, TableView | CardsView | BoardView | MapView) and view.sort is not None:
             builder.sort_key(view.sort.field, view.sort.id)
         if isinstance(view, TableView):
             for name, column in view.columns.items():
@@ -585,10 +590,11 @@ class _Builder:
             param.ids, param.description, param.test = [element_id], description, _test(path)
             self.add(param)
 
-    def geo(self, path: PyPath, filter_: NearFilter | AreaFilter) -> None:
+    def geo(self, path: PyPath, filter_: NearFilter | AreaFilter | MapView) -> None:
         """Add the parameters of a `near` or an `area` filter of a point field (ADR 0046).
 
-        The first `near` filter of a path gives the default distance.
+        The first `near` filter of a path gives the default distance. A map
+        view sends the visible area of the map as the area of its point.
         """
         name, attr = _names(path)
         if isinstance(filter_, NearFilter):

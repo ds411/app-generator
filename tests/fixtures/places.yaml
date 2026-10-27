@@ -1,9 +1,13 @@
 # yaml-language-server: $schema=../../schema/app.schema.json
 # Places: the points of M35 (ADR 0046). A place has a point, and the
 # list of the places has the filters `near` (a point and a distance) and
-# `area` (a box of a map), also through the relation to its city.
+# `area` (a box of a map), also through the relation to its city. The map
+# of the places shows a marker for each place, and lists the places in
+# its visible area.
 # scripts/check-fastapi.sh generates and checks the FastAPI app of this
 # definition, and runs its tests on Postgres and SQLite.
+# scripts/places_ui_test.py opens the map in the Next.js app, the React
+# app, and the React app with the FastAPI app, with a local tile server.
 version: 0
 
 app:
@@ -23,7 +27,7 @@ entities:
 
   Place:
     display_field: name
-    crud: { views: [table, detail], forms: [create, update] }
+    crud: { views: [table, detail], forms: [update] }
     fields:
       name: { type: string, required: true, max_length: 120 }
       kind: { type: enum, values: [museum, park, view], required: true }
@@ -35,6 +39,13 @@ entities:
 
 pages:
   places: { path: /places, title: Places, content: { view: place_list } }
+  place_map: { path: /map, title: Map, content: { view: place_map } }
+  place_detail:
+    path: "/places/{id}"
+    title: Place
+    entity: Place
+    content: { view: place_detail }
+  new_place: { path: /places/new, title: New place, content: { form: new_place } }
 
 ui:
   views:
@@ -50,6 +61,30 @@ ui:
         visible: { kind: area, field: location, label: In the map }
         near_city: { kind: near, field: city.center, label: Near the city }
         kind: { kind: select, field: kind }
+    place_map:
+      kind: map
+      entity: Place
+      title: Map of the places
+      point: location
+      label: name
+      link: place_detail
+      sort: { field: name }
+      filters:
+        kind: { kind: select, field: kind }
+        nearby: { kind: near, field: location, label: Near, distance: 10 }
+  forms:
+    new_place:
+      entity: Place
+      operation: create_place
+      mode: page
+      title: New place
+      fields:
+        name: {}
+        kind: {}
+        location: {}
+        entrance: {}
+        city: {}
+      on_success: { toast: The place is saved., navigate: place_map }
 
 seed:
   City:
@@ -63,8 +98,23 @@ seed:
         kind: view
         location: { lat: 38.6916, lng: -9.216 }
         city: lisbon
+      monastery:
+        name: Jerónimos Monastery
+        kind: museum
+        location: { lat: 38.6979, lng: -9.2068 }
+        city: lisbon
+      park:
+        name: Eduardo VII Park
+        kind: park
+        location: { lat: 38.7287, lng: -9.1546 }
+        city: lisbon
       gardens:
         name: Crystal Palace Gardens
         kind: park
         location: { lat: 41.148, lng: -8.6254 }
+        city: porto
+      serralves:
+        name: Serralves Museum
+        kind: museum
+        location: { lat: 41.1595, lng: -8.6597 }
         city: porto

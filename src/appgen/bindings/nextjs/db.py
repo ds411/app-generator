@@ -41,6 +41,8 @@ class Column:
     """The builders that the column imports from `drizzle-orm/pg-core`."""
     file: bool = False
     """True for the column of a file field: a `StoredFile` value (ADR 0027)."""
+    point: bool = False
+    """True for the column of a point field: a `GeoPoint` value (ADR 0046)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +216,11 @@ class Table:
         return [column for column in self.columns if column.file]
 
     @property
+    def points(self) -> bool:
+        """True if the table has the column of a point field (ADR 0046)."""
+        return any(column.point for column in self.columns)
+
+    @property
     def relation_helpers(self) -> str:
         """The helpers of the `relations()` callback of the table, for example `one, many`."""
         kinds = {r.kind for r in self.relations}
@@ -322,8 +329,8 @@ def column_builder(
             # A file field keeps the key, the name, the size, and the type of its file (ADR 0027).
             code, imports = f'jsonb("{column}").$type<StoredFile>()', ("jsonb",)
         case "point":
-            # `reject_point_fields` stops the binding first (ADR 0046).
-            raise GenerationError(f"The binding 'nextjs' does not generate the point '{name}'.")
+            # The app filters the points in the browser, so they need no index (ADR 0046).
+            code, imports = f'jsonb("{column}").$type<GeoPoint>()', ("jsonb",)
     if spec.required:
         code += ".notNull()"
     if spec.unique:
@@ -368,7 +375,9 @@ def build_tables(definition: AppDefinition) -> list[Table]:
                     )
                 )
                 code = code.replace("<enum>", const)
-            table.columns.append(Column(camel(field_name), code, spec.id, imports, spec.is_file))
+            table.columns.append(
+                Column(camel(field_name), code, spec.id, imports, spec.is_file, spec.is_point)
+            )
             if spec.translatable:
                 code = f'jsonb("{snake(field_name)}_translations").$type<Record<string, string>>()'
                 table.columns.append(

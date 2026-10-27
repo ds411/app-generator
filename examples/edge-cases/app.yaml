@@ -41,6 +41,7 @@ entities:
       payload: { type: json, default: { tags: [a, b], nested: { ok: true } }, x-widget: code }
       attachment: { type: file, max_size: 512KB, types: [application/pdf, "text/*"] }
       photo: { type: image, types: [image/png] }
+      place: { type: point, default: { lat: 38.72, lng: -9.14 }, description: A latitude and a longitude. }
 
   # Each relation kind, with and without an inverse.
   Owner:
