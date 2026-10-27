@@ -224,4 +224,6 @@ def test_the_trimmed_document_keeps_the_original_server_and_schemes() -> None:
     operations: list[str] = [
         op["operationId"] for item in paths.values() for op in item.values() if "operationId" in op
     ]
-    assert sorted(operations) == sorted(OPERATIONS)
+    # The fixture tests/fixtures/jira-accounts.yaml checks the credentials of each user
+    # with getCurrentUser (#487).
+    assert sorted(operations) == sorted([*OPERATIONS, "getCurrentUser"])

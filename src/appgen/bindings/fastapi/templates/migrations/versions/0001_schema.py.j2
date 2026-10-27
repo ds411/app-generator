@@ -130,6 +130,10 @@ def upgrade() -> None:
         sa.Column("refresh_token", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.BigInteger(), nullable=True),
         sa.Column("scope", sa.Text(), nullable=False),
+{% if py_connections | selectattr("user_basic") | list %}
+        sa.Column("username", sa.String(length=320), nullable=True),
+        sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=True),
+{% endif %}
         sa.Column(
             "connected_at",
             sa.DateTime(timezone=True),

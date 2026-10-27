@@ -4,8 +4,9 @@
 # the password. jira/jira.openapi.json is a trimmed copy of the OpenAPI
 # document of the Jira Cloud platform REST API
 # (https://developer.atlassian.com/cloud/jira/platform/swagger-v3.v3.json,
-# Apache 2.0): the selected operations, the schemas that they use, the
-# tags of the operations, and the original server and security schemes.
+# Apache 2.0): the operations of this definition and of
+# tests/fixtures/jira-accounts.yaml, the schemas that they use, the tags
+# of the operations, and the original server and security schemes.
 # The OAuth 2.0 scheme keeps only the scopes of the selected operations.
 # The trimmed copy has no other change.
 # scripts/check-fastapi.sh and scripts/check-nextjs.sh check the apps of

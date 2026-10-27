@@ -438,7 +438,7 @@ BINDING = Binding(
                 ),
             )
         ),
-        # The connections of the users to the APIs with the authorization code flow (ADR 0033).
+        # The connections of the users to the APIs that the app calls in their name (ADR 0033).
         *(
             Output(template=template, path=path, when="ts_connections")
             for template, path in (
@@ -452,6 +452,12 @@ BINDING = Binding(
                     "src/shared/auth/connection-actions.ts",
                 ),
                 ("app/connections/page.tsx.j2", "app/connections/page.tsx"),
+            )
+        ),
+        # The routes of the authorization code flow.
+        *(
+            Output(template=template, path=path, when="ts_code_flows")
+            for template, path in (
                 ("app/connections/start/route.ts.j2", "app/connections/[api]/start/route.ts"),
                 (
                     "app/connections/callback/route.ts.j2",

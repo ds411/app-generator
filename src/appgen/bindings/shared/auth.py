@@ -40,8 +40,8 @@ class AuthPages:
     second_factor: bool = False
     """The page `/second-factor` of the account, and the code step of the sign-in (ADR 0024)."""
     connections: bool = False
-    """The page `/connections` of the accounts of the APIs with the authorization code flow
-    (ADR 0033)."""
+    """The page `/connections` of the accounts of the APIs with the authorization code flow or
+    `per_user` (ADR 0033)."""
 
 
 def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
@@ -61,7 +61,7 @@ def auth_pages(definition: AppDefinition, server: bool) -> AuthPages:
         password_reset=auth.password_reset is not None and server,
         verify_email=auth.sign_up is not None and auth.sign_up.verify_email is not None and server,
         second_factor=auth.second_factor is not None and auth.password,
-        connections=any(api.user_flow for api in definition.apis.values()),
+        connections=any(api.per_user for api in definition.apis.values()),
     )
 
 

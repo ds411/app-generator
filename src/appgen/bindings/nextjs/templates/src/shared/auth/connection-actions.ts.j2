@@ -1,16 +1,40 @@
 {{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{% set basic = ts_connections | selectattr("user_basic") | list %}
 "use server";
 
 {% if i18n %}
 import { inRequestLanguage } from "@/shared/lib/i18n-server";
 
 {% endif %}
+{% if basic %}
+import {
+  ConnectionError,
+  type ConnectionState,
+  connectWithCredentials,
+  deleteConnection,
+  isBasicName,
+  isConnectionName,
+  listConnections,
+} from "./connections";
+{% else %}
 import { type ConnectionState, deleteConnection, isConnectionName, listConnections } from "./connections";
+{% endif %}
 import { sessionUserId } from "./session";
 
+{% if basic and ts_code_flows %}
+// The server actions of the page of the connections (ADR 0033). The start
+// of a connection with the authorization code flow is a route handler: the
+// browser goes to the authorization server. A connection with HTTP Basic
+// keeps the user name and the password of the user.
+{% elif basic %}
+// The server actions of the page of the connections (ADR 0033): a
+// connection keeps the user name and the password of the user for an API
+// with HTTP Basic.
+{% else %}
 // The server actions of the page of the connections (ADR 0033). The start
 // of a connection is a route handler: the browser goes to the
 // authorization server.
+{% endif %}
 
 /** A value, or the message of the error. */
 type Result<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -27,7 +51,11 @@ function failed<T>(message: () => string): Result<T> {
 }
 {% endif %}
 
+{% if basic %}
+/** List the APIs that the users connect, with the connections of the signed-in user. */
+{% else %}
 /** List the APIs with the authorization code flow, with the connections of the signed-in user. */
+{% endif %}
 export async function listConnectionsAction(): Promise<Result<ConnectionState[]>> {
   const userId = await sessionUserId();
   if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
@@ -46,3 +74,27 @@ export async function deleteConnectionAction(api: string): Promise<Result<null>>
   await deleteConnection(api, userId);
   return { ok: true, value: null };
 }
+{% if basic %}
+
+/**
+ * Check the user name and the password of the signed-in user at an API with
+ * HTTP Basic, and keep them. The page does not get the password back.
+ */
+export async function connectWithCredentialsAction(api: string, username: string, password: string): Promise<Result<null>> {
+  const userId = await sessionUserId();
+  if (userId === null) return failed(() => {{ tr(js("Sign in to do this.")) }});
+  const valid = username.length > 0 && username.length <= 320 && password.length > 0 && password.length <= 2000;
+  if (!isConnectionName(api) || !isBasicName(api) || !valid) return failed(() => {{ tr(js("The connection failed.")) }});
+  try {
+{% if i18n %}
+    await inRequestLanguage(() => connectWithCredentials(api, userId, username, password));
+{% else %}
+    await connectWithCredentials(api, userId, username, password);
+{% endif %}
+  } catch (error) {
+    if (error instanceof ConnectionError) return { ok: false, message: error.message };
+    throw error;
+  }
+  return { ok: true, value: null };
+}
+{% endif %}

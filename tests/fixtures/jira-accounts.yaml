@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# An API with HTTP Basic and the credentials of each user (#487, ADR
+# 0033): each agent connects their own Jira account on the page
+# /connections with the email address and an API token, and the app
+# files the issues in the name of the agent. The check getCurrentUser
+# calls the API with new credentials before the app keeps them. The
+# operation file_issue files an issue for the ticket in the name of the
+# signed-in agent (or adds a comment to the issue of the ticket), and the
+# job file_open_tickets does the same for each open ticket in the name of
+# its owner. The hand-written logic is in
+# tests/fixtures/jira-accounts/extensions/. jira/jira.openapi.json is the
+# trimmed document of tests/fixtures/jira.yaml.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition, and
+# scripts/connection_ui_test.py connects a user on the page /connections
+# of the front ends, and files an issue on the page /tickets.
+version: 0
+
+app:
+  name: issue-desk
+  title: Issue Desk
+  description: The tickets of the support agents, with an issue in Jira for each ticket.
+
+auth:
+  user_entity: Agent
+  username_field: email
+  sign_up:
+    fields: [name, email]
+
+entities:
+  Agent:
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+    relations:
+      tickets: { kind: one_to_many, target: Ticket, inverse: owner }
+
+  Ticket:
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 200 }
+      status: { type: enum, values: [open, closed], default: open }
+      issue_key:
+        type: string
+        max_length: 40
+        description: The key of the Jira issue of the ticket, for example SUP-12.
+    relations:
+      owner: { kind: many_to_one, target: Agent, required: true, inverse: tickets }
+
+operations:
+  list_tickets: { kind: list, entity: Ticket }
+  create_ticket: { kind: create, entity: Ticket }
+  read_ticket: { kind: read, entity: Ticket }
+  file_issue:
+    kind: custom
+    entity: Ticket
+    description: >-
+      Make an issue in Jira for the ticket in the name of the agent, and keep its key. For a
+      ticket with an issue, add a comment to the issue.
+    apis: [jira]
+
+pages:
+  tickets: { path: /tickets, title: Tickets, content: { view: ticket_table } }
+
+ui:
+  views:
+    ticket_table:
+      kind: table
+      entity: Ticket
+      title: Tickets
+      columns:
+        title: { label: Title }
+        status: { label: Status }
+        issue_key: { label: Jira issue }
+      row_actions:
+        file:
+          kind: operation
+          operation: file_issue
+          label: File in Jira
+          on_success: { toast: The ticket has an issue in Jira. }
+
+apis:
+  jira:
+    description: The issues of the Jira Cloud site of the support team.
+    document: jira/jira.openapi.json
+    # The URL of the site, for example https://acme.atlassian.net.
+    base_url_env: JIRA_API_URL
+    # Each agent gives the email address of their Atlassian account and an
+    # API token. The app checks them with the operation that gives the
+    # current user.
+    security: { scheme: basicAuth, per_user: true, check: getCurrentUser }
+    operations: [getCurrentUser, createIssue, addComment]
+
+jobs:
+  file_open_tickets:
+    description: File an issue in Jira for each open ticket, in the name of its owner.
+    schedule: "0 * * * *"
+    entity: Ticket
+    filter: { status: open }
+    operation: file_issue
+    user: owner

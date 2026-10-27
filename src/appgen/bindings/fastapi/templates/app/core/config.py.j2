@@ -160,10 +160,10 @@ class Settings(BaseSettings):
     storage_link_seconds: int = 3600
     """The time that a link of a file works, in seconds."""
 {% endif %}
-{% if py.providers or py.storage or py_connections %}
+{% if py.providers or py.storage or py_code_flows %}
     public_url: str = ""
-{% if py.providers or py_connections %}
-{% if py.providers and py_connections %}
+{% if py.providers or py_code_flows %}
+{% if py.providers and py_code_flows %}
     """The URL of the API for the browsers, for example `https://api.example.com`. The
     providers and the authorization servers of the APIs send the users back to it. Empty:
     the URL of each request."""

@@ -3,7 +3,10 @@
 {% set sf = definition.auth.second_factor %}
 {{ trace_header(definition.auth.id) }}
 import { {{ actions | join(", ") }} } from "./actions";
-{% if ts_connections %}
+{% set basic_users = ts_connections | selectattr("user_basic") | list %}
+{% if basic_users %}
+import { connectWithCredentialsAction, deleteConnectionAction, listConnectionsAction } from "./connection-actions";
+{% elif ts_connections %}
 import { deleteConnectionAction, listConnectionsAction } from "./connection-actions";
 {% endif %}
 {% if sf %}
@@ -130,6 +133,25 @@ export async function disableSecondFactor(code: string): Promise<string | null> 
 {% endif %}
 {% if ts_connections %}
 
+{% if basic_users %}
+/** An API that the users connect, and the connection of the signed-in user (ADR 0033). */
+export type Connection = {
+  /** The name of the API in the paths of the connections. */
+  api: string;
+  title: string;
+  /** `oauth`: the authorization code flow. `basic`: the user name and the password of the user. */
+  kind: "oauth" | "basic";
+  connected: boolean;
+  /** HTTP Basic: the user name of the connection, or null. */
+  username: string | null;
+  /** HTTP Basic: true if the API did not accept the credentials. The user gives new ones. */
+  rejected: boolean;
+  /** The time of the connection, as an ISO 8601 text, or null. */
+  connectedAt: string | null;
+};
+
+/** List the APIs that the users connect, with the connections of the signed-in user. */
+{% else %}
 /** An API with the authorization code flow, and the connection of the signed-in user (ADR 0033). */
 export type Connection = {
   /** The name of the API in the paths of the connections. */
@@ -141,11 +163,13 @@ export type Connection = {
 };
 
 /** List the APIs with the authorization code flow, with the connections of the signed-in user. */
+{% endif %}
 export async function listConnections(): Promise<Connection[]> {
   const result = await listConnectionsAction();
   if (!result.ok) throw new Error(result.message);
   return result.value;
 }
+{% if ts_code_flows %}
 
 /**
  * Connect an account of an API: the browser goes to the authorization
@@ -157,6 +181,15 @@ export async function connectAccount(api: string): Promise<string | null> {
   window.location.assign(new URL(`/connections/${encodeURIComponent(api)}/start`, window.location.origin));
   return null;
 }
+{% endif %}
+{% if basic_users %}
+
+/** Connect an account of an API with HTTP Basic: the server checks and keeps the credentials. Return null, or the message of the error. */
+export async function connectWithCredentials(api: string, username: string, password: string): Promise<string | null> {
+  const result = await connectWithCredentialsAction(api, username, password);
+  return result.ok ? null : result.message;
+}
+{% endif %}
 
 /** Delete the connection of the signed-in user to an API. Return null, or the message of the error. */
 export async function disconnectAccount(api: string): Promise<string | null> {

@@ -699,6 +699,22 @@
           ],
           "default": null,
           "title": "Flow"
+        },
+        "per_user": {
+          "default": false,
+          "title": "Per User",
+          "type": "boolean"
+        },
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

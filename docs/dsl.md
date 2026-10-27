@@ -1432,9 +1432,11 @@ jobs:
 - `user` names the user of each record: a `many_to_one` or `one_to_one`
   relation of `entity` to the user entity of `auth`, or `id` when
   `entity` is the user entity. A job whose operation calls an API with
-  the authorization code flow needs it: the clients send the token of
-  this user ([ADR 0033](adr/0033-api-connections.md)). A run for a
-  record whose user has no connection to the API does nothing.
+  the authorization code flow or with `per_user` needs it: the clients
+  send the token or the credentials of this user
+  ([ADR 0033](adr/0033-api-connections.md)). A run for a record whose
+  user has no connection to the API, or a rejected connection, does
+  nothing.
 - A job without `entity` has a `schedule`, and no `at`, `filter`,
   `operation`, or `user`.
 
@@ -1623,7 +1625,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For HTTP Basic: `username_env`, the environment variable of the user name, and `env`, the one of the password. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For HTTP Basic: `username_env`, the environment variable of the user name, and `env`, the one of the password, or `per_user: true` and the optional `check` (see below). For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
 | `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
@@ -1740,6 +1742,37 @@ apis:
     base_url_env: JIRA_API_URL
     security: { scheme: basicAuth, username_env: JIRA_EMAIL, env: JIRA_API_TOKEN }
     operations: [getIssue, searchAndReconsileIssuesUsingJql, createIssue, addComment]
+```
+
+- With HTTP Basic and `per_user: true`, the app calls the API in the
+  name of a user ([ADR 0033](adr/0033-api-connections.md)), with the
+  credentials of this user, for example the email address of the
+  Atlassian account of each agent and an API token. The security has no
+  `username_env` and no `env`. A signed-in user gives the user name and
+  the password on the page `/connections`. The server keeps them in the
+  table `api_connections`, with the password encrypted with a key from
+  `AUTH_SECRET`, and never sends the password back. `check` names an
+  operation in `operations` without required parameters and without a
+  required body, for example the operation that gives the current user:
+  the server calls it with the new credentials, and keeps them only if
+  the API accepts them (else 422). Without `check`, the server keeps the
+  credentials without a call. An answer with the status 401 marks the
+  connection as rejected: the call gives 409, and the page asks for new
+  credentials. The FastAPI app has the route `POST
+  /auth/connections/<api>` (in kebab case) with `username` and
+  `password`. The rest is the same as with the authorization code flow:
+  the custom operations, the jobs with `user`, the page, the React app
+  with mock data, which keeps only the user name, and the React app with
+  `x-react-data: api`. The app needs no `PUBLIC_URL` for these APIs.
+
+```yaml
+# not valid alone: the definition is tests/fixtures/jira-accounts.yaml.
+apis:
+  jira:
+    document: jira/jira.openapi.json
+    base_url_env: JIRA_API_URL
+    security: { scheme: basicAuth, per_user: true, check: getCurrentUser }
+    operations: [getCurrentUser, createIssue, addComment]
 ```
 
 - The client has only the selected operations and the schemas that they
@@ -2993,9 +3026,10 @@ auth:
   `/verify-email` with `verify_email`, `/forgot-password` and
   `/reset-password` with a password reset, `/second-factor` with a
   second factor, a path under `/auth/` with providers, or
-  `/connections` and a path under `/connections/` with an API with the
-  authorization code flow, or `/notice-settings` with a notification
-  with `email: true`: they are the pages of the front ends.
+  `/connections` and a path under `/connections/` with an API that the
+  app calls in the name of a user (the authorization code flow or
+  `per_user`), or `/notice-settings` with a notification with
+  `email: true`: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -3620,6 +3654,14 @@ use in the app does not show.
   `The token endpoint of the API {api} did not answer correctly.`,
   `The state of the callback is not correct. Connect the account again.`,
   `The connection failed.`.
+- The page of the connections to the APIs with the credentials of each
+  user: `User name`, `Password or API token`,
+  `Connected as {username}`,
+  `The API did not accept the credentials. Enter new credentials.`. The
+  check of the Next.js app:
+  `The API {api} did not accept the user name and the password.`,
+  `The API {api} gave no valid answer.`,
+  `The API {api} did not accept the credentials of the account. Connect the account again.`.
 - The secret links of the records (ADR 0049): the button `Share`, its
   dialog `Share the record`,
   `A person with the link sees the record without a sign-in.`, `Link`,
@@ -3720,6 +3762,10 @@ to translate one. The rules and the workflows give their own messages.
   `The token endpoint of the API {api} did not answer correctly.`,
   `The state of the callback is not correct. Connect the account again.`,
   `The connection failed.`.
+- The connections of the users to the APIs with the credentials of each
+  user:
+  `The API {api} did not accept the user name and the password.`,
+  `The API {api} did not accept the credentials of the account. Connect the account again.`.
 - The webhooks: `The server has no secret for the webhook {name}.`,
   `The signature of the webhook is not valid.`,
   `The body of the webhook is not valid JSON.`,

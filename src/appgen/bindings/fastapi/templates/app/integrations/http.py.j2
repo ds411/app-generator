@@ -1,7 +1,9 @@
 {{ trace_header("app") }}
 {% set oauth = "oauth2" in py_api_features %}
-{% set basic = "basic" in py_api_features %}
+{% set user_basic = "user_basic" in py_api_features %}
+{% set basic = "basic" in py_api_features or user_basic %}
 {% set user = "user" in py_api_features %}
+{% set code_flow = py_apis.values() | selectattr("credential", "equalto", "user") | list %}
 {% set tokens = oauth or user %}
 """The HTTP client that the clients of the third-party APIs share.
 
@@ -13,7 +15,14 @@ error status raises `ApiError`, and each request stops after a timeout.
 An API with OAuth 2.0 gets its access tokens with the client credentials
 flow (`ClientCredentials`).
 {% endif %}
-{% if user %}
+{% if code_flow and user_basic %}
+An API with the authorization code flow sends the access token of a user
+(`UserToken` in `app/core/connections.py`, ADR 0033), and an API with
+`per_user` the user name and the password of a user (`UserCredentials`).
+{% elif user_basic %}
+An API with `per_user` sends the user name and the password of a user
+(`UserCredentials` in `app/core/connections.py`, ADR 0033).
+{% elif code_flow %}
 An API with the authorization code flow sends the access token of a user
 (`UserToken` in `app/core/connections.py`, ADR 0033).
 {% endif %}
@@ -100,6 +109,11 @@ class ApiClient:
 
     api = ""
     """The name of the API in the app definition."""
+{% if user_basic %}
+    scheme = "Bearer"
+    """The scheme of the header `Authorization` with the value of the token source: `Basic` for
+    the credentials of a user."""
+{% endif %}
 
     def __init__(
         self,
@@ -206,7 +220,7 @@ class ApiClient:
 
         async def send(token: str | None = None) -> httpx.Response:
             if token is not None:
-                headers["Authorization"] = f"Bearer {token}"
+                headers["Authorization"] = f"{{ "{self.scheme}" if user_basic else "Bearer" }} {token}"
             return await self._http.request(
                 method,
                 url,
@@ -242,8 +256,11 @@ class TokenSource(Protocol):
 {% if oauth %}
     `ClientCredentials` gets the tokens of the app with the client credentials flow.
 {% endif %}
-{% if user %}
+{% if code_flow %}
     `UserToken` (`app/core/connections.py`) reads the tokens of a user.
+{% endif %}
+{% if user_basic %}
+    `UserCredentials` (`app/core/connections.py`) reads the credentials of a user.
 {% endif %}
     """
 

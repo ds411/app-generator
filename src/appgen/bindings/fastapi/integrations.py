@@ -437,7 +437,8 @@ class PyApi:
     secret_env: str | None
     credential: str | None
     """`header`, `query`, `bearer`, `basic` (HTTP Basic), `oauth2` (the client credentials
-    flow), or `user` (the authorization code flow: the token of a user, ADR 0033)."""
+    flow), `user` (the authorization code flow: the token of a user, ADR 0033), or `user_basic`
+    (HTTP Basic with the user name and the password of a user, ADR 0033)."""
     credential_name: str | None
     """The name of the header or the query parameter of an API key."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
@@ -460,11 +461,26 @@ class PyApi:
     """The authorization code flow: the page where the user allows the access."""
     refresh_url: str = ""
     """The authorization code flow: the URL that gives a new access token for a refresh token."""
+    check_method: str = ""
+    """`per_user`: the HTTP method of the operation that checks new credentials, or empty."""
+    check_path: str = ""
+    """`per_user`: the path of the operation that checks new credentials."""
 
     @property
     def user(self) -> bool:
-        """True for the authorization code flow: the client sends the token of a user."""
-        return self.credential == "user"
+        """True if the client sends the credentials of a user: the token of the authorization
+        code flow, or the HTTP Basic credentials of `per_user`."""
+        return self.credential in ("user", "user_basic")
+
+    @property
+    def user_basic(self) -> bool:
+        """True for HTTP Basic with the user name and the password of each user."""
+        return self.credential == "user_basic"
+
+    @property
+    def token_source(self) -> str:
+        """The class of the credentials of a user: `UserToken` or `UserCredentials`."""
+        return "UserCredentials" if self.user_basic else "UserToken"
 
     @property
     def client_for(self) -> str:
@@ -479,6 +495,11 @@ class PyApi:
     @property
     def dependency(self) -> str:
         return f"get_{self.module}_client"
+
+    def connect_call(self) -> str:
+        """Return the statement of the route of `per_user` that keeps the credentials of a user."""
+        args = ["request", "session", "client", json.dumps(self.connection_name), "user.id", "data"]
+        return call("return await ", "connect_with_credentials", args)
 
     def settings_args(self) -> list[str]:
         """Return the arguments of the client from the settings: the URL and the credentials."""
@@ -566,7 +587,7 @@ class PyApi:
                 "from uuid import UUID",
                 "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
                 "from app.core.auth import CurrentUser",
-                "from app.core.connections import UserToken, require_connection",
+                f"from app.core.connections import {self.token_source}, require_connection",
                 "from app.core.db import SessionDep",
             ]
         lines.append(from_import("app.integrations.http", http))
@@ -733,11 +754,14 @@ class PyApi:
 
 def py_features(apis: dict[str, PyApi]) -> frozenset[str]:
     """Return what the HTTP client of the app needs for these APIs: `basic` (HTTP Basic),
-    `oauth2` (the client credentials flow), `user` (the authorization code flow), `files`."""
+    `oauth2` (the client credentials flow), `user` (the credentials of a user), `user_basic`
+    (the HTTP Basic credentials of a user), `files`."""
     found: set[str] = set()
     for api in apis.values():
         if api.credential in ("basic", "oauth2", "user"):
             found.add(api.credential)
+        if api.credential == "user_basic":
+            found.update(("user", "user_basic"))
         if "ApiFile" in api.client_types or any(
             "ApiFile" in f.type for m in api.models for f in m.fields or []
         ):
@@ -774,7 +798,8 @@ def mocks_imports(apis: dict[str, PyApi]) -> list[str]:
 
 
 def python_connections(apis: dict[str, PyApi]) -> list[PyApi]:
-    """Return the APIs with the authorization code flow: the users connect their accounts."""
+    """Return the APIs with the authorization code flow or `per_user`: the users connect their
+    accounts."""
     return [api for api in apis.values() if api.user]
 
 
@@ -793,6 +818,8 @@ def _api(name: str, api: Api) -> PyApi:
     code = scheme.authorization_code if scheme is not None and api.user_flow else None
     if code is not None:
         credential = "user"
+    elif api.user_basic:
+        credential = "user_basic"
     security = api.security
     secret_env = security.secret_env if security else None
     client_id_env = security.client_id_env if security else None
@@ -823,6 +850,9 @@ def _api(name: str, api: Api) -> PyApi:
         py.token_url = code.token_url
         py.authorization_url = code.authorization_url
         py.refresh_url = code.refresh_url or code.token_url
+    check = api.check_operation
+    if check is not None:
+        py.check_method, py.check_path = check.method.upper(), check.path
     types = _Types(spec.schemas)
     for named in spec.schemas:
         py.models.append(types.model(named))

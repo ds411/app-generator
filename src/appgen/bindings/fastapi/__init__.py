@@ -491,7 +491,12 @@ BINDING = Binding(
         Output(
             template="tests/test_connections.py.j2",
             path="tests/test_connections.py",
-            when="py_connections",
+            when="py_code_flows",
+        ),
+        Output(
+            template="tests/test_credentials.py.j2",
+            path="tests/test_credentials.py",
+            when="py_connections | selectattr('user_basic') | list",
         ),
         Output(template="app/core/webhooks.py.j2", path="app/core/webhooks.py", when="py_webhooks"),
         Output(

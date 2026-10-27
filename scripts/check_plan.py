@@ -188,6 +188,7 @@ def fastapi_sections() -> Iterator[Section]:
         ("api_connection_test.py",),
     )
     yield Section("fastapi:jira", (fixture("jira", "fastapi"),), ("api_calls.py",))
+    yield Section("fastapi:jira-accounts", (fixture("jira-accounts", "fastapi", extensions=True),))
     for name in ("totals", "invoices"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
     yield Section("fastapi:listings", (fixture("listings", "fastapi", extensions=True),))
@@ -305,13 +306,17 @@ AUTH_UI_SPECS = {
 }
 """The UI test (ui-tests/tests/<name>.spec.ts) of each part."""
 AUTH_UI_BINDINGS = ("react", "nextjs", "react-api")
-AUTH_UI_FIXTURES = {
-    "connections": ("api-connections", ("fastapi", "nextjs")),
-    "listings": ("listings", ("fastapi", "nextjs", "react")),
-    "courses": ("courses", ()),
-    "places": ("places", ()),
+AUTH_UI_FIXTURES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+    "connections": (
+        ("api-connections", ("fastapi", "nextjs")),
+        ("jira-accounts", ("fastapi", "nextjs")),
+    ),
+    "listings": (("listings", ("fastapi", "nextjs", "react")),),
+    "courses": (("courses", ()),),
+    "places": (("places", ()),),
 }
-"""The fixture of each part after the room booking, with the bindings of its hand-written code."""
+"""The fixtures of each part after the room booking, with the bindings of their hand-written
+code."""
 
 
 def auth_ui_apps(part: str, binding: str) -> tuple[App, ...]:
@@ -325,12 +330,15 @@ def auth_ui_apps(part: str, binding: str) -> tuple[App, ...]:
         if binding == "nextjs":
             return (App(ROOMS, binding), fixture("record-rules", binding), App(cognito, binding))
         return (App(ROOMS, binding), fixture("record-rules", binding))
-    name, extended = AUTH_UI_FIXTURES[part]
-    if binding == "react-api":
-        return tuple(
-            fixture(name, b, extensions=b in extended, **API) for b in ("react", "fastapi")
-        )
-    return (fixture(name, binding, extensions=binding in extended),)
+    apps: list[App] = []
+    for name, extended in AUTH_UI_FIXTURES[part]:
+        if binding == "react-api":
+            apps.extend(
+                fixture(name, b, extensions=b in extended, **API) for b in ("react", "fastapi")
+            )
+        else:
+            apps.append(fixture(name, binding, extensions=binding in extended))
+    return tuple(apps)
 
 
 def auth_ui_sections() -> Iterator[Section]:
