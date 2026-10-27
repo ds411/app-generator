@@ -2506,7 +2506,8 @@ day without a value is not a point of the line. A chart of snapshots
 takes no `entity`, `group_by`, `interval`, `aggregate`, `field`,
 `filter`, `badge`, or `period_field`, and its stat takes no
 `period_field` or `compare`. A snapshot has the value of all records,
-so the entity of the stat cannot have a record rule. The chart is
+so the entity of the stat cannot have a record rule, and the filter of
+the stat cannot have `$me`: the job has no signed-in user. The chart is
 empty until the first run of the job. The React app with mock data has
 no stored values: its chart shows the value of today. The Next.js app
 computes a snapshot in the database, so the field of the aggregate is a

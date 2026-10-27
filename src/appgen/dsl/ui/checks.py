@@ -9,7 +9,7 @@ import re
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping
 from typing import cast
 
-from appgen.dsl.auth import ME
+from appgen.dsl.auth import ME, has_me
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Operation, Page, Relation
@@ -1201,7 +1201,16 @@ def _check_snapshot_stat(
     definition: AppDefinition, widget: StatWidget, entity: str
 ) -> Iterator[Diagnostic]:
     """A snapshot has the value of all records of a day: the entity has no record rule, and
-    the stat has no period (ADR 0042)."""
+    the stat has no period and no `$me` (ADR 0042)."""
+    if has_me(widget.filter):
+        yield _error(
+            "invalid-value",
+            "The snapshots of a stat have the value of all users, but its filter has $me: the "
+            "job of the snapshots has no signed-in user.",
+            widget,
+            at="filter",
+            hint="Remove $me from the filter, or remove 'snapshots'.",
+        )
     if widget.period_field is not None:
         yield _error(
             "invalid-option",

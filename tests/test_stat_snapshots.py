@@ -162,6 +162,21 @@ def test_the_snapshots_have_no_period() -> None:
     assert codes(period) == [("invalid-option", OPEN_POINTS)]
 
 
+def test_the_snapshots_have_no_me() -> None:
+    owner = "      sprint: { kind: many_to_one, target: Sprint }\n"
+    person = "  Person:\n    crud: [list]\n    fields:\n      email: { type: email, required: true"
+    person += ", unique: true }\n"
+    text = (
+        BASE.replace(owner, owner + "      owner: { kind: many_to_one, target: Person }\n")
+        .replace("  Sprint:\n", person + "  Sprint:\n")
+        .replace("ui:\n", "auth: { user_entity: Person, username_field: email }\nui:\n")
+    )
+    assert codes(text) == []
+    # The job of the snapshots has no signed-in user.
+    me = text.replace("due_on: { gte: $today } }", "owner: $me }")
+    assert codes(me) == [("invalid-value", OPEN_POINTS)]
+
+
 def test_the_fastapi_app_stores_the_values_with_a_built_in_job() -> None:
     files = files_of(BASE, fastapi.BINDING)
     module = files["app/features/dashboards/overview.py"]
