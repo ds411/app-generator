@@ -2,6 +2,9 @@
 "use client";
 
 import {
+{% if "order" in ui_views.features %}
+  type CellContext,
+{% endif %}
   type ColumnDef,
   flexRender,
   functionalUpdate,
@@ -36,6 +39,40 @@ function metaOf(meta: unknown): DataColumnMeta | undefined {
   return meta as DataColumnMeta | undefined;
 }
 
+{% if order %}
+/** The table option of a manual order: the move of a row. */
+type MoveMeta = { move: (id: string, overId: string) => void };
+
+/**
+ * The handle of a row in the manual order (ADR 0039). The column takes the
+ * same function in each render, so the handle stays, and keeps the focus of
+ * the keyboard while the table loads the rows again.
+ */
+function MoveHandle<T>({ row, table }: CellContext<T, unknown>) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-7 cursor-grab text-muted-foreground active:cursor-grabbing"
+      aria-label={{ jsx_attr("Move the row") }}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        // The arrow keys move the row above the row before it, or below the row after it.
+        const shown = table.getRowModel().rows;
+        const index = shown.findIndex((other) => other.id === row.id);
+        const other = event.key === "ArrowUp" ? shown[index - 1] : event.key === "ArrowDown" ? shown[index + 1] : undefined;
+        if (other) {
+          event.preventDefault();
+          (table.options.meta as MoveMeta).move(row.id, other.id);
+        }
+      }}
+    >
+      <GripVerticalIcon className="size-4" />
+    </Button>
+  );
+}
+
+{% endif %}
 /** The page and the sort of a table whose server sorts and pages the records. */
 export type ServerPages = {
   page: number;
@@ -51,7 +88,8 @@ export type ServerPages = {
  * page at its end, and keeps the shown rows. With `server` and `scroll`,
  * `data` is the loaded pages, and `scroll.onMore` loads the next page.{% endif %}{% if order %} With
  * `onMove`, a row moves by drag and drop, or with the arrow keys on its
- * handle, while no column sorts the rows (ADR 0039).{% endif %}
+ * handle, while no column sorts the rows (ADR 0039). The table is busy
+ * (`aria-busy`) until the promise of `onMove` ends.{% endif %}
  */
 export function DataTable<T extends { id: string }>({
   columns,
@@ -92,8 +130,8 @@ export function DataTable<T extends { id: string }>({
   scroll?: true | { loading: boolean; onMore: () => void };
 {% endif %}
 {% if order %}
-  /** Move the record `id` to the place of the record `overId` (`order_field`). */
-  onMove?: (id: string, overId: string) => void;
+  /** Move the record `id` to the place of the record `overId` (`order_field`), and save it. */
+  onMove?: (id: string, overId: string) => Promise<void> | void;
 {% endif %}
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
@@ -119,6 +157,12 @@ export function DataTable<T extends { id: string }>({
     setDragged(null);
     setOver(null);
   };
+  const [moving, setMoving] = useState(false);
+  const move = (id: string, overId: string) => {
+    if (!onMove) return;
+    setMoving(true);
+    void Promise.resolve(onMove(id, overId)).finally(() => setMoving(false));
+  };
 
 {% endif %}
   const allColumns: ColumnDef<T>[] = [
@@ -128,27 +172,7 @@ export function DataTable<T extends { id: string }>({
           {
             id: "move",
             header: () => <span className="sr-only">{{ jsx_text("Order") }}</span>,
-            cell: ({ row, table }) => (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 cursor-grab text-muted-foreground active:cursor-grabbing"
-                aria-label={{ jsx_attr("Move the row") }}
-                onClick={(event) => event.stopPropagation()}
-                onKeyDown={(event) => {
-                  // The arrow keys move the row above the row before it, or below the row after it.
-                  const shown = table.getRowModel().rows;
-                  const index = shown.findIndex((other) => other.id === row.id);
-                  const other = event.key === "ArrowUp" ? shown[index - 1] : event.key === "ArrowDown" ? shown[index + 1] : undefined;
-                  if (other) {
-                    event.preventDefault();
-                    onMove?.(row.id, other.id);
-                  }
-                }}
-              >
-                <GripVerticalIcon className="size-4" />
-              </Button>
-            ),
+            cell: MoveHandle,
             enableSorting: false,
             meta: { className: "w-10" },
           } satisfies ColumnDef<T>,
@@ -209,6 +233,9 @@ export function DataTable<T extends { id: string }>({
     columns: allColumns,
     state: { ...state, rowSelection },
     getRowId: (row) => row.id,
+{% if order %}
+    meta: { move } satisfies MoveMeta,
+{% endif %}
     onSortingChange: server
       ? (update) => server.onChange({ page: 1, pageSize: server.pageSize, sorting: functionalUpdate(update, server.sorting) })
       : setSorting,
@@ -246,7 +273,7 @@ export function DataTable<T extends { id: string }>({
         </div>
       )}
       <div className="overflow-hidden rounded-md border">
-        <Table>
+        <Table{{ " aria-busy={moving || undefined}" if order }}>
           <TableHeader className="bg-muted/40">
             {table.getHeaderGroups().map((group) => (
               <TableRow key={group.id}>
@@ -309,7 +336,7 @@ export function DataTable<T extends { id: string }>({
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  if (dragged !== null && dragged !== row.id) onMove?.(dragged, row.id);
+                  if (dragged !== null && dragged !== row.id) move(dragged, row.id);
                   endDrag();
                 }}
                 onDragEnd={endDrag}

@@ -4,7 +4,9 @@
 // moves to another column. scripts/order_ui_test.py starts an app and runs
 // this file with APPGEN_ORDER_TEST=1. With APPGEN_ORDER_RELOAD=1, the test
 // reloads the page and checks that the order stays: the mock data of the
-// React app does not keep a change.
+// React app does not keep a change. The table is busy (`aria-busy`) while
+// it saves a move, and the test waits for the save of each move before the
+// next one.
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 test.skip(!process.env.APPGEN_ORDER_TEST, "Only for the apps of tests/fixtures/invoices.yaml.");
@@ -34,6 +36,11 @@ function ranksAfterMove(ranks: readonly (number | null)[]): (number | null)[] {
   return list.map((_, index) => (index + 1) * 1024);
 }
 
+/** Wait until the steps table saved the last move: the table is not busy. */
+async function saved(page: Page): Promise<void> {
+  await expect(page.locator("table")).not.toHaveAttribute("aria-busy", "true");
+}
+
 /** Return the titles of the cards of a column of the steps board. */
 function cardTitles(column: Locator): Promise<string[]> {
   return column.locator('[data-slot="card-title"]').allInnerTexts();
@@ -47,10 +54,12 @@ test("a row of the table moves by drag and drop and with the arrow keys", async 
   // The third row goes before the first row.
   await rows.nth(2).dragTo(rows.nth(0));
   await expect.poll(() => rowTitles(page)).toEqual([third, first, second, fourth, fifth]);
+  await saved(page);
   // The last row goes up one place.
   await rows.nth(4).getByRole("button", { name: "Move the row" }).press("ArrowUp");
   let moved = [third, first, second, fifth, fourth];
   await expect.poll(() => rowTitles(page)).toEqual(moved);
+  await saved(page);
   // Each move of the second row to the top halves the rank of the first row,
   // until no integer is free and the rows get 1024, 2048, and so on.
   const renumbered = [1024, 2048, 3072, 4096, 5120];
@@ -60,6 +69,13 @@ test("a row of the table moves by drag and drop and with the arrow keys", async 
     moved = [moved[1] ?? "", moved[0] ?? "", ...moved.slice(2)];
     ranks = ranksAfterMove(ranks);
     await expect.poll(async () => [await rowTitles(page), await rowRanks(page)]).toEqual([moved, ranks]);
+    await saved(page);
+    // The handle of the moved row keeps the focus of the keyboard while the
+    // table loads the rows again. (A renumber saves the rows one at a time,
+    // so the moved row goes down and up again, and loses the focus.)
+    if (JSON.stringify(ranks) !== JSON.stringify(renumbered)) {
+      await expect(rows.nth(0).getByRole("button", { name: "Move the row" })).toBeFocused();
+    }
   }
   expect(ranks).toEqual(renumbered);
   if (reload) {

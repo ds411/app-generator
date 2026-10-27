@@ -133,13 +133,20 @@ def test_a_table_moves_its_rows(binding: Binding) -> None:
         "await writeOrder(orderChanges(order, id), "
         "(change) => stepApi.update(change.id, { rank: change.value }));"
     ) in table
-    assert "onMove={(id, overId) => void move(id, overId)}" in table
+    assert "onMove={move}" in table
     data_table = files["src/shared/ui/data-table.tsx"]
     assert (
         "const movable = onMove !== undefined && (server ? server.sorting : sorting).length === 0;"
         in data_table
     )
     assert 'aria-label="Move the row"' in data_table
+    # The handle is the same component in each render, so it keeps the focus, and the
+    # table is busy until the move is saved.
+    assert "function MoveHandle<T>({ row, table }: CellContext<T, unknown>) {" in data_table
+    assert "cell: MoveHandle," in data_table
+    assert "meta: { move } satisfies MoveMeta," in data_table
+    assert "void Promise.resolve(onMove(id, overId)).finally(() => setMoving(false));" in data_table
+    assert "<Table aria-busy={moving || undefined}>" in data_table
     order = files["src/shared/lib/order.ts"]
     assert (
         "export function orderChanges(list: readonly OrderItem[], id: string): OrderChange[] {"
@@ -167,6 +174,7 @@ def test_without_an_order_field_the_views_do_not_move_rows() -> None:
     files = files_of(text, react.BINDING)
     assert "src/shared/lib/order.ts" not in files
     assert "onMove" not in files["src/shared/ui/data-table.tsx"]
+    assert "aria-busy" not in files["src/shared/ui/data-table.tsx"]
     assert "overCard" not in files[BOARD]
 
 
@@ -211,5 +219,5 @@ def test_a_role_that_may_not_update_cannot_move() -> None:
     files = files_of(text, react.BINDING)
     table = files[TABLE]
     assert 'const canMove = useAccess().canCall("update_step");' in table
-    assert "onMove={canMove ? (id, overId) => void move(id, overId) : undefined}" in table
+    assert "onMove={canMove ? move : undefined}" in table
     assert 'const canMove = useAccess().canCall("update_step");' in files[BOARD]
