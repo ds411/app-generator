@@ -220,6 +220,27 @@ record, with the user, the time, and the old and the new values.
   script, a delete of the database (`on_delete: cascade`), and the seed.
 
 {% endif %}
+{% if py.shares %}
+## Secret links
+
+A user that may change a record makes a secret link of it, for a guest
+without a sign-in. The table `share_links` keeps the SHA-256 hash of
+each token, and a record has one link at most.
+
+| Entity | Endpoints of the links | Public endpoint |
+| ------ | ---------------------- | --------------- |
+{% for e in py.shares %}
+| {{ e.name }} | `GET`, `POST`, `DELETE {{ e.path }}/{id}/share` | `GET {{ e.share.shared_path }}` |
+{% endfor %}
+
+- The endpoints of the links need the permission of the update
+  operation. Only the answer of `POST` has the token.
+- A new link stops the old link, and `DELETE` revokes the link. A wrong
+  token, a revoked token, and the token of a deleted record give 404.
+- The public endpoint gives the record and the related records that the
+  page shows. A link does not expire.
+
+{% endif %}
 {% if py.notifications %}
 ## Notices
 

@@ -1165,6 +1165,7 @@ ignores the pages.
 | `breadcrumb`  | The label in the breadcrumbs. Default: the label of the menu item of the page, else the title, or the display field of the record for a page with an entity and a path parameter. |
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 | `embed`       | The origins of the websites that can show the page in a frame, for example `[https://www.example.com]` (see [Pages in frames](#pages-in-frames)). |
+| `share`       | `true`: a user that may change the record of a detail page makes a secret link of it, for a guest without a sign-in (see [Secret links](#secret-links)). |
 | `meta`        | The `description` and the `image` of the page for search engines and the previews of links (see [Page metadata](#page-metadata)). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
@@ -1288,6 +1289,41 @@ The other website shows the page with an `iframe`:
   show them in a frame.
 - A browser can block the cookies of the app in a frame of another
   website. The page then shows in the language of the browser.
+
+### Secret links
+
+A user gives one record to a guest without an account with a secret
+link, for example a booking to a guest of the meeting
+([ADR 0049](https://github.com/ds411/app-generator/blob/main/docs/adr/0049-share-links.md)). The detail page of the record
+takes `share: true`:
+
+```yaml
+# example: room-booking
+pages:
+  booking_detail:
+    path: "/bookings/{id}"
+    title: Booking
+    entity: Booking
+    content: { view: booking_detail }
+    share: true
+```
+
+The page then has the button "Share" for a user that may call the
+update operation of the entity. The button makes a link such as
+`/shared/bookings/<token>`, and shows it one time. The user can make a
+new link, which stops the old link, or revoke the link. The guest opens
+the link without a sign-in and sees the detail view without the actions,
+without the app shell, and without the tabs of the lists and of the
+change log.
+
+- The app has `auth`, and the page is not in `auth.public_pages`.
+- The content of the page is a detail view. Its path ends with `{id}`
+  and has no other parameter, and its entity has an update operation.
+- An entity has one page with `share` at most. No other page has the
+  path of the shared page: `/shared` and the path of the page, with
+  `{token}` in the place of `{id}`.
+- The link gives all fields of the record and of the related records
+  that the view shows, also to a guest. A link does not expire.
 
 ## workflows
 
@@ -3216,6 +3252,18 @@ use in the app does not show.
   `The token endpoint of the API {api} did not answer correctly.`,
   `The state of the callback is not correct. Connect the account again.`,
   `The connection failed.`.
+- The secret links of the records (ADR 0049): the button `Share`, its
+  dialog `Share the record`,
+  `A person with the link sees the record without a sign-in.`, `Link`,
+  `Copy the link`, `Copy the link now: it shows one time only.`,
+  `The record has a link, made at`, `The record has no link.`,
+  `Make a link`, `Make a new link`, `Revoke the link`,
+  `The link is copied.`, `Copy the link from the field.`,
+  `The link is revoked.`, `The link did not load.`,
+  `The link was not made.`, `The revoke did not succeed.`, and the
+  shared page: `The link is not valid.`,
+  `The record is not shared, or its link was revoked.`,
+  `Something went wrong`.
 
 ### Messages of the FastAPI app
 

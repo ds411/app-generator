@@ -1,0 +1,115 @@
+{{ trace_header(py.entity(name).share.id) }}
+{% set e = py.entity(name) %}
+{% set s = e.share %}
+{% set url = e.path ~ "/{record.id}/share" %}
+{% set shared = "/shared" ~ e.path ~ "/" %}
+"""The tests of the secret links of {{ e.name }} (ADR 0049).
+
+A user makes the link of a record, and a request without a sign-in reads
+the record with the token of the link. A new link stops the old link,
+and a revoke stops the link. A wrong token gives 404.
+"""
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+{% if s.access and s.update.protected %}
+from app.core.access import NEEDS
+{% endif %}
+from tests.factories import make_{{ e.snake }}
+
+pytestmark = pytest.mark.anyio
+
+
+async def _token(client: AsyncClient, url: str) -> str:
+    """Make a new link, and return its token."""
+    response = await client.post(url)
+    assert response.status_code == 201, response.text
+    return response.json()["token"]
+
+
+async def test_a_link_opens_the_record_without_a_sign_in(
+    client: AsyncClient, anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    url = f"{{ url }}"
+    assert (await client.get(url)).json() == {"active": False, "created_at": None}
+
+    token = await _token(client, url)
+
+    state = (await client.get(url)).json()
+    assert state["active"] is True
+    assert state["created_at"] is not None
+    response = await anonymous_client.get(f"{{ shared }}{token}")
+    assert response.status_code == 200, response.text
+    assert response.json()["record"]["id"] == str(record.id)
+{% if s.tested %}
+    related = response.json()["related"]["{{ s.tested[0] }}"]
+    assert str(record.{{ s.tested[1] }}) in [item["id"] for item in related]
+{% endif %}
+
+
+async def test_a_wrong_token_gives_not_found(anonymous_client: AsyncClient) -> None:
+    response = await anonymous_client.get("{{ shared }}no-such-token")
+    assert response.status_code == 404, response.text
+
+
+async def test_a_new_link_stops_the_old_link(
+    client: AsyncClient, anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    url = f"{{ url }}"
+    old = await _token(client, url)
+
+    new = await _token(client, url)
+
+    assert (await anonymous_client.get(f"{{ shared }}{old}")).status_code == 404
+    assert (await anonymous_client.get(f"{{ shared }}{new}")).status_code == 200
+
+
+async def test_a_revoke_stops_the_link(
+    client: AsyncClient, anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    url = f"{{ url }}"
+    token = await _token(client, url)
+
+    response = await client.delete(url)
+
+    assert response.status_code == 204, response.text
+    assert (await anonymous_client.get(f"{{ shared }}{token}")).status_code == 404
+    assert (await client.get(url)).json()["active"] is False
+
+
+async def test_the_link_of_a_deleted_record_opens_nothing(
+    client: AsyncClient, anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    token = await _token(client, f"{{ url }}")
+
+    await session.delete(record)
+    await session.commit()
+
+    assert (await anonymous_client.get(f"{{ shared }}{token}")).status_code == 404
+{% if s.update.protected %}
+
+
+async def test_the_links_need_a_sign_in(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    record = await make_{{ e.snake }}(session)
+    url = f"{{ url }}"
+
+    for method in ("GET", "POST", "DELETE"):
+        response = await anonymous_client.request(method, url)
+        assert response.status_code == 401, response.text
+{% endif %}
+{% if s.access and s.update.protected %}
+
+
+def test_the_links_need_the_permission_of_the_update_operation() -> None:
+{% for op in s.guarded %}
+    assert NEEDS["{{ op }}"] == "{{ s.update.name }}"
+{% endfor %}
+{% endif %}

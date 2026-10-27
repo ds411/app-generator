@@ -34,3 +34,10 @@ export * from "./history-entries";
 // The notices of the users (ADR 0041).
 export * from "./notices";
 {% endif %}
+{% if shares %}
+// The secret links of the records (ADR 0049).
+export * from "./share-links";
+{% for share in shares.values() %}
+{{ trace(share.page_id) }}
+{% endfor %}
+{% endif %}

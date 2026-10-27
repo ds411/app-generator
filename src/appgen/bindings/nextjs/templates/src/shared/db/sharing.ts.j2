@@ -1,0 +1,112 @@
+{{ trace_header(*(shares.values() | map(attribute="page_id"))) }}
+import "server-only";
+
+import { createHash, randomBytes } from "node:crypto";
+
+import { and, eq } from "drizzle-orm";
+
+import type { EntityRecord, ShareLinkCreated, ShareLinkState } from "@/shared/api";
+
+import { getDb } from "./client";
+import { shareLinksTable } from "./schema";
+
+// The secret links of the records (ADR 0049). A record has one link at
+// most. The table keeps only the SHA-256 hash of the token, so that a copy
+// of the database gives no links: the token shows one time only, when a
+// user makes the link. A new link replaces the old link, and a revoke
+// deletes it. The links have no foreign key: the link of a deleted record
+// opens nothing.
+
+/** Return the SHA-256 hash of a token, as hexadecimal text. */
+function tokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Return the state of the link of a record. */
+export async function shareLinkState(entity: string, recordId: string): Promise<ShareLinkState> {
+  const [link] = await getDb()
+    .select({ createdAt: shareLinksTable.createdAt })
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.entity, entity), eq(shareLinksTable.recordId, recordId)))
+    .limit(1);
+  return link === undefined ? { active: false, createdAt: null } : { active: true, createdAt: link.createdAt.toISOString() };
+}
+
+/** Make a new link of a record, and return its token. The old link of the record stops. */
+export async function makeShareLink(entity: string, recordId: string, userId: string | null): Promise<ShareLinkCreated> {
+  const token = randomBytes(32).toString("base64url");
+  const createdAt = new Date();
+  await getDb().transaction(async (tx) => {
+    await tx
+      .delete(shareLinksTable)
+      .where(and(eq(shareLinksTable.entity, entity), eq(shareLinksTable.recordId, recordId)));
+    await tx.insert(shareLinksTable).values({ entity, recordId, tokenHash: tokenHash(token), createdBy: userId, createdAt });
+  });
+  return { token, createdAt: createdAt.toISOString() };
+}
+
+/** Delete the link of a record, if it has one. */
+export async function revokeShareLink(entity: string, recordId: string): Promise<void> {
+  await getDb()
+    .delete(shareLinksTable)
+    .where(and(eq(shareLinksTable.entity, entity), eq(shareLinksTable.recordId, recordId)));
+}
+
+/** Return the ID of the record of a token, or null for a wrong or a revoked token. */
+export async function sharedRecordId(entity: string, token: string): Promise<string | null> {
+  const [link] = await getDb()
+    .select({ recordId: shareLinksTable.recordId })
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.entity, entity), eq(shareLinksTable.tokenHash, tokenHash(token))))
+    .limit(1);
+  return link?.recordId ?? null;
+}
+
+/**
+ * The related records of one entity that a shared page shows: the keys
+ * with their IDs (in the shared record, or in the records of another
+ * step), and the read of the records by ID.
+ */
+export type RelatedStep = {
+  entity: string;
+  keys: readonly { from: string | null; key: string }[];
+  byIds: (ids: string[]) => Promise<readonly EntityRecord[]>;
+};
+
+/**
+ * Return the related records of the steps, by the entity of the step. The
+ * steps run again until no step finds a new ID, so that a cycle of
+ * relations finds all records.
+ */
+export async function relatedRecords(
+  record: EntityRecord,
+  steps: readonly RelatedStep[],
+): Promise<Record<string, EntityRecord[]>> {
+  const found = new Map(steps.map((step) => [step.entity, new Map<string, EntityRecord>()]));
+  const asked = new Map(steps.map((step) => [step.entity, new Set<string>()]));
+  let more = true;
+  while (more) {
+    more = false;
+    for (const step of steps) {
+      const seen = asked.get(step.entity) ?? new Set<string>();
+      const ids = new Set<string>();
+      for (const { from, key } of step.keys) {
+        const sources = from === null ? [record] : [...(found.get(from)?.values() ?? [])];
+        for (const source of sources) {
+          const value = (source as Record<string, unknown>)[key];
+          for (const id of Array.isArray(value) ? value : [value]) {
+            if (typeof id === "string" && !seen.has(id)) ids.add(id);
+          }
+        }
+      }
+      if (ids.size === 0) continue;
+      more = true;
+      ids.forEach((id) => seen.add(id));
+      const records = found.get(step.entity);
+      for (const item of await step.byIds([...ids])) {
+        records?.set(item.id, item);
+      }
+    }
+  }
+  return Object.fromEntries([...found].map(([entity, records]) => [entity, [...records.values()]]));
+}

@@ -15,13 +15,20 @@ from pydantic import Field
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs import db
-from appgen.bindings.nextjs.model import DEPLOY_KEY, FSD_LAYERS, RATE_LIMIT_STORE_KEY, context
+from appgen.bindings.nextjs.model import (
+    DEPLOY_KEY,
+    FSD_LAYERS,
+    RATE_LIMIT_STORE_KEY,
+    SHARE_GROUP,
+    context,
+)
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kinds
 from appgen.bindings.shared.events import ts_events
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.notices import notice_rules
+from appgen.bindings.shared.sharing import share_rules
 from appgen.bindings.shared.totals import rule_side_key
 from appgen.dsl.storage import format_size
 from appgen.gen.binding import Binding, ExtensionKey, Output
@@ -83,6 +90,11 @@ _APP_SHELL = (
         template="app/group/embed-layout.tsx.j2",
         path="app/(embed)/layout.tsx",
         when="ui_plan.embedded_pages",
+    ),
+    Output(
+        template="app/group/shared-layout.tsx.j2",
+        path="app/" + SHARE_GROUP + "/layout.tsx",
+        when="shares",
     ),
     Output(template="app/not-found.tsx.j2", path="app/not-found.tsx"),
     Output(
@@ -217,12 +229,24 @@ BINDING = Binding(
             when="i18n",
         ),
         *auth_rules(),
+        *share_rules(),
         *notice_rules(),
         *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
             path="{{ nextjs.pages[name].route_file }}",
             for_each="page",
+        ),
+        # The pages of the secret links of the records (ADR 0049).
+        Output(
+            template="app/shared-page.tsx.j2",
+            path="app/" + SHARE_GROUP + "/{{ nextjs.share_routes[name] }}/page.tsx",
+            for_each="entity",
+            when="name in shares",
+        ),
+        *(
+            Output(template=f"{path}.j2", path=path, when="shares")
+            for path in ("src/shared/db/schema/share-links.ts", "src/shared/db/sharing.ts")
         ),
         # The metadata of the pages: the previews of the links, the sitemap, and robots.txt.
         Output(

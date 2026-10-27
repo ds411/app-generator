@@ -1,0 +1,23 @@
+{{ trace_header(*(shares.values() | map(attribute="page_id"))) }}
+import { pgTable, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
+
+/**
+ * The secret links of the records (ADR 0049): one row for each record
+ * with a link. The row keeps the SHA-256 hash of the token, not the
+ * token. The FastAPI app has the same table, with the same columns.
+ */
+export const shareLinksTable = pgTable(
+  "share_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The name of the entity in the app definition.
+    entity: varchar("entity", { length: 63 }).notNull(),
+    recordId: uuid("record_id").notNull(),
+    // The SHA-256 hash of the token, as hexadecimal text.
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique("uq_share_links_token_hash"),
+    // The signed-in user that made the link, or null.
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [unique("uq_share_links_entity").on(table.entity, table.recordId)],
+);

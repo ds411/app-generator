@@ -1,0 +1,150 @@
+{{ trace_header(*(shares.values() | map(attribute="page_id"))) }}
+"use client";
+
+import { CopyIcon, Share2Icon } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import type { ShareLinkState, SharingApi } from "@/shared/api";
+{% if definition.access %}
+import { useAccess } from "@/shared/lib/access";
+{% endif %}
+import { formatValue } from "@/shared/lib/format";
+import { Button } from "@/shared/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/shared/ui/dialog";
+import { Input } from "@/shared/ui/input";
+
+export type ShareButtonProps = {
+  sharing: SharingApi;
+  /** The ID of the record. */
+  id: string;
+  /** The path of the shared page without the token, for example `/shared/lessons/`. */
+  path: string;
+{% if definition.access %}
+  /** The update operation of the entity: the button shows if the user may call it. */
+  operation: string;
+{% endif %}
+};
+
+/** Return the message of an error of a call. */
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error ? {{ tr("error.message") }} : fallback;
+}
+
+/**
+ * The button "Share" of a detail page with `share` (ADR 0049). Its dialog
+ * makes the secret link of the record, and shows the link one time, with
+ * a copy button: the app keeps only the hash of the token. A new link
+ * stops the old link, and a revoke stops the link.
+ */
+export function ShareButton({ sharing, id, path{{ ", operation" if definition.access }} }: ShareButtonProps) {
+{% if definition.access %}
+  const { canCall } = useAccess(); {{ trace(definition.access.id) }}
+{% endif %}
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<ShareLinkState | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+{% if definition.access %}
+
+  if (!canCall(operation)) return null;
+{% endif %}
+
+  const load = async () => {
+    try {
+      setState(await sharing.state(id));
+    } catch (error) {
+      toast.error(errorText(error, {{ tr(js("The link did not load.")) }}));
+    }
+  };
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    setLink(null);
+    setState(null);
+    if (next) void load();
+  };
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const created = await sharing.create(id);
+      setLink(new URL(path + created.token, window.location.origin).toString());
+      setState({ active: true, createdAt: created.createdAt });
+    } catch (error) {
+      toast.error(errorText(error, {{ tr(js("The link was not made.")) }}));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async () => {
+    setBusy(true);
+    try {
+      await sharing.revoke(id);
+      setLink(null);
+      setState({ active: false, createdAt: null });
+      toast.success({{ tr(js("The link is revoked.")) }});
+    } catch (error) {
+      toast.error(errorText(error, {{ tr(js("The revoke did not succeed.")) }}));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    if (link === null) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success({{ tr(js("The link is copied.")) }});
+    } catch {
+      toast.error({{ tr(js("Copy the link from the field.")) }});
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Share2Icon />
+          {{ jsx_text("Share") }}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ jsx_text("Share the record") }}</DialogTitle>
+          <DialogDescription>{{ jsx_text("A person with the link sees the record without a sign-in.") }}</DialogDescription>
+        </DialogHeader>
+        {link !== null ? (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input readOnly value={link} aria-label={{ '{' ~ tr(js("Link")) ~ '}' }} onFocus={(event) => event.currentTarget.select()} />
+              <Button variant="outline" size="icon" aria-label={{ '{' ~ tr(js("Copy the link")) ~ '}' }} onClick={() => void copy()}>
+                <CopyIcon />
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">{{ jsx_text("Copy the link now: it shows one time only.") }}</p>
+          </div>
+        ) : state === null ? (
+          <p className="text-sm text-muted-foreground">{{ jsx_text("Loading…") }}</p>
+        ) : state.active ? (
+          <p className="text-sm">
+            {{ jsx_text("The record has a link, made at") }} {formatValue(state.createdAt, "datetime")}.
+          </p>
+        ) : (
+          <p className="text-sm">{{ jsx_text("The record has no link.") }}</p>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          {state?.active && (
+            <Button variant="outline" disabled={busy} onClick={() => void revoke()}>
+              {{ jsx_text("Revoke the link") }}
+            </Button>
+          )}
+          <Button disabled={busy || state === null} onClick={() => void create()}>
+            {state?.active ? {{ tr(js("Make a new link")) }} : {{ tr(js("Make a link")) }}}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

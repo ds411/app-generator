@@ -19,6 +19,7 @@ from appgen.bindings.shared.auth import auth_rules
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
 from appgen.bindings.shared.notices import notice_rules
+from appgen.bindings.shared.sharing import share_rules
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
 _PAGE = "src/pages/{{ name | kebab }}"
@@ -168,6 +169,7 @@ BINDING = Binding(
         *views.view_rules(),
         *i18n_rules(),
         *auth_rules(),
+        *share_rules(),
         *notice_rules(),
         Output(
             template="src/shared/auth/index.ts.j2",
@@ -198,6 +200,11 @@ BINDING = Binding(
             template="src/app/layout/embed-layout.tsx.j2",
             path="src/app/layout/embed-layout.tsx",
             when="ui_plan.embedded_pages",
+        ),
+        Output(
+            template="src/app/layout/shared-layout.tsx.j2",
+            path="src/app/layout/shared-layout.tsx",
+            when="shares",
         ),
         Output(
             template="src/features/toggle-theme/index.ts.j2",

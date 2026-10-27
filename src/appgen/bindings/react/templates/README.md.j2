@@ -192,6 +192,29 @@ notice can have its old values again.
 - A notice keeps the values of its text from the time of the change.
 
 {% endif %}
+{% if shares %}
+## Secret links
+
+A user that may change a record of these pages makes a secret link of
+it with the button "Share". A guest opens the link without a sign-in,
+and sees the record without the actions.
+
+| Page | Path of the links |
+| ---- | ----------------- |
+{% for share in shares.values() %}
+| `{{ share.page }}` | `{{ route_path(share.shared_path) }}` |
+{% endfor %}
+
+{% if react.api %}
+The app calls the share endpoints of the FastAPI app. A new link stops
+the old link, and a revoke stops the link.
+{% else %}
+With mock data, the app keeps the links in the local storage of the
+browser, so that a link opens in another tab of the same browser. A
+link of a new record opens only until the page reloads.
+{% endif %}
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 

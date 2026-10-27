@@ -1,2 +1,9 @@
 {{ trace_header(element_id) }}
 export { {{ name | pascal }}View, type {{ name | pascal }}ViewProps } from "./ui/{{ name | kebab }}-view";
+{% if shares is defined and shares.values() | selectattr("view", "equalto", name) | list %}
+{% if nextjs is defined %}
+export { {{ name | pascal }}SharedView, type {{ name | pascal }}SharedViewProps } from "./ui/{{ name | kebab }}-shared-view";
+{% else %}
+export { {{ name | pascal }}SharedView } from "./ui/{{ name | kebab }}-shared-view";
+{% endif %}
+{% endif %}

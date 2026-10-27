@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 6 %}
 import {
 {% for type_name in type_names %}
@@ -290,6 +290,50 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
         return record;
       },
     };
+  }
+
+{% endif %}
+{% if shares %}
+  /**
+   * Return the secret links of the records (ADR 0049): `GET`, `POST`, and
+   * `DELETE <path>/{id}/share`. The FastAPI app checks the access.
+   */
+  sharing(): SharingApi {
+    return {
+      state: async (id) => {
+        const result = (await this.request("GET", id, undefined, "/share")) as {
+          active: boolean;
+          created_at?: string | null;
+        };
+        return { active: result.active, createdAt: result.created_at ?? null };
+      },
+      create: async (id) => {
+        const result = (await this.request("POST", id, undefined, "/share")) as { token: string; created_at: string };
+        return { token: result.token, createdAt: result.created_at };
+      },
+      revoke: async (id) => {
+        await this.request("DELETE", id, undefined, "/share");
+      },
+    };
+  }
+
+  /**
+   * Return the record of a secret link without a sign-in: `GET /shared<path>/{token}`.
+   * The related records stay JSON, by the JSON name of their entity: the
+   * stores of their entities read them. A wrong or revoked token gives a
+   * NotFoundError.
+   */
+  async shared(token: string): Promise<SharedRecord<T, unknown>> {
+    const path = `/shared${this.path}/${encodeURIComponent(token)}${this.translations()}`;
+    try {
+      const result = (await apiRequest("GET", path)) as { record: unknown; related: Record<string, unknown[]> };
+      return { record: this.fromJson(result.record), related: result.related };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        throw new NotFoundError(this.entity, token);
+      }
+      throw error;
+    }
   }
 
 {% endif %}

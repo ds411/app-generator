@@ -10,11 +10,19 @@
 {# A view of a query loads its rows with the server action of the query (ADR 0045). #}
 {% set query_view = element.content.view if element.content is not none and element.content.view in ui_views.query_views else none %}
 {% set query_route = query_view and ui_views.query_view_plan(query_view).route_params %}
+{# The button "Share" of the secret links (ADR 0049). #}
+{% set share = shares.get(element.entity) if detail and element.share else none %}
 {{ trace_header(element_id) }}
 "use client";
 
+{% if share %}
+import { {{ element.entity | camel }}Sharing } from "@/entities/{{ element.entity | kebab }}";
+{% endif %}
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
+{% endif %}
+{% if share %}
+import { ShareButton } from "@/features/share-record";
 {% endif %}
 {% if (info.params and not view and not dashboard and not api_view and not query_view) or form or query_route %}
 import { useParams } from "@/shared/lib/router";
@@ -58,7 +66,8 @@ export function {{ info.component }}() {
 {% elif info.params and not view and not dashboard and not api_view and not query_view %}
   const { {% for param in info.params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
-{% set regions = page_regions(element, page_actions | length > 0) %}
+{% set regions = page_regions(element, page_actions | length > 0 or share is not none) %}
+{% set share_button %}{% if share %}<ShareButton sharing={ {{- element.entity | camel }}Sharing} id={ {{- id_param }} ?? ""} path={{ js(share.shared_prefix) }}{% if definition.access %} operation={{ js(share.update) }}{% endif %} />{% endif %}{% endset %}
 {% set content %}
 {% if custom %}
 <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
@@ -97,7 +106,12 @@ export function {{ info.component }}() {
       />
 {% elif region.name == "actions" %}
       <div className={{ js(region.classes) }}>
+{% if page_actions %}
         <{{ name | pascal }}PageActions />
+{% endif %}
+{% if share %}
+        {{ share_button }}
+{% endif %}
       </div>
 {% else %}
       <div className={{ js(region.classes) }}>
@@ -115,7 +129,16 @@ export function {{ info.component }}() {
 {% if element.description %}
         description={{ jsx_attr(element.description) }}
 {% endif %}
-{% if page_actions %}
+{% if page_actions and share %}
+        actions={
+          <>
+            <{{ name | pascal }}PageActions />
+            {{ share_button }}
+          </>
+        }
+{% elif share %}
+        actions={ {{- share_button -}} }
+{% elif page_actions %}
         actions={<{{ name | pascal }}PageActions />}
 {% endif %}
       />

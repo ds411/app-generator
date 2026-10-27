@@ -1,0 +1,21 @@
+{{ trace_header(*(shares.values() | map(attribute="page_id"))) }}
+import { Outlet } from "react-router";
+
+import { appConfig } from "@/shared/config/app";
+
+/**
+ * The frame of the pages of the secret links (ADR 0049): the app title
+ * and the record, without the app shell, for a guest without a sign-in.
+ */
+export function SharedLayout() {
+  return (
+    <div className="min-h-svh bg-background text-foreground">
+      <header className="border-b px-6 py-3">
+        <span className="font-semibold">{{ "{" ~ tr("appConfig.title") ~ "}" }}</span>
+      </header>
+      <main className="mx-auto max-w-5xl p-6">
+        <Outlet />
+      </main>
+    </div>
+  );
+}

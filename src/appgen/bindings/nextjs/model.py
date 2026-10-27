@@ -24,6 +24,7 @@ from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.notices import has_notices, notice_plans
+from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
 from appgen.bindings.shared.typescript import has_history
@@ -99,6 +100,8 @@ BARE_GROUP = "(bare)"
 """The route group of the pages without a layout."""
 EMBED_GROUP = "(embed)"
 """The route group of the pages with `embed`: without the app shell (ADR 0032)."""
+SHARE_GROUP = "(shared-links)"
+"""The route group of the pages of the secret links: without the app shell (ADR 0049)."""
 
 
 def route_group(layout: str | None) -> str:
@@ -320,6 +323,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     totals = repository_totals(definition, by_entity)
+    shares = share_plans(definition)
     return {
         "ts_apis": apis,
         "ts_connections": ts_connections(apis),
@@ -331,6 +335,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The pages with `share` by entity: the secret links of the records (ADR 0049).
+        "shares": shares,
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
         "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
@@ -389,6 +395,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 for entity in definition.entities.values()
                 for rule in entity.rules.values()
             ),
+            # The route folders of the pages of the secret links (ADR 0049), by entity.
+            "share_routes": {
+                entity: route_dir(plan.shared_path)[0] for entity, plan in shares.items()
+            },
             # The change log (ADR 0040): one table for all entities, and the helpers.
             "history": has_history(definition),
             # The notices (ADR 0041): one table for all users, and the helpers.

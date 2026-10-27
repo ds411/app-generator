@@ -445,6 +445,27 @@ the change log.
   and the seed.
 
 {% endif %}
+{% if shares %}
+## Secret links
+
+A user that may change a record of these pages makes a secret link of
+it with the button "Share". A guest opens the link without a sign-in,
+and sees the record without the actions. The pages of the links are in
+`app/(shared-links)/`, without the app shell, and the search engines do
+not index them.
+
+| Page | Path of the links |
+| ---- | ----------------- |
+{% for share in shares.values() %}
+| `{{ share.page }}` | `{{ share.shared_path }}` |
+{% endfor %}
+
+- The table `share_links` keeps the SHA-256 hash of each token, and a
+  record has one link at most. The token shows one time only.
+- A new link stops the old link, and a revoke stops the link. A link
+  does not expire.
+
+{% endif %}
 {% if ui_plan.embedded_pages %}
 ## Pages in frames of other websites
 
