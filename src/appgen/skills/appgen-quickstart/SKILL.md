@@ -76,8 +76,8 @@ A key with `<...>` stands for a name that you choose, for example
 | `app` | Always: the subject of the prompts. `name` in kebab case, for example `tool-library`. | `app.name`, `app.title`, `app.description` |
 | `entities` | Always: each thing that the app keeps records of. | `entities.<Entity>.crud: { views: [table, detail], forms: [create, update] }` |
 | `pages` | Always with `nextjs` or `react`: a start page with a dashboard, a list page and a detail page for each entity, and a menu. | `pages.<page>.path: /`, `ui.dashboards`, `ui.layouts`, `ui.navigation`, `ui.defaults.layout` |
-| `auth` | Users, members, customers, staff, accounts, a sign-in, "my" records, or roles. A sign-in with an email address and a password. | `auth.user_entity`, `auth.username_field: email` |
-| `access` | Roles, or rights that differ between groups of users, for example "only the librarians add tools". The role with the most rights gets all operations and pages. | `access.role_field: role`, `access.roles.<role>.operations: ["*"]`, `access.roles.<role>.pages: ["*"]` |
+| `auth` | People who use the app: members, staff, mechanics, accounts, a sign-in, "my" records, or roles. A sign-in with an email address and a password. People that the app only keeps records of, for example the customers of a shop, are no signal. | `auth.user_entity`, `auth.username_field: email` |
+| `access` | Always with `auth`. The roles of the prompts, for example "only the librarians add tools". Without roles in the prompts: `admin`, and one role for the other users, for example `member`. The role with the most rights gets all operations and pages. | `access.role_field: role`, `access.roles.<role>.operations: ["*"]`, `access.roles.<role>.pages: ["*"]` |
 | `records` | Users see or change only their own records, for example "members see their loans". | `access.roles.<role>.records.<Entity>.owner` |
 | `sign_up` | A public app: anyone, customers, or visitors make their own accounts. | `auth.sign_up.fields`, `auth.sign_up.default_role`, `auth.password_reset`, `auth.delivery: smtp` |
 | `public` | Parts that visitors use without an account, for example a public catalog. | `auth.public_pages`, `auth.public_operations` |
@@ -125,8 +125,15 @@ and the words of the prompt that caused it:
 # - <row>: <choice>. Prompt: "<words of the prompt>"
 ```
 
-Write a line only for a chosen default, not for a row without its
-signal. Use `binding` for the row of [Bindings](#bindings). An example:
+Rules for the lines:
+
+- Write a line only for a chosen default. Do not write a line for a row
+  without its signal, for example `no auth`.
+- Use `binding` for the row of [Bindings](#bindings).
+- End each line with the closing quote of the words. A note about a
+  default goes into the summary, not into the record.
+
+An example:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ds411/app-generator/main/schema/app.schema.json
