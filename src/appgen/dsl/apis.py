@@ -61,10 +61,14 @@ class ApiSecurity(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     scheme: Text
-    """A key of `components.securitySchemes` of the document: an API key, a bearer token, or
-    OAuth 2.0 with the client credentials flow."""
+    """A key of `components.securitySchemes` of the document: an API key, a bearer token, HTTP
+    Basic, or OAuth 2.0."""
     env: EnvName | None = None
-    """The environment variable that holds the API key or the bearer token."""
+    """The environment variable that holds the API key, the bearer token, or the password of
+    HTTP Basic (for Jira, the API token)."""
+    username_env: EnvName | None = None
+    """HTTP Basic: the environment variable that holds the user name (for Jira, the email
+    address of the account)."""
     client_id_env: EnvName | None = None
     """OAuth 2.0: the environment variable that holds the client ID."""
     client_secret_env: EnvName | None = None
@@ -84,7 +88,7 @@ class ApiSecurity(BaseModel):
     @property
     def variables(self) -> list[tuple[str, str]]:
         """The key and the environment variable of each variable of the credential."""
-        keys = ("env", "client_id_env", "client_secret_env")
+        keys = ("username_env", "env", "client_id_env", "client_secret_env")
         return [(key, value) for key in keys if (value := getattr(self, key)) is not None]
 
 

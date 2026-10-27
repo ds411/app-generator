@@ -644,6 +644,17 @@
           ],
           "default": null
         },
+        "username_env": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnvName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "client_id_env": {
           "anyOf": [
             {

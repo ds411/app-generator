@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# An API with HTTP Basic (#486): the Jira Cloud REST API takes the email
+# address of an Atlassian account as the user name, and an API token as
+# the password. jira/jira.openapi.json is a trimmed copy of the OpenAPI
+# document of the Jira Cloud platform REST API
+# (https://developer.atlassian.com/cloud/jira/platform/swagger-v3.v3.json,
+# Apache 2.0): the selected operations, the schemas that they use, the
+# tags of the operations, and the original server and security schemes.
+# The OAuth 2.0 scheme keeps only the scopes of the selected operations.
+# The trimmed copy has no other change.
+# scripts/check-fastapi.sh and scripts/check-nextjs.sh check the apps of
+# this definition, and scripts/api_calls.py calls the mock Jira API from
+# them. The React app has no client for the API, because a browser app
+# cannot keep the API token: the API is a gap (ADR 0019).
+version: 0
+
+app:
+  name: support-desk
+  title: Support Desk
+  description: The tickets of the support team, with an issue in Jira for each ticket.
+
+entities:
+  Ticket:
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 200 }
+      description: { type: text }
+      issue_key:
+        type: string
+        max_length: 40
+        description: The key of the Jira issue of the ticket, for example SUP-12.
+
+operations:
+  list_tickets: { kind: list, entity: Ticket }
+  create_ticket: { kind: create, entity: Ticket }
+  read_ticket: { kind: read, entity: Ticket }
+  update_ticket: { kind: update, entity: Ticket }
+  file_issue:
+    kind: custom
+    entity: Ticket
+    description: Make an issue in Jira for the ticket, and keep its key.
+    apis: [jira]
+
+pages:
+  tickets: { path: /, title: Tickets, content: { view: ticket_table } }
+
+ui:
+  views:
+    ticket_table:
+      kind: table
+      entity: Ticket
+      title: Tickets
+      columns:
+        title: { label: Title }
+        issue_key: { label: Jira issue }
+      row_actions:
+        file:
+          kind: operation
+          operation: file_issue
+          label: File in Jira
+          on_success: { toast: The ticket has an issue in Jira. }
+
+apis:
+  jira:
+    description: The issues of the Jira Cloud site of the support team.
+    document: jira/jira.openapi.json
+    # The URL of the site, for example https://acme.atlassian.net.
+    base_url_env: JIRA_API_URL
+    # HTTP Basic: the email address of the account and an API token.
+    security: { scheme: basicAuth, username_env: JIRA_EMAIL, env: JIRA_API_TOKEN }
+    operations:
+      getIssue: {}
+      searchAndReconsileIssuesUsingJql:
+        description: Find the issues of a JQL query.
+      createIssue: {}
+      addComment: {}

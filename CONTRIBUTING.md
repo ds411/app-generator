@@ -304,7 +304,9 @@ git config core.hooksPath .githooks
   0045, and the available filters, ADR 0047), `tests/fixtures/courses.yaml` (the totals and the widgets of
   the signed-in user, `$me`), and `tests/fixtures/places.yaml` (point
   fields and the filters `near` and `area`, ADR 0046), and runs the
-  same checks on them. It needs Docker.
+  same checks on them. For `tests/fixtures/jira.yaml` (an API with HTTP
+  Basic), it also calls the mock Jira API from the app
+  (`scripts/api_calls.py`). It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
@@ -326,8 +328,10 @@ git config core.hooksPath .githooks
   the queries with PGlite (`scripts/queries_test.py`), and
   `tests/fixtures/record-rules.yaml`, whose test reads the stream of the
   live updates of each user and the users on a task page with PGlite,
-  and with two brokers and one Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
-  with `scripts/check-nextjs.sh [output folder]`.
+  and with two brokers and one Redis (`scripts/live_test.py`), and
+  `tests/fixtures/jira.yaml`, whose check calls the mock Jira API with
+  HTTP Basic (`scripts/api_calls.py`). It needs pnpm and Docker. Run it
+  by hand with `scripts/check-nextjs.sh [output folder]`.
 - The hook runs the selected sections of `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs
   `pnpm install`, lint, type check, build, `docker build`, and

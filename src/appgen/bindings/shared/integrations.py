@@ -244,10 +244,11 @@ class TsApi:
     base_url: str
     url_env: str
     secret_env: str | None
-    """The environment variable of the API key, the token, or the client secret."""
+    """The environment variable of the API key, the token, the password, or the client
+    secret."""
     credential: str | None
-    """`header`, `query`, `bearer`, `oauth2` (the client credentials flow), or `user` (the
-    authorization code flow: the token of a user, ADR 0033)."""
+    """`header`, `query`, `bearer`, `basic` (HTTP Basic), `oauth2` (the client credentials
+    flow), or `user` (the authorization code flow: the token of a user, ADR 0033)."""
     credential_name: str | None
     types: list[TsType] = field(default_factory=list[TsType])
     methods: list[TsMethod] = field(default_factory=list[TsMethod])
@@ -257,6 +258,8 @@ class TsApi:
     """The path of the endpoints of an exposed API in the FastAPI app."""
     client_id_env: str | None = None
     """OAuth 2.0: the environment variable of the client ID."""
+    username_env: str | None = None
+    """HTTP Basic: the environment variable of the user name."""
     token_url: str = ""
     """OAuth 2.0: the token URL of the flow. A path is under the base URL."""
     scopes: tuple[str, ...] = ()
@@ -275,6 +278,12 @@ class TsApi:
     def connection_name(self) -> str:
         """The name of the API in the paths of the connections, for example `exchange-rates`."""
         return kebab(self.name)
+
+    @property
+    def secret_envs(self) -> list[str]:
+        """The environment variables of the credentials: the user name of HTTP Basic, and the
+        secret."""
+        return [env for env in (self.username_env, self.secret_env) if env]
 
     @property
     def client_for(self) -> str:
@@ -326,6 +335,9 @@ class TsApi:
         """Return the HTTP option of the secret, or None for an API without a secret."""
         if self.credential == "bearer":
             return "headers: options.secret ? { Authorization: `Bearer ${options.secret}` } : {},"
+        if self.credential == "basic":
+            value = 'basicAuthorization(options.username ?? "", options.secret)'
+            return f"headers: options.secret ? {{ Authorization: {value} }} : {{}},"
         if self.credential == "header":
             key = ts_key(self.credential_name or "")
             return f"headers: options.secret ? {{ {key}: options.secret }} : {{}},"
@@ -348,10 +360,10 @@ class TsApi:
 
 def ts_features(apis: Mapping[str, TsApi]) -> frozenset[str]:
     """Return what the HTTP client of the apps needs for the methods of these APIs: `form`,
-    `multipart`, `text`, `binary`, `cookie`, `oauth2`, and `user`."""
+    `multipart`, `text`, `binary`, `cookie`, `basic`, `oauth2`, and `user`."""
     found: set[str] = set()
     for api in apis.values():
-        if api.credential in ("oauth2", "user"):
+        if api.credential in ("basic", "oauth2", "user"):
             found.add(api.credential)
         for m in api.methods:
             if m.body_type is not None and m.body_kind != "json":
@@ -384,7 +396,8 @@ def _api(name: str, api: Api) -> TsApi:
     )
     credential: str | None = None
     if scheme is not None:
-        credential = {"http": "bearer", "oauth2": "oauth2"}.get(scheme.type, scheme.location)
+        http = "basic" if scheme.scheme == "basic" else "bearer"
+        credential = {"http": http, "oauth2": "oauth2"}.get(scheme.type, scheme.location)
     code = scheme.authorization_code if scheme is not None and api.user_flow else None
     if code is not None:
         credential = "user"
@@ -407,6 +420,7 @@ def _api(name: str, api: Api) -> TsApi:
         exposed=api.expose,
         prefix=exposed_prefix(name) if api.expose else "",
         client_id_env=security.client_id_env if security else None,
+        username_env=security.username_env if security else None,
         token_url=(scheme.token_url or "") if scheme is not None else "",
         scopes=tuple(security.scopes) if security else (),
     )

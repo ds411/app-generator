@@ -198,13 +198,14 @@ class SecurityScheme:
 
     @property
     def supported(self) -> bool:
-        """True for an API key in a header or a query parameter, for a bearer token, and for
-        OAuth 2.0 with the client credentials flow or the authorization code flow."""
+        """True for an API key in a header or a query parameter, for a bearer token, for HTTP
+        Basic, and for OAuth 2.0 with the client credentials flow or the authorization code
+        flow."""
         if self.type == "apiKey":
             return self.location in ("header", "query") and bool(self.parameter)
         if self.type == "oauth2":
             return self.token_url is not None or self.authorization_code is not None
-        return self.type == "http" and self.scheme == "bearer"
+        return self.type == "http" and self.scheme in ("bearer", "basic")
 
 
 @dataclass(frozen=True, slots=True)
@@ -723,7 +724,7 @@ class _Builder:
                 answer, answer_media, media = self.answer_media(cast(dict[str, object], content))
                 if answer == "json":
                     result = self.schema(media.get("schema", {}), base + "Result")
-                    example = self.example(media)
+                    example = self.json_example(self.example(media), result)
                 elif answer == "text":
                     result = ScalarSchema("string")
                     found_example = self.example(media)
@@ -838,6 +839,31 @@ class _Builder:
         if isinstance(listed, list) and listed:
             return cast(JsonValue, cast(list[object], listed)[0])
         return None
+
+    def json_example(self, example: JsonValue, result: Schema) -> JsonValue:
+        """Return the example of a JSON answer.
+
+        Some documents, for example the document of Jira Cloud, give the
+        example as a string with the JSON text. If the result cannot be a
+        string, return the value of the JSON text of a string example, or
+        None (the clients then use a sample of the schema).
+        """
+        if not isinstance(example, str) or self.can_be_string(result):
+            return example
+        try:
+            return cast(JsonValue, json.loads(example))
+        except ValueError:
+            return None
+
+    def can_be_string(self, schema: Schema) -> bool:
+        """Return True if a string can be a value of a schema."""
+        while isinstance(schema, Ref):
+            schema = self.schemas[schema.name].schema
+        if isinstance(schema, UnionSchema):
+            return any(self.can_be_string(option) for option in schema.options)
+        if isinstance(schema, ScalarSchema):
+            return schema.type == "string"
+        return isinstance(schema, AnySchema)
 
     def name(self, wanted: str) -> str:
         name = wanted

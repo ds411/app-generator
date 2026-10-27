@@ -2408,7 +2408,7 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Use a name with the name of the API, for example 'HOLIDAYS_API_URL'.",
                 )
                 continue
-            secret = name in ("security", "security.client_secret_env")
+            secret = name in ("security", "security.username_env", "security.client_secret_env")
             if secret and env.startswith(PUBLIC_ENV_PREFIXES):
                 yield _error(
                     "reserved-name",
@@ -2478,8 +2478,8 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             yield _error(
                 "unsuitable-security",
                 f"The security scheme '{security.scheme}' is not an API key in a header or a "
-                "query parameter, a bearer token, or OAuth 2.0 with the client credentials flow "
-                "or the authorization code flow." + flows,
+                "query parameter, a bearer token, HTTP Basic, or OAuth 2.0 with the client "
+                "credentials flow or the authorization code flow." + flows,
                 api,
                 at="security",
                 hint="The clients support only these schemes. Call the API from hand-written "
@@ -3516,10 +3516,15 @@ def _check_seed_targets(definition: AppDefinition) -> Iterator[Diagnostic]:
 def _check_security_keys(
     api: Api, security: ApiSecurity, scheme: SecurityScheme
 ) -> Iterator[Diagnostic]:
-    """The security has the keys of its scheme: `env`, or the keys of OAuth 2.0."""
+    """The security has the keys of its scheme: `env`, the keys of HTTP Basic, or the keys of
+    OAuth 2.0."""
     oauth = scheme.type == "oauth2"
-    needed = ("client_id_env", "client_secret_env") if oauth else ("env",)
-    kind = "OAuth 2.0" if oauth else "an API key or a bearer token"
+    if oauth:
+        needed, kind = ("client_id_env", "client_secret_env"), "OAuth 2.0"
+    elif scheme.type == "http" and scheme.scheme == "basic":
+        needed, kind = ("username_env", "env"), "HTTP Basic"
+    else:
+        needed, kind = ("env",), "an API key or a bearer token"
     for key in needed:
         if getattr(security, key) is None:
             yield _error(
@@ -3528,8 +3533,9 @@ def _check_security_keys(
                 api,
                 at="security",
             )
-    other = ("env",) if oauth else ("client_id_env", "client_secret_env", "scopes", "flow")
-    for key in other:
+    keys = ("username_env", "env", "client_id_env", "client_secret_env", "scopes", "flow")
+    allowed = (*needed, "scopes", "flow") if oauth else needed
+    for key in (key for key in keys if key not in allowed):
         if getattr(security, key):
             yield _error(
                 "invalid-option",

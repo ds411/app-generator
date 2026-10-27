@@ -1,5 +1,6 @@
 {{ trace_header("app") }}
 {% set oauth = "oauth2" in py_api_features %}
+{% set basic = "basic" in py_api_features %}
 {% set user = "user" in py_api_features %}
 {% set tokens = oauth or user %}
 """The HTTP client that the clients of the third-party APIs share.
@@ -20,6 +21,9 @@ An API with the authorization code flow sends the access token of a user
 
 {% if oauth %}
 import asyncio
+{% endif %}
+{% if basic %}
+import base64
 {% endif %}
 import datetime as dt
 import json
@@ -54,6 +58,15 @@ class ApiError(Exception):
         """The body of the answer, as text."""
 
 
+{% if basic %}
+def basic_authorization(username: str, password: str) -> str:
+    """Return the value of the header `Authorization` of HTTP Basic (RFC 7617): the Base64 of
+    the UTF-8 bytes of `<user name>:<password>`."""
+    credentials = f"{username}:{password}".encode()
+    return "Basic " + base64.b64encode(credentials).decode()
+
+
+{% endif %}
 @dataclass(frozen=True, slots=True)
 class ApiFile:
     """A file of a multipart form: its name, its content, and its media type."""

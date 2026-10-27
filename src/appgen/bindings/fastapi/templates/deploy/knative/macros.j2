@@ -145,11 +145,13 @@
 {% endif %}
 {% for api in py_apis.values() if api.secret_env %}
             {{ trace(api.id) }}
-            - name: {{ api.secret_env }}
+{% for env in api.secret_envs %}
+            - name: {{ env }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ app.name }}-{{ api.secret_env | lower | replace("_", "-") }}
+                  name: {{ app.name }}-{{ env | lower | replace("_", "-") }}
                   key: latest
+{% endfor %}
 {% endfor %}
 {% for w in py_webhooks.values() %}
             {{ trace(w.id) }}

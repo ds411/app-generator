@@ -3,6 +3,7 @@
 {% set features = ts_features(ts_apis) %}
 {% set forms = "form" in features or "multipart" in features %}
 {% set oauth = server and "oauth2" in features %}
+{% set basic = server and "basic" in features %}
 {# The client credentials flow, or the token of a user (ADR 0033). #}
 {% set tokens = server and ("oauth2" in features or "user" in features) %}
 {{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
@@ -34,8 +35,12 @@ export interface ClientOptions {
   /** The base URL. The default is the first server of the OpenAPI document. */
   baseUrl?: string;
 {% if server %}
-  /** The API key, the bearer token, or the client secret of an API with security. */
+  /** The API key, the bearer token, the password, or the client secret of an API with security. */
   secret?: string;
+{% if basic %}
+  /** The user name of an API with HTTP Basic. */
+  username?: string;
+{% endif %}
 {% if oauth %}
   /** The client ID of an API with OAuth 2.0. */
   clientId?: string;
@@ -238,6 +243,16 @@ function multipartBody(form: object): FormData {
   return body;
 }
 {% endif %}
+{% endif %}
+{% if basic %}
+
+/**
+ * Return the value of the header `Authorization` of HTTP Basic (RFC 7617):
+ * the Base64 of the UTF-8 bytes of `<user name>:<password>`.
+ */
+export function basicAuthorization(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+}
 {% endif %}
 {% if oauth %}
 
