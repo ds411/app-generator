@@ -157,3 +157,44 @@ async def test_the_text_has_the_language_of_the_request(
     [item] = response.json()["items"]
     assert item["text"] == TRANSLATION
 {% endif %}
+{% if py.notice_emails %}
+
+
+{% for id in py.notice_emails.ids %}
+{{ trace(id) }}
+{% endfor %}
+async def test_the_emails_of_each_notification_are_on_until_the_user_turns_them_off(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await signed_in(session)
+    name = {{ py.string(py.notice_emails.names[0]) }}
+
+    before = await anonymous_client.get("/notices/settings", headers=headers)
+    response = await anonymous_client.put(
+        f"/notices/settings/{name}", json={"email": False}, headers=headers
+    )
+    after = await anonymous_client.get("/notices/settings", headers=headers)
+
+    assert before.status_code == 200, before.text
+    {{ py.literal(py.notice_emails.names | sort, "names = ", 4) }}
+    assert before.json() == [{"notification": n, "email": True} for n in names]
+    assert response.status_code == 200, response.text
+    assert response.json() == {"notification": name, "email": False}
+    assert {item["notification"]: item["email"] for item in after.json()}[name] is False
+    again = await anonymous_client.put(
+        f"/notices/settings/{name}", json={"email": True}, headers=headers
+    )
+    assert again.json() == {"notification": name, "email": True}
+
+
+async def test_a_notification_without_emails_has_no_setting(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, headers = await signed_in(session)
+
+    response = await anonymous_client.put(
+        "/notices/settings/unknown", json={"email": False}, headers=headers
+    )
+
+    assert_problem(response, 404)
+{% endif %}

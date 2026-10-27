@@ -1,0 +1,98 @@
+{% set emails = email_notifications(definition) %}
+{{ trace_header(*(emails | map(attribute="id"))) }}
+"use client";
+
+import { useState } from "react";
+
+import type { NoticeSetting } from "@/shared/api";
+import { notices } from "@/shared/api/notices";
+import { Link } from "@/shared/lib/router";
+import { useResource } from "@/shared/lib/use-resource";
+import { Switch } from "@/shared/ui/switch";
+
+/** The notifications with emails (ADR 0044): the name in words, and the description. */
+const labels: Readonly<Record<string, { label: string; description: string | null }>> = {
+{% for n in emails %}
+  {{ n.name | tojson }}: { label: {{ text(n.label) }}, description: {{ text(n.description) if n.description else "null" }} }, {{ trace(n.id) }}
+{% endfor %}
+};
+
+/**
+ * The page of the emails of the notices of the signed-in user (ADR 0044):
+ * a switch for each notification with emails. A change saves at once. The
+ * notices stay in the bell when the emails are off.
+ */
+export function NoticeSettingsPage() {
+  const settings = useResource("notice-settings", () => notices.settings());
+  const [changed, setChanged] = useState<Record<string, boolean>>({});
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Turn the emails of a notification on or off, and keep the new state. */
+  async function change(setting: NoticeSetting, email: boolean) {
+    setError(null);
+    setPending(setting.notification);
+    try {
+      await notices.setEmail(setting.notification, email);
+      setChanged((current) => ({ ...current, [setting.notification]: email }));
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : {{ tr(js("The change did not succeed.")) }});
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+      <div className="flex w-full max-w-md flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
+        <h1 className="text-xl font-semibold">{{ jsx_text("Notice emails") }}</h1>
+        <p className="text-sm text-muted-foreground">
+          {{ jsx_text("Choose the notices that also come to you by email. The bell shows all notices.") }}
+        </p>
+        {settings.status === "loading" && <p className="text-sm text-muted-foreground">{{ jsx_text("Loading") }}</p>}
+        {settings.status === "error" && (
+          <p role="alert" className="text-sm text-destructive">
+            {settings.error instanceof Error ? settings.error.message : {{ tr(js("The request failed.")) }}}
+          </p>
+        )}
+        {error !== null && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        {settings.status === "success" && (
+          <ul className="flex flex-col divide-y rounded-md border">
+            {settings.data.map((setting) => {
+              const text = labels[setting.notification];
+              const id = `notice-email-${setting.notification}`;
+              return (
+                <li key={setting.notification} className="flex items-center justify-between gap-4 p-3">
+                  <div className="flex min-w-0 flex-col">
+                    <label htmlFor={id} className="text-sm font-medium">
+                      {text === undefined ? setting.notification : {{ tr("text.label") }}}
+                    </label>
+                    {text?.description != null && (
+                      <p id={`${id}-description`} className="text-sm text-muted-foreground">
+                        {{ "{" ~ tr("text.description") ~ "}" }}
+                      </p>
+                    )}
+                  </div>
+                  <Switch
+                    id={id}
+                    aria-describedby={text?.description != null ? `${id}-description` : undefined}
+                    checked={changed[setting.notification] ?? setting.email}
+                    disabled={pending !== null}
+                    onCheckedChange={(email) => void change(setting, email)}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <Link href="/" className="text-sm font-medium underline underline-offset-4">
+          {{ jsx_text("Go to the start page") }}
+        </Link>
+      </div>
+    </main>
+  );
+}

@@ -131,6 +131,8 @@ export type ExpectedAuth = {
    * The receiver finds the notice in the bell of the top bar.
    */
   notice?: {
+    /** The name of the notification. */
+    notification: string;
     /** The user names of the user of the change and of the receiver. */
     actor: string;
     receiver: string;
@@ -141,6 +143,23 @@ export type ExpectedAuth = {
     value: string;
     /** The text of the notice. */
     text: string;
+  } | null;
+  /**
+   * The emails of the notices (ADR 0044): after the test of the notices,
+   * the receiver turns off the emails of the first notification with
+   * emails on the page /notice-settings.
+   */
+  noticeEmails?: {
+    /** The names in words of the notifications with emails, in the order of the page. */
+    labels: string[];
+    /**
+     * The file of the mock SMTP server, or null: the app sends no emails.
+     * With a file, the test calls the route of the job `notice_emails`
+     * with the secret, and finds the email of the notice to the address.
+     */
+    mailbox: string | null;
+    to: string;
+    secret: string;
   } | null;
   /**
    * The mentions (ADR 0043): a user with all operations mentions another
@@ -175,6 +194,18 @@ export type ExpectedConnections = {
 };
 
 /** The views of the rows of the queries of tests/fixtures/listings.yaml, for scripts/listings_ui_test.py (ADR 0045). */
+/** A table of listings with an available filter of their bookings (ADR 0047). */
+export type ExpectedAvailable = {
+  path: string;
+  /** The label of the filter, and the day that the browser shows first (UTC). */
+  label: string;
+  today: string;
+  /** The titles of all listings, in the order of the table. */
+  all: string[];
+  /** The labels of the first and the last day of a pick in the calendar, and the free listings. */
+  ranges: { from: string; to: string; titles: string[] }[];
+};
+
 export type ExpectedQueryViews = {
   /** A table of a query of records, with a required text filter and a number filter. */
   table: {
@@ -279,6 +310,8 @@ export type Expected = {
   colors: ExpectedToken[];
   /** The font size of the body text (`typography.body`), for each mode. */
   bodyFontSize: Record<Mode, string>;
+  /** The entities whose changes the open views show at once (ADR 0051): none with mock data. */
+  live?: string[];
   /** Only for the test of the test language. */
   testLanguage?: ExpectedTestLanguage;
   /** Only for the test of the sign-in and the permissions. */
@@ -287,6 +320,8 @@ export type Expected = {
   connections?: ExpectedConnections;
   /** Only for the test of the views of the queries. */
   queryViews?: ExpectedQueryViews;
+  /** Only for the test of the available filter of the listings. */
+  available?: ExpectedAvailable;
   /** Only for the test of the signed-in users. */
   sessions?: ExpectedSessions;
   /** Only for the test of the map views. */

@@ -1,12 +1,19 @@
 {{ trace_header("app") }}
 {% if react.api %}
+{% if react.live and definition.auth %}
+export { API_URL, ApiError, accessToken, apiRequest, setAccessToken, subscribeAccessToken } from "./http";
+{% else %}
 export { API_URL, ApiError, accessToken, apiRequest, setAccessToken } from "./http";
+{% endif %}
 export {
   type ApiParam,
   type ApiParams,
   type ApiQuery,
   type ApiShape,
   HttpStore,
+{% if react.live %}
+  notifyChange,
+{% endif %}
   type OptionSource,
   type RecordOption,
 } from "./http-store";
@@ -23,7 +30,7 @@ export {
 } from "./dashboards";
 {% endif %}
 {% else %}
-{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore"] + (["pathIds"] if react.notices else []) + (["recordsOf"] if memberships else []) + (["recordValue"] if react.notices else []) + (["ScopeError"] if memberships else []) + ["TransitionError", "type Workflow"] %}
+{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore"] + (["pathIds"] if react.notices else []) + (["type RangeSpec"] if react.ranges else []) + (["recordsOf"] if memberships else []) + (["recordValue"] if react.notices else []) + (["ScopeError"] if memberships else []) + ["TransitionError", "type Workflow"] %}
 export { {{ mock_names | join(", ") }} } from "./mock-store";
 {% endif %}
 export type {
@@ -51,6 +58,12 @@ export type {
 {% if has_notices(definition) %}
   Notice,
   NoticeApi,
+{% endif %}
+{% if has_notice_emails(definition) %}
+  NoticeSetting,
+{% endif %}
+{% if has_available(definition) %}
+  OwnerRange,
 {% endif %}
   Search,
 {% if shares %}

@@ -14,7 +14,7 @@ import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/p
 
 {% endif %}
 import { applyQuery } from "./query";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult"] + (["type MemberPermissions"] if memberships else []) + ["NotFoundError"] + (["type SharedRecord", "type SharingApi"] if shares else []) %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult"] + (["type MemberPermissions"] if memberships else []) + ["NotFoundError"] + (["type OwnerRange"] if react.ranges else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 5 %}
 import {
 {% for type_name in type_names %}
@@ -86,7 +86,7 @@ export class ScopeError extends Error {
 {% endif %}
 
 {% endif %}
-{% set reads_others = record_rules or react.totals or react.notices %}
+{% set reads_others = record_rules or react.totals or react.notices or react.ranges %}
 {% if reads_others %}
 {% if record_rules and react.totals %}
 /** The records of each store by entity: an owner path and a total read the records of other entities. */
@@ -94,6 +94,8 @@ export class ScopeError extends Error {
 /** The records of each store by entity: an owner path reads the records of other entities. */
 {% elif react.totals %}
 /** The records of each store by entity: a total reads the records of another entity. */
+{% elif react.ranges %}
+/** The records of each store by entity: an available filter reads the records of another entity. */
 {% else %}
 /** The records of each store by entity: a receiver path of a notice reads the records of other entities. */
 {% endif %}
@@ -218,6 +220,27 @@ function totalOf(total: Total, items: readonly Record<string, unknown>[]): numbe
     case "max":
       return Math.max(...numbers);
   }
+}
+
+{% endif %}
+{% if react.ranges %}
+/**
+ * The related records of an available filter (ADR 0047): their entity, and
+ * the keys of their start, of their end, and of the relation to the records.
+ */
+export type RangeSpec = {
+  target: string;
+  start: string;
+  end: string;
+  /** A `one_to_many` relation: the key of the ID of the record in the related records. */
+  link?: string;
+  /** A `many_to_many` relation: the key of the IDs of the related records in the record. */
+  list?: string;
+};
+
+/** Return the text of a start or an end of a range, or null. */
+function rangeText(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 {% endif %}
@@ -434,7 +457,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
   ) {
     this.records = data.map((record) => ({ ...record }));
-{% if record_rules or react.totals or react.notices %}
+{% if reads_others %}
     recordsByEntity.set(entity, () => this.records);
 {% endif %}
 {% if lines_ops %}
@@ -777,6 +800,38 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       }
     }
     return { operations, records };
+  }
+
+{% endif %}
+{% if react.ranges %}
+  /**
+   * Return the ranges of the related records of an available filter (ADR
+   * 0047): the ID of the record, the start, and the end of each related
+   * record. The ranges come from all related records, also from the
+   * records that a record rule hides. `guard` checks the access first.
+   */
+  async ranges(spec: RangeSpec, guard?: () => void): Promise<OwnerRange[]> {
+    guard?.();
+    await wait();
+    const related = (recordsByEntity.get(spec.target)?.() ?? []) as readonly Record<string, unknown>[];
+    const range = (item: Record<string, unknown>): [string | null, string | null] => [
+      rangeText(item[spec.start]),
+      rangeText(item[spec.end]),
+    ];
+    const { link, list } = spec;
+    if (list !== undefined) {
+      const byId = new Map(related.map((item) => [String(item.id), item]));
+      return this.records.flatMap((record) =>
+        idsOf((record as Record<string, unknown>)[list]).flatMap((id): OwnerRange[] => {
+          const item = byId.get(id);
+          return item === undefined ? [] : [[record.id, ...range(item)]];
+        }),
+      );
+    }
+    return related.flatMap((item): OwnerRange[] => {
+      const id = item[link ?? ""];
+      return typeof id === "string" ? [[id, ...range(item)]] : [];
+    });
   }
 
 {% endif %}

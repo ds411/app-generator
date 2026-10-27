@@ -2,11 +2,15 @@
 "use server";
 
 import { requireUser } from "@/shared/auth/session";
+{% if has_notice_emails(definition) %}
+import { noticeSettings, noticesPage, readAllNotices, readNotice, setNoticeEmail } from "@/shared/db/notices";
+{% else %}
 import { noticesPage, readAllNotices, readNotice } from "@/shared/db/notices";
+{% endif %}
 
 import type { ActionResult } from "./errors";
 import { runAction } from "./server";
-import type { ListResult, Notice } from "./types";
+import type { ListResult, Notice{{ ", NoticeSetting" if has_notice_emails(definition) }} } from "./types";
 
 // The server actions of the notices of the signed-in user (ADR 0041). A
 // user reads and marks only the own notices.
@@ -32,3 +36,15 @@ export async function readAllNoticesAction(): Promise<ActionResult<null>> {
     return null;
   });
 }
+{% if has_notice_emails(definition) %}
+
+/** Return the settings of the emails of the signed-in user (ADR 0044). */
+export async function noticeSettingsAction(): Promise<ActionResult<NoticeSetting[]>> {
+  return runAction(async () => noticeSettings(await requireUser()));
+}
+
+/** Turn the emails of a notification on or off for the signed-in user. */
+export async function setNoticeEmailAction(notification: string, email: boolean): Promise<ActionResult<NoticeSetting>> {
+  return runAction(async () => setNoticeEmail(await requireUser(), notification, email));
+}
+{% endif %}

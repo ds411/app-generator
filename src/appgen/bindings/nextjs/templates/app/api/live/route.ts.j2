@@ -1,0 +1,74 @@
+{% set auth = definition.auth %}
+{% set access = definition.access %}
+{{ trace_header(*(nextjs.live | map(attribute="id"))) }}
+{% if access %}
+import { currentRole } from "@/shared/auth/access";
+{% endif %}
+{% if auth %}
+import { sessionUserId } from "@/shared/auth/session";
+{% endif %}
+import { type LiveEvent, liveBroker, liveViewer } from "@/shared/db/live";
+
+// The stream of the live updates (ADR 0051): the creates, the changes, and
+// the deletes of the records that the client may read, as server-sent
+// events. The first event is `open`. An event has the entity and the ID of
+// a record, but no values: the client reads the record again. The
+// parameter `entity` (once or more) limits the entities. A comment (a
+// ping) keeps a quiet stream open.
+
+export const dynamic = "force-dynamic";
+
+/** Return an event in the format of server-sent events. */
+function eventText(event: LiveEvent): string {
+  return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+export async function GET(request: Request): Promise<Response> {
+  const names = new URL(request.url).searchParams.getAll("entity");
+{% if access %}
+  const viewer = liveViewer(names, await sessionUserId(), await currentRole());
+{% elif auth %}
+  const viewer = liveViewer(names, await sessionUserId());
+{% else %}
+  const viewer = liveViewer(names);
+{% endif %}
+  if (typeof viewer === "number") {
+    return new Response(null, { status: viewer });
+  }
+  const broker = liveBroker();
+  const subscription = broker.subscribe(viewer);
+  const stop = () => {
+    subscription.end();
+    broker.unsubscribe(subscription);
+  };
+  request.signal.addEventListener("abort", stop, { once: true });
+  const encoder = new TextEncoder();
+  // The stream asks for the next event only when the client reads, so a slow client gets `reset`.
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(eventText({ type: "open" })));
+    },
+    async pull(controller) {
+      const event = await subscription.next();
+      if (event === undefined) {
+        stop();
+        try {
+          controller.close();
+        } catch {
+          // The client left: the stream is closed.
+        }
+        return;
+      }
+      controller.enqueue(encoder.encode(event === null ? ": ping\n\n" : eventText(event)));
+    },
+    cancel: stop,
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      // No compression and no buffer of a proxy: each event goes out at once.
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}

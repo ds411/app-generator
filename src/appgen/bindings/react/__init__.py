@@ -195,6 +195,13 @@ BINDING = Binding(
         Output(template="components.json.j2", path="components.json"),
         Output(template="theme/globals.css.j2", path="src/app/styles/index.css"),
         Output(template="src/app/providers/index.tsx.j2", path="src/app/providers/index.tsx"),
+        # The live updates (ADR 0051): the client of the stream of the FastAPI app.
+        Output(template="ui/lib/live.ts.j2", path="src/shared/lib/live.ts", when="react.live"),
+        Output(
+            template="src/app/providers/live-updates.tsx.j2",
+            path="src/app/providers/live-updates.tsx",
+            when="react.live",
+        ),
         Output(template="src/app/layout/root-layout.tsx.j2", path="src/app/layout/root-layout.tsx"),
         Output(
             template="src/app/layout/embed-layout.tsx.j2",
@@ -424,12 +431,11 @@ BINDING = Binding(
         | {"event"}
         | {"storage"}
         | {"history", "notification"}
+        | {"live"}
     ),
     # The React app has no server: the entity rules, the webhooks, and the jobs need one.
     excludes=frozenset(
         {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule", "webhook", "job"}
-        # The live updates of the React app follow with the events of the views (#405).
-        | {"live"}
     ),
     context=context,
     warnings=warnings,

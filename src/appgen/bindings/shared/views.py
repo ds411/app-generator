@@ -16,6 +16,11 @@ loads the records of the shown dates, and a map the records in its
 visible area (ADR 0046). The related records are the
 records of the IDs on the page (`RelatedStep`), and a select filter of a
 relation searches its options on the server.
+
+An available filter (ADR 0047) shows the widget of a date range. A view
+in the browser reads the ranges of the related records with the data
+access of its entity (`RangesPlan`), and keeps the records without a range
+in the picked days. A view of the API sends the days to the list endpoint.
 """
 
 import re
@@ -41,6 +46,7 @@ from appgen.dsl.expressions import (
     parse_expression,
 )
 from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.rules import EntityOverlapRule
 from appgen.dsl.storage import FILE_TYPES
 from appgen.dsl.ui.common import (
     Action,
@@ -56,6 +62,7 @@ from appgen.dsl.ui.states import effective_states
 from appgen.dsl.ui.views import (
     ApiViewBase,
     AreaFilter,
+    AvailableFilter,
     BadgeSet,
     BoardView,
     BooleanFilter,
@@ -347,6 +354,19 @@ class RelatedKey:
     """The relation of `entity` that the key holds."""
 
 
+@dataclass(frozen=True, slots=True)
+class RangesPlan:
+    """The ranges of the related records of an available filter, for a view in the browser
+    (ADR 0047)."""
+
+    key: str
+    """The relation and the rule, for example `bookings.no_double_booking`."""
+    lookup: str
+    """The key of the ranges in the lookups of the view, for example `bookingsNoDoubleBooking`."""
+    target: str
+    """The entity of the related records: a change of them loads the ranges again."""
+
+
 @dataclass(slots=True)
 class RelatedStep:
     """The related records of one entity that a view loads by ID (`loadRelated`)."""
@@ -443,6 +463,8 @@ class ViewPlan:
     """The query that the view sends to the API, or None if the view reads all records."""
     related: list[list[RelatedStep]] = field(default_factory=list[list[RelatedStep]])
     """With a server plan: the related records that the view loads by ID, in stages."""
+    ranges: list[RangesPlan] = field(default_factory=list[RangesPlan])
+    """Without a server plan: the ranges of the related records of the available filters."""
 
     @property
     def type(self) -> str:
@@ -867,7 +889,8 @@ class ViewContext:
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
         `date_range`, `select`, `multi_select`, `near`, `area`, and `param`
         for the input of a param of a query), `geo` for the helpers of the
-        points of a map view or of a geo filter (ADR 0046), the value components
+        points of a map view or of a geo filter (ADR 0046), `available` for the
+        helpers of an available filter in the browser (ADR 0047), the value components
         (`badge`, `avatar`, `formatted`), the charts (`chart`, `dates` for
         a chart of dates, and `snapshots` for a chart of snapshots), the
         period of a dashboard (`period`), and the manual order of a table or
@@ -888,6 +911,8 @@ class ViewContext:
                     found.add("record_select")
                 else:
                     found.add("multi_select" if f.multiple else f.kind)
+            if plan.ranges:
+                found.add("available")
         if found & {"map", "near", "area"}:
             found.add("geo")
         for name in self.detail_views:
@@ -1201,7 +1226,10 @@ class ViewContext:
         if isinstance(view, TableView | CardsView | MapView):
             for filter_name, filter_ in view.filters.items():
                 plan.filters.append(self._filter(view.entity, filter_name, filter_))
-                paths += filter_.fields if isinstance(filter_, SearchFilter) else [filter_.field]
+                if isinstance(filter_, SearchFilter):
+                    paths += filter_.fields
+                elif not isinstance(filter_, AvailableFilter):
+                    paths.append(filter_.field)
         if isinstance(view, TableView | CardsView):
             pagination = view.pagination
             defaults = definition.ui.defaults
@@ -1271,6 +1299,8 @@ class ViewContext:
             plan.server = self._server(plan, view, endpoint)
             plan.related = self.related(view.entity, paths + action_paths(view))
             plan.lookups = sorted({*plan.lookups, *(s.entity for st in plan.related for s in st)})
+        elif isinstance(view, TableView | CardsView | MapView):
+            plan.ranges = self._ranges(view.entity, view.filters.values())
         return plan
 
     def _server(self, plan: ViewPlan, view: View, endpoint: ListEndpoint) -> ServerPlan:
@@ -1677,9 +1707,38 @@ class ViewContext:
                 current = relation.target
         return found
 
+    def _ranges(self, entity: str, filters: Iterable[Filter]) -> list[RangesPlan]:
+        """Return the ranges that the available filters of a view in the browser read."""
+        found: dict[str, RangesPlan] = {}
+        for filter_ in filters:
+            if isinstance(filter_, AvailableFilter) and filter_.rule not in found:
+                target = self.definition.entities[entity].relations[filter_.relation].target
+                lookup = camel(filter_.rule.replace(".", "_"))
+                found[filter_.rule] = RangesPlan(filter_.rule, lookup, target)
+        return list(found.values())
+
     def _filter(self, entity: str, name: str, filter_: Filter) -> FilterPlan:
         key = camel(name)
         state = f"filters.{key}"
+        if isinstance(filter_, AvailableFilter):
+            # The widget of a date range. In the browser, the view keeps the records
+            # without a range of a related record in the days (ADR 0047).
+            relation = self.definition.entities[entity].relations[filter_.relation]
+            target = self.definition.entities[relation.target]
+            rule = target.rules[filter_.rule_name]
+            assert isinstance(rule, EntityOverlapRule)
+            dates = js(target.fields[rule.start].type == "date")
+            lookup = camel(filter_.rule.replace(".", "_"))
+            return FilterPlan(
+                name=name,
+                key=key,
+                element_id=filter_.id,
+                kind="date_range",
+                label=filter_.label or "Available",
+                default="{}",
+                state_type="DateRange",
+                match=f"isFree(lookups.{lookup}.get(row.id), {state}, {dates})",
+            )
         if isinstance(filter_, SearchFilter):
             texts = [self.value(entity, path).text_expr for path in filter_.fields]
             default = filter_.default if isinstance(filter_.default, str) else ""

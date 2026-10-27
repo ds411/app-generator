@@ -6,10 +6,12 @@
 # copy the files of tests/fixtures/listings/extensions/<binding> into each
 # app before they generate it. A table, a card list, and a calendar show
 # the rows of the queries, with filters and path parameters for the
-# params. scripts/check-fastapi.sh generates and checks the FastAPI app of
-# this definition, and runs its tests on Postgres and SQLite.
-# scripts/listings_ui_test.py runs the UI tests of the views of the
-# queries in each front end.
+# params. The table of the page /free has the available filters of the
+# bookings (date fields) and of the cleanings (date-time fields) of a
+# listing (ADR 0047). scripts/check-fastapi.sh generates and checks the
+# FastAPI app of this definition, and runs its tests on Postgres and
+# SQLite. scripts/listings_ui_test.py runs the UI tests of the views of
+# the queries and of the available filter in each front end.
 version: 0
 
 app:
@@ -35,6 +37,7 @@ entities:
         currency: EUR
     relations:
       bookings: { kind: one_to_many, target: Booking, inverse: listing }
+      cleanings: { kind: one_to_many, target: Cleaning, inverse: listing }
 
   Booking:
     display_field: guest
@@ -64,8 +67,31 @@ entities:
         scope: [listing]
         message: The listing has another booking on these dates.
 
+  Cleaning:
+    display_field: team
+    crud: { operations: [list, create] }
+    fields:
+      team: { type: string, required: true, max_length: 80 }
+      starts_at: { type: datetime, required: true }
+      ends_at: { type: datetime, required: true }
+    relations:
+      listing:
+        kind: many_to_one
+        target: Listing
+        required: true
+        inverse: cleanings
+        on_delete: cascade
+    rules:
+      one_cleaning_at_a_time:
+        kind: no_overlap
+        start: starts_at
+        end: ends_at
+        scope: [listing]
+        message: The listing has another cleaning at this time.
+
 pages:
   listings: { path: /listings, title: Listings, content: { view: listing_table } }
+  free_listings: { path: /free, title: Free listings, content: { view: free_listings } }
   listing_detail:
     path: "/listings/{id}"
     title: Listing
@@ -118,6 +144,17 @@ operations:
 
 ui:
   views:
+    free_listings:
+      kind: table
+      entity: Listing
+      title: Free listings
+      columns:
+        title: { link: listing_detail }
+        city: {}
+      sort: { field: title }
+      filters:
+        dates: { kind: available, rule: bookings.no_double_booking, label: Dates }
+        cleaning: { kind: available, rule: cleanings.one_cleaning_at_a_time, label: No cleaning }
     stay_table:
       kind: table
       query: listings_for_guests

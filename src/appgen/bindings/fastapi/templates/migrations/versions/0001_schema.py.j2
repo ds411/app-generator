@@ -201,6 +201,9 @@ def upgrade() -> None:
         ),
         sa.Column("at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
+{% if py.notice_emails %}
+        sa.Column("email", sa.Boolean(), nullable=False),
+{% endif %}
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["{{ u.table }}.id"],
@@ -210,6 +213,22 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_notices"),
     )
     op.create_index("ix_notices_user_id", "notices", ["user_id"])
+{% if py.notice_emails %}
+    op.create_index("ix_notices_email_at", "notices", ["email", "at"])
+    op.create_table(
+        "notice_settings",
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("notification", sa.String(length=63), nullable=False),
+        sa.Column("email", sa.Boolean(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["{{ u.table }}.id"],
+            name="fk_notice_settings_user_id_{{ u.table }}",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("user_id", "notification", name="pk_notice_settings"),
+    )
+{% endif %}
 {% endif %}
 {% if py.shares %}
     op.create_table(
@@ -265,6 +284,10 @@ def downgrade() -> None:
     op.drop_table("stat_snapshots")
 {% endif %}
 {% if py.notices %}
+{% if py.notice_emails %}
+    op.drop_table("notice_settings")
+    op.drop_index("ix_notices_email_at", table_name="notices")
+{% endif %}
     op.drop_index("ix_notices_user_id", table_name="notices")
     op.drop_table("notices")
 {% endif %}

@@ -4,8 +4,9 @@
 // starts the app of tests/fixtures/listings.yaml with its seed records and
 // the hand-written queries: the Next.js app runs them in its server
 // actions, the React app with mock data in the browser, and the React app
-// with the FastAPI app at the endpoints of the queries. The test changes
-// no record.
+// with the FastAPI app at the endpoints of the queries. The last test picks
+// the days of an available filter (ADR 0047): the table keeps the listings
+// without a booking in the days. The tests change no record.
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import { expected } from "./expected";
@@ -87,5 +88,25 @@ test("a calendar shows the records of a query of the record of the page", async 
   }
   for (const other of calendar.others) {
     await expect(page.getByText(other, { exact: true })).toHaveCount(0);
+  }
+});
+
+test("an available filter keeps the listings without a booking in the picked days", async ({ page }, testInfo) => {
+  const available = expected.available;
+  test.skip(!available || testInfo.project.name !== "light", "Only the test of the available filter, in the light mode.");
+  if (!available) return;
+  // The calendar of the filter shows the month of the bookings first.
+  await page.clock.setFixedTime(new Date(available.today));
+  await page.goto(available.path);
+  await expectTitles(page, available.all);
+
+  for (const { from, to, titles: free } of available.ranges) {
+    await page.getByRole("button", { name: available.label, exact: true }).click();
+    await page.getByRole("button", { name: new RegExp(from) }).click();
+    await page.getByRole("button", { name: new RegExp(to) }).click();
+    await page.keyboard.press("Escape");
+    await expectTitles(page, free);
+    await page.getByRole("button", { name: `Clear ${available.label}`, exact: true }).click();
+    await expectTitles(page, available.all);
   }
 });

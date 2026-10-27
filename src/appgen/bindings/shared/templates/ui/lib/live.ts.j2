@@ -1,0 +1,124 @@
+{{ trace_header(*(definition.entities.values() | selectattr("live") | map(attribute="live.id"))) }}
+// The client of the live updates (ADR 0051). It reads the server-sent
+// events of the stream of the server with EventSource, and opens the
+// stream again after an error. After the changes of the records of an
+// entity, the open views of the entity load their data again.
+
+/**
+ * An event of the stream. `open`: the stream is open. `created`, `changed`,
+ * `deleted`: a change of a record. `reset`: the stream lost events, so the
+ * views load all their data again.
+ */
+export type LiveEvent = {
+  type: "open" | "created" | "changed" | "deleted" | "reset";
+  entity?: string;
+  id?: string;
+};
+
+/**
+ * The first wait before the stream opens again after an error, in
+ * milliseconds. It doubles after each error, up to RETRY_LIMIT_MS.
+ */
+const RETRY_MS = 1_000;
+const RETRY_LIMIT_MS = 30_000;
+/** The time that the views wait for more events before they load their data again, in milliseconds. */
+const BATCH_MS = 50;
+
+/**
+ * Read the events of the stream at the URL of `url`, and give each one to
+ * `onEvent`. The browser opens the stream again by itself after a lost
+ * connection. The views can have missed changes in the time without a
+ * stream, so each new stream after the first gives `reset`. After an error
+ * response, for example while a new version of the server starts, a new
+ * URL opens the stream again after a wait. An error before the first
+ * stream, for example without a signed-in user, stops it. Return the
+ * function that stops the stream.
+ */
+export function watchLive(url: () => Promise<string>, onEvent: (event: LiveEvent) => void): () => void {
+  let source: EventSource | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  let opened = false;
+  let wait = RETRY_MS;
+
+  const retry = () => {
+    source?.close();
+    if (!opened || stopped) {
+      return;
+    }
+    timer = setTimeout(() => void connect(), wait);
+    wait = Math.min(wait * 2, RETRY_LIMIT_MS);
+  };
+
+  async function connect(): Promise<void> {
+    let address: string;
+    try {
+      address = await url();
+    } catch {
+      retry();
+      return;
+    }
+    if (stopped) {
+      return;
+    }
+    const current = new EventSource(address);
+    source = current;
+    current.onmessage = (message: MessageEvent<string>) => {
+      const event = JSON.parse(message.data) as LiveEvent;
+      if (event.type !== "open") {
+        onEvent(event);
+        return;
+      }
+      wait = RETRY_MS;
+      if (opened) {
+        onEvent({ type: "reset" });
+      }
+      opened = true;
+    };
+    current.onerror = () => {
+      // While the state is CONNECTING, the browser tries again by itself.
+      if (current.readyState === EventSource.CLOSED) {
+        retry();
+      }
+    };
+  }
+
+  void connect();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    source?.close();
+  };
+}
+
+/**
+ * Return a function that collects the entities of the events, and after
+ * BATCH_MS calls `notify` once for each entity, or once without an entity
+ * after `reset`: then all views load their data again.
+ */
+export function batched(notify: (entity?: string) => void): (event: LiveEvent) => void {
+  let entities = new Set<string>();
+  let all = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return (event) => {
+    if (event.type === "reset") {
+      all = true;
+    } else if (event.entity !== undefined) {
+      entities.add(event.entity);
+    }
+    timer ??= setTimeout(() => {
+      const names = entities;
+      const reset = all;
+      entities = new Set();
+      all = false;
+      timer = undefined;
+      if (reset) {
+        notify();
+        return;
+      }
+      for (const name of names) {
+        notify(name);
+      }
+    }, BATCH_MS);
+  };
+}

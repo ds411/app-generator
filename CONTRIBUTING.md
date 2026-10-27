@@ -264,7 +264,7 @@ git config core.hooksPath .githooks
   example `tests/fixtures/totals.yaml` (the totals of the relations),
   `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037),
   `tests/fixtures/listings.yaml` (queries with hand-written logic, ADR
-  0045), `tests/fixtures/courses.yaml` (the totals and the widgets of
+  0045, and the available filters, ADR 0047), `tests/fixtures/courses.yaml` (the totals and the widgets of
   the signed-in user, `$me`), and `tests/fixtures/places.yaml` (point
   fields and the filters `near` and `area`, ADR 0046), and runs the
   same checks on them. It needs Docker.
@@ -287,7 +287,10 @@ git config core.hooksPath .githooks
   test reads the totals of the relations and checks the compare rules
   over totals with PGlite (`scripts/totals_test.py`), and
   `tests/fixtures/listings.yaml`, whose test calls the server actions of
-  the queries with PGlite (`scripts/queries_test.py`). It needs pnpm and Docker. Run it by hand
+  the queries with PGlite (`scripts/queries_test.py`), and
+  `tests/fixtures/record-rules.yaml`, whose test reads the stream of the
+  live updates of each user with PGlite, and with two brokers and one
+  Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
   with `scripts/check-nextjs.sh [output folder]`.
 - When a push changes the generator core, the React binding, or the
   shared binding code, the hook also runs `scripts/check-react.sh`. The
@@ -337,8 +340,9 @@ git config core.hooksPath .githooks
   the account on the page `/connections` (`scripts/connection_ui_test.py`).
   Then it builds `tests/fixtures/listings.yaml` with React, Next.js, and
   react-api, and checks the views of its queries: a table that pages the
-  rows of its filters, a card list of a path parameter, and a calendar
-  (`scripts/listings_ui_test.py`). Then it builds
+  rows of its filters, a card list of a path parameter, a calendar, and
+  the available filter of the listings without a booking in the picked
+  days (`scripts/listings_ui_test.py`). Then it builds
   `tests/fixtures/courses.yaml` with React, Next.js, and react-api, signs
   in as two users, and checks the widgets, the lists, the totals, and the
   forms of the signed-in user (`$me`, `scripts/sessions_ui_test.py`).

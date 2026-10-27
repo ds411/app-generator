@@ -1,0 +1,22 @@
+{{ trace_header(*(email_notifications(definition) | map(attribute="id"))) }}
+import type { Metadata } from "next";
+
+import { NoticeSettingsPage } from "@/features/notices";
+import { requirePageUser } from "@/shared/auth/session";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+
+/** The title of the page, in the language of the request. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js("Notice emails")) }} }));
+}
+{% else %}
+
+export const metadata: Metadata = { title: "Notice emails" };
+{% endif %}
+
+/** The page of the emails of the notices of the signed-in user (ADR 0044). */
+export default async function Route() {
+  await requirePageUser("/notice-settings");
+  return <NoticeSettingsPage />;
+}

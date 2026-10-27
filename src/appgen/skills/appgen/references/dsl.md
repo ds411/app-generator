@@ -610,7 +610,9 @@ foreign keys). A compare rule compares two numbers, two dates, two
 date-times, or two texts. The start and the end of a `no_overlap` rule
 are two `date` or two `datetime` fields. An empty value passes a
 compare rule and a `no_overlap` rule: `required` checks it. The mock
-data keeps the compare and the unique rules.
+data keeps the compare and the unique rules. The `available` filter of a
+view keeps the records without a related record in the picked days of a
+`no_overlap` rule (see [views](#views)).
 
 A side of a compare rule can also be a total of the lines of the
 record, as in a [computed field](#computed-fields): `count(<relation>)`,
@@ -800,9 +802,16 @@ live: true
   tells the client to read its views again, for example after a loss of
   events. With Redis in the setting `LIVE_EVENTS_URL`, all replicas and
   the worker of the jobs send their changes to the streams of all
-  replicas. Without it, each process sends only its own changes.
-- The Next.js app and the React app do not show the live updates yet:
-  `appgen check` lists `live` as excluded by design.
+  replicas. Without it, each process sends only its own changes. With
+  the sign-in, `POST /live/ticket` gives a short ticket for the stream,
+  because the browser cannot send a bearer token with `EventSource`.
+- The Next.js app has the same stream at `/api/live`, with the session
+  cookie of the user and the same `LIVE_EVENTS_URL`. The React app with
+  the FastAPI app (`x-react-data: api`) reads the stream of the FastAPI
+  app. The React app with mock data has no stream.
+- In the Next.js app and the React app, the open views of an entity
+  load their data again after the events of the entity. The events of
+  50 ms give one load.
 
 ### Relations
 
@@ -1472,11 +1481,13 @@ notifications:
     transition: confirm
     receivers: [organizer]
     text: The booking {title} is confirmed.
+    email: true
   booking_cancelled:
     entity: Booking
     transition: cancel
     receivers: [organizer]
     text: The booking {title} is cancelled.
+    email: true
 ```
 
 | Key           | Required | Content                                                         |
@@ -1487,7 +1498,8 @@ notifications:
 | `transition`  | No       | A transition of a workflow of the entity: `<transition>`, or `<workflow>.<transition>` when two workflows of the entity have a transition of the same name. |
 | `receivers`   | Yes      | The users that get the notices: paths of relations to the user entity. |
 | `text`        | Yes      | The text of a notice. A name in braces is a value of the record. |
-| `description` | No       | Text.                                                           |
+| `email`       | No       | `true`: the receivers also get each notice by email (see [Emails of the notices](#emails-of-the-notices)). The default is `false`. |
+| `description` | No       | Text. The page of the settings of the emails shows it.          |
 
 - A notification has `event` or `transition`, not both. A notification
   `changed` gives the notices when an update gives one of `fields` a
@@ -1525,6 +1537,31 @@ notifications:
   marks it read, and opens the detail page of its record: the first
   page with a detail view of the entity and one parameter in its path.
   "Mark all read" marks all notices of the user read.
+
+### Emails of the notices
+
+A notification with `email: true` also sends each notice to the email
+address of the receiver ([ADR 0044](https://github.com/ds411/app-generator/blob/main/docs/adr/0044-notice-emails.md)). It
+needs `auth.delivery: smtp` (see [auth](#auth)): the apps send the
+emails with the SMTP server of the settings `SMTP_*`.
+
+- The notice waits for its email in the table `notices`. The built-in
+  job `notice_emails` runs each minute (see [jobs](#jobs)), and sends
+  the emails of the oldest 100 notices that wait. A job of the
+  definition with the name `notice_emails` is an error.
+- The subject is the title of the app and the text of the notice. The
+  email has the text, the link to the detail page of the record, and
+  the link to the page of the settings. The emails have the default
+  language of the app. The links start with `FRONT_END_URL` (FastAPI)
+  or `PUBLIC_URL` (Next.js).
+- The page `/notice-settings` has a switch for each notification with
+  `email: true`, with the name of the notification in words and the
+  `description`. A user turns off the emails of a notification there.
+  The notices stay in the bell. The bell has a link to the page. The
+  FastAPI app has `GET /notices/settings` and
+  `PUT /notices/settings/{notification}` (`{"email": false}`).
+- The React app with mock data keeps the choices in the browser tab,
+  and sends no emails. The mentions give no emails.
 
 ### Mentions
 
@@ -2108,8 +2145,9 @@ the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), `date_range` (`field`), `near`
-(`field`, `distance`), or `area` (`field`). All filters take `label`,
-and all filters except `near` and `area` take `default`. The `default`
+(`field`, `distance`), `area` (`field`), or `available` (`rule`). All
+filters take `label`, and all filters except `near`, `area`, and
+`available` take `default`. The `default`
 of a `select` filter of a relation to the user entity can be `$me`, the
 signed-in user (see [The signed-in user](#the-signed-in-user)): the view
 starts with the records of the user, and a clear of the filter shows all
@@ -2130,6 +2168,50 @@ for a filter of the field path `<path>`:
 - `area`: `<path>_area`, a box `<south>,<west>,<north>,<east>`, for
   example `38.69,-9.23,38.80,-9.09`. A box whose west is greater than
   its east crosses the antimeridian.
+
+The filter `available` keeps the records without a related record whose
+range overlaps the days that the user picks
+([ADR 0047](https://github.com/ds411/app-generator/blob/main/docs/adr/0047-available-filter.md)), for example the rooms
+without a booking. `rule` is a relation to many records (`one_to_many`
+or `many_to_many`) and a `no_overlap` rule of the related entity, with
+a dot: the `start` and the `end` of the rule give the range of a related
+record (see [Entity rules](#entity-rules)). The filter shows the widget
+of a date range.
+
+```yaml
+# example: room-booking
+ui:
+  views:
+    free_rooms:
+      kind: table
+      entity: Room
+      columns: { name: {}, capacity: {} }
+      filters:
+        free: { kind: available, rule: bookings.no_double_booking, label: Free on }
+```
+
+- The range of a related record is from its start up to its end: a
+  range that ends when another starts does not overlap it, as for the
+  rule. A related record without a start or an end has no range.
+- On date fields, the picked days are the range of a new related
+  record: from the first day up to the end day, for example a check-in
+  and a check-out. A record is free on the day that a booking ends.
+  Without an end day after the first day, the range is the first day.
+- On date-time fields, the picked days are whole days in UTC: from the
+  start of the first day to the end of the last day.
+- Without a first day, the filter keeps all records.
+- The list endpoint of the FastAPI app takes `<relation>_free_from` and
+  `<relation>_free_to`, for example
+  `?bookings_free_from=2026-03-06&bookings_free_to=2026-03-09`. The
+  Next.js app and the React app with mock data read the ranges of the
+  related records with the access of the list of the records, and filter
+  in the browser. The ranges come from all related records: a record
+  rule that hides the bookings of another user does not make a room
+  free.
+- `appgen validate` reports a relation that does not exist or is not to
+  many records (`unknown-reference`, `unsuitable-field`), and a rule
+  that does not exist or is not a `no_overlap` rule (`unknown-reference`,
+  `invalid-option`).
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page
@@ -2814,7 +2896,8 @@ auth:
   `/reset-password` with a password reset, `/second-factor` with a
   second factor, a path under `/auth/` with providers, or
   `/connections` and a path under `/connections/` with an API with the
-  authorization code flow: they are the pages of the front ends.
+  authorization code flow, or `/notice-settings` with a notification
+  with `email: true`: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -3371,7 +3454,12 @@ use in the app does not show.
   `Custom range`, `Pick the days`, `{change} from the previous period`.
 - The bell of the notices (see [notifications](#notifications)):
   `Notices`, `Notices: {count} unread`, `Mark all read`,
-  `No notices yet.`.
+  `No notices yet.`, `Email settings`.
+- The page of the emails of the notices (see
+  [Emails of the notices](#emails-of-the-notices)): `Notice emails`,
+  `Choose the notices that also come to you by email. The bell shows all notices.`,
+  `The change did not succeed.`, and the text of the email
+  `Turn off these emails on the page of the settings:`.
 - The mentions (see [Mentions](#mentions)): `Users` (the list of the
   suggestions), and the text of the notice
   `You are mentioned in {record}.`.
@@ -3551,7 +3639,9 @@ to translate one. The rules and the workflows give their own messages.
   that is not valid `The link is not valid, or has ended.`.
 - The change log: `The record has no history entry with the ID {id}.`,
   `Only the entry of a change has old values to restore.`.
-- The notices: `You have no notice with the ID {id}.`.
+- The notices: `You have no notice with the ID {id}.`,
+  `The notification {notification} has no emails.`, and the text of the
+  email `Turn off these emails on the page of the settings:`.
 
 ## Extension keys
 

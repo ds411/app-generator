@@ -1,19 +1,23 @@
 {{ trace_header(*notice_ids(definition)) }}
 {% set users = nextjs.tables_by_entity[definition.auth.user_entity] %}
+{% set emails = email_notifications(definition) %}
 import "server-only";
 
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, {{ "asc, " if emails }}desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
-import { type ListResult, type Notice, NotFoundError } from "@/shared/api";
+import { type ListResult, type Notice, {{ "type NoticeSetting, " if emails }}NotFoundError } from "@/shared/api";
 {% if has_mentions(definition) %}
 import { mentionedIds } from "@/shared/lib/mentions";
 {% endif %}
 
 import { actingUserId } from "./acting-user";
 import { type Database, getDb } from "./client";
-import { noticesTable, {{ users.const }} } from "./schema";
+import { {{ "noticeSettingsTable, " if emails }}noticesTable, {{ users.const }} } from "./schema";
+
+// The receiver paths of the notifications: the steps from the record to the users.
+export { pathUsers, type PathStep } from "./paths";
 
 // The notices of the users (ADR 0041). The repositories add the notices
 // of a change of a record in the transaction of the change, after the
@@ -21,27 +25,15 @@ import { noticesTable, {{ users.const }} } from "./schema";
 // one notice, except the user that made the change.
 
 type Row = Record<string, unknown>;
+{% if emails %}
 
-/**
- * A step of a receiver path: the table of the step, the column of the IDs
- * of the step before, and the column of the next IDs. A many-to-one step
- * reads the foreign key of the records, and a many-to-many step reads its
- * join table.
- */
-export type PathStep = readonly [table: PgTable, from: PgColumn, to: PgColumn];
-
-/** Return the IDs of the users at the end of a receiver path of a record, as the transaction has them. */
-export async function pathUsers(tx: Database, recordId: string, steps: readonly PathStep[]): Promise<string[]> {
-  let ids = [recordId];
-  for (const [table, from, to] of steps) {
-    if (ids.length === 0) {
-      return [];
-    }
-    const rows = await tx.select({ id: to }).from(table).where(inArray(from, ids));
-    ids = rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
-  }
-  return ids;
-}
+/** The notifications with emails (ADR 0044): their notices wait for the job notice_emails. */
+const EMAILS: ReadonlySet<string> = new Set([
+{% for n in emails %}
+  {{ n.name | tojson }}, {{ trace(n.id) }}
+{% endfor %}
+]);
+{% endif %}
 
 /** Return a value of a record as text, for the text of a notice: a time is in UTC, without the seconds. */
 export function textValue(value: unknown): string {
@@ -100,9 +92,17 @@ export async function addNotices(
     return;
   }
   const at = new Date();
+{% if emails %}
+  // A notice of a notification with emails waits for its email (ADR 0044).
+  const email = EMAILS.has(notification);
+  await tx
+    .insert(noticesTable)
+    .values(ids.map((userId) => ({ userId, notification, entity, recordId, actorId, values, at, email })));
+{% else %}
   await tx
     .insert(noticesTable)
     .values(ids.map((userId) => ({ userId, notification, entity, recordId, actorId, values, at })));
+{% endif %}
 }
 
 {% if has_mentions(definition) %}
@@ -210,3 +210,55 @@ export async function readAllNotices(userId: string): Promise<void> {
     .set({ readAt: new Date() })
     .where(and(eq(noticesTable.userId, userId), isNull(noticesTable.readAt)));
 }
+{% if emails %}
+
+/** Return the settings of the emails of a user (ADR 0044): each notification with emails. Without a row, the emails are on. */
+export async function noticeSettings(userId: string): Promise<NoticeSetting[]> {
+  const rows = await getDb().select().from(noticeSettingsTable).where(eq(noticeSettingsTable.userId, userId));
+  const stored = new Map(rows.map((row) => [row.notification, row.email]));
+  return [...EMAILS].map((notification) => ({ notification, email: stored.get(notification) ?? true }));
+}
+
+/** Turn the emails of a notification on or off for a user. A notification without emails does not exist. */
+export async function setNoticeEmail(userId: string, notification: string, email: unknown): Promise<NoticeSetting> {
+  if (!EMAILS.has(notification)) {
+    throw new NotFoundError("Notification", notification);
+  }
+  const value = z.boolean().parse(email);
+  await getDb()
+    .insert(noticeSettingsTable)
+    .values({ userId, notification, email: value })
+    .onConflictDoUpdate({ target: [noticeSettingsTable.userId, noticeSettingsTable.notification], set: { email: value } });
+  return { notification, email: value };
+}
+
+/** A notice that waits for its email (ADR 0044): the address of its user, and false if the email is off. */
+export type WaitingEmail = { notice: Notice; to: string | null; send: boolean };
+
+/** Return the oldest notices that wait for their emails, with the addresses and the settings of their users. */
+export async function waitingEmails(limit: number): Promise<WaitingEmail[]> {
+  const rows = await getDb()
+    .select({ notice: noticesTable, to: {{ users.const }}.{{ definition.address_field() | camel }}, email: noticeSettingsTable.email })
+    .from(noticesTable)
+    .innerJoin({{ users.const }}, eq({{ users.const }}.id, noticesTable.userId))
+    .leftJoin(
+      noticeSettingsTable,
+      and(eq(noticeSettingsTable.userId, noticesTable.userId), eq(noticeSettingsTable.notification, noticesTable.notification)),
+    )
+    .where(eq(noticesTable.email, true))
+    .orderBy(asc(noticesTable.at), asc(noticesTable.id))
+    .limit(limit);
+  const actors = await actorsOf(rows.map((row) => row.notice));
+  return rows.map((row) => ({
+    notice: toNotice(row.notice, actors),
+    to: row.to,
+    // A notification that lost its emails sends none.
+    send: EMAILS.has(row.notice.notification) && row.email !== false,
+  }));
+}
+
+/** Mark the email of a notice done: sent, or not sent because the user turned it off. */
+export async function emailDone(id: string): Promise<void> {
+  await getDb().update(noticesTable).set({ email: false }).where(eq(noticesTable.id, id));
+}
+{% endif %}

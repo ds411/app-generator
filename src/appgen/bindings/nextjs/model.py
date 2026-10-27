@@ -12,7 +12,9 @@ from typing import Any, cast
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, in_scopes, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
-from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
+from appgen.bindings.nextjs.live import live_entities
+from appgen.bindings.nextjs.notices import check_notice_table, ts_notice_emails, ts_notify
+from appgen.bindings.nextjs.ranges import repository_ranges
 from appgen.bindings.nextjs.snapshots import ts_snapshots
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
@@ -24,7 +26,12 @@ from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.memberships import member_plan
-from appgen.bindings.shared.notices import has_notices, mention_plans, notice_plans
+from appgen.bindings.shared.notices import (
+    has_notice_emails,
+    has_notices,
+    mention_plans,
+    notice_plans,
+)
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
@@ -209,9 +216,9 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
     The app gets the npm packages of the shadcn/ui components that it uses,
     with providers `jose` (ADR 0020), with the delivery by SMTP
-    `nodemailer`, with the rate limit in Redis `@redis/client`
-    (ADR 0013), with the storage kind `s3` `@aws-sdk/client-s3` (ADR
-    0027), and with a map Leaflet (ADR 0046).
+    `nodemailer`, with the rate limit in Redis or with live entities
+    `@redis/client` (ADR 0013, ADR 0051), with the storage kind `s3`
+    `@aws-sdk/client-s3` (ADR 0027), and with a map Leaflet (ADR 0046).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -234,7 +241,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.S3_PACKAGES
     if uses_smtp(definition):
         dependencies |= versions.SMTP_PACKAGES
-    if uses_redis(definition):
+    if uses_redis(definition) or any(e.live for e in definition.entities.values()):
         dependencies |= versions.REDIS_PACKAGES
     return {
         "name": definition.app.name,
@@ -265,15 +272,19 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 
 def uses_smtp(definition: AppDefinition) -> bool:
-    """Return True if the app sends the messages of the sign-in by SMTP (`auth.delivery: smtp`).
+    """Return True if the app sends emails by SMTP (`auth.delivery: smtp`).
 
-    The app has these messages with a password reset or a verification of the email address.
+    The app has the messages of the sign-in with a password reset or a
+    verification of the email address, and the emails of the notices with
+    a notification with `email: true` (ADR 0044).
     """
     auth = definition.auth
     if auth is None or auth.delivery != "smtp":
         return False
-    return auth.password_reset is not None or (
-        auth.sign_up is not None and auth.sign_up.verify_email is not None
+    return (
+        auth.password_reset is not None
+        or (auth.sign_up is not None and auth.sign_up.verify_email is not None)
+        or has_notice_emails(definition)
     )
 
 
@@ -323,11 +334,15 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     rules = record_rules(definition)
     jobs = ts_jobs(definition, by_entity)
     if has_notices(definition):
-        check_notice_table(by_entity)
+        check_notice_table(by_entity, has_notice_emails(definition))
     snapshots = ts_snapshots(definition, by_entity)
     if snapshots is not None:
         # The built-in job of the snapshots (ADR 0042) runs as the jobs of the definition.
         jobs[snapshots.job.name] = snapshots.job
+    notice_emails = ts_notice_emails(definition)
+    if notice_emails is not None:
+        # The built-in job of the emails of the notices (ADR 0044) runs as the jobs too.
+        jobs[notice_emails.job.name] = notice_emails.job
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     totals = repository_totals(definition, by_entity)
@@ -408,6 +423,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "events": has_events(definition),
             # The totals of the related records (ADR 0034): the subqueries of the repositories.
             "totals": totals,
+            # The ranges of the related records of the available filters (ADR 0047): the
+            # queries of the repositories.
+            "ranges": repository_ranges(definition, by_entity),
             # The totals of the signed-in user (`$me`): the repositories read the user of the
             # request.
             "me_totals": any(t.me for t in totals.values()),
@@ -426,6 +444,11 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "history": has_history(definition),
             # The notices (ADR 0041): one table for all users, and the helpers.
             "notices": has_notices(definition),
+            # The live entities (ADR 0051): the repositories note their changes, and the route
+            # `/api/live` sends them as events.
+            "live": live_entities(definition, by_entity),
+            # The emails of the notices (ADR 0044): the built-in job that sends them.
+            "notice_emails": notice_emails,
             "frame_headers": frame_headers(definition),
             # The public pages with metadata: `sitemap.xml` and `robots.txt`.
             "sitemap": sitemap_pages(definition),

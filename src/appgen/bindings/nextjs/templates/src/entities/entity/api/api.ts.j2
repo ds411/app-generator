@@ -9,7 +9,8 @@
 {% set share = shares.get(name) %}
 {# An entity of the scope of the memberships (ADR 0048): the operations of the memberships on its records. #}
 {% set member = memberships and record_rules.get(name) and record_rules[name].scope is not none %}
-{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + (["createHistoryApi"] if history else []) + (["createSharingApi"] if share else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type HistoryApi"] if history else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) + (["type MemberPermissions"] if member else []) + (["type SharingApi"] if share else []) + (["unwrap"] if member else []) %}
+{% set ranges = nextjs.ranges.get(name) %}
+{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + (["createHistoryApi"] if history else []) + (["createSharingApi"] if share else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type HistoryApi"] if history else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) + (["type MemberPermissions"] if member else []) + (["type OwnerRange"] if ranges else []) + (["type SharingApi"] if share else []) + (["unwrap"] if member or ranges else []) %}
 import { {{ api_names | join(", ") }} } from "@/shared/api";
 
 import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
@@ -28,6 +29,9 @@ import {
   list{{ type }}Action,
 {% if history %}
   list{{ type }}HistoryAction,
+{% endif %}
+{% if ranges %}
+  list{{ type }}RangesAction,
 {% endif %}
   remove{{ type }}Action,
 {% if files %}
@@ -83,6 +87,13 @@ export const {{ var }}Sharing: SharingApi = createSharingApi({ {{ trace(share.pa
 /** The operations that the memberships of the signed-in user give on the records of {{ type }} (ADR 0048). */
 export async function {{ var }}Permissions(ids: string[]): Promise<MemberPermissions> { {{ trace(memberships.element_id) }}
   return unwrap(await get{{ type }}PermissionsAction(ids));
+}
+{% endif %}
+{% if ranges %}
+
+/** Return the ranges of the related records of an available filter of {{ type }} (ADR 0047). */
+export async function {{ var }}Ranges(key: {{ ranges.keys }}): Promise<OwnerRange[]> {
+  return unwrap(await list{{ type }}RangesAction(key));
 }
 {% endif %}
 {% for op_name, op in ops %}

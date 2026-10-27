@@ -6,14 +6,18 @@
 {% set in_scope = nextjs.scope_conditions.get(name) %}
 {% set totals = nextjs.totals.get(name) %}
 {% set notify = nextjs.notify.get(name) %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + ((in_scope.tables + (["getDb"] if rules.scope | length > 1 else [])) if in_scope else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) %}
-{% set operators = (condition.operators if condition else []) + (in_scope.operators if in_scope else []) + (totals.operators if totals else []) %}
+{% set ranges = nextjs.ranges.get(name) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + ((in_scope.tables + (["getDb"] if rules.scope | length > 1 else [])) if in_scope else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) + ((ranges.tables + ["getDb"]) if ranges else []) %}
+{% set operators = (condition.operators if condition else []) + (in_scope.operators if in_scope else []) + (totals.operators if totals else []) + (ranges.operators if ranges else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
 
 {% if operators %}
 import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 
+{% endif %}
+{% if ranges %}
+import type { OwnerRange } from "@/shared/api";
 {% endif %}
 {% if totals and totals.me %}
 import { requestUserId } from "@/shared/auth/session";
@@ -102,6 +106,10 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endif %}
 {% if notify %}
   notify: {{ var }}Notify,
+{% endif %}
+{% if element.live %}
+  // The changes go to the open views of the clients (ADR 0051).
+  live: true, {{ trace(element.live.id) }}
 {% endif %}
 {% if element.file_fields %}
   // The URLs of the files: app/files/{{ name | kebab }}/[id]/[field]/route.ts (ADR 0027).
@@ -284,3 +292,24 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   },
 {% endif %}
 });
+{% if ranges %}
+
+/**
+ * The ranges of the related records of the available filters of {{ type }}
+ * (ADR 0047), by the relation and the rule: the ID of the record, and the
+ * start and the end of each related record. The queries read all related
+ * records: a record rule of the related entity does not hide a range.
+ */
+export const {{ var }}RangeQueries: Record<string, () => Promise<OwnerRange[]>> = {
+{% for q in ranges.queries %}
+  {{ ts_value(q.rule.key) }}: async () => { {{ trace(q.rule.ids[0], scope="begin") }}
+{% for id in q.rule.ids[1:] %}
+    {{ trace(id) }}
+{% endfor %}
+{% for line in q.lines %}
+    {{ line }}
+{% endfor %}
+  }, {{ trace(q.rule.ids[0], scope="end") }}
+{% endfor %}
+};
+{% endif %}

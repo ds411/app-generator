@@ -14,6 +14,7 @@ from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rules, uses_me
+from appgen.bindings.shared.available import available_rules
 from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
@@ -209,10 +210,17 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "totals": {}
             if api
             else {name: totals for name in entities if (totals := entity_totals(definition, name))},
+            # The ranges of the related records of the available filters (ADR 0047): the mock
+            # store reads them. With the FastAPI app, the list endpoints filter the records.
+            "ranges": {} if api else available_rules(definition),
             # The change log (ADR 0040): the mock store keeps the entries, else the FastAPI app.
             "history": has_history(definition),
             # The notices (ADR 0041): the mock store adds them, else the FastAPI app.
             "notices": has_notices(definition),
+            # The live entities (ADR 0051): with the FastAPI app, the open views load their
+            # records again after the events of the stream `/live`. The mock records stay in
+            # the browser tab: no other client changes them.
+            "live": [name for name, entity in definition.entities.items() if entity.live and api],
         },
     }
 

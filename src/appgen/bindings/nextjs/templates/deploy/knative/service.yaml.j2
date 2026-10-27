@@ -58,7 +58,7 @@ spec:
             - name: JOBS_WINDOW_MINUTES
               value: "60"
 {% endif %}
-{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections) %}
+{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition)) %}
             # The URL of the app for the browsers.
             - name: PUBLIC_URL
               value: https://app.example.com
@@ -135,6 +135,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ name }}-rate-limit-store-url
+                  key: latest
+{% endif %}
+{% if nextjs.live %}
+            - name: LIVE_EVENTS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-live-events-url
                   key: latest
 {% endif %}
 {% if definition.auth %}

@@ -109,3 +109,15 @@ def day_start(day: dt.date, days: int = 0) -> dt.datetime:
     the first day to the start of the day after the last day.
     """
     return dt.datetime.combine(day + dt.timedelta(days=days), dt.time.min, tzinfo=dt.UTC)
+{% if py.free_dates %}
+
+
+def range_end(first: dt.date, end: dt.date | None) -> dt.date:
+    """Return the end of the days of an available filter of date fields (ADR 0047).
+
+    The days are a range as the ranges of the related records: `end` is the
+    first day after the range, for example a check-out. Without an end after
+    the first day, the range is the first day.
+    """
+    return end if end is not None and end > first else first + dt.timedelta(days=1)
+{% endif %}

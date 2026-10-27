@@ -46,10 +46,11 @@ Without it, each process sends only its own events.
 ]) %}
 {% if auth %}
 {% set ns.lines = ns.lines + [
+    "import time",
     "from app.core.errors import ProblemError, problem_responses",
     "from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer",
     "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
-    "from app.core.auth import read_token, signing_key",
+    "from app.core.auth import CurrentUser, read_token, sign, signing_key, unsign",
 ] %}
 {% if i18n %}
 {% set ns.lines = ns.lines + ["from app.core.i18n import t"] %}
@@ -80,6 +81,10 @@ BROKER_KEY = "appgen.live.broker"
 """The key of `session.info` with the broker that sends the changes after the commit."""
 QUEUE_SIZE = 100
 """The events that wait for a slow client. With more, the client gets `reset`."""
+{% if auth %}
+TICKET_SECONDS = 30
+"""The time of a ticket of the stream, in seconds: a client opens the stream with it at once."""
+{% endif %}
 
 type Action = Literal["created", "changed", "deleted"]
 
@@ -180,6 +185,15 @@ class LiveEvent(BaseModel):
     )
     entity: str | None = Field(default=None, description="The entity of the record.")
     id: UUID | None = Field(default=None, description="The ID of the record.")
+{% if auth %}
+
+
+class LiveTicket(BaseModel):
+    """A ticket of the stream, for a client that cannot send a header, for example a browser."""
+
+    ticket: str = Field(description="The value of the parameter `ticket` of `GET /live`.")
+    expires_in: int = Field(description="The seconds until the ticket ends.")
+{% endif %}
 
 
 @dataclass(frozen=True, slots=True)
@@ -554,6 +568,15 @@ def _audiences(item: _Pending) -> tuple[Audience, ...] | None:
 router = APIRouter(tags=["live"])
 {% if auth %}
 _bearer = HTTPBearer(auto_error=False)
+
+
+def _ticket_user(key: bytes, ticket: str) -> UUID | None:
+    """Return the user ID of a valid ticket of the stream that has not ended, else None."""
+    payload = unsign(key, "live", ticket)
+    try:
+        return UUID(str(payload["sub"])) if payload else None
+    except ValueError, KeyError:
+        return None
 {% endif %}
 
 
@@ -566,17 +589,30 @@ async def live_viewer(
         list[LiveName] | None,
         Query(description="The entities. The default is all that the client may read."),
     ] = None,
+{% if auth %}
+    ticket: Annotated[
+        str | None,
+        Query(description="A ticket of `POST /live/ticket`: the user of the stream."),
+    ] = None,
+{% endif %}
 ) -> Viewer:
 {% if auth %}
     """Return the client of a stream: its user, and the entities whose events it gets.
 
-    Without `entity`, the client gets the events of all live entities that
-    it may read. An entity that it may not read gives 401 without a user,
-    else 403.
+    The user comes from the header Authorization, or from a ticket of
+    `POST /live/ticket`: a browser cannot send a header with EventSource. A
+    ticket that is not valid gives 401. Without `entity`, the client gets
+    the events of all live entities that it may read. An entity that it may
+    not read gives 401 without a user, else 403.
     """
     names = set(entity or NAMES)
     user: {{ u.name }} | None = None
-    user_id = read_token(signing_key(request), credentials.credentials) if credentials else None
+    key = signing_key(request)
+    user_id = read_token(key, credentials.credentials) if credentials else None
+    if ticket is not None:
+        user_id = _ticket_user(key, ticket)
+        if user_id is None:
+            {{ py.problem(401, "Sign in to use this endpoint.", 12) }}
     if user_id is not None:
         # A session of its own: the stream keeps no connection of the database.
         sessions: async_sessionmaker[AsyncSession] = request.app.state.sessions
@@ -642,6 +678,30 @@ async def live_events(
         broker.unsubscribe(subscription)
 
 
+{% if auth %}
+{% for id in py.live_ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.post(
+    "/live/ticket",
+    responses=problem_responses(401),
+    summary="Get a ticket for the stream of the changes",
+    operation_id="live_ticket",
+)
+async def live_ticket(request: Request, user: CurrentUser) -> LiveTicket:
+    """Return a ticket of the signed-in user for `GET /live?ticket=<ticket>`.
+
+    A browser opens the stream with EventSource, which cannot send the
+    header Authorization. The ticket is valid for TICKET_SECONDS: a URL can
+    end in the log of a proxy, so the ticket must be short. The stream that
+    it opens stays open.
+    """
+    payload = {"sub": str(user.id), "exp": int(time.time()) + TICKET_SECONDS}
+    ticket = sign(signing_key(request), "live", payload)
+    return LiveTicket(ticket=ticket, expires_in=TICKET_SECONDS)
+
+
+{% endif %}
 @contextlib.contextmanager
 def end_streams_on_exit(broker: Broker) -> Generator[None]:
     """End the open streams at SIGINT and SIGTERM, and then call the handler of the server.

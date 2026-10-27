@@ -37,8 +37,10 @@ from appgen.bindings.fastapi.memberships import PyMemberships, python_membership
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.notifications import (
     PyMention,
+    PyNoticeEmails,
     PyNotification,
     PyReceiver,
+    python_notice_emails,
     python_notifications,
 )
 from appgen.bindings.fastapi.pysource import (
@@ -2206,7 +2208,9 @@ class PyEntity:
         code += "\n".join(k.entry() for k in query.sort_keys)
         pagination = {"Page", "PageQuery", "sort_order"}
         pagination |= {
-            n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
+            n
+            for n in ("contains", "day_start", "lookup", "range_end", "search_words")
+            if n + "(" in code
         }
         search = {
             n
@@ -2228,7 +2232,11 @@ class PyEntity:
                 if self.translations_query or any("Field(" in d for d in declarations)
                 else ""
             ),
-            "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
+            "from sqlalchemy import "
+            + ("and_, " if "and_(" in code else "")
+            + "func, "
+            + ("or_, " if query.search else "")
+            + "select",
             "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
             from_import("app.core.pagination", pagination),
@@ -2561,8 +2569,9 @@ class PyApp:
     embed_tests: list[PyEmbedTest] = field(default_factory=list[PyEmbedTest])
     """The generated tests of the record rules on the embedded relations (ADR 0025)."""
     smtp: bool = False
-    """True if the app sends these messages by SMTP (`auth.delivery: smtp`), not with the
-    extension file `app/core/messages_ext.py`."""
+    """True if the app sends emails by SMTP (`auth.delivery: smtp`): the messages of the
+    sign-in, not with the extension file `app/core/messages_ext.py`, and the emails of the
+    notices (ADR 0044)."""
     dashboards: dict[str, PyDashboard] = field(default_factory=dict[str, PyDashboard])
     """The dashboards with the endpoints of their widgets, by name."""
     access: bool = False
@@ -2575,6 +2584,8 @@ class PyApp:
     """The jobs that the worker runs (ADR 0029), by name."""
     snapshots: PySnapshots | None = None
     """The stats with daily snapshots, their charts, and the built-in job (ADR 0042)."""
+    notice_emails: PyNoticeEmails | None = None
+    """The emails of the notices, and the built-in job that sends them (ADR 0044)."""
     storage: PyStorage | None = None
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
     user_label_attr: str | None = None
@@ -2764,6 +2775,16 @@ class PyApp:
         """True if a list endpoint has a `near` or an `area` filter: `app/core/geo.py` has them."""
         return any(
             p.kind in ("near", "area") for e in self.entities.values() for p in e.query.params
+        )
+
+    @property
+    def free_dates(self) -> bool:
+        """True if a list endpoint has an available filter of date fields (ADR 0047):
+        `app/core/pagination.py` has `range_end`."""
+        return any(
+            p.kind == "free_from" and p.free is not None and p.free.dates
+            for e in self.entities.values()
+            for p in e.query.params
         )
 
     @property
@@ -3001,6 +3022,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     dashboards = python_dashboards(definition, entities)
     rule_tests = _rule_tests(definition, entities)
     snapshots = python_snapshots(definition, entities, dashboards)
+    notice_emails = python_notice_emails(definition, entities)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -3015,15 +3037,16 @@ def python_app(definition: AppDefinition) -> PyApp:
         message_elements=_message_elements(definition),
         rule_tests=rule_tests,
         embed_tests=_embed_tests(definition, entities),
-        smtp=bool(_message_elements(definition))
+        smtp=(bool(_message_elements(definition)) or notice_emails is not None)
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
         dashboards=dashboards,
         access=definition.access is not None,
         auth=auth is not None,
         search_config=search_config,
-        jobs=_jobs(definition, entities, operations, snapshots),
+        jobs=_jobs(definition, entities, operations, snapshots, notice_emails),
         snapshots=snapshots,
+        notice_emails=notice_emails,
         storage=_storage(definition, entities),
         user_label_attr=_user_label_attr(definition, entities),
         me_tests=me_tests(definition, entities, dashboards),
@@ -3037,10 +3060,11 @@ def _jobs(
     entities: dict[str, PyEntity],
     operations: dict[str, PyOperation],
     snapshots: PySnapshots | None,
+    notice_emails: PyNoticeEmails | None,
 ) -> dict[str, PyJob]:
-    """Return the jobs, with the built-in job of the snapshots (ADR 0042). Raise
-    GenerationError if an entity has the table of the job runs."""
-    if definition.jobs or snapshots is not None:
+    """Return the jobs, with the built-in jobs of the snapshots (ADR 0042) and of the emails of
+    the notices (ADR 0044). Raise GenerationError if an entity has the table of the job runs."""
+    if definition.jobs or snapshots is not None or notice_emails is not None:
         for entity in entities.values():
             if entity.table == JOBS_TABLE:
                 raise GenerationError(
@@ -3050,6 +3074,8 @@ def _jobs(
     jobs = python_jobs(definition, entities, operations)
     if snapshots is not None:
         jobs[snapshots.job.name] = snapshots.job
+    if notice_emails is not None:
+        jobs[notice_emails.job.name] = notice_emails.job
     return jobs
 
 

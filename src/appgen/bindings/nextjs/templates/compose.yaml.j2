@@ -11,6 +11,10 @@
 #   RATE_LIMIT_PER_MINUTE=1200 RATE_LIMIT_STORE_URL=redis://redis:6379/0 \
 #     docker compose --profile redis up --build
 {% endif %}
+{% if nextjs.live %}
+# With Redis for the live events of all replicas:
+#   LIVE_EVENTS_URL=redis://redis:6379/0 docker compose --profile redis up --build
+{% endif %}
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:18-alpine}
@@ -38,6 +42,9 @@ services:
 {% if nextjs.redis %}
       RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
 {% endif %}
+{% if nextjs.live %}
+      LIVE_EVENTS_URL: ${LIVE_EVENTS_URL:-}
+{% endif %}
 {% if nextjs.jobs %}
       # The secret of the routes of the jobs (/api/jobs/<job>), and the window of a call.
       JOBS_SECRET: ${JOBS_SECRET:?Set JOBS_SECRET}
@@ -49,7 +56,7 @@ services:
 {% if definition.auth.password %}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
 {% endif %}
-{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections %}
+{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition) %}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
 {% endif %}
 {% if nextjs.smtp %}
@@ -117,7 +124,7 @@ services:
     depends_on:
       - app
 {% endif %}
-{% if nextjs.redis %}
+{% if nextjs.redis or nextjs.live %}
 
   redis:
     image: ${REDIS_IMAGE:-redis:8-alpine}
