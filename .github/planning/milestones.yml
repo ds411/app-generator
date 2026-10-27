@@ -646,6 +646,42 @@
 
     **Depends on:** None.
 
+- title: "M38: Company sign-in and Jira"
+  description: |
+    **Goal:** The staff of a company sign in to the generated apps with their Microsoft Entra ID account through Amazon Cognito, and the apps call APIs such as Jira that take an email address and an API token.
+
+    **Scope**
+    - In: Cognito as an OpenID Connect provider with Entra ID as its SAML identity provider (fixed parameters of the authorization request, a trusted email claim, roles from a claim, and the sign-out at the provider), a Cognito mode of the mock provider, a setup guide, HTTP Basic credentials of the app for an API, and HTTP Basic credentials of each user on the page `/connections`.
+    - Out: SAML in the apps themselves: Cognito does the SAML part. A sign-in that starts at Entra ID (IdP-initiated, for example from the My Apps portal). A real user pool or a real Jira site in the checks: the checks use the mock provider and the mock API. OAuth 2.0 (3LO) apps of Atlassian.
+
+    **Exit criteria**
+    - [ ] A user signs in through the mock provider in Cognito mode, with `identity_provider` in the authorization request and without `email_verified` in the ID token, in the FastAPI app, the Next.js app, and the React app with the FastAPI app.
+    - [ ] A user gets the role of a group claim at each sign-in.
+    - [ ] The sign-out of the app also sends the browser to the logout endpoint of the provider.
+    - [ ] A custom operation calls the mock Jira API with `Authorization: Basic` from the settings, in the FastAPI and the Next.js apps, and the React app calls it through the FastAPI app.
+    - [ ] A user connects a Jira account with an email address and an API token on the page `/connections`, and a custom operation calls the API with them.
+
+    **Demo:** Sign in to `tests/fixtures/cognito-sign-in.yaml` through the mock provider in Cognito mode, then connect a mock Jira account in `tests/fixtures/jira.yaml` and list its issues.
+
+    **Depends on:** M17 (the sign-in with providers) and M30 (the API connections of the users).
+
+- title: "M39: Quick-start skill"
+  description: |
+    **Goal:** An agent makes a working app from one or more prompts with a second skill, which picks the defaults from the prompts and uses the `appgen` skill for the CLI and the DSL.
+
+    **Scope**
+    - In: a second skill in the package next to `appgen`, its table of defaults (the bindings, the sign-in, the roles, the languages, the seed records, the APIs, and more), a record of the chosen defaults in the definition, its install with `appgen skills`, tests that keep the table in agreement with the DSL and the bindings, and an evaluation with prompts.
+    - Out: An MCP server (M14). A dialog that asks the user about each default: the skill asks only when the prompts conflict.
+
+    **Exit criteria**
+    - [ ] `appgen skills install` writes both skills, and `appgen skills list` shows both.
+    - [ ] A test fails when the table of defaults names a DSL key, a value, or a binding that does not exist.
+    - [ ] In the evaluation, an agent with only the installed skills makes an app from each prompt, `appgen check` reports no invalid traces, and the chosen defaults agree with the expected defaults of the task.
+
+    **Demo:** `appgen skills install --scope user`, then an agent session in an empty folder with the prompt "Make an app for a neighborhood tool library".
+
+    **Depends on:** M22 (the skill checks and the evaluation script). The rows for Cognito and Jira need M38.
+
 - title: "M40: Fast pre-push checks"
   description: |
     **Goal:** A push waits only for the checks that its change can break, and the checks give the same result on each run.
