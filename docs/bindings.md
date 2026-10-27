@@ -841,7 +841,10 @@ listeners of the sessions, the broker, and the endpoint `GET /live`.
 - `live_viewer()` reads the token without the dependency of the user,
   in a session of its own, so that a stream holds no database
   connection. It gives 401 or 403 for an entity that the client may not
-  read.
+  read. With the sign-in, `POST /live/ticket` gives the signed-in user a
+  ticket for 30 seconds (`sign()` of the sessions, with the purpose
+  `live`), and `GET /live?ticket=...` takes it instead of the token,
+  because `EventSource` cannot send a header.
 - The broker gives each stream a `Subscription`: a queue of at most 100
   events. A full queue gives `reset`. With Redis, a task sends the
   changes to the channel `<package>:live`, and another task gives the
@@ -1320,6 +1323,55 @@ does ([ADR 0049](adr/0049-share-links.md)).
 - The UI test `ui-tests/tests/sessions.spec.ts` makes a link of a lesson
   of the course hub as a teacher, opens it without a sign-in, revokes
   it, and sees that the link does not open.
+
+### The live updates of the Next.js app and of the React app
+
+The front ends load their open views again after the changes of the
+records of the entities with `live` ([ADR 0051](adr/0051-live-updates.md)).
+
+- The Next.js app sends the changes as the FastAPI app does.
+  `src/shared/db/live.ts` has the table `LIVE` of the live entities,
+  the broker (`liveBroker()`, one for each process, also after a hot
+  reload), and the audiences of the record rules (`liveAudience()`).
+  The repository of a live entity has the option `live`: `create`,
+  `update`, `remove`, and the file uploads run in `liveChanges()`, and
+  call `noteChange()` in their transactions. `afterCommit()` of
+  `src/shared/db/client.ts` gives the changes to the broker after the
+  commit of the outer transaction. A change in the operation of an
+  event joins the changes of the outer work.
+- The route `app/api/live/route.ts` reads the session cookie, and sends
+  the events of a `Subscription` of the broker. The stream asks the
+  subscription for the next event only when the client reads, and sends
+  a comment each 15 seconds without an event. The headers
+  `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`
+  stop the compression of Next.js and the buffers of the proxies.
+  `instrumentation.ts` ends the streams at SIGINT and SIGTERM.
+- With `LIVE_EVENTS_URL`, the broker uses `@redis/client`: a publisher
+  without the offline queue, and a subscriber of the channel
+  `<app name>:live`. The packages are the packages of the shared rate
+  limit.
+- `src/shared/lib/live.ts` (a shared template) has the client:
+  `watchLive()` reads the stream with `EventSource`, and `batched()`
+  calls `notifyChange()` once for each entity after 50 ms, or once
+  without an entity after `reset`. The component
+  `src/app/providers/live-updates.tsx` starts the client. In the
+  Next.js app, `notifyChange()` of `@/shared/api` calls the listeners
+  of the resources of the views. In the React app, it marks the HTTP
+  stores of the entity (`src/shared/api/http-store.ts`) as old, so the
+  open views load their data again. The root layout of the Next.js app
+  gives the component the key of the signed-in user, so a new user
+  opens a new stream.
+- With the sign-in, the React app gets a ticket from `POST /live/ticket`
+  before each new stream, and opens a new stream after each new access
+  token (`subscribeAccessToken()` of `src/shared/api/http.ts`).
+- `scripts/live_test.py` runs the server code of the Next.js app of
+  `tests/fixtures/record-rules.yaml` with tsx and PGlite: the events of
+  each role and user, two brokers with one Redis, a broker without
+  Redis, and the end of the streams. The UI test
+  `ui-tests/tests/live.spec.ts` changes a task in a second browser, and
+  checks that the task board of the first browser shows each change in
+  less than 2 s: in the Next.js app, and in the React app with the
+  FastAPI app (`scripts/api_client_test.py`).
 
 ## Shared templates
 

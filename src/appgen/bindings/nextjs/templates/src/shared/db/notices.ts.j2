@@ -15,33 +15,15 @@ import { actingUserId } from "./acting-user";
 import { type Database, getDb } from "./client";
 import { noticesTable, {{ users.const }} } from "./schema";
 
+// The receiver paths of the notifications: the steps from the record to the users.
+export { pathUsers, type PathStep } from "./paths";
+
 // The notices of the users (ADR 0041). The repositories add the notices
 // of a change of a record in the transaction of the change, after the
 // events and the change log. Each user at the end of a receiver path gets
 // one notice, except the user that made the change.
 
 type Row = Record<string, unknown>;
-
-/**
- * A step of a receiver path: the table of the step, the column of the IDs
- * of the step before, and the column of the next IDs. A many-to-one step
- * reads the foreign key of the records, and a many-to-many step reads its
- * join table.
- */
-export type PathStep = readonly [table: PgTable, from: PgColumn, to: PgColumn];
-
-/** Return the IDs of the users at the end of a receiver path of a record, as the transaction has them. */
-export async function pathUsers(tx: Database, recordId: string, steps: readonly PathStep[]): Promise<string[]> {
-  let ids = [recordId];
-  for (const [table, from, to] of steps) {
-    if (ids.length === 0) {
-      return [];
-    }
-    const rows = await tx.select({ id: to }).from(table).where(inArray(from, ids));
-    ids = rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
-  }
-  return ids;
-}
 
 /** Return a value of a record as text, for the text of a notice: a time is in UTC, without the seconds. */
 export function textValue(value: unknown): string {

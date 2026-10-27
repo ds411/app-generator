@@ -281,6 +281,8 @@ export type Expected = {
   colors: ExpectedToken[];
   /** The font size of the body text (`typography.body`), for each mode. */
   bodyFontSize: Record<Mode, string>;
+  /** The entities whose changes the open views show at once (ADR 0051): none with mock data. */
+  live?: string[];
   /** Only for the test of the test language. */
   testLanguage?: ExpectedTestLanguage;
   /** Only for the test of the sign-in and the permissions. */

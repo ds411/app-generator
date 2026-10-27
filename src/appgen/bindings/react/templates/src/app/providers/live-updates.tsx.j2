@@ -1,0 +1,43 @@
+{{ trace_header(*(definition.entities.values() | selectattr("live") | map(attribute="live.id"))) }}
+{% if definition.auth %}
+import { useEffect, useSyncExternalStore } from "react";
+
+import { API_URL, accessToken, apiRequest, notifyChange, subscribeAccessToken } from "@/shared/api";
+{% else %}
+import { useEffect } from "react";
+
+import { API_URL, notifyChange } from "@/shared/api";
+{% endif %}
+import { batched, watchLive } from "@/shared/lib/live";
+{% if definition.auth %}
+
+/**
+ * Return the URL of the stream. EventSource cannot send the bearer token,
+ * so a signed-in user opens the stream with a short ticket of the API.
+ */
+async function streamUrl(token: string | null): Promise<string> {
+  if (token === null) {
+    return `${API_URL}/live`;
+  }
+  const { ticket } = (await apiRequest("POST", "/live/ticket")) as { ticket: string };
+  return `${API_URL}/live?ticket=${encodeURIComponent(ticket)}`;
+}
+{% endif %}
+
+/**
+ * Load the open views again after the changes of their records in other
+ * browsers (ADR 0051): the events of the stream `/live` of the FastAPI app.
+{% if definition.auth %}
+ * A new token, after a sign-in or a sign-out, opens a new stream with the
+ * events of the new user.
+{% endif %}
+ */
+export function LiveUpdates() {
+{% if definition.auth %}
+  const token = useSyncExternalStore(subscribeAccessToken, accessToken, () => null);
+  useEffect(() => watchLive(() => streamUrl(token), batched(notifyChange)), [token]);
+{% else %}
+  useEffect(() => watchLive(() => Promise.resolve(`${API_URL}/live`), batched(notifyChange)), []);
+{% endif %}
+  return null;
+}

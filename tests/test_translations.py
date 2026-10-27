@@ -366,7 +366,11 @@ def test_nextjs_renders_the_language_of_the_request(example: AppDefinition) -> N
     assert (
         "<html lang={localeOf(language)} dir={dirOf(language)} suppressHydrationWarning>" in layout
     )
-    assert "<Providers language={language}>{children}</Providers>" in layout
+    # The tasks of the project tracker are live (ADR 0051): the providers start the stream.
+    assert (
+        "<Providers language={language}>\n          <LiveUpdates />\n          {children}\n"
+        in layout
+    )
     server = files["src/shared/lib/i18n-server.ts"]
     assert "(await cookies()).get(LANGUAGE_COOKIE)?.value" in server
     assert 'matchLanguage((await headers()).get("accept-language"))' in server

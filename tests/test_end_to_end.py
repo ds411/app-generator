@@ -20,16 +20,14 @@ EXAMPLE = Path(__file__).parent.parent / "examples" / "project-tracker" / "app.y
 runner = CliRunner()
 
 # The element kinds that each binding leaves out by design. A back-end
-# app has no pages and no UI, and a front-end app has no webhooks. The
-# front ends show the live updates later, with their events (#405).
+# app has no pages and no UI, and a front-end app has no webhooks.
 BY_DESIGN: dict[str, list[str]] = {
-    "nextjs": ["live"],
+    "nextjs": [],
     "react": [
         "entity_compare_rule",
         "entity_overlap_rule",
         "entity_unique_rule",
         "job",
-        "live",
         "webhook",
     ],
     "fastapi": ["page", "ui"],

@@ -800,9 +800,16 @@ live: true
   tells the client to read its views again, for example after a loss of
   events. With Redis in the setting `LIVE_EVENTS_URL`, all replicas and
   the worker of the jobs send their changes to the streams of all
-  replicas. Without it, each process sends only its own changes.
-- The Next.js app and the React app do not show the live updates yet:
-  `appgen check` lists `live` as excluded by design.
+  replicas. Without it, each process sends only its own changes. With
+  the sign-in, `POST /live/ticket` gives a short ticket for the stream,
+  because the browser cannot send a bearer token with `EventSource`.
+- The Next.js app has the same stream at `/api/live`, with the session
+  cookie of the user and the same `LIVE_EVENTS_URL`. The React app with
+  the FastAPI app (`x-react-data: api`) reads the stream of the FastAPI
+  app. The React app with mock data has no stream.
+- In the Next.js app and the React app, the open views of an entity
+  load their data again after the events of the entity. The events of
+  50 ms give one load.
 
 ### Relations
 

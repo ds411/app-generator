@@ -104,6 +104,10 @@ of the entity in snake case, for example `bookings`.
   gives the entries of a record (`list(id, page)`) and a restore
   (`restore(id, entryId)`), and `HistoryList` of
   `@/shared/ui/history-list` shows them.
+- The repositories of an entity with `live` (ADR 0051) give an event
+  to the open views of all users after each create, change, and delete.
+  An operation that changes records with them gives the events too. A
+  change with SQL gives none.
 - A third-party API of the definition has a server-only client in
   `@/shared/api/<api>`, for example `holidaysClient()`, which reads the
   base URL and the secret from the environment. Call it in an operation
@@ -123,7 +127,8 @@ of the entity in snake case, for example `bookings`.
   function that stops it.
 - `useResource(key, load, subscribe)` gives `{ status: "loading" }`,
   `{ status: "error", error }`, or `{ status: "success", data }`, with
-  `reload()`. It calls `load` again when `subscribe` reports a change.
+  `reload()`. It calls `load` again when `subscribe` reports a change,
+  also a change of another user of an entity with `live`.
   The generated dashboard `src/widgets/<dashboard>/ui/<dashboard>-dashboard.tsx`
   is an example: it loads the records of each entity, and subscribes to
   their changes.

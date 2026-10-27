@@ -70,6 +70,21 @@ const OPTION_COUNT = 20;
 
 /** The most IDs in one request of `byIds`, for a short URL. */
 const ID_LIMIT = 100;
+{% if react.live %}
+
+/** The stores of each entity: a change in another browser loads their records again (ADR 0051). */
+const stores = new Map<string, Set<() => void>>();
+
+/** Load the records of an entity again in the open views, or of all entities without an entity. */
+export function notifyChange(entity?: string): void {
+  const sets = entity === undefined ? [...stores.values()] : [stores.get(entity)];
+  for (const set of sets) {
+    for (const reload of set ?? []) {
+      reload();
+    }
+  }
+}
+{% endif %}
 
 /**
  * The records of one entity in the FastAPI app. The list endpoint filters,
@@ -91,6 +106,14 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     private readonly shape: ApiShape,
   ) {
     this.jsonNames = { id: "id", ...Object.fromEntries(Object.entries(shape.keys).map(([json, key]) => [key, json])) };
+{% if react.live %}
+    let set = stores.get(entity);
+    if (set === undefined) {
+      set = new Set();
+      stores.set(entity, set);
+    }
+    set.add(() => this.notify());
+{% endif %}
   }
 
   /** Load one page of the list endpoint. */

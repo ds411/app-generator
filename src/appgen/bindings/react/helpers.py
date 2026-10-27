@@ -214,6 +214,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "history": has_history(definition),
             # The notices (ADR 0041): the mock store adds them, else the FastAPI app.
             "notices": has_notices(definition),
+            # The live entities (ADR 0051): with the FastAPI app, the open views load their
+            # records again after the events of the stream `/live`. The mock records stay in
+            # the browser tab: no other client changes them.
+            "live": [name for name, entity in definition.entities.items() if entity.live and api],
         },
     }
 

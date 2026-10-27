@@ -465,7 +465,11 @@ def check_api_operation(binding: str, mock: MockApi) -> None:
 
 
 def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
-    """Return the values that the UI tests expect: the pages and the design tokens."""
+    """Return the values that the UI tests expect: the pages and the design tokens.
+
+    The live entities (ADR 0051) are for the apps with a server: the React
+    app with mock data has no stream of the changes.
+    """
     tokens = resolve_tokens(definition)
     body = next((t for t in tokens if t.path == "typography.body"), None)
     font_sizes = {
@@ -502,6 +506,7 @@ def expected_ui(binding: str, definition: AppDefinition) -> dict[str, object]:
             if t.group == "color"
         ],
         "bodyFontSize": font_sizes,
+        "live": [] if binding == "react" else [n for n, e in definition.entities.items() if e.live],
     }
 
 

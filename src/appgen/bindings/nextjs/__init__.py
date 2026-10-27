@@ -356,6 +356,23 @@ BINDING = Binding(
             # The change log without auth has no user of a change: the module gives null.
             when="nextjs.history or nextjs.notices",
         ),
+        Output(
+            template="src/shared/db/paths.ts.j2",
+            path="src/shared/db/paths.ts",
+            # The receiver paths of the notices, and the owner paths of the live events.
+            when="nextjs.notices or nextjs.live | selectattr('owner_path') | list",
+        ),
+        # The live updates (ADR 0051): the changes of the repositories, the route of the events,
+        # and the client that loads the open views again.
+        *(
+            Output(template=template, path=path, when="nextjs.live")
+            for template, path in (
+                ("src/shared/db/live.ts.j2", "src/shared/db/live.ts"),
+                ("app/api/live/route.ts.j2", "app/api/live/route.ts"),
+                ("ui/lib/live.ts.j2", "src/shared/lib/live.ts"),
+                ("src/app/providers/live-updates.tsx.j2", "src/app/providers/live-updates.tsx"),
+            )
+        ),
         *(
             Output(template=f"{path}.j2", path=path, when="nextjs.notices")
             for path in (
@@ -677,9 +694,8 @@ BINDING = Binding(
         | {"job", "event"}
         | {"storage"}
         | {"history", "notification"}
+        | {"live"}
     ),
-    # The live updates of the Next.js app follow with its events route (#405).
-    excludes=frozenset({"live"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

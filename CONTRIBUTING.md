@@ -287,7 +287,10 @@ git config core.hooksPath .githooks
   test reads the totals of the relations and checks the compare rules
   over totals with PGlite (`scripts/totals_test.py`), and
   `tests/fixtures/listings.yaml`, whose test calls the server actions of
-  the queries with PGlite (`scripts/queries_test.py`). It needs pnpm and Docker. Run it by hand
+  the queries with PGlite (`scripts/queries_test.py`), and
+  `tests/fixtures/record-rules.yaml`, whose test reads the stream of the
+  live updates of each user with PGlite, and with two brokers and one
+  Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
   with `scripts/check-nextjs.sh [output folder]`.
 - When a push changes the generator core, the React binding, or the
   shared binding code, the hook also runs `scripts/check-react.sh`. The

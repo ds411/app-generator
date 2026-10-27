@@ -4,10 +4,14 @@ import type { ReactNode } from "react";
 
 import "@/app/styles/globals.css";
 import { Providers } from "@/app/providers";
+{% if nextjs.live %}
+import { LiveUpdates } from "@/app/providers/live-updates";
+{% endif %}
 {% if definition.access %}
 import { currentRole } from "@/shared/auth/access";
 {% endif %}
-{% if record_rules or me %}
+{% set live_user = nextjs.live and definition.auth %}
+{% if record_rules or me or live_user %}
 import { sessionUserId } from "@/shared/auth/session";
 {% endif %}
 import { appConfig } from "@/shared/config";
@@ -56,7 +60,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const role = await currentRole(); {{ trace(definition.access.id) }}
 {% else %}
-export default {{ "async " if me }}function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default {{ "async " if me or live_user }}function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
 {% endif %}
 {% if record_rules and me %}
   // The forms apply the record rules of the user (ADR 0018, ADR 0025), and the values `$me` are the user.
@@ -67,8 +71,13 @@ export default {{ "async " if me }}function RootLayout({ children }: Readonly<{ 
 {% elif me %}
   // The values `$me` of the filters and of the defaults are the signed-in user.
   const userId = await sessionUserId();
+{% elif live_user %}
+  // The stream of the live updates has the events of the signed-in user (ADR 0051).
+  const userId = await sessionUserId();
 {% endif %}
 {% set providers = "Providers language={language}" if i18n else "Providers" %}
+{# A new user opens a new stream of the live updates (ADR 0051). #}
+{% set live_element = ("<LiveUpdates key={userId ?? \"\"} />" if live_user else "<LiveUpdates />") if nextjs.live else "" %}
   return (
     // next-themes sets the class of the color mode before React hydrates.
 {% if i18n %}
@@ -79,12 +88,18 @@ export default {{ "async " if me }}function RootLayout({ children }: Readonly<{ 
       <body className="min-h-svh antialiased">
 {% if definition.access and me %}
         <{{ providers }}>
+{% if nextjs.live %}
+          {{ live_element }}
+{% endif %}
           <AccessProvider role={role}{{ " userId={userId}" if record_rules }}>
             <MeProvider me={userId}>{children}</MeProvider>
           </AccessProvider>
         </Providers>
 {% elif definition.access %}
         <{{ providers }}>
+{% if nextjs.live %}
+          {{ live_element }}
+{% endif %}
 {% if record_rules %}
           <AccessProvider role={role} userId={userId}>
             {children}
@@ -95,7 +110,15 @@ export default {{ "async " if me }}function RootLayout({ children }: Readonly<{ 
         </Providers>
 {% elif me %}
         <{{ providers }}>
+{% if nextjs.live %}
+          {{ live_element }}
+{% endif %}
           <MeProvider me={userId}>{children}</MeProvider>
+        </Providers>
+{% elif nextjs.live %}
+        <{{ providers }}>
+          {{ live_element }}
+          {children}
         </Providers>
 {% else %}
         <{{ providers }}>{children}</Providers>

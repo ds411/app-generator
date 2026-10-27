@@ -2,7 +2,8 @@
 # Check the API client of the React app: generate the project tracker
 # with `x-react-data: api` for FastAPI and React, start both apps, and
 # open the project table: each page of the table must load with one
-# request to the API (scripts/api_client_test.py). Then do the same with
+# request to the API, and a change in a second browser must show on the
+# task board of the first (scripts/api_client_test.py). Then do the same with
 # tests/fixtures/invoices.yaml, and move a row and a card of the views
 # with a manual order (scripts/order_ui_test.py).
 # The pre-push hook runs this script when a push changes the React or
