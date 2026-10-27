@@ -8,7 +8,7 @@ import { useEffect } from "react";
 
 import { API_URL, notifyChange } from "@/shared/api";
 {% endif %}
-import { batched, watchLive } from "@/shared/lib/live";
+import { batched, {{ "liveEvents, " if presences }}watchLive } from "@/shared/lib/live";
 {% if definition.auth %}
 
 /**
@@ -35,7 +35,11 @@ async function streamUrl(token: string | null): Promise<string> {
 export function LiveUpdates() {
 {% if definition.auth %}
   const token = useSyncExternalStore(subscribeAccessToken, accessToken, () => null);
+{% if presences %}
+  useEffect(() => watchLive(() => streamUrl(token), liveEvents(batched(notifyChange))), [token]);
+{% else %}
   useEffect(() => watchLive(() => streamUrl(token), batched(notifyChange)), [token]);
+{% endif %}
 {% else %}
   useEffect(() => watchLive(() => Promise.resolve(`${API_URL}/live`), batched(notifyChange)), []);
 {% endif %}

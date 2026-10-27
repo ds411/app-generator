@@ -1183,6 +1183,7 @@ ignores the pages.
 | `arrangement` | Layout hints: the order and the place of the title, the actions, and the content (see below). |
 | `embed`       | The origins of the websites that can show the page in a frame, for example `[https://www.example.com]` (see [Pages in frames](#pages-in-frames)). |
 | `share`       | `true`: a user that may change the record of a detail page makes a secret link of it, for a guest without a sign-in (see [Secret links](#secret-links)). |
+| `presence`    | `true`: a detail page shows the other signed-in users on the page of the same record, and a note when one of them types (see [Users on a record page](#users-on-a-record-page)). |
 | `meta`        | The `description` and the `image` of the page for search engines and the previews of links (see [Page metadata](#page-metadata)). |
 
 The parent of a page in the breadcrumbs is the page whose path is the
@@ -1341,6 +1342,46 @@ change log.
   `{token}` in the place of `{id}`.
 - The link gives all fields of the record and of the related records
   that the view shows, also to a guest. A link does not expire.
+
+### Users on a record page
+
+A detail page shows the other signed-in users on the page of the same
+record, so that two users do not change the record at the same time
+([ADR 0052](https://github.com/ds411/app-generator/blob/main/docs/adr/0052-presence.md)). The page takes `presence: true`,
+and the entity of its view is live ([Live updates](#live-updates)):
+
+```yaml
+# example: room-booking
+entities:
+  Booking:
+    live: true
+pages:
+  booking_detail:
+    presence: true
+```
+
+The header of the page then shows the avatar of each other user on the
+record: the initials of the name, with the name as its tooltip. When a
+user types in a form on the page, for example in the form of the button
+"Edit", the other users see the note `<name> is typing.`. The name is
+the display field of the user entity, else the user name.
+
+- The app has `auth`, and the page is not in `auth.public_pages`.
+- The content of the page is a detail view. Its path ends with `{id}`
+  and has no other parameter, and its entity has `live`.
+- The page calls the server when it opens, when the user starts or
+  stops to type, and each 5 seconds. The typing stops 3 seconds after
+  the last input. The server forgets a user 15 seconds after the last
+  call, for example after a crash of the browser, and at once when the
+  user leaves the page.
+- The FastAPI app has `PUT /<entity>/{id}/presence` (with
+  `{"typing": false}`, the answer has the other users) and
+  `DELETE /<entity>/{id}/presence`. They need a read operation of the
+  entity and its record rules. The Next.js app has server actions with
+  the same checks. The changes of the users come to the other users on
+  the record through the stream of the live updates, also through Redis
+  with `LIVE_EVENTS_URL`.
+- The React app with mock data shows no users.
 
 ## workflows
 
@@ -3499,6 +3540,9 @@ use in the app does not show.
   shared page: `The link is not valid.`,
   `The record is not shared, or its link was revoked.`,
   `Something went wrong`.
+- The other users on a record page (ADR 0052): the list
+  `Other users on this page`, and the notes `{name} is typing.`,
+  `{first} and {second} are typing.`, and `{count} users are typing.`.
 
 ### Messages of the FastAPI app
 

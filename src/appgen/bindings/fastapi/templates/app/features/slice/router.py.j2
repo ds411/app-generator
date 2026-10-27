@@ -36,3 +36,9 @@ router.include_router(history.router)
 {{ trace(e.share.id) }}
 router.include_router(share.router)
 {% endif %}
+{% if e.presence %}
+{% for id in e.presence.ids %}
+{{ trace(id) }}
+{% endfor %}
+router.include_router(presence.router)
+{% endif %}

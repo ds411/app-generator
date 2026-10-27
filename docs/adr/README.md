@@ -65,3 +65,4 @@ gives the rules.
 | 0048   | [Roles from membership records](0048-memberships.md)                    | Accepted |
 | 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |
 | 0051   | [Live updates of the records](0051-live-updates.md)                     | Accepted |
+| 0052   | [The other users on a record page](0052-presence.md)                    | Accepted |

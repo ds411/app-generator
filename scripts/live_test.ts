@@ -3,24 +3,42 @@ import assert from "node:assert/strict";
 import { migrate } from "drizzle-orm/pglite/migrator";
 
 import { GET } from "../app/api/live/route";
+import { hereTaskPresenceAction, leaveTaskPresenceAction } from "@/entities/task/api/task-actions";
 import { taskRepository } from "@/entities/task/server";
+import type { ActionResult } from "@/shared/api";
 import { makeToken } from "@/shared/auth/session";
 import { getDb } from "@/shared/db/client";
-import { Broker, type Change, type LiveEvent, liveBroker, type Subscription, type Viewer } from "@/shared/db/live";
+import {
+  Broker,
+  type Change,
+  type LiveEvent,
+  liveBroker,
+  type PresentUser,
+  type Subscription,
+  type Viewer,
+} from "@/shared/db/live";
 import { personTable, personTeamsTable, projectTable, teamTable } from "@/shared/db/schema";
 
 /** The longest time from a change to its event (the exit criteria of M37). */
 const LIMIT_MS = 2_000;
 /** The time to wait for an event that must not come. The events of a change are in the queues at once. */
 const QUIET_MS = 200;
+/** The time after the last call of a page when the broker forgets its user (PRESENCE_MS of the broker). */
+const PRESENCE_MS = 15_000;
 
 const redisUrl = process.env.APPGEN_LIVE_REDIS_URL ?? "";
 const jar: Map<string, string> = ((globalThis as { appgenCookies?: Map<string, string> }).appgenCookies ??= new Map());
 /** The names of the records in the events, by ID. */
 const names = new Map<string, string>();
 
+/** Return the names of users on a record, with their typing, as text. */
+function who(users: PresentUser[]): string {
+  return users.map((user) => (user.typing ? `${user.name} (typing)` : user.name)).join(", ") || "nobody";
+}
+
 function text(event: LiveEvent | undefined): string {
   if (event === undefined) return "none";
+  if (event.type === "presence") return `presence ${names.get(event.id) ?? event.id}: ${who(event.users)}`;
   return "id" in event ? `${event.type} ${names.get(event.id) ?? event.id}` : event.type;
 }
 
@@ -94,10 +112,15 @@ class Stream {
   }
 }
 
-/** Call the route as a user (or without a session), and return the response. */
-async function get(user: string | null, query = "", leave = new AbortController()): Promise<Response> {
+/** Sign in a user for the next calls, or sign out. */
+function signIn(user: string | null): void {
   if (user) jar.set("session", makeToken(user));
   else jar.delete("session");
+}
+
+/** Call the route as a user (or without a session), and return the response. */
+async function get(user: string | null, query = "", leave = new AbortController()): Promise<Response> {
+  signIn(user);
   return GET(new Request(`http://localhost/api/live${query}`, { signal: leave.signal }));
 }
 
@@ -228,6 +251,62 @@ step("a client that leaves has no subscription: the next changes go to the other
   await expectEvents({ ada: ["created Mop"], ben: [], dee: [] });
 });
 
+step("the users on the page of a task see the other users that may read the task (ADR 0052)", async () => {
+  /** Note a user on the page of a task, as the page does, and return the other users or the error. */
+  const here = async (user: string | null, id: string, typing = false): Promise<string> => {
+    signIn(user === null ? null : (users[user] ?? ""));
+    const result: ActionResult<PresentUser[]> = await hereTaskPresenceAction(id, typing);
+    return result.ok ? who(result.data) : `error ${result.error.name}`;
+  };
+  const task = await taskRepository.create({ title: "Plan", projectId: projects.red ?? "", status: "open" });
+  names.set(task.id, "Plan");
+  await expectEvents({ ada: ["created Plan"], ben: ["created Plan"], dee: [] });
+
+  // Ben opens the page of the task, then Ada: each one gets the other user.
+  assert.equal(await here("ben", task.id), "nobody");
+  await expectEvents({ ada: [], ben: [], dee: [] });
+  assert.equal(await here("ada", task.id), "Ben Member");
+  await expectEvents({ ada: [], ben: ["presence Plan: Ada Admin"], dee: [] });
+
+  // Ada types in a form: Ben gets her typing. A heartbeat without a change gives no event.
+  assert.equal(await here("ada", task.id, true), "Ben Member");
+  await expectEvents({ ada: [], ben: ["presence Plan: Ada Admin (typing)"], dee: [] });
+  assert.equal(await here("ada", task.id, true), "Ben Member");
+  assert.equal(await here("ben", task.id), "Ada Admin (typing)");
+  await expectEvents({ ada: [], ben: [], dee: [] });
+
+  // The reviewer may read only the done tasks, and a member only the tasks of the teams of the member.
+  assert.equal(await here("dee", task.id), "error NotFoundError");
+  assert.equal(await here("cy", task.id), "error NotFoundError");
+  assert.equal(await here(null, task.id), "error Error");
+  await expectEvents({ ada: [], ben: [], dee: [] });
+
+  // Ada leaves the page: Ben gets nobody.
+  signIn(users.ada ?? "");
+  const left: ActionResult<null> = await leaveTaskPresenceAction(task.id);
+  assert.ok(left.ok, `the leave failed: ${JSON.stringify(left)}`);
+  await expectEvents({ ada: [], ben: ["presence Plan: nobody"], dee: [] });
+
+  // Ada opens the page again after Ben. Without a call of Ben, the broker forgets Ben, and tells Ada.
+  assert.equal(await here("ben", task.id), "nobody");
+  const after = Date.now();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(await here("ada", task.id), "Ben Member");
+  await expectEvents({ ada: [], ben: ["presence Plan: Ada Admin"], dee: [] });
+  // Ben's call ended before `after`, and Ada's call started after it.
+  liveBroker().forget(after + PRESENCE_MS);
+  await expectEvents({ ada: ["presence Plan: nobody"], ben: [], dee: [] });
+  assert.deepEqual(
+    liveBroker()
+      .users("Task", task.id)
+      .map((user) => user.name),
+    ["Ada Admin"],
+  );
+  liveBroker().forget(Date.now() + PRESENCE_MS);
+  assert.deepEqual(liveBroker().users("Task", task.id), []);
+  await expectEvents({ ada: [], ben: [], dee: [] });
+});
+
 step("with Redis, the brokers of two replicas give each change to the streams of both", async () => {
   if (!redisUrl) {
     console.log("live-test: no APPGEN_LIVE_REDIS_URL, so no check of Redis");
@@ -262,6 +341,23 @@ step("with Redis, the brokers of two replicas give each change to the streams of
       assert.equal(await far.next(), `created ${id}`);
       assert.ok(Date.now() - start < LIMIT_MS, `the change ${id} took ${Date.now() - start} ms`);
     }
+
+    // The calls of the record pages go through Redis too: each replica knows the users of both.
+    names.set("board", "board");
+    const ben = new Feed(second.subscribe({ entities: new Set(["Task"]), user: users.ben ?? "", role: "member" }));
+    assert.deepEqual(second.here("Task", "board", users.ben ?? "", "Ben Member", false), []);
+    const known = () => first.users("Task", "board").length > 0 && second.users("Task", "board").length > 0;
+    for (let tries = 0; tries < 100 && !known(); tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(known(), "the brokers did not get the user of the second broker through Redis");
+    const start = Date.now();
+    const others = first.here("Task", "board", users.ada ?? "", "Ada Admin", true);
+    assert.equal(who(others), "Ben Member", "the first replica did not get the user of the second");
+    assert.equal(await ben.next(), "presence board: Ada Admin (typing)");
+    assert.ok(Date.now() - start < LIMIT_MS, `the presence took ${Date.now() - start} ms`);
+    first.leave("Task", "board", users.ada ?? "");
+    assert.equal(await ben.next(), "presence board: nobody");
   } finally {
     await Promise.all([first.close(), second.close()]);
   }

@@ -5636,6 +5636,11 @@
           "default": false,
           "title": "Share",
           "type": "boolean"
+        },
+        "presence": {
+          "default": false,
+          "title": "Presence",
+          "type": "boolean"
         }
       },
       "required": [

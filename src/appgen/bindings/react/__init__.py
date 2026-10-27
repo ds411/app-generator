@@ -19,6 +19,7 @@ from appgen.bindings.shared.auth import auth_rules
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.mock_data import MOCK_COUNT_KEY
 from appgen.bindings.shared.notices import notice_rules
+from appgen.bindings.shared.presence import presence_rules
 from appgen.bindings.shared.sharing import share_rules
 from appgen.gen.binding import Binding, ExtensionKey, Output
 
@@ -170,6 +171,7 @@ BINDING = Binding(
         *i18n_rules(),
         *auth_rules(),
         *share_rules(),
+        *presence_rules(),
         *notice_rules(),
         Output(
             template="src/shared/auth/index.ts.j2",

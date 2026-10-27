@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type PresenceApi", "type PresentUser"] if presences else []) + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 6 %}
 import {
 {% for type_name in type_names %}
@@ -311,6 +311,25 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
         const record = this.fromJson(await this.request("POST", id, undefined, suffix, this.translations()));
         this.notify();
         return record;
+      },
+    };
+  }
+
+{% endif %}
+{% if presences %}
+  /**
+   * Return the other users on the pages of the records (ADR 0052): `PUT`
+   * and `DELETE <path>/{id}/presence`. The FastAPI app checks the access.
+   */
+  presence(): PresenceApi {
+    return {
+      entity: this.entity,
+      here: async (id, typing) => {
+        const result = (await this.request("PUT", id, { typing }, "/presence")) as { users: PresentUser[] };
+        return result.users;
+      },
+      leave: async (id) => {
+        await this.request("DELETE", id, undefined, "/presence");
       },
     };
   }

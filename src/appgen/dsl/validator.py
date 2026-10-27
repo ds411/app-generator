@@ -2705,6 +2705,65 @@ def _check_page_share(definition: AppDefinition, name: str, page: Page) -> Itera
         )
 
 
+def _check_page_presence(definition: AppDefinition, name: str, page: Page) -> Iterator[Diagnostic]:
+    """A page with `presence` is a detail page with the path parameter `id` only, of a live
+    entity, in an app with `auth`, and not public (ADR 0052)."""
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "invalid-option",
+            "The page shows the names of the signed-in users, so 'presence' needs the section "
+            "'auth'.",
+            page,
+            at="presence",
+            hint="Add the section 'auth', or remove the key 'presence'.",
+        )
+        return
+    if name in auth.public_pages:
+        yield _error(
+            "invalid-option",
+            "A public page has no signed-in user, so it does not take 'presence'.",
+            page,
+            at="presence",
+            hint=f"Remove '{name}' from 'auth.public_pages', or remove the key 'presence'.",
+        )
+    ui = definition.ui
+    view_name = page.content.view if page.content is not None else None
+    view = ui.views.get(view_name) if ui is not None and view_name is not None else None
+    if not isinstance(view, DetailView):
+        yield _error(
+            "invalid-option",
+            "The page shows the users on one record, so 'presence' needs a page with a "
+            "detail view.",
+            page,
+            at="presence",
+            hint="Show a detail view on the page, or remove the key 'presence'.",
+        )
+        return
+    if set(re.findall(r"\{([a-z][a-z0-9_]*)\}", page.path)) != {"id"} or not page.path.endswith(
+        "/{id}"
+    ):
+        yield _error(
+            "invalid-option",
+            "The ID in the path names the record of the users, so the path of a page with "
+            f"'presence' ends with '/{{id}}' and has no other parameter. The path is "
+            f"'{page.path}'.",
+            page,
+            at="path",
+            hint="Use a path such as /lessons/{id}.",
+        )
+    entity = definition.entities.get(view.entity)
+    if entity is not None and entity.live is None:
+        yield _error(
+            "invalid-option",
+            "The users on a record get the changes through the live updates (ADR 0051), so "
+            f"'presence' needs 'live' on the entity '{view.entity}'.",
+            page,
+            at="presence",
+            hint=f"Add 'live: true' to the entity '{view.entity}', or remove the key 'presence'.",
+        )
+
+
 def _check_shared_paths(definition: AppDefinition) -> Iterator[Diagnostic]:
     """An entity has one page with `share` at most, and no page has the path of a shared page."""
     ui = definition.ui
@@ -2739,12 +2798,14 @@ def _check_shared_paths(definition: AppDefinition) -> Iterator[Diagnostic]:
 def check_pages(definition: AppDefinition) -> Iterator[Diagnostic]:
     """A page with `embed` is public, has no layout, and names https origins (ADR 0032). The
     metadata of a page reads fields of the record of a page of a record. A page with `share` is
-    a detail page (ADR 0049)."""
+    a detail page (ADR 0049), and a page with `presence` too (ADR 0052)."""
     auth = definition.auth
     yield from _check_shared_paths(definition)
     for name, page in definition.pages.items():
         if page.share:
             yield from _check_page_share(definition, name, page)
+        if page.presence:
+            yield from _check_page_presence(definition, name, page)
         if page.meta is not None:
             yield from _check_page_meta(definition, name, page, page.meta)
         if page.embed is None:

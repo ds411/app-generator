@@ -23,20 +23,28 @@ await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "
 {% set history = element.history %}
 {% set share = shares.get(name) %}
 {% set ranges = nextjs.ranges.get(name) %}
+{% set presence = presences.values() | selectattr("entity", "eq", name) | list %}
 {% if files or ranges %}
-import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, {{ "NotFoundError, " if files }}{{ "type OwnerRange, " if ranges }}{{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
+import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, {{ "NotFoundError, " if files }}{{ "type OwnerRange, " if ranges }}{{ "type PresentUser, " if presence }}{{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
 {% else %}
-import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
+import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", PresentUser" if presence }}{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
 {% endif %}
 import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
 {% if owned %}
 import { recordScope } from "@/shared/auth/access";
 {% endif %}
-{% if share %}
+{% if share and presence %}
+import { requireUser, sessionUserId } from "@/shared/auth/session";
+{% elif share %}
 import { sessionUserId } from "@/shared/auth/session";
+{% elif presence %}
+import { requireUser } from "@/shared/auth/session";
 {% endif %}
 {% if history %}
 import { historyPage, oldValues, restorable } from "@/shared/db/history";
+{% endif %}
+{% if presence %}
+import { liveBroker, notePresence } from "@/shared/db/live";
 {% endif %}
 {% if share %}
 import { makeShareLink, revokeShareLink, shareLinkState } from "@/shared/db/sharing";
@@ -328,6 +336,38 @@ export async function revoke{{ type }}ShareLinkAction(id: string): Promise<Actio
       return null;
     },
     {{ share_opts }},
+  );
+}
+{% endif %}
+{% if presence %}
+{# The presence needs a signed-in user, also with a public read operation. #}
+{% set presence_opts = ("{ operation: " ~ (ops["read"] | tojson) ~ " }") if "read" in ops and "read" not in public else "{}" %}
+
+{% for plan in presence %}
+{{ trace(plan.page_id) }}
+{% endfor %}
+/** Note the signed-in user on the page of a record, and return the other users on it (ADR 0052). */
+export async function here{{ type }}PresenceAction(id: string, typing: boolean): Promise<ActionResult<PresentUser[]>> {
+  return runAction(
+    async () => {
+      const record = await {{ var }}Repository.get(idSchema.parse(id){{ (", " ~ scope("read")) if "read" in owned }});
+      return notePresence({{ ts_value(name) }}, record.id, await requireUser(), typing === true);
+    },
+    {{ presence_opts }},
+  );
+}
+
+{% for plan in presence %}
+{{ trace(plan.page_id) }}
+{% endfor %}
+/** End the presence of the signed-in user on a record: the page closed. */
+export async function leave{{ type }}PresenceAction(id: string): Promise<ActionResult<null>> {
+  return runAction(
+    async () => {
+      liveBroker().leave({{ ts_value(name) }}, idSchema.parse(id), await requireUser());
+      return null;
+    },
+    {{ presence_opts }},
   );
 }
 {% endif %}

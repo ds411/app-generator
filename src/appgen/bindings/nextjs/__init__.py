@@ -28,6 +28,7 @@ from appgen.bindings.shared.events import ts_events
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.notices import notice_rules
+from appgen.bindings.shared.presence import presence_rules
 from appgen.bindings.shared.sharing import share_rules
 from appgen.bindings.shared.totals import rule_side_key
 from appgen.dsl.storage import format_size
@@ -230,6 +231,7 @@ BINDING = Binding(
         ),
         *auth_rules(),
         *share_rules(),
+        *presence_rules(),
         *notice_rules(),
         *forms.form_rules(),
         Output(

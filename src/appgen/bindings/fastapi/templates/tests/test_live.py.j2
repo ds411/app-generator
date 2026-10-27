@@ -1,4 +1,4 @@
-{{ trace_header(*py.live_ids) }}
+{{ trace_header(*(py.live_ids + py.presence_ids)) }}
 {% set lt = py.live_tests %}
 {% set auth = definition.auth %}
 {% set access = definition.access %}
@@ -10,6 +10,15 @@
 {% set _ = owners.update({t.entity.name: t.entity}) %}
 {% endfor %}
 {% set guarded = (py.live | rejectattr("live.public") | list) if auth else [] %}
+{% if py.presences %}
+"""The tests of the live updates (ADR 0051), and of the users on the record pages (ADR 0052).
+
+The HTTP client of the other tests gives a response only at its end, so
+these tests read the stream of `GET /live` from the ASGI messages of the
+app. The changes use the sessions of the app, whose broker sends the
+events after each commit.
+"""
+{% else %}
 """The tests of the live updates (ADR 0051): the events of the changes of the records.
 
 The HTTP client of the other tests gives a response only at its end, so
@@ -17,6 +26,7 @@ these tests read the stream of `GET /live` from the ASGI messages of the
 app. The changes use the sessions of the app, whose broker sends the
 events after each commit.
 """
+{% endif %}
 
 {% set ns = namespace(lines=[
     "import asyncio",
@@ -34,7 +44,7 @@ events after each commit.
     "from app.core.config import Settings",
     "from app.main import create_app",
 ]) %}
-{% set live_names = ["Broker", "Change", "LiveEvent", "Subscription", "Viewer", "end_streams_on_exit"] + (["Audience"] if py.live | selectattr("scoped") | list else []) %}
+{% set live_names = ["Broker", "Change", "LiveEvent", "Subscription", "Viewer", "end_streams_on_exit"] + (["Audience"] if py.live | selectattr("scoped") | list else []) + (["Here", "PresentUser", "message_of"] if py.presences else []) %}
 {% set ns.lines = ns.lines + [py.from_import("app.core.live", live_names)] %}
 {% set factories = [] %}
 {% set schemas = {} %}
@@ -58,10 +68,13 @@ events after each commit.
 {% set _ = factories.append("make_" ~ step_entity.snake) %}
 {% endfor %}
 {% endfor %}
+{% for e, role in lt.presence %}
+{% set _ = factories.append("make_" ~ e.snake) %}
+{% endfor %}
 {% if auth %}
 {% set _ = factories.append("make_" ~ u.snake) %}
 {% set ns.lines = ns.lines + ["from app.core.auth import make_token"] %}
-{% if first %}
+{% if first or lt.presence %}
 {% set ns.lines = ns.lines + ["from httpx import ASGITransport, AsyncClient"] %}
 {% endif %}
 {% endif %}
@@ -92,6 +105,7 @@ async def app(migrated_url: str, session: AsyncSession) -> AsyncIterator[FastAPI
     app = create_app(Settings(database_url=migrated_url))
 {% endif %}
     yield app
+    await app.state.live.close()
     await app.state.engine.dispose()
 
 
@@ -183,6 +197,26 @@ async def headers_of(session: AsyncSession) -> tuple[str, dict[str, str]]:
     user = await make_{{ u.snake }}(session)
 {% endif %}
     return str(user.id), {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+{% endif %}
+{% if lt.presence %}
+
+
+{% if access %}
+async def present_user(session: AsyncSession, role: str) -> tuple[dict[str, Any], dict[str, str]]:
+    """Store a user with a role, and return its entry in the users on a record, and its headers."""
+    user = await make_{{ u.snake }}(session, {{ role_field.name }}=role)
+{% else %}
+async def present_user(session: AsyncSession) -> tuple[dict[str, Any], dict[str, str]]:
+    """Store a user, and return its entry in the users on a record, and its headers."""
+    user = await make_{{ u.snake }}(session)
+{% endif %}
+    entry = {"id": str(user.id), "name": str(user.{{ lt.presence[0][0].presence.user_label }}), "typing": False}
+    return entry, {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+
+
+def presence(entity: str, id: UUID, users: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the event of the other users on the page of a record."""
+    return {"type": "presence", "entity": entity, "id": str(id), "users": users}
 {% endif %}
 {% for e in owners.values() %}
 
@@ -352,6 +386,85 @@ async def test_the_stream_of_the_role_{{ t.name }}_has_only_the_records_of_its_r
             assert await stream.next() == change("changed", "{{ e.name }}", mine.id)
 {% endif %}
 {% endfor %}
+{% for e, role in lt.presence %}
+{% set role_arg = (role | tojson) if access else "" %}
+
+
+{% for id in e.presence.ids %}
+{{ trace(id) }}
+{% endfor %}
+async def test_the_users_on_a_page_of_{{ e.snake }}_see_each_other(app: FastAPI) -> None:
+    async with sessions_of(app)() as session:
+        ada, ada_headers = await present_user(session{{ ", " ~ role_arg if access }})
+        ben, ben_headers = await present_user(session{{ ", " ~ role_arg if access }})
+        record = await make_{{ e.snake }}(session)
+    path = f"{{ e.path }}/{record.id}/presence"
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        open_stream(app, "entity={{ e.name }}", ada_headers) as stream,
+    ):
+        response = await client.put(path, json={"typing": False}, headers=ada_headers)
+        assert response.status_code == 200
+        assert response.json() == {"users": []}
+
+        response = await client.put(path, json={"typing": False}, headers=ben_headers)
+        assert response.json() == {"users": [ada]}
+        assert await stream.next() == presence("{{ e.name }}", record.id, [ben])
+
+        await client.put(path, json={"typing": True}, headers=ben_headers)
+        assert await stream.next() == presence("{{ e.name }}", record.id, [{**ben, "typing": True}])
+
+        # A call without a change gives no event. A user that leaves goes from the list.
+        await client.put(path, json={"typing": True}, headers=ben_headers)
+        assert (await client.delete(path, headers=ben_headers)).status_code == 204
+        assert await stream.next() == presence("{{ e.name }}", record.id, [])
+
+
+{% for id in e.presence.ids %}
+{{ trace(id) }}
+{% endfor %}
+async def test_the_presence_on_a_{{ e.snake }}_needs_a_user_and_a_record(app: FastAPI) -> None:
+    async with sessions_of(app)() as session:
+        _, headers = await present_user(session{{ ", " ~ role_arg if access }})
+    path = f"{{ e.path }}/{uuid4()}/presence"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.put(path, json={"typing": False})).status_code == 401
+        assert (await client.put(path, json={"typing": False}, headers=headers)).status_code == 404
+{% endfor %}
+{% if py.presences %}
+{% set e = py.presences[0] %}
+
+
+{{ trace(e.presence.id) }}
+async def test_the_broker_forgets_a_user_without_a_call() -> None:
+    broker = Broker()
+    record, ada, ben = uuid4(), uuid4(), uuid4()
+    subscription = broker.subscribe(Viewer(frozenset({"{{ e.name }}"}), ada))
+    broker.here("{{ e.name }}", record, ada, "Ada", False)
+    broker.here("{{ e.name }}", record, ben, "Ben", False)
+    users = [PresentUser(id=ben, name="Ben", typing=False)]
+    assert await subscription.next() == LiveEvent(
+        type="presence", entity="{{ e.name }}", id=record, users=users
+    )
+
+    broker.present["{{ e.name }}", record][ben].until = 0
+    broker.forget()
+
+    assert await subscription.next() == LiveEvent(
+        type="presence", entity="{{ e.name }}", id=record, users=[]
+    )
+    await broker.close()
+
+
+{{ trace(e.presence.id) }}
+def test_a_call_of_a_record_page_goes_through_redis_as_json() -> None:
+    for value in (
+        Here("{{ e.name }}", uuid4(), uuid4(), "Ada", typing=True),
+        Here("{{ e.name }}", uuid4(), uuid4(), left=True),
+        Change("{{ e.name }}", uuid4(), "created"),
+    ):
+        assert message_of(value.to_json()) == value
+{% endif %}
 
 
 def test_a_change_goes_through_redis_as_json() -> None:

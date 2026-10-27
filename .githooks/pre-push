@@ -151,7 +151,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
     'tests/fixtures/api-connections*' 'scripts/api_connection_test.py' \
     'tests/fixtures/invoices.yaml' 'tests/fixtures/listings*' 'tests/fixtures/courses*' \
-    'tests/fixtures/places.yaml' \
+    'tests/fixtures/places.yaml' 'tests/fixtures/record-rules.yaml' 'scripts/check_live_events.py' \
     'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
     'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps fastapi"

@@ -21,6 +21,10 @@ tasks of the project tracker:
 5. Send SIGTERM to the first process: its stream must end, and the
    process must stop in less than 10 s. (A server waits for the open
    requests before it stops.)
+6. Generate tests/fixtures/record-rules.yaml (a task page that shows the
+   other users on the task, ADR 0052), and run two brokers of its app
+   with one Redis: a user on a task of one broker must get a new user
+   on the task of the other broker in less than 2 s, and its leave.
 
 Run it from the repository root:
 
@@ -57,6 +61,7 @@ from typing import Any
 from check_shared_rate_limit import CheckError, get, redis, started
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+PRESENCE_DEFINITION = Path("tests/fixtures/record-rules.yaml")
 PORTS = (8441, 8442)
 REDIS_PORT = 6393
 REDIS_NAME = "appgen-check-redis-live"
@@ -64,6 +69,49 @@ LIMIT = 2.0
 """The seconds from a change to its event in an open view (the exit criteria of M37)."""
 STOP = 10
 """The seconds of a process with an open stream to stop after SIGTERM."""
+PRESENCE_CHECK = """\
+import asyncio
+import sys
+import time
+from uuid import uuid4
+
+from app.core.live import Broker, LiveEvent, PresentUser, Viewer
+
+
+async def main(url: str, limit: float) -> None:
+    first, second = Broker(url), Broker(url)
+    task, ada, ben = uuid4(), uuid4(), uuid4()
+    first.subscribe(Viewer(frozenset({"Task"}), ada))
+    subscription = second.subscribe(Viewer(frozenset({"Task"}), ben))
+    try:
+        # The brokers connect: Ben calls again until both brokers know him.
+        for _ in range(100):
+            second.here("Task", task, ben, "Ben", False)
+            await asyncio.sleep(0.1)
+            if first.users("Task", task) and second.users("Task", task):
+                break
+        else:
+            sys.exit("The brokers did not get the user of the second broker through Redis.")
+        start = time.monotonic()
+        others = first.here("Task", task, ada, "Ada", True)
+        if others != [PresentUser(id=ben, name="Ben", typing=False)]:
+            sys.exit(f"The first broker gave {others}, not Ben.")
+        event = await asyncio.wait_for(subscription.next(), limit)
+        ada_typing = [PresentUser(id=ada, name="Ada", typing=True)]
+        if event != LiveEvent(type="presence", entity="Task", id=task, users=ada_typing):
+            sys.exit(f"Ben got {event}, not Ada.")
+        print(f"{(time.monotonic() - start) * 1000:.0f}")
+        first.leave("Task", task, ada)
+        event = await asyncio.wait_for(subscription.next(), limit)
+        if event != LiveEvent(type="presence", entity="Task", id=task, users=[]):
+            sys.exit(f"Ben got {event}, not the leave of Ada.")
+    finally:
+        await asyncio.gather(first.close(), second.close())
+
+
+asyncio.run(main(sys.argv[1], float(sys.argv[2])))
+"""
+"""Two brokers of an app with presence in one process, with one Redis (ADR 0052)."""
 
 
 def log(message: str) -> None:
@@ -251,7 +299,33 @@ def check(out: Path) -> None:
                 f"With an open stream, the process did not stop in {STOP} s."
             ) from None
         log(f"the process stopped in {time.monotonic() - start:.1f} s")
+    check_presence(out / "presence")
     log("passed")
+
+
+def check_presence(app: Path) -> None:
+    """Check that two brokers with one Redis know the users on a record of both (ADR 0052)."""
+    log(f"generate {PRESENCE_DEFINITION} with fastapi in {app}")
+    generate = ["uv", "run", "--locked", "appgen", "generate", str(PRESENCE_DEFINITION)]
+    subprocess.run(
+        [*generate, "-b", "fastapi", "-o", str(app)], check=True, stdout=subprocess.DEVNULL
+    )
+    env = {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
+    subprocess.run(["uv", "sync", "--quiet"], cwd=app, check=True, env=env)
+    log("two brokers with one Redis: the users on a task of both brokers")
+    url = f"redis://127.0.0.1:{REDIS_PORT}/0"
+    with redis(REDIS_NAME, REDIS_PORT):
+        result = subprocess.run(
+            ["uv", "run", "python", "-c", PRESENCE_CHECK, url, str(LIMIT)],
+            cwd=app,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    if result.returncode != 0:
+        raise CheckError(f"The users on a task through Redis: {result.stderr.strip()}")
+    log(f"the users on the task came {result.stdout.strip()} ms after the call")
 
 
 def main() -> int:
