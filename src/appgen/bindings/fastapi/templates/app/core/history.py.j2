@@ -28,6 +28,9 @@ from app.core.i18n import t
 {% endif %}
 from app.core.pagination import Page
 from app.core.schemas import ReadModel
+{% if py.points %}
+from app.core.types import GeoPoint
+{% endif %}
 {% if u %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
 {% endif %}
@@ -83,10 +86,15 @@ def json_value(value: Any) -> JsonValue:
 
     An enum gives its value. A decimal number, a date, a time, and an ID
     give text: a time in UTC, and a decimal number without the zeros at
-    the end.
+    the end.{% if py.points %} A point gives `{"lat": ..., "lng": ...}`.{% endif %}
+
     """
     if isinstance(value, Enum):
         return value.value
+{% if py.points %}
+    if isinstance(value, GeoPoint):
+        return {"lat": value.lat, "lng": value.lng}
+{% endif %}
     if isinstance(value, Decimal):
         return format(value.normalize(), "f")
     if isinstance(value, dt.datetime):

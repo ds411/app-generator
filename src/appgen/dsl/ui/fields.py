@@ -105,6 +105,7 @@ WIDGET_TYPES: dict[str, frozenset[str] | None] = {
     "datetime": frozenset({"datetime"}),
     "relation": frozenset({*SINGLE_KINDS, "many_to_many"}),
     "file": FILE_TYPES,
+    "point": frozenset({"point"}),
     "lines": frozenset({"one_to_many"}),
     "custom": None,
 }
@@ -124,6 +125,7 @@ _DEFAULT_WIDGETS = {
     "datetime": "datetime",
     "file": "file",
     "image": "file",
+    "point": "point",
     "many_to_one": "relation",
     "one_to_one": "relation",
     "many_to_many": "relation",
