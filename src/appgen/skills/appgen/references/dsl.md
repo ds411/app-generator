@@ -1585,8 +1585,9 @@ notifications:
 
 A notification with `email: true` also sends each notice to the email
 address of the receiver ([ADR 0044](https://github.com/ds411/app-generator/blob/main/docs/adr/0044-notice-emails.md)). It
-needs `auth.delivery: smtp` (see [auth](#auth)): the apps send the
-emails with the SMTP server of the settings `SMTP_*`.
+needs `auth.delivery: smtp` or `ses` (see [auth](#auth)): the apps send
+the emails with the SMTP server of the settings `SMTP_*`, or with
+Amazon SES.
 
 - The notice waits for its email in the table `notices`. The built-in
   job `notice_emails` runs each minute (see [jobs](#jobs)), and sends
@@ -2959,9 +2960,22 @@ auth:
   `SMTP_PASSWORD`, `SMTP_FROM` (the sender), and `SMTP_TLS` (`starttls`
   by default, `tls`, or `none`) select the server. Without `SMTP_HOST`,
   the apps write the links to the log with `ENVIRONMENT=development`,
-  and give an error in production. `smtp` needs an address: the user
-  name field of the type `email`, or a required `email` field of the
-  user entity.
+  and give an error in production. With `ses`, the apps send them with
+  `SendEmail` of the API v2 of Amazon SES, and the delivery is not a
+  gap either. The apps read the AWS credentials from the default chain
+  of the AWS SDK (for example EKS Pod Identity, IRSA, or the role of an
+  ECS task), so the settings have no secret for the email. The settings
+  `AWS_REGION`, `SES_FROM` (a verified sender), and the optional
+  `SES_CONFIGURATION_SET` select the service, and the role needs the
+  IAM permission `ses:SendEmail`. Without `SES_FROM`, the apps write the
+  links to the log with `ENVIRONMENT=development`, and give an error in
+  production. When SES does not send a message, for example
+  `MessageRejected` in the sandbox of SES, the apps answer as for an
+  error of the SMTP server, and the log has the error code of SES but
+  not the link. `smtp` and `ses` also send the emails of the notices
+  (see [Emails of the notices](#emails-of-the-notices)). `smtp` and
+  `ses` need an address: the user name field of the type `email`, or a
+  required `email` field of the user entity.
 - `second_factor` lets each user with a password turn on a second factor
   of the sign-in: the codes of an authenticator app
   ([ADR 0024](https://github.com/ds411/app-generator/blob/main/docs/adr/0024-second-factor.md)). It is off by default.
@@ -3095,7 +3109,9 @@ kinds: its stub writes the link to the log with
 `ENVIRONMENT=development`, and gives 501 in production. With
 `delivery: smtp`, the app has no extension file: `app/core/mail.py`
 sends each message with `smtplib` in a thread, so that the request does
-not block the other requests. The subject and the text of a message are
+not block the other requests. With `delivery: ses`, `app/core/mail.py`
+sends each message with boto3 in a thread, and the app has the
+dependency `boto3`. The subject and the text of a message are
 in the language of the request. With
 `second_factor`, `POST /auth/second-factor/setup` gives a new secret
 and its `otpauth://` URI, and `POST /auth/second-factor/confirm` with a
@@ -3148,7 +3164,8 @@ the same token rules as the FastAPI app, and the link starts with
 (`deliverMessage`) delivers the messages of the verification and of the
 password reset, with the stub of the FastAPI app. With `delivery:
 smtp`, `src/shared/auth/mail.ts` sends them with the package
-`nodemailer` instead. The React app calls
+`nodemailer` instead, and with `delivery: ses`, with the package
+`@aws-sdk/client-sesv2`. The React app calls
 the endpoints of the FastAPI app: set `EMAIL_VERIFY_URL` to its page
 `/verify-email`. The React app with mock data has no verification: the
 sign-up signs in at once.

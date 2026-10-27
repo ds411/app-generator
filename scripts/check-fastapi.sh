@@ -14,7 +14,9 @@
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
 # example, which has the sign-in, the sign-up, the roles, and a
-# provider, and check its code and run its tests. Last, generate
+# provider, and check its code and run its tests. Generate it again with
+# `auth.delivery: ses` (Amazon SES), and check its code and run its tests
+# on SQLite. Last, generate
 # tests/fixtures/provider-sign-in.yaml (only the sign-in with
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
@@ -74,7 +76,8 @@
 #
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The other apps go to the folders
-# "<output folder>-room-booking", "<output folder>-provider-sign-in",
+# "<output folder>-room-booking", "<output folder>-room-booking-ses",
+# "<output folder>-provider-sign-in",
 # "<output folder>-cognito-sign-in",
 # "<output folder>-account-security", "<output folder>-seed-data",
 # "<output folder>-record-rules", "<output folder>-webhooks",
@@ -125,9 +128,10 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-jira" "$out-jira-accounts" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-room-booking-ses" "$out-room-booking-ses.yaml" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-jira" "$out-jira-accounts" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
 fi
 auth_out="$out-room-booking"
+ses_out="$out-room-booking-ses"
 provider_out="$out-provider-sign-in"
 cognito_out="$out-cognito-sign-in"
 security_out="$out-account-security"
@@ -261,6 +265,26 @@ if section fastapi:room-booking; then
     cd "$root"
     step "room booking: the sign-in with the mock provider"
     uv run --locked scripts/check_provider_sign_in.py "$auth_definition" "$auth_out"
+fi
+
+if section fastapi:room-booking-ses; then
+    step "room booking with SES: generate in $ses_out"
+    rm -rf "$ses_out"
+    mkdir -p "$ses_out"
+    ses_definition="$ses_out.yaml"
+    sed 's/^  delivery: smtp$/  delivery: ses/' "$auth_definition" >"$ses_definition"
+    grep -q '^  delivery: ses$' "$ses_definition"
+    uv run --locked appgen generate "$ses_definition" -b fastapi -o "$ses_out" >/dev/null
+    uv run --locked appgen check "$ses_definition" "$ses_out"
+    cd "$ses_out"
+    step "room booking with SES: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
 fi
 
 if section fastapi:provider-sign-in; then

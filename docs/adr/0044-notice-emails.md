@@ -74,6 +74,10 @@ notice of it in the bell and by email.
 - As for the messages of the sign-in, without `SMTP_HOST` the
   development app writes each email to the log. The production app
   writes an error to the log, and the emails wait.
+- Update (#491): `auth.delivery: ses` also sends the emails of the
+  notices, with the API of Amazon SES (ADR 0017), from `SES_FROM`. An
+  error of SES stops the run as an error of the SMTP server does.
+  Without `SES_FROM`, the development app writes each email to the log.
 
 The mentions (ADR 0043) give no emails.
 

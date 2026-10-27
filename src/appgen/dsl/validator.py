@@ -1499,13 +1499,15 @@ def check_notifications(definition: AppDefinition) -> Iterator[Diagnostic]:
                     what="receiver",
                 )
         yield from _check_notification_text(notification, entity)
-        if notification.email and auth is not None and auth.delivery != "smtp":
+        if notification.email and auth is not None and auth.delivery not in ("smtp", "ses"):
             yield _error(
                 "invalid-option",
-                "The emails of a notification need the delivery 'smtp' of the section 'auth'.",
+                "The emails of a notification need the delivery 'smtp' or 'ses' of the section "
+                "'auth'.",
                 notification,
                 at="email",
-                hint="Set 'delivery: smtp' in the section 'auth', or remove 'email'.",
+                hint="Set 'delivery: smtp' or 'delivery: ses' in the section 'auth', or remove "
+                "'email'.",
             )
 
 
@@ -1743,10 +1745,10 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
     for name in auth.public_operations:
         if name not in definition.operations:
             yield _missing(auth, "public_operations", "operation", name, definition.operations)
-    if auth.delivery == "smtp" and definition.address_field() is None:
+    if auth.delivery in ("smtp", "ses") and definition.address_field() is None:
         yield _error(
             "unsuitable-field",
-            "The delivery 'smtp' needs a field of the type 'email' in "
+            f"The delivery '{auth.delivery}' needs a field of the type 'email' in "
             f"'{auth.user_entity}' for the address of the messages.",
             auth,
             at="delivery",

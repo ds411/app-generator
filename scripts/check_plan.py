@@ -73,6 +73,8 @@ class App:
     """The keys that the test adds to the `app` section of the definition."""
     variant: str | None = None
     """A test script that writes another definition (VARIANTS)."""
+    replace: tuple[tuple[str, str], ...] = ()
+    """The texts that the test replaces in the definition, each one time (for example SES)."""
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,8 @@ UI_FILES = (
 API = {"x-react-data": "api"}
 """The key of the React app with the API client of the FastAPI app."""
 SKIPPED = {"node_modules", "__pycache__", ".venv", "test-results", ".DS_Store"}
+SES = (("  delivery: smtp\n", "  delivery: ses\n"),)
+"""The replacement that changes the delivery of the emails of a definition to Amazon SES."""
 VARIANTS = {"translation": "translation_test.py", "api-client": "api_client_test.py"}
 """The test scripts that write another definition of their apps."""
 
@@ -167,6 +171,7 @@ def fastapi_sections() -> Iterator[Section]:
         ),
     )
     yield Section("fastapi:room-booking", (App(ROOMS, "fastapi"),), ("check_provider_sign_in.py",))
+    yield Section("fastapi:room-booking-ses", (App(ROOMS, "fastapi", replace=SES),))
     yield Section(
         "fastapi:provider-sign-in",
         (fixture("provider-sign-in", "fastapi"),),
@@ -323,14 +328,23 @@ code."""
 
 def auth_ui_apps(part: str, binding: str) -> tuple[App, ...]:
     if part == "room-booking":
-        # Next.js and react-api also sign in through the mock user pool of Cognito.
+        # Next.js and react-api also sign in through the mock user pool of Cognito, and send the
+        # emails with Amazon SES.
         cognito = f"{FIXTURES}/cognito-sign-in.yaml"
         if binding == "react-api":
             keys = tuple(API.items())
-            bindings = ("react", "fastapi")
-            return tuple(App(d, b, keys=keys) for d in (ROOMS, cognito) for b in bindings)
+            return tuple(
+                App(d, b, keys=keys, replace=r)
+                for d, r in ((ROOMS, ()), (cognito, ()), (ROOMS, SES))
+                for b in ("react", "fastapi")
+            )
         if binding == "nextjs":
-            return (App(ROOMS, binding), fixture("record-rules", binding), App(cognito, binding))
+            return (
+                App(ROOMS, binding),
+                fixture("record-rules", binding),
+                App(cognito, binding),
+                App(ROOMS, binding, replace=SES),
+            )
         return (App(ROOMS, binding), fixture("record-rules", binding))
     apps: list[App] = []
     for name, extended in AUTH_UI_FIXTURES[part]:
@@ -496,6 +510,10 @@ def app_hash(app: App) -> str | None:
         with tempfile.TemporaryDirectory() as temp:
             path = variant_definition(app, Path(temp)) if app.variant else Path(app.definition)
             text = path.read_text()
+            for old, new in app.replace:
+                if old not in text:
+                    return None
+                text = text.replace(old, new, 1)
             if app.keys:
                 lines = "".join(f"  {key}: {value}\n" for key, value in app.keys)
                 text, count = re.subn(r"(?m)^app:\n", f"app:\n{lines}", text, count=1)

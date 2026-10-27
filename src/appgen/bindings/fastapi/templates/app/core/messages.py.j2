@@ -7,7 +7,8 @@
 """The messages of the sign-in to the users (ADR 0023): a subject, a text, and a link.
 
 The app makes each message in the language of the request. {% if py.smtp %}The module
-`app/core/mail.py` sends it by SMTP.{% else %}The delivery
+`app/core/mail.py` sends it by SMTP.{% elif py.ses %}The module
+`app/core/mail.py` sends it with Amazon SES.{% else %}The delivery
 hook `app/core/messages_ext.py` sends it.{% endif %}
 """
 

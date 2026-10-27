@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     """`development` for a local run: without `SMTP_HOST`, the app writes the emails to the log."""
 {% elif py.smtp %}
     """`development` for a local run: without `SMTP_HOST`, the app writes the links to the log."""
+{% elif py.ses and not py.message_elements %}
+    """`development` for a local run: without `SES_FROM`, the app writes the emails to the log."""
+{% elif py.ses %}
+    """`development` for a local run: without `SES_FROM`, the app writes the links to the log."""
 {% else %}
     """`development` for a local run: the stub of the delivery writes the links to the log."""
 {% endif %}
@@ -97,6 +101,15 @@ class Settings(BaseSettings):
     smtp_tls: Literal["starttls", "tls", "none"] = "starttls"
     """`starttls`: the connection changes to TLS. `tls`: TLS from the start. `none`: no
     TLS, only for a local test server."""
+{% endif %}
+{% if py.ses %}
+    aws_region: str = ""
+    """The AWS region of Amazon SES (`AWS_REGION`). Empty: the region of the AWS configuration."""
+    ses_from: str = ""
+    """The sender of the emails, a verified identity of SES, for example
+    `Example <no-reply@example.com>`. Empty: no delivery."""
+    ses_configuration_set: str = ""
+    """The configuration set of SES for the emails, for example for the events. Empty: none."""
 {% endif %}
 {% if py.notice_emails %}
     front_end_url: str = "http://localhost:5173"

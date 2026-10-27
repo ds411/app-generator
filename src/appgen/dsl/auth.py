@@ -226,11 +226,13 @@ class Auth(Element):
     """The sign-up of new users. Without it, only an administrator makes users."""
     password_reset: PasswordReset | None = None
     """The reset of a forgotten password with a link in a message. Off by default."""
-    delivery: Literal["extension", "smtp"] = "extension"
+    delivery: Literal["extension", "smtp", "ses"] = "extension"
     """The delivery of the messages of the password reset and of the email verification.
 
     `extension`: the extension file of the app sends them (ADR 0017). `smtp`:
-    the apps send them with the SMTP server of the settings `SMTP_*`.
+    the apps send them with the SMTP server of the settings `SMTP_*`. `ses`:
+    the apps send them with the API of Amazon SES and the AWS credentials of
+    the environment, from the sender `SES_FROM`.
     """
     password: bool = True
     """The sign-in with a user name and a password. `false`: only the sign-in with `providers`."""

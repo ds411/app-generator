@@ -146,13 +146,19 @@ BINDING = Binding(
         Output(
             template="app/core/messages_ext.py.j2",
             path="app/core/messages_ext.py",
-            when="py.message_elements and not py.smtp",
+            when="py.message_elements and not py.smtp and not py.ses",
             extension=True,
         ),
-        *(
-            Output(template=f"{path}.j2", path=path, when="py.smtp")
-            for path in ("app/core/mail.py", "tests/test_mail.py")
+        Output(template="app/core/mail.py.j2", path="app/core/mail.py", when="py.smtp"),
+        # The tests of the SMTP module check the messages of the sign-in.
+        Output(
+            template="tests/test_mail.py.j2",
+            path="tests/test_mail.py",
+            when="py.smtp and py.message_elements",
         ),
+        # The same modules with the API of Amazon SES (`auth.delivery: ses`).
+        Output(template="app/core/mail_ses.py.j2", path="app/core/mail.py", when="py.ses"),
+        Output(template="tests/test_mail_ses.py.j2", path="tests/test_mail.py", when="py.ses"),
         Output(
             template="app/core/access.py.j2", path="app/core/access.py", when="definition.access"
         ),

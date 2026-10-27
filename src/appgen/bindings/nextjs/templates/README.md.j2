@@ -276,6 +276,21 @@ server of `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
 Without `SMTP_HOST`, the app writes the links to the log with
 `ENVIRONMENT=development`. Set `PUBLIC_URL` to the URL of the app for
 the browsers: the links use it.
+{% elif nextjs.ses %}
+The app sends the messages with the links as emails with the API of
+Amazon SES (`SendEmail` of the API v2), from `SES_FROM`, a verified
+identity of SES, in the region `AWS_REGION`, with the optional
+configuration set `SES_CONFIGURATION_SET`. The app reads the AWS
+credentials from the default chain of the AWS SDK: the environment
+variables, the web identity or EKS Pod Identity, the role of an ECS
+task, or the instance profile. The role needs the IAM permission
+`ses:SendEmail` on the identity of the sender. On EKS, give the role to
+the service account of the pod with EKS Pod Identity or IRSA. In the
+sandbox of SES, the app can send only to verified addresses. Without
+`SES_FROM`, the app writes the links to the log with
+`ENVIRONMENT=development`. `AWS_ENDPOINT_URL_SESV2` changes the endpoint
+of SES, for example for a test server. Set `PUBLIC_URL` to the URL of
+the app for the browsers: the links use it.
 {% elif definition.auth.password_reset or (definition.auth.sign_up and definition.auth.sign_up.verify_email) %}
 Write the delivery of the messages (for example an email) in
 `src/shared/auth/messages.ext.ts`. Until then, with
@@ -501,8 +516,9 @@ the change log.
 {% if has_notice_emails(definition) %}
 - The notifications {% for n in email_notifications(definition) %}`{{ n.name }}`{{ ", " if not loop.last }}{% endfor %} also send each
   notice by email. The job `notice_emails` sends the emails that wait
-  each minute (`POST /api/jobs/notice_emails`), with the SMTP server of
-  `SMTP_*`. The links of an email start with `PUBLIC_URL`.
+  each minute (`POST /api/jobs/notice_emails`), {% if nextjs.ses %}with Amazon SES from
+  `SES_FROM`{% else %}with the SMTP server of
+  `SMTP_*`{% endif %}. The links of an email start with `PUBLIC_URL`.
 - The page `/notice-settings` (the link "Email settings" of the bell)
   turns the emails of each notification on or off for the signed-in
   user. The notices stay in the bell.

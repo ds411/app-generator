@@ -274,7 +274,7 @@ the change log.
 {% if py.notice_emails %}
 - The notifications {% for name in py.notice_emails.names %}`{{ name }}`{{ ", " if not loop.last }}{% endfor %} also
   send each notice by email. The job `notice_emails` of the worker sends
-  the emails that wait each minute, with the SMTP server of `SMTP_*`.
+  the emails that wait each minute, {% if py.ses %}with Amazon SES from `SES_FROM`{% else %}with the SMTP server of `SMTP_*`{% endif %}.
   The links of an email (the record, and the page of the settings) start
   with `FRONT_END_URL`.
 - `GET /notices/settings` gives the state of the emails of each
@@ -462,6 +462,21 @@ the token of each request, also on a public endpoint. Without a token,
   `none`). Without `SMTP_HOST`, the links go to the log with
   `ENVIRONMENT=development`, and the endpoints that send a message give
   501 in production.
+{% elif py.ses %}
+- The app sends the messages with the links as emails with the API of
+  Amazon SES (`SendEmail` of the API v2), from `SES_FROM`, a verified
+  identity of SES, in the region `AWS_REGION`, with the optional
+  configuration set `SES_CONFIGURATION_SET`. The app reads the AWS
+  credentials from the default chain of the AWS SDK: the environment
+  variables, the web identity or EKS Pod Identity, the role of an ECS
+  task, or the instance profile. The role needs the IAM permission
+  `ses:SendEmail` on the identity of the sender. On EKS, give the role
+  to the service account of the pod with EKS Pod Identity or IRSA. In
+  the sandbox of SES, the app can send only to verified addresses.
+  Without `SES_FROM`, the links go to the log with
+  `ENVIRONMENT=development`, and the endpoints that send a message give
+  501 in production. `AWS_ENDPOINT_URL_SESV2` changes the endpoint of
+  SES, for example for a test server.
 {% elif py.message_elements %}
 - Write the delivery of the messages with the links (for example an
   email) in `app/core/messages_ext.py`. Until then, the links go to the
