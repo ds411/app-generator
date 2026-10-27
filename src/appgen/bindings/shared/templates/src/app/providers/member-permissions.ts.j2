@@ -1,0 +1,27 @@
+{{ trace_header(memberships.element_id) }}
+{% set scoped = memberships.paths | list | sort %}
+{% set watched = (scoped + [memberships.entity]) | unique | sort %}
+// The memberships (ADR 0048) in the UI: the call `permissions` of the data
+// access of each entity of the scope gives the operations of the
+// memberships of the user on its records. A change of the records of an
+// entity of the scope, or of the memberships, forgets the answers.
+{% for entity in watched %}
+import { {{ entity | camel }}Api{{ ", " ~ (entity | camel) ~ "Permissions" if entity in scoped }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+import type { MemberPermissions } from "@/shared/api";
+import { forgetPermissions, setPermissionsSource } from "@/shared/lib/member-access";
+
+const SOURCES: Readonly<Record<string, (ids: string[]) => Promise<MemberPermissions>>> = {
+{% for entity in scoped %}
+  {{ entity }}: {{ entity | camel }}Permissions,
+{% endfor %}
+};
+
+setPermissionsSource((entity, ids) => {
+  const load = SOURCES[entity];
+  return load === undefined ? Promise.resolve({ operations: [], records: {} }) : load(ids);
+});
+
+for (const api of [{% for entity in watched %}{{ entity | camel }}Api{{ ", " if not loop.last }}{% endfor %}]) {
+  api.subscribe(forgetPermissions);
+}

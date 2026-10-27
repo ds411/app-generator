@@ -10,6 +10,11 @@ import { Toaster } from "@/shared/ui/sonner";
 
 import { LiveUpdates } from "./live-updates";
 {% endif %}
+{% if memberships %}
+
+// The data access of the memberships, for the actions of the UI (ADR 0048).
+import "./member-permissions";
+{% endif %}
 
 {% if i18n %}
 /** The toasts, with their labels in the selected language. */

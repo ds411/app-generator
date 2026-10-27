@@ -34,7 +34,7 @@ export async function {{ fn }}Action(
 {% for id in rule.element_ids %}
       {{ trace(id) }}
 {% endfor %}
-      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id), await recordScope({{ ts_value(element.entity) }}, "change"));
+      const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id), await recordScope({{ ts_value(element.entity) }}, "change"{% if memberships and rule.scope is not none %}, {{ ts_value(name) }}{% endif %}));
 {% else %}
       const record = await {{ element.entity | camel }}Repository.get(idSchema.parse(id));
 {% endif %}

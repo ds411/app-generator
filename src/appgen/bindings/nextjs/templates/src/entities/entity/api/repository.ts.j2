@@ -3,11 +3,12 @@
 {% set var = name | camel %}
 {% set rules = record_rules.get(name) %}
 {% set condition = nextjs.owner_conditions.get(name) %}
+{% set in_scope = nextjs.scope_conditions.get(name) %}
 {% set totals = nextjs.totals.get(name) %}
 {% set notify = nextjs.notify.get(name) %}
 {% set ranges = nextjs.ranges.get(name) %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) + ((ranges.tables + ["getDb"]) if ranges else []) %}
-{% set operators = (condition.operators if condition else []) + (totals.operators if totals else []) + (ranges.operators if ranges else []) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + ((in_scope.tables + (["getDb"] if rules.scope | length > 1 else [])) if in_scope else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) + ((ranges.tables + ["getDb"]) if ranges else []) %}
+{% set operators = (condition.operators if condition else []) + (in_scope.operators if in_scope else []) + (totals.operators if totals else []) + (ranges.operators if ranges else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
 
@@ -127,6 +128,18 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   belongsTo: (user) =>
     {{ condition.code }},
+{% endif %}
+{% if in_scope %}
+{% if rules.scope %}
+  // The records in some scopes of the memberships: the path {{ rules.scope | map(attribute="relation") | join(".") }} (ADR 0048).
+{% for step in rules.scope %}
+  {{ trace(step.element_id) }}
+{% endfor %}
+{% else %}
+  // The records of {{ name }} are the scopes of the memberships (ADR 0048). {{ trace(memberships.element_id) }}
+{% endif %}
+  inScopes: (scopes) =>
+    {{ in_scope.code }},
 {% endif %}
 {% if table.lists %}
   manyToMany: [

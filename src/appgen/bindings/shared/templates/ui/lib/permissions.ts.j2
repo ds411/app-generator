@@ -5,7 +5,11 @@
 // operations or pages. A public page or operation needs no role.{% if record_rules %}
 
 // The record rules (ADR 0018, ADR 0025) limit a role to some records: the
-// records of its user, or the records with some values.{% endif +%}
+// records of its user, or the records with some values.{% endif %}{% if memberships %}
+
+// The memberships (ADR 0048) give a user a role in a record of {{ memberships.scope }}: the
+// role gives operations on the records of the scope, if the role of the
+// user does not give them.{% endif +%}
 import type { PageName } from "@/shared/config/pages";
 
 const ALL = "*";
@@ -65,6 +69,16 @@ export type RecordScope = {
   owner: boolean;
   /** The values that each field must have: one of the values of the list. */
   where: Readonly<Record<string, readonly RecordValue[]>>;
+{% if memberships %}
+  /**
+   * The IDs of the scopes whose memberships give the operation (ADR 0048):
+   * the user uses only the records of these scopes. Undefined if the role
+   * of the user gives the operation.
+   */
+  scopes?: readonly string[];
+  /** The IDs of all scopes of the memberships of the user. */
+  memberOf?: readonly string[];
+{% endif %}
 };
 
 const RECORD_RULES: Record<string, Record<string, RecordRule>> = {
@@ -116,5 +130,41 @@ export function hasValuesOf(scope: RecordScope, record: object): boolean {
 export function fixedValue<V>(scope: RecordScope | null, key: string): V | undefined {
   const values = scope?.where[key];
   return values?.length === 1 ? (values[0] as V) : undefined;
+}
+{% endif %}
+{% if memberships %}
+{% set m = memberships %}
+
+/** A membership of a user (ADR 0048): the ID of the scope record of {{ m.scope }}, and the role in it. */
+export type Membership = { scope: string; role: string };
+
+/** The operations of each role of the memberships, on the records of its scopes. */
+const MEMBER_ROLES: Record<string, readonly string[]> = {
+{% for name, ops in m.roles.items() %}
+  {{ name | tojson }}: {{ ops | tojson }}, {{ trace(m.role_ids[name]) }}
+{% endfor %}
+};
+
+/** The entity of each operation that a role of the memberships gives. */
+export const MEMBER_OPERATIONS: Readonly<Record<string, string>> = {
+{% for name, entity in m.operation_entities.items() %}
+  {{ name }}: {{ entity | tojson }},
+{% endfor %}
+};
+
+/** The operations of the memberships on one record: the record must be in a scope of the operation. */
+const RECORD_OPERATIONS: readonly string[] = {{ m.record_operations | list | tojson }};
+
+/** The entities of the scope: the scope records, and the records whose path ends at one. */
+export const SCOPE_ENTITIES: readonly string[] = {{ m.paths | list | tojson }}; {{ trace(m.element_id) }}
+
+/** Return the IDs of the scopes of the memberships whose role gives an operation. */
+export function scopesOf(memberships: readonly Membership[], operation: string): string[] {
+  return memberships.filter((item) => MEMBER_ROLES[item.role]?.includes(operation) === true).map((item) => item.scope);
+}
+
+/** Return true if an operation is on one record: a membership gives it only in the scope of the record. */
+export function onRecord(operation: string): boolean {
+  return RECORD_OPERATIONS.includes(operation);
 }
 {% endif %}

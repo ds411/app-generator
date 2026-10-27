@@ -8,6 +8,9 @@
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 import type { PageName } from "@/shared/config/pages";
+{% if memberships %}
+import { memberGives, useMemberPermissions } from "@/shared/lib/member-access";
+{% endif %}
 {% if record_rules %}
 import { type RecordScope, recordScopeOf, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% else %}
@@ -19,6 +22,13 @@ export type Access = {
   canOpenPage: (page: PageName) => boolean;
   /** Return true if the user may call an operation. */
   canCall: (operation: string) => boolean;
+{% if memberships %}
+  /**
+   * Return true if the user may call an operation on some records: the role
+   * gives it, or a membership gives it in the scope of each record (ADR 0048).
+   */
+  canCallOn: (operation: string, ids: readonly string[]) => boolean;
+{% endif %}
 {% if record_rules %}
   /**
    * Return the records that the user may change, of the record rule of the
@@ -31,6 +41,18 @@ export type Access = {
 };
 
 {% if record_rules %}
+{% if memberships %}
+function accessOf(role: string | null, userId: string | null): Access {
+  const canCallOn = (operation: string, ids: readonly string[]) =>
+    roleMayCall(role, operation) || memberGives(userId, operation, ids);
+  return {
+    canOpenPage: (page) => roleMayOpenPage(role, page),
+    canCall: (operation) => canCallOn(operation, []),
+    canCallOn,
+    scopeOf: (entity) => recordScopeOf(role, userId, entity, "change"),
+  };
+}
+{% else %}
 function accessOf(role: string | null, userId: string | null): Access {
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
@@ -38,6 +60,7 @@ function accessOf(role: string | null, userId: string | null): Access {
     scopeOf: (entity) => recordScopeOf(role, userId, entity, "change"),
   };
 }
+{% endif %}
 
 // Without a provider, the user has no role: only the public pages and operations.
 const AccessContext = createContext<Access>(accessOf(null, null));
@@ -71,7 +94,18 @@ export function AccessProvider({ role, children }: { role: string | null; childr
   return <AccessContext value={access}>{children}</AccessContext>;
 }
 
+{% if memberships %}
+/**
+ * Return the permissions of the signed-in user. The component renders
+ * again when the data access gives the operations of the memberships.
+ */
+export function useAccess(): Access {
+  useMemberPermissions();
+  return useContext(AccessContext);
+}
+{% else %}
 /** Return the permissions of the signed-in user. */
 export function useAccess(): Access {
   return useContext(AccessContext);
 }
+{% endif %}

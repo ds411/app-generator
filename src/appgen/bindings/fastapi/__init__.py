@@ -268,6 +268,13 @@ BINDING = Binding(
             for_each="entity",
             when="py.entity(name).share",
         ),
+        # The operations of the memberships on the records, for the front end (ADR 0048).
+        Output(
+            template="app/features/slice/permissions.py.j2",
+            path=_SLICE + "/permissions.py",
+            for_each="entity",
+            when="py.entity(name).scope_path is not none",
+        ),
         Output(
             template="app/features/slice/validation_ext.py.j2",
             path=_SLICE + "/validation_ext.py",

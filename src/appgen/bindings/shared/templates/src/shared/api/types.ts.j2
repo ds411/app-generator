@@ -130,6 +130,20 @@ export type SharedRecord<T extends EntityRecord, R = EntityRecord> = {
 };
 
 {% endif %}
+{% if memberships %}
+/**
+ * The operations that the memberships of the signed-in user give on the
+ * records of an entity of the scope (ADR 0048), without the operations of
+ * the role of the user.
+ */
+export type MemberPermissions = {
+  /** The operations that a membership gives on some records of the entity. */
+  operations: readonly string[];
+  /** The operations that a membership gives on each record, by ID. */
+  records: Readonly<Record<string, readonly string[]>>;
+};
+
+{% endif %}
 {% if has_notices(definition) %}
 /** A notice for the signed-in user: a change of a record that concerns the user (ADR 0041). */
 export type Notice = {

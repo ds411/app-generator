@@ -291,6 +291,16 @@ export type ExpectedSessions = {
     /** The text that a revoked link shows. */
     invalid: string;
   } | null;
+  /**
+   * The roles of the memberships (ADR 0048). A user with two roles in two
+   * scopes sees the button of a change on the page of a record in the
+   * first scope, and not in the second. The button of a create shows for
+   * one user, and not for the other.
+   */
+  memberships?: {
+    record: { username: string; label: string; pages: { path: string; title: string }[] };
+    create: { path: string; title: string; label: string; shown: string; hidden: string };
+  } | null;
 };
 
 export type Expected = {

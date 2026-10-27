@@ -891,12 +891,16 @@ class OwnerCondition:
     """The tables to import from `@/shared/db`, sorted."""
 
 
-def belongs_to(steps: Sequence[PathStep], tables: dict[str, Table], indent: int) -> OwnerCondition:
+def belongs_to(
+    steps: Sequence[PathStep], tables: dict[str, Table], indent: int, scopes: bool = False
+) -> OwnerCondition:
     """Return the Drizzle condition of the records of `user` through an owner path (ADR 0025).
 
     A many-to-one step compares its foreign key with the IDs of the next
     entity, and a many-to-many step finds the IDs in its join table. The
-    last step compares with `user`. Each inner step is a subquery.
+    last step compares with `user`. Each inner step is a subquery. With
+    `scopes`, the path goes to the scope entity of the memberships (ADR 0048),
+    and the last step finds its foreign key in the IDs `scopes`.
     """
     operators: set[str] = set()
     used: set[str] = set()
@@ -927,6 +931,9 @@ def belongs_to(steps: Sequence[PathStep], tables: dict[str, Table], indent: int)
 
     def target(index: int, column: str) -> TsCode:
         """The condition of a column with the ID of the target of step `index`."""
+        if index == len(steps) - 1 and scopes:
+            operators.add("inArray")
+            return TsCall("inArray", [column, "[...scopes]"])
         if index == len(steps) - 1:
             operators.add("eq")
             return TsCall("eq", [column, "user"])
@@ -945,3 +952,17 @@ def belongs_to(steps: Sequence[PathStep], tables: dict[str, Table], indent: int)
 
     code = format_ts(condition(0), indent)
     return OwnerCondition(code, sorted(operators), sorted(used))
+
+
+def in_scopes(
+    entity: str, steps: Sequence[PathStep], tables: dict[str, Table], indent: int
+) -> OwnerCondition:
+    """Return the Drizzle condition of the records in the scopes `scopes` (ADR 0048).
+
+    A record of the scope entity is a scope. The record of another entity
+    of the scope is in the scope at the end of its path.
+    """
+    if not steps:
+        table = tables[entity]
+        return OwnerCondition(f"inArray({table.const}.id, [...scopes])", ["inArray"], [table.const])
+    return belongs_to(steps, tables, indent, scopes=True)

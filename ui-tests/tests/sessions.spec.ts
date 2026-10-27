@@ -1,12 +1,14 @@
 // The front ends show the values of the signed-in user (M36): the value
 // `$me` of the filters of the widgets and the views, of the totals, and of
 // the defaults of the forms. A user shares a record with a secret link
-// (ADR 0049). scripts/sessions_ui_test.py starts the app of
-// tests/fixtures/courses.yaml, and runs this file. Without the values of
-// the users (`expected.sessions`), the tests skip.
+// (ADR 0049). The actions of a page follow the role of the user in the
+// scope of the record (ADR 0048). scripts/sessions_ui_test.py starts the
+// app of tests/fixtures/courses.yaml, and runs this file. Without the
+// values of the users (`expected.sessions`), the tests skip.
 import { expect, type Page, test } from "@playwright/test";
 
 import { expected } from "./expected";
+import { saveAndClose } from "./forms";
 
 const sessions = expected.sessions;
 
@@ -130,4 +132,49 @@ test("a guest opens the secret link of a record without a sign-in", async ({ pag
   await page.goto(link.pathname);
   await expect(page.getByText(share.invalid, { exact: true })).toBeVisible();
   await expect(heading).toHaveCount(0);
+});
+
+test("the actions of a page follow the role of the user in the scope of the record", async ({ page }, testInfo) => {
+  const memberships = sessions?.memberships;
+  test.skip(!memberships || testInfo.project.name !== "light", "The app has no memberships.");
+  if (!memberships) return;
+  const password = sessions?.password ?? "";
+  const { record, create } = memberships;
+  const [allowed, denied] = record.pages;
+  if (!allowed || !denied) throw new Error("The test needs two records.");
+  const button = page.getByRole("button", { name: record.label, exact: true });
+
+  // The role of the scope of the first record gives the change: the button shows, and the save passes.
+  await signIn(page, record.username, password);
+  await page.goto(allowed.path);
+  await expect(page.getByRole("heading", { name: allowed.title, exact: true })).toBeVisible();
+  await expect(button).toBeVisible();
+  const sheet = page.getByRole("dialog");
+  await expect(async () => {
+    if (!(await sheet.isVisible())) {
+      await button.click({ timeout: 2_000 });
+    }
+    await expect(sheet).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+  await saveAndClose(sheet);
+
+  // The role of the scope of the second record does not give the change.
+  await page.goto(denied.path);
+  await expect(page.getByRole("heading", { name: denied.title, exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(button).toHaveCount(0);
+  await signOut(page);
+
+  // A role of a membership gives the create to one user, and no role gives it to the other.
+  const createButton = page.getByRole("button", { name: create.label, exact: true });
+  await signIn(page, create.shown, password);
+  await page.goto(create.path);
+  await expect(page.locator("h1").first()).toHaveText(create.title);
+  await expect(createButton).toBeVisible();
+  await signOut(page);
+  await signIn(page, create.hidden, password);
+  await page.goto(create.path);
+  await expect(page.locator("h1").first()).toHaveText(create.title);
+  await page.waitForLoadState("networkidle");
+  await expect(createButton).toHaveCount(0);
 });

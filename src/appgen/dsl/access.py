@@ -167,3 +167,24 @@ def scope_entities(definition: AppDefinition) -> dict[str, str]:
     if scope is None or definition.access is None or definition.access.memberships is None:
         return {}
     return {scope: "", **definition.access.memberships.paths}
+
+
+def membership_roles(definition: AppDefinition) -> dict[str, list[str]]:
+    """Return the operations of each role of the memberships, sorted, with `*` expanded.
+
+    `*` gives the operations of the entities of the scope, without the
+    queries.
+    """
+    access = definition.access
+    if access is None or access.memberships is None:
+        return {}
+    scoped = scope_entities(definition)
+    everything = [
+        name
+        for name, op in definition.operations.items()
+        if op.entity in scoped and op.kind != "query"
+    ]
+    return {
+        name: sorted(everything if ALL in role.operations else role.operations)
+        for name, role in access.memberships.roles.items()
+    }

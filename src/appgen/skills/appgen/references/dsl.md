@@ -3206,10 +3206,17 @@ operation that no role of the user gives. A list gives the records of
 these scopes. A read, a change, or a delete of a record in another
 scope of the user gives 403, and of a record out of all scopes of the
 user gives 404. A create or a change that puts a record out of these
-scopes gives 403, and the record does not change. The front ends do not
-apply the memberships yet: the trace check of the Next.js app reports
-them as gaps, and the trace check of the React app as uncovered
-elements.
+scopes gives 403, and the record does not change.
+
+The front ends apply the memberships too. The server actions of the
+Next.js app use only the records of the scopes, with the same errors. The
+React app shows the records that the FastAPI app gives, and with mock
+data the mock store applies the memberships in the browser, as a
+demonstration. An action of an operation that only a membership gives
+shows on a record in a scope whose role gives the operation, and not on
+the other records: the UI asks the server for the operations of the
+memberships of the user on the records of the page. An action of a
+create or a list shows if a membership in some scope gives it.
 
 ## translations
 
@@ -3489,6 +3496,7 @@ use in the app does not show.
   `Another record has the same value, and the value must be unique.`,
   `Sign in to do this.`, `Your role may not do this operation.`,
   `Your role may not give a record these values.`,
+  `Your role in the scope of the record may not do this operation.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.

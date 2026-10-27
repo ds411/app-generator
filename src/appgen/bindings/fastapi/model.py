@@ -2313,6 +2313,8 @@ class PyEntity:
             modules.add("history")
         if self.share is not None:
             modules.add("share")
+        if self.scope_path is not None:
+            modules.add("permissions")
         if modules:
             lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)

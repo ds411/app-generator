@@ -12,6 +12,9 @@ export {
 {% if element.history %}
   {{ var }}History,
 {% endif %}
+{% if memberships and record_rules.get(name) and record_rules[name].scope is not none %}
+  {{ var }}Permissions,
+{% endif %}
 {% if shares.get(name) %}
   {{ var }}Sharing,
 {% endif %}
