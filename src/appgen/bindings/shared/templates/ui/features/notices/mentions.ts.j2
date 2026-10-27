@@ -1,0 +1,41 @@
+{{ trace_header(*(mention_plans(definition) | map(attribute="id"))) }}
+// The mentions of users in a text (ADR 0043). A mention is
+// `@[<display value>](<ID of the user>)`: the views show it as a link,
+// and a new mention gives the user a notice.
+
+/** A mention of a user in a text: the display value and the ID of the user. */
+const MENTION = /@\[([^[\]\n]+)\]\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/g;
+
+/** A part of a text with mentions: a text, or the mention of a user. */
+export type MentionPart = { text: string } | { name: string; id: string };
+
+/** Return the parts of a text: the texts between the mentions, and the mentions. */
+export function mentionParts(text: string): MentionPart[] {
+  const parts: MentionPart[] = [];
+  let last = 0;
+  for (const match of text.matchAll(MENTION)) {
+    if (match.index > last) {
+      parts.push({ text: text.slice(last, match.index) });
+    }
+    parts.push({ name: match[1] ?? "", id: match[2] ?? "" });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) {
+    parts.push({ text: text.slice(last) });
+  }
+  return parts;
+}
+
+/** Return the IDs of the users that a text mentions, each one time. */
+export function mentionedIds(text: unknown): string[] {
+  if (typeof text !== "string") {
+    return [];
+  }
+  return [...new Set([...text.matchAll(MENTION)].map((match) => (match[2] ?? "").toLowerCase()))];
+}
+
+/** Return the mention of a user for a text. The name has no brackets and no line breaks. */
+export function mentionToken(name: string, id: string): string {
+  const clean = name.replace(/[[\]\n]+/g, " ").trim();
+  return `@[${clean || id}](${id})`;
+}

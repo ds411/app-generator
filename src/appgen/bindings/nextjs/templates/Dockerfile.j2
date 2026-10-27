@@ -24,6 +24,12 @@ FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
+{% if ui_views.map_tiles %}
+# The tiles of the maps (see the README): the build puts them in the code
+# of the browser. Without a value, the maps use the tiles of OpenStreetMap.
+ARG NEXT_PUBLIC_MAP_TILES
+ARG NEXT_PUBLIC_MAP_ATTRIBUTION
+{% endif %}
 # The migrations belong to the app (pnpm db:generate). Without them, the
 # build writes the first migration from the schema.
 RUN if [ ! -d drizzle ]; then pnpm db:generate; fi

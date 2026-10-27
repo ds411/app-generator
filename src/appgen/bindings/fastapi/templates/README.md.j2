@@ -158,7 +158,7 @@ in UTC.
 | Job | When | What |
 | --- | ---- | ---- |
 {% for job in py.jobs.values() %}
-| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
+| `{{ job.name }}` | {% if job.schedule %}The schedule `{{ job.schedule.expression }}`{% else %}The time of `{{ job.at.name }}`{{ " " ~ job.offset if job.offset != "0m" }}{% endif %} | {% if job.entity %}The operation `{{ job.operation.name }}` on each {{ job.entity.name }} record of the filter{% elif job.builtin %}The daily values of the stat widgets with `snapshots: daily` (built in){% else %}`app/jobs/{{ job.module }}_ext.py`{% endif %} |
 {% endfor %}
 
 - A run is for one record (or for none) and one time. The table
@@ -241,7 +241,7 @@ each token, and a record has one link at most.
   page shows. A link does not expire.
 
 {% endif %}
-{% if py.notifications %}
+{% if py.notices %}
 ## Notices
 
 A change of a record gives each user that it concerns a notice in the
@@ -254,6 +254,9 @@ the change log.
 {% for n in py.notifications %}
 | `{{ n.name }}` | {{ n.summary() }} | {% for r in n.receivers %}`{{ r.path }}`{{ ", " if not loop.last }}{% endfor %} | {{ n.text }} |
 {% endfor %}
+{% for m in py.mentions %}
+| `@mention` | A new mention in `{{ m.name }}` of a {{ m.entity }} | The users that the text mentions for the first time | You are mentioned in {record}. |
+{% endfor %}
 
 - `GET /notices` gives the notices of the signed-in user, the newest
   first, with the text in the language of the request. `unread=true`
@@ -263,6 +266,11 @@ the change log.
 - A notice keeps the values of its text from the time of the change.
 - A change outside the repository functions gives no notice: SQL in a
   script, and the seed.
+{% if py.mentions %}
+- A mention in a text with mentions is `@[<name>](<ID of the user>)`.
+  The notice goes to each user that a new or a changed text mentions for
+  the first time. A mention of an ID without a user gives no notice.
+{% endif %}
 
 {% endif %}
 {% if py.live %}

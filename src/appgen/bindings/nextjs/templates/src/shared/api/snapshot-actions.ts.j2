@@ -1,0 +1,23 @@
+{{ trace_header(*(nextjs.snapshots.charts | map(attribute="id"))) }}
+"use server";
+
+import { z } from "zod";
+
+import { readSnapshots, type SnapshotValue } from "@/shared/db/snapshots";
+
+import type { ActionResult } from "./errors";
+import { runAction } from "./server";
+
+// The server actions of the charts of snapshots (ADR 0042): the stored
+// daily values of a stat. A user who may list the records of the stat may
+// read its values.
+
+/** The rules of the day of today in the time zone of the user. */
+const daySchema = z.iso.date();
+{% for chart in nextjs.snapshots.charts %}
+
+/** Return the values of the stat `{{ chart.stat }}` of the {{ chart.days }} days up to `today`. */
+export async function {{ chart.action }}(today: string): Promise<ActionResult<SnapshotValue[]>> { {{ trace(chart.id) }}
+  return runAction(() => readSnapshots({{ chart.dashboard | tojson }}, {{ chart.stat | tojson }}, {{ chart.days }}, daySchema.parse(today)){{ chart.options }});
+}
+{% endfor %}

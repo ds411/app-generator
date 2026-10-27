@@ -13,9 +13,9 @@ from appgen.dsl.schema import json_schema
 from appgen.dsl.ui.fields import default_widget, resolve_path
 from appgen.dsl.ui.views import AreaFilter, NearFilter, TableView
 from appgen.gen import GenerationResult, find_binding, generate
-from appgen.gen.render import GenerationError
 
 ROOT = Path(__file__).parent.parent
+API_APP = "app: { name: sites, title: Sites, x-react-data: api }"
 PLACES = ROOT / "tests" / "fixtures" / "places.yaml"
 BASE = dedent(
     """\
@@ -286,9 +286,46 @@ def test_the_mock_records_have_points_near_the_default() -> None:
 
 
 @pytest.mark.parametrize("binding", ["nextjs", "react"])
-def test_the_front_ends_stop_for_a_point_field(binding: str) -> None:
-    with pytest.raises(GenerationError, match="does not generate 'point' fields yet"):
-        files(binding=binding)
+def test_the_front_ends_show_filter_and_edit_a_point(binding: str) -> None:
+    app = files(BASE, binding=binding)
+    assert (
+        "export type GeoPoint = {\n  lat: number;\n  lng: number;\n};"
+        in app["src/shared/api/types.ts"]
+    )
+    assert "location: GeoPoint;" in app["src/entities/site/model/types.ts"]
+    form = app["src/features/new-site-form/ui/new-site-form.tsx"]
+    assert '<PointInput id="new-site-location"' in form
+    assert "Enter a latitude and a longitude." in form
+    assert '"Latitude"' in app["src/shared/ui/form-widgets/point-input.tsx"]
+    view = app["src/widgets/sites/ui/sites-view.tsx"]
+    assert "isNear(row.location, filters.nearby)" in view
+    assert "inBox(row.location, filters.inMap)" in view
+    assert 'nearby: { point: "", distance: 2.5 }' in view
+    assert "<NearFilter " in view and "<AreaFilter " in view
+    assert 'case "point": {' in app["src/shared/lib/format.ts"]
+    # The area filter shows a map, so the app has Leaflet.
+    assert "leaflet" in app["package.json"]
+    if binding == "nextjs":
+        schema = app["src/shared/db/schema/site.ts"]
+        assert 'location: jsonb("location").$type<GeoPoint>().notNull()' in schema
+
+
+def test_the_react_app_of_the_api_sends_the_geo_filters() -> None:
+    view = files(BASE.replace("app: { name: sites, title: Sites }", API_APP), binding="react")[
+        "src/widgets/sites/ui/sites-view.tsx"
+    ]
+    assert "location_near: nearParam(filters.nearby)," in view
+    assert "location_distance: filters.nearby.distance," in view
+    assert "location_area: filters.inMap ? boxText(filters.inMap) : null," in view
+    assert '"region.center_near": nearParam(filters.nearRegion),' in view
+
+
+def test_a_front_end_without_a_point_has_no_geo_code() -> None:
+    app = files(BASE.replace("type: point", "type: string").split("ui:\n")[0], binding="nextjs")
+    assert "src/shared/lib/geo.ts" not in app
+    assert "src/shared/ui/geo-map.tsx" not in app
+    assert "leaflet" not in app["package.json"]
+    assert "GeoPoint" not in app["src/shared/api/types.ts"]
 
 
 @pytest.fixture(scope="module")

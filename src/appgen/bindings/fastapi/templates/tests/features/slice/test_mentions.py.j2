@@ -1,0 +1,75 @@
+{% set e = py.entity(name) %}
+{{ trace_header(*(e.mentions | map(attribute="id"))) }}
+{% set u = py.entity(e.mentions[0].user_entity) %}
+{% set factories = (["make_" ~ e.snake] + (["make_" ~ u.snake] if u.name != e.name else [])) | sort %}
+"""The tests of the mentions in the texts of {{ e.name }} (ADR 0043).
+
+A user that a new or a changed text mentions for the first time gets a
+notice, except the user that made the change. A mention is
+`@[<name>](<ID of the user>)`.
+"""
+
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import USER_KEY
+from app.core.notifications import MENTION, Notice, notice_text
+from app.features.{{ e.slice }} import repository
+from app.features.{{ e.slice }}.schemas import {{ e.name }}Update
+from tests.factories import {{ factories | join(", ") }}
+
+pytestmark = pytest.mark.anyio
+
+
+async def mentions(session: AsyncSession, id: UUID) -> list[Notice]:
+    """Return the notices of the mentions of a record."""
+    statement = select(Notice).where(Notice.notification == MENTION, Notice.record_id == id)
+    return list(await session.scalars(statement))
+{% for m in e.mentions %}
+
+
+{{ trace(m.id) }}
+{{ py.signature("async def test_a_new_mention_in_" ~ m.name ~ "_gives_the_user_a_notice", ["session: AsyncSession"], " -> None:") }}
+    user = await make_{{ u.snake }}(session)
+    other = await make_{{ u.snake }}(session)
+{% if m.two_mentions %}
+    text = f"@[A]({user.id}) @[A]({user.id})"
+{% else %}
+    text = f"@[A]({user.id})"
+{% endif %}
+
+    record = await make_{{ e.snake }}(session, {{ m.attr }}=text)
+
+    found = await mentions(session, record.id)
+    assert [notice.user_id for notice in found] == [user.id]
+    assert "{" not in notice_text(found[0])
+{% if m.two_mentions %}
+    # The mention of the user stays: only the new mention gives a notice.
+    changed = f"@[A]({user.id}) @[B]({other.id})"
+{% else %}
+    changed = f"@[B]({other.id})"
+{% endif %}
+    changes = {{ e.name }}Update.model_validate({"{{ m.name }}": changed})
+    await repository.update(session, record, changes)
+    found = await mentions(session, record.id)
+    assert len(found) == 2
+    assert {notice.user_id for notice in found} == {user.id, other.id}
+
+
+{{ trace(m.id) }}
+{{ py.signature("async def test_a_mention_in_" ~ m.name ~ "_of_the_user_of_the_change_or_of_no_user_gives_no_notice", ["session: AsyncSession"], " -> None:") }}
+    user = await make_{{ u.snake }}(session)
+    session.info[USER_KEY] = user.id
+{% if m.two_mentions %}
+    text = f"@[A]({user.id}) @[B]({uuid4()})"
+{% else %}
+    text = f"@[B]({uuid4()})"
+{% endif %}
+
+    record = await make_{{ e.snake }}(session, {{ m.attr }}=text)
+
+    assert await mentions(session, record.id) == []
+{% endfor %}

@@ -379,6 +379,66 @@ def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any]
     return None
 
 
+def expected_mention(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
+    """Return the values of the test of the mentions (ADR 0043): a text, and the user it mentions.
+
+    A user of a role with all operations edits a record of the first entity
+    with a text with mentions and a detail page, with the edit form of the
+    page, and mentions another user from the list of the text area. The
+    detail page shows the mention as a link to the page of the user, if one
+    exists. Then the user signs in, and finds the notice in the bell. The
+    user is not a user of the other tests, and the record breaks no
+    `no_overlap` rule.
+    """
+    auth, access = definition.auth, definition.access
+    assert auth is not None and access is not None
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    actor = next(
+        (u for u in users if Permissions(definition, u.get(access.role_field)).operation(ALL)),
+        None,
+    )
+    if actor is None:
+        return None
+    names = definition_display(definition.entities[auth.user_entity])
+    receiver = next(
+        (
+            u
+            for u in users
+            if u["id"] != actor["id"] and u[auth.username_field] not in used and u.get(names)
+        ),
+        None,
+    )
+    user_page = detail_page(definition, auth.user_entity)
+    for entity_name, entity in definition.entities.items():
+        field = next((n for n, f in entity.fields.items() if f.mentions), None)
+        page = detail_page(definition, entity_name)
+        record = next(
+            (r for r in data[entity_name] if not overlaps(definition, entity_name, r)), None
+        )
+        if field is None or page is None or record is None or receiver is None:
+            continue
+        title = record.get(definition_display(entity)) or record["id"]
+        return {
+            "actor": actor[auth.username_field],
+            "receiver": receiver[auth.username_field],
+            "name": str(receiver[names]),
+            "path": page.path.replace("{id}", str(record["id"])),
+            "field": str(entity.fields[field].label or label(field)),
+            "userPath": user_page.path.replace("{id}", str(receiver["id"])) if user_page else None,
+            "text": f"You are mentioned in {title}.",
+        }
+    return None
+
+
+def detail_page(definition: AppDefinition, entity: str) -> Page | None:
+    """Return the first page of a record of an entity, with the path parameter `{id}`."""
+    return next(
+        (p for p in definition.pages.values() if p.entity == entity and p.path.endswith("/{id}")),
+        None,
+    )
+
+
 def entity_pages(
     definition: AppDefinition, entity: str, allowed: Permissions
 ) -> tuple[str | None, str | None]:
@@ -621,6 +681,9 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
     password_reset = expected_password_reset(binding, definition, app, used)
     if password_reset is not None:
         used.add(password_reset["username"])
+    mention = expected_mention(definition, used)
+    if mention is not None:
+        used.add(mention["receiver"])
     anonymous = Permissions(definition, None)
     public = next(
         definition.pages[n] for n in auth.public_pages if "{" not in definition.pages[n].path
@@ -641,6 +704,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         "recordRules": record_checks,
         "providers": expected_providers(binding, definition),
         "notice": notice,
+        "mention": mention,
     }
 
 

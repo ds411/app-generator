@@ -1,18 +1,24 @@
-"""The `point` fields of the entities in the bindings (ADR 0046)."""
+"""The `point` fields of the entities in the front ends (ADR 0046).
+
+A record has a point as `GeoPoint` (`{ lat, lng }` in degrees), from
+`@/shared/api`. The views filter the points in the browser, or send the
+geo parameters to the list endpoint of the FastAPI app.
+"""
 
 from appgen.dsl.model import AppDefinition
-from appgen.gen.render import GenerationError
+
+DEFAULT_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+"""The tiles of a map without a setting: the standard tiles of OpenStreetMap."""
+DEFAULT_ATTRIBUTION = (
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+)
+"""The attribution of the default tiles, as the tile usage policy of OpenStreetMap asks."""
 
 
-def reject_point_fields(definition: AppDefinition, binding: str) -> None:
-    """Raise GenerationError if an entity has a `point` field.
-
-    The bindings add the point fields one after the other. A binding calls
-    this function until it generates the code of the point fields.
-    """
-    for entity in definition.entities.values():
-        for field in entity.fields.values():
-            if field.is_point:
-                raise GenerationError(
-                    f"The binding '{binding}' does not generate 'point' fields yet: '{field.id}'."
-                )
+def has_points(definition: AppDefinition) -> bool:
+    """Return True if an entity has a `point` field."""
+    return any(
+        field.is_point
+        for entity in definition.entities.values()
+        for field in entity.fields.values()
+    )

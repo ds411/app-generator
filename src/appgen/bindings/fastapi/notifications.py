@@ -4,7 +4,8 @@
 notification, and the endpoints of the notices of the signed-in user.
 The repository of each entity with a notification adds the notices of a
 change in the transaction of the change, after the events and the
-change log.
+change log. A `text` field with mentions (ADR 0043) gives a notice to
+each user that a new or a changed text mentions for the first time.
 """
 
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, literal, string
 from appgen.bindings.shared.i18n import I18nPlan
+from appgen.bindings.shared.notices import MENTION, MENTION_TEXT
 from appgen.dsl.model import AppDefinition
 from appgen.gen.naming import constant
 from appgen.gen.render import GenerationError
@@ -231,12 +233,68 @@ def _values(values: list[PyNoticeValue], indent: int) -> str:
     return "\n".join(lines)
 
 
+@dataclass(slots=True)
+class PyMention:
+    """A `text` field with mentions (ADR 0043): a new mention of a user gives a notice."""
+
+    name: str
+    """The name of the field."""
+    id: str
+    entity: str
+    """The model of the entity."""
+    attr: str
+    """The attribute of the field."""
+    label: str | None
+    """The attribute of the display field of the entity, or None: the text has the ID."""
+    user_entity: str
+    """The model of the user entity of `auth`."""
+    max_length: int | None = None
+    """The most characters of the text, or None."""
+
+    @property
+    def two_mentions(self) -> bool:
+        """True if the text can hold two mentions, for the tests: 90 characters."""
+        return self.max_length is None or self.max_length >= 90
+
+    def call(self, indent: int) -> str:
+        """Return the statement of `mention` in the repository that adds the notices."""
+        label = f"text_value(record.{self.label})" if self.label else "str(record.id)"
+        args = [
+            "session",
+            f"{self.user_entity}.id",
+            string(self.entity),
+            "record.id",
+            label,
+            f"record.{self.attr}",
+            f'None if before is None else before["{self.attr}"]',
+        ]
+        return call("await ", "add_mentions", args, indent)
+
+    def sample(self) -> PyNotification:
+        """Return the notices of the mentions as a notification, for the tests of the notices."""
+        return PyNotification(
+            name=MENTION,
+            id=self.id,
+            entity=self.entity,
+            kind="mention",
+            text=MENTION_TEXT,
+            receivers=[],
+            values=[PyNoticeValue(name="record", attr=self.label or "id")],
+            user_entity=self.user_entity,
+        )
+
+
 def python_notifications(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
-    """Give the entities their notifications (ADR 0041).
+    """Give the entities their notifications (ADR 0041) and their fields with mentions
+    (ADR 0043).
 
     Raise GenerationError if an entity has the table of the notices.
     """
-    if not definition.notifications:
+    auth = definition.auth
+    mentions = auth is not None and any(
+        f.mentions for e in definition.entities.values() for f in e.fields.values()
+    )
+    if not definition.notifications and not mentions:
         return
     for entity in entities.values():
         if entity.table == TABLE:
@@ -244,6 +302,19 @@ def python_notifications(definition: AppDefinition, entities: dict[str, PyEntity
                 f"The entity '{entity.name}' has the table '{TABLE}' of the notices. Give it "
                 "another table with x-fastapi-table."
             )
+    if auth is not None:
+        users = entities[auth.user_entity].name
+        for entity_name, entity in definition.entities.items():
+            py_entity = entities[entity_name]
+            label = _label_attr(definition, py_entity)
+            for f in py_entity.fields:
+                dsl = entity.fields[f.name]
+                if dsl.mentions:
+                    py_entity.mentions.append(
+                        PyMention(
+                            f.name, dsl.id, py_entity.name, f.attr, label, users, dsl.max_length
+                        )
+                    )
     for name, notification in definition.notifications.items():
         py_entity = entities[notification.entity]
         fields = {f.name: f for f in py_entity.fields}

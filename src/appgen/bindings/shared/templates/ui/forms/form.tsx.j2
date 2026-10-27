@@ -34,8 +34,9 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if plan.entity in plan.lookups or (plan.host_page and uses_record and plan.record_param) %}
 import { {{ plan.entity | camel }}Api } from "@/entities/{{ plan.entity | kebab }}";
 {% endif %}
-{% if plan.files %}
-import type { FileValue } from "@/shared/api";
+{% set points = plan.fields | selectattr("kind", "eq", "point") | list %}
+{% if plan.files or points %}
+import type { {{ "FileValue" if plan.files }}{{ ", " if plan.files and points }}{{ "GeoPoint" if points }} } from "@/shared/api";
 {% endif %}
 {% if plan.scoped %}
 import { useAccess } from "@/shared/lib/access";
@@ -99,6 +100,9 @@ import { {{ plan.file_imports | join(", ") }} } from "@/shared/ui/form-widgets/f
 {% if "number_format" in widgets %}
 import { NumberInput } from "@/shared/ui/form-widgets/number-input";
 {% endif %}
+{% if "point" in widgets %}
+import { PointInput } from "@/shared/ui/form-widgets/point-input";
+{% endif %}
 {% if "radio" in widgets %}
 import { OptionRadio } from "@/shared/ui/form-widgets/option-radio";
 {% endif %}
@@ -107,6 +111,9 @@ import { OptionSelect } from "@/shared/ui/form-widgets/option-select";
 {% endif %}
 {% if relation_names %}
 import { {{ relation_names | join(", ") }} } from "@/shared/ui/form-widgets/relation-select";
+{% endif %}
+{% if "mentions" in widgets %}
+import { MentionTextarea } from "@/shared/ui/form-widgets/mention-textarea";
 {% endif %}
 {% for f in editors %}
 
@@ -133,7 +140,7 @@ type Values = {
 };
 
 type RouteParams = Readonly<Record<string, string | undefined>>;
-{% for f in plan.widget_fields if f.options and not f.target %}
+{% for f in plan.widget_fields if f.options and not f.target and not f.mentions %}
 
 const {{ f.options_const }} = {{ f.options }};
 {% endfor %}

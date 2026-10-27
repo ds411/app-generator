@@ -12,6 +12,10 @@ A file field (ADR 0027) keeps the file of the record (`FileValue`), a
 new `File`, or `null`. The input of the operation has no files: after
 the operation, the form uploads the new files and deletes the removed
 files with the file API of the entity (`<entity>Files`).
+
+A point field (ADR 0046) keeps a `GeoPoint` or `null`. Its widget has
+an input for the latitude and one for the longitude: a value that is
+not a number is `NaN`, so that the zod schema of the entity reports it.
 """
 
 from collections.abc import Callable
@@ -37,7 +41,18 @@ from appgen.gen.binding import Output
 from appgen.gen.naming import camel, kebab, pascal, snake
 
 type ValueKind = Literal[
-    "text", "number", "enum", "one", "many", "boolean", "date", "datetime", "json", "file", "lines"
+    "text",
+    "number",
+    "enum",
+    "one",
+    "many",
+    "boolean",
+    "date",
+    "datetime",
+    "json",
+    "file",
+    "lines",
+    "point",
 ]
 
 _KINDS: dict[str, ValueKind] = {
@@ -53,6 +68,7 @@ _KINDS: dict[str, ValueKind] = {
     "datetime": "datetime",
     "enum": "enum",
     "json": "json",
+    "point": "point",
 }
 _EMPTY: dict[ValueKind, str] = {
     "text": '""',
@@ -114,6 +130,9 @@ class FieldPlan:
     source: str | None = None
     """For a relation of a form that searches on the server: the option source, for example
     `personOptions`. The field then has no `options`."""
+    mentions: str | None = None
+    """For a text with mentions (ADR 0043): the user entity. `options` or `source` give the
+    users that the widget suggests after `@`."""
     initial: str = ""
     """The TypeScript initial value, of `record` and `routeParams`."""
     checks: list[Check] = field(default_factory=list[Check])
@@ -458,6 +477,10 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
             plan.source = f"{camel(plan.target)}Options"
             plan.options = None
             plan.widget = "relation"
+        if server and plan.mentions is not None:
+            # The server searches the users of the mentions.
+            plan.source = f"{camel(plan.mentions)}Options"
+            plan.options = None
         member = by_name.get(field_name)
         if params is None and member is not None and member.field and member.field.translatable:
             _translations(definition, plan, operation.kind == "update")
@@ -526,7 +549,7 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
             f'import {{ {", ".join(names)} }} from "@/features/{kebab(form.operation)}";'
         )
     widget_fields = [c for f in fields for c in (f.lines.columns if f.lines else [f])]
-    sources = sorted({f.target for f in widget_fields if f.source and f.target})
+    sources = sorted({t for f in widget_fields if f.source for t in (f.target or f.mentions,) if t})
     line_names = _line_imports(fields, operation.kind == "update", preview_keys)
     if entity in sources:
         entity_names.append(f"{camel(entity)}Options")
@@ -546,7 +569,9 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
     for f in fields:
         if f.gap_name:
             imports.append(f'import {{ {f.gap_name} }} from "{f.gap_module}";')
-    lookups = sorted({f.target for f in widget_fields if f.target and not f.source})
+    lookups = sorted(
+        {t for f in widget_fields if not f.source for t in (f.target or f.mentions,) if t}
+    )
     host = next(
         (
             p_name
@@ -783,6 +808,16 @@ def _member_field(
         assert member.field is not None
         plan = _value_field(name, member.key, form_field, member.field, widget)
         plan.required = member.input_required
+        if member.field.mentions and definition.auth is not None and widget != "custom":
+            # The widget suggests the users after `@` (ADR 0043).
+            users = definition.auth.user_entity
+            display = camel(definition_display(definition.entities[users]))
+            plan.widget = "mentions"
+            plan.mentions = users
+            plan.options = (
+                f"[...lookups.{camel(users)}.values()].map((item) => "
+                f'({{ value: item.id, label: String(item.{display} ?? "") }}))'
+            )
     plan.to_input = _to_input(plan, member.nullable, member.input_required)
     _widget_options(plan, form_field)
     return plan
@@ -816,6 +851,8 @@ def _value_field(
         value_type = "boolean"
     elif kind == "number":
         value_type = "number | null"
+    elif kind == "point":
+        value_type = "GeoPoint | null"
     else:
         value_type = "string | null"
     plan = FieldPlan(
@@ -830,6 +867,8 @@ def _value_field(
         input_type=_INPUT_TYPES.get(value.type, "text"),
         required_message="Select a value."
         if kind in ("enum", "date", "datetime")
+        else "Enter a latitude and a longitude."
+        if kind == "point"
         else "Enter a value.",
     )
     if kind == "enum":
@@ -1154,6 +1193,8 @@ def form_rules() -> tuple[Output, ...]:
                 ("number-input", "'number_format' in ui_forms.widgets"),
                 ("relation-select", "ui_forms.relations"),
                 ("file-input", "ui_forms.files"),
+                ("point-input", "'point' in ui_forms.widgets"),
+                ("mention-textarea", "'mentions' in ui_forms.widgets"),
             )
         ),
         Output(

@@ -142,6 +142,25 @@ export type ExpectedAuth = {
     /** The text of the notice. */
     text: string;
   } | null;
+  /**
+   * The mentions (ADR 0043): a user with all operations mentions another
+   * user in a text with the edit form of the detail page of a record. The
+   * other user finds the notice in the bell.
+   */
+  mention?: {
+    /** The user names of the user of the change and of the user of the mention. */
+    actor: string;
+    receiver: string;
+    /** The display value of the user of the mention. */
+    name: string;
+    /** The detail page of the record, and the label of the text with mentions. */
+    path: string;
+    field: string;
+    /** The page of the user of the mention, or null: the mention shows without a link. */
+    userPath: string | null;
+    /** The text of the notice. */
+    text: string;
+  } | null;
 };
 
 /** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */
@@ -190,6 +209,25 @@ export type ExpectedQueryViews = {
     events: string[];
     others: string[];
   };
+};
+
+/** The map of the places of tests/fixtures/places.yaml, for scripts/places_ui_test.py (ADR 0046). */
+export type ExpectedPlaces = {
+  path: string;
+  /** The title of the map view: the name of the map. */
+  title: string;
+  /** The start of the URLs of the tiles: the local tile server. */
+  tiles: string;
+  /** The names of all places, in the order of the list. */
+  all: string[];
+  /** The names of the places after a move of the map to the south. */
+  south: string[];
+  /** The label of the near filter, a point, and the names of the places near it. */
+  near: { label: string; value: string; names: string[] };
+  /** The name of the place whose marker the test opens. */
+  marker: string;
+  /** The form of a new place: its path, the name, and the latitude and the longitude. */
+  form: { path: string; name: string; lat: string; lng: string };
 };
 
 /** The values of the signed-in users, for scripts/sessions_ui_test.py (M36). */
@@ -241,6 +279,8 @@ export type Expected = {
   queryViews?: ExpectedQueryViews;
   /** Only for the test of the signed-in users. */
   sessions?: ExpectedSessions;
+  /** Only for the test of the map views. */
+  places?: ExpectedPlaces;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

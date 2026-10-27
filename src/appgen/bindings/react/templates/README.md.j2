@@ -142,6 +142,24 @@ The app has mock data, so the page keeps the connections in
 
 {% endif %}
 {% endif %}
+{% if ui_views.map_tiles %}
+## Maps
+
+The map views and the area filters show the tiles of a tile server with
+Leaflet. The build variable `VITE_MAP_TILES` sets the URL of the tiles,
+with `{z}`, `{x}`, and `{y}`, and `VITE_MAP_ATTRIBUTION` sets
+their attribution as HTML. Without a value, the maps use the standard
+tiles of OpenStreetMap. Read the
+[tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+of OpenStreetMap, and use a tile server of your own or of a provider in
+production:
+
+```sh
+VITE_MAP_TILES='https://tiles.example.com/{z}/{x}/{y}.png' \
+  VITE_MAP_ATTRIBUTION='&copy; Example' pnpm build
+```
+
+{% endif %}
 {% if react.history %}
 ## Change log
 
@@ -184,12 +202,20 @@ notice can have its old values again.
 {% for name, n in definition.notifications.items() %}
 | `{{ name }}` | {{ notice_summary(n) }} | {% for r in n.receivers %}`{{ r }}`{{ ", " if not loop.last }}{% endfor %} | {{ n.text }} |
 {% endfor %}
+{% for m in mention_plans(definition) %}
+| `@mention` | A new mention in `{{ m.name }}` of a {{ m.entity }} | The users that the text mentions for the first time | You are mentioned in {record}. |
+{% endfor %}
 
 - The bell in the top bar shows the count of the unread notices of the
   signed-in user, and the newest notices. A click on a notice marks it
   read, and opens the detail page of its record. "Mark all read" marks
   all notices of the user read.
 - A notice keeps the values of its text from the time of the change.
+{% if has_mentions(definition) %}
+- A text with mentions (`mentions: true`) shows a list of the users
+  after `@` in the forms. A mention is `@[<name>](<ID of the user>)` in
+  the text, and the views show it as `@<name>`{{ " with a link to the page of the user" if mention_link(definition) }}.
+{% endif %}
 
 {% endif %}
 {% if shares %}

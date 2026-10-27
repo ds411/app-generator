@@ -124,8 +124,7 @@ def test_edge_cases_use_each_field_type_relation_kind_and_operation_kind() -> No
     field_types = {field.type for entity in entities for field in entity.fields.values()}
     kinds = {relation.kind for entity in entities for relation in entity.relations.values()}
     operations = {operation.kind for operation in definition.operations.values()}
-    # The edge cases get the point fields when all bindings generate them (ADR 0046).
-    assert field_types == set(FIELD_TYPES) - {"point"}
+    assert field_types == set(FIELD_TYPES)
     assert kinds == set(RELATION_KINDS)
     assert operations == set(OPERATION_KINDS)
 

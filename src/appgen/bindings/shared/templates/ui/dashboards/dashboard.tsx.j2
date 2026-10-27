@@ -42,6 +42,11 @@ import { {{ entity | camel }}Api, type {{ entity | pascal }} } from "@/entities/
 {% if served | selectattr("kind", "eq", "list") | list %}{% set api = api + ["widgetRecords"] %}{% endif %}
 import { {{ api | join(", ") }} } from "@/shared/api";
 {% endif %}
+{% set snapshot_actions = plan.snapshot_actions %}
+{% if snapshot_actions %}
+import { unwrap } from "@/shared/api";
+import { {{ snapshot_actions | map(attribute="action") | join(", ") }} } from "@/shared/api/snapshot-actions";
+{% endif %}
 {% for line in plan.imports %}
 {{ line }}
 {% endfor %}
@@ -56,6 +61,7 @@ import { badges } from "@/shared/config/badges";
 {% if "groupRows(" in code %}{% set agg = agg + ["groupRows"] %}{% endif %}
 {% if "intervalRows(" in code %}{% set agg = agg + ["intervalRows"] %}{% endif %}
 {% if "matchesOp(" in code %}{% set agg = agg + ["matchesOp"] %}{% endif %}
+{% if "snapshotData(" in code %}{% set agg = agg + ["snapshotData"] %}{% endif %}
 {% if "ChartDatum" in (functions | map(attribute="returns") | join(" ")) %}{% set agg = agg + ["type ChartDatum"] %}{% endif %}
 {% if agg %}
 import { {{ agg | join(", ") }} } from "@/shared/lib/aggregate";
@@ -106,6 +112,9 @@ import { BadgeValue } from "@/shared/ui/values/badge-value";
 {% endif %}
 {% if "<FormattedValue" in render %}
 import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% if "<MentionText" in render %}
+import { MentionText } from "@/shared/ui/values/mention-text";
 {% endif %}
 {% set file_names = (["FileLink"] if "<FileLink" in render else []) + (["ImageValue"] if "<ImageValue" in render else []) %}
 {% if file_names %}
@@ -202,18 +211,35 @@ type DashboardData = {
 {% endfor %}
   };
   lookups: Lookups;
+{% if snapshot_actions %}
+  /** The stored daily values of the charts of snapshots (ADR 0042). */
+  snapshots: {
+{% for w in snapshot_actions %}
+    {{ w.function }}: { key: string; value: number | null }[];
+{% endfor %}
+  };
+{% endif %}
 };
 
-/** Read the records of the entities that the widgets show. */
+/** Read the records of the entities that the widgets show{{ ", and the stored daily values of the stats" if snapshot_actions }}. */
 async function load(): Promise<DashboardData> {
-  const [{% for entity in plan.entities %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+{% set loaded = namespace(names=[]) %}
+{% for entity in plan.entities %}{% set loaded.names = loaded.names + [(entity | camel) ~ "List"] %}{% endfor %}
+{% for w in snapshot_actions %}{% set loaded.names = loaded.names + [w.function ~ "Values"] %}{% endfor %}
+  const [{{ loaded.names | join(", ") }}] = await Promise.all([
 {% for entity in plan.entities %}
     {{ entity | camel }}Api.list(),
+{% endfor %}
+{% for w in snapshot_actions %}
+    {{ w.action }}(today()),
 {% endfor %}
   ]);
   return {
     records: { {% for entity in plan.entities %}{{ entity | camel }}: {{ entity | camel }}List.items{{ ", " if not loop.last }}{% endfor %} },
     lookups: { {% for entity in plan.entities %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+{% if snapshot_actions %}
+    snapshots: { {% for w in snapshot_actions %}{{ w.function }}: unwrap({{ w.function }}Values){{ ", " if not loop.last }}{% endfor %} },
+{% endif %}
   };
 }
 

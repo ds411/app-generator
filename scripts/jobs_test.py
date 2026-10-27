@@ -15,6 +15,9 @@ tests/fixtures/jobs-extensions/nextjs/, and with PGlite (in memory):
    failed run rolls back and runs again at the next call, two calls at the
    same time run each run one time, and a job without an entity runs its
    extension function once for the time of its schedule.
+4. Call the built-in job `stat_snapshots` (ADR 0042) on three days, and
+   check the rows of the table `stat_snapshots` and the values that the
+   server action of the chart of snapshots gives.
 
 Run it from the repository root, after `pnpm install` in the app:
 
@@ -88,6 +91,14 @@ async function statuses(): Promise<Record<string, string>> {
 
 const bearer = "Bearer " + process.env.JOBS_SECRET;
 const steps: Record<string, unknown> = {};
+// The daily snapshots of the stats on three days, before the other jobs change the invoices.
+steps.snapshots = [];
+for (const day of ["2026-06-11", "2026-06-12", "2026-06-13"]) {
+  (steps.snapshots as unknown[]).push(await call("stat_snapshots", `${day}T00:05:00Z`, bearer));
+}
+steps.snapshotsAgain = await call("stat_snapshots", "2026-06-13T00:06:00Z", bearer);
+const { billingOverduePerDayAction } = await import("./src/shared/api/snapshot-actions");
+steps.chart = await billingOverduePerDayAction("2026-06-13");
 steps.noSecret = await call("dunning", "2026-06-15T00:30:00Z", null);
 steps.wrongSecret = await call("dunning", "2026-06-15T00:30:00Z", "Bearer wrong");
 delete process.env.JOBS_FIXED_CLOCK;
@@ -110,8 +121,10 @@ steps.monthlyClose = await call("monthly_close", "2026-07-01T00:10:00Z", bearer)
 steps.monthlyCloseAgain = await call("monthly_close", "2026-07-01T00:10:00Z", bearer);
 const runs = await db.select().from(schema.jobRunsTable);
 const customers = await db.select().from(schema.customerTable);
+const snapshots = await db.select().from(schema.statSnapshotsTable);
 const report = {
   steps,
+  snapshots: snapshots.map((row: any) => [row.dashboard, row.widget, row.day, row.value]),
   failedId: invoices.find((row: any) => row.number === "FAIL-1").id,
   runs: runs
     .map((row: any) => ({
@@ -147,6 +160,11 @@ def _statuses(**changed: str) -> dict[str, str]:
     return found | changed
 
 
+_SNAPSHOT_DAYS = ("2026-06-11", "2026-06-12", "2026-06-13")
+_OVERDUE = (0, 100, 250)
+"""The overdue amount on each day: the unpaid invoices with a due date before the day."""
+
+
 def expected() -> dict[str, Any]:
     """Return the report of a correct app, without the ID of the invoice FAIL-1."""
     dunning = "2026-06-15T00:30:00.000Z"
@@ -161,6 +179,10 @@ def expected() -> dict[str, Any]:
         *(
             {"key": f"overdue:{number}:2026-06-15T06:30:00Z", "status": "done", "attempts": 1}
             for number in ("D1", "D3", "D4", "FAIL-1")
+        ),
+        *(
+            {"key": f"stat_snapshots:-:{day}T00:00:00Z", "status": "done", "attempts": 1}
+            for day in _SNAPSHOT_DAYS
         ),
     ]
     for run in runs:
@@ -182,7 +204,30 @@ def expected() -> dict[str, Any]:
             "overdueLater": _result("overdue", "2026-06-15T12:00:00.000Z", 0),
             "monthlyClose": _result("monthly_close", close, 1),
             "monthlyCloseAgain": _result("monthly_close", close, 0),
+            "snapshots": [
+                _result("stat_snapshots", f"{day}T00:05:00.000Z", 1) for day in _SNAPSHOT_DAYS
+            ],
+            "snapshotsAgain": _result("stat_snapshots", "2026-06-13T00:06:00.000Z", 0),
+            # The chart shows the last 2 days.
+            "chart": {
+                "ok": True,
+                "data": [
+                    {"key": day, "value": value}
+                    for day, value in zip(_SNAPSHOT_DAYS[1:], _OVERDUE[1:], strict=True)
+                ],
+            },
         },
+        # The open invoices: all but D2, which is paid.
+        "snapshots": sorted(
+            [
+                *(
+                    ["billing", "overdue_amount", day, value]
+                    for day, value in zip(_SNAPSHOT_DAYS, _OVERDUE, strict=True)
+                ),
+                *(["billing", "open_invoices", day, 7] for day in _SNAPSHOT_DAYS),
+            ],
+            key=json.dumps,
+        ),
         "runs": sorted(runs, key=lambda run: run["key"]),
         "customers": sorted(["Close 2026-07-01T00:00:00.000Z", "Plain", "VIP"]),
     }
@@ -205,6 +250,9 @@ def check(report: dict[str, Any], log: str) -> list[str]:
         problems.append(f"the table job_runs has {report['runs']}, expected {want['runs']}")
     if report["customers"] != want["customers"]:
         problems.append(f"the customers are {report['customers']}, expected {want['customers']}")
+    snapshots = sorted(report["snapshots"], key=json.dumps)
+    if snapshots != want["snapshots"]:
+        problems.append(f"the table stat_snapshots has {snapshots}, expected {want['snapshots']}")
     logged = [
         entry
         for entry in (json.loads(line) for line in log.splitlines() if line.startswith("{"))
@@ -248,7 +296,10 @@ def run(app: Path) -> None:
         print(f"jobs-test: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
-    print("jobs-test: passed (4 jobs, 8 runs, a failed run, and 2 calls at the same time)")
+    print(
+        "jobs-test: passed (4 jobs and the snapshots of 2 stats, 11 runs, a failed run, "
+        "and 2 calls at the same time)"
+    )
 
 
 def main() -> None:

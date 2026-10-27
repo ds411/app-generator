@@ -1,0 +1,176 @@
+{{ trace_header(*(mention_plans(definition) | map(attribute="id"))) }}
+"use client";
+
+import { type KeyboardEvent, useRef, useState } from "react";
+
+{% if ui_forms.server %}
+import type { OptionSource } from "@/shared/api";
+{% endif %}
+import { mentionToken } from "@/shared/lib/mentions";
+{% if ui_forms.server %}
+import { useOptionSearch } from "@/shared/lib/use-options";
+{% endif %}
+import { cn } from "@/shared/lib/utils";
+import { Textarea } from "@/shared/ui/textarea";
+{% if not ui_forms.server %}
+
+import type { FieldOption } from "./option-select";
+{% endif %}
+
+/** The most users that the list suggests. */
+const SUGGESTION_COUNT = 8;
+
+/** A mention that the user types: the `@` at the start of a word, and the text after it up to the cursor. */
+const QUERY = /(?:^|\s)@([^\s@[\]]*)$/;
+
+/** A mention that the user types: the position of its `@`, and its text. */
+type Query = { start: number; text: string };
+
+/** Return the mention that the user types before the cursor, or null. */
+function queryAt(text: string, cursor: number): Query | null {
+  const match = QUERY.exec(text.slice(0, cursor));
+  if (match === null) {
+    return null;
+  }
+  const words = match[1] ?? "";
+  return { start: cursor - words.length - 1, text: words };
+}
+
+/**
+ * A text area with mentions of users (ADR 0043). After `@`, a list
+ * suggests the users whose name has the text after the `@`. A choice puts
+ * the mention `@[<name>](<ID>)` into the text: the views show it as a
+ * link, and the user gets a notice.
+ */
+export function MentionTextarea({
+  id,
+  {{ "source" if ui_forms.server else "options" }},
+  value,
+  onChange,
+  placeholder,
+  rows,
+  disabled,
+  invalid,
+}: {
+  id: string;
+{% if ui_forms.server %}
+  /** The users: the server searches them. */
+  source: OptionSource;
+{% else %}
+  /** The users that the list can suggest. */
+  options: FieldOption[];
+{% endif %}
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const area = useRef<HTMLTextAreaElement>(null);
+  const [query, setQuery] = useState<Query | null>(null);
+  const [active, setActive] = useState(0);
+{% if ui_forms.server %}
+  const search = useOptionSearch(source, query?.text ?? "");
+  const found = query === null || search.loading ? [] : search.options.slice(0, SUGGESTION_COUNT);
+{% else %}
+  const words = (query?.text ?? "").toLowerCase();
+  const found =
+    query === null
+      ? []
+      : options.filter((option) => option.label.toLowerCase().includes(words)).slice(0, SUGGESTION_COUNT);
+{% endif %}
+  const listId = `${id}-users`;
+
+  const change = (text: string, cursor: number) => {
+    onChange(text);
+    setQuery(queryAt(text, cursor));
+    setActive(0);
+  };
+
+  const choose = (user: { value: string; label: string }) => {
+    if (query === null) {
+      return;
+    }
+    const token = `${mentionToken(user.label, user.value)} `;
+    const end = query.start + 1 + query.text.length;
+    onChange(value.slice(0, query.start) + token + value.slice(end));
+    setQuery(null);
+    const cursor = query.start + token.length;
+    requestAnimationFrame(() => {
+      area.current?.focus();
+      area.current?.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (found.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : found.length - 1;
+      setActive((index) => (index + step) % found.length);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      const user = found[Math.min(active, found.length - 1)];
+      if (user !== undefined) {
+        event.preventDefault();
+        choose(user);
+      }
+    } else if (event.key === "Escape") {
+      // The list closes, and a dialog of the form stays open.
+      event.preventDefault();
+      event.stopPropagation();
+      setQuery(null);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Textarea
+        ref={area}
+        id={id}
+        placeholder={placeholder}
+        rows={rows}
+        value={value}
+        onChange={(event) => change(event.target.value, event.target.selectionStart)}
+        onKeyDown={keyDown}
+        onBlur={() => setQuery(null)}
+        disabled={disabled}
+        aria-invalid={invalid}
+        aria-autocomplete="list"
+        aria-controls={found.length > 0 ? listId : undefined}
+        aria-activedescendant={found.length > 0 ? `${listId}-${Math.min(active, found.length - 1)}` : undefined}
+      />
+      {found.length > 0 && (
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label={{ jsx_attr("Users") }}
+          className="absolute inset-x-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {found.map((user, index) => (
+            <li
+              key={user.value}
+              id={`${listId}-${index}`}
+              role="option"
+              aria-selected={index === Math.min(active, found.length - 1)}
+              className={cn(
+                "cursor-pointer truncate rounded-sm px-2 py-1.5 text-sm",
+                index === Math.min(active, found.length - 1) && "bg-accent text-accent-foreground",
+              )}
+              onMouseDown={(event) => {
+                // The text area keeps the focus.
+                event.preventDefault();
+                choose(user);
+              }}
+              onMouseEnter={() => setActive(index)}
+            >
+              @{user.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -218,7 +218,7 @@ entities:
 | Type       | Meaning                              | Options                               |
 | ---------- | ------------------------------------ | ------------------------------------- |
 | `string`   | A short line of text.                | `min_length`, `max_length`, `pattern` |
-| `text`     | Long text with line breaks.          | `min_length`, `max_length`            |
+| `text`     | Long text with line breaks.          | `min_length`, `max_length`, `mentions` |
 | `integer`  | A whole number.                      | `min`, `max`                          |
 | `decimal`  | An exact decimal number.             | `min`, `max`, `precision`, `scale`    |
 | `boolean`  | True or false.                       |                                       |
@@ -270,6 +270,9 @@ language of `translations` (see
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
 A `point` field holds a place on the earth (see [Point fields](#point-fields)).
+
+`mentions: true` lets a `text` field mention users with `@` (see
+[Mentions](#mentions)).
 
 `sequence` gives a `string` or an `integer` field the next number of a
 sequence (see [Sequence numbers](#sequence-numbers)).
@@ -576,6 +579,11 @@ ui:
 - A point field cannot be the `display_field`, a field or a value of a
   notification, or a field of the sign-up form. The param of an
   operation cannot be a point: use two `decimal` params.
+- A view shows a point as its latitude and its longitude, for example
+  `38.7223, -9.1393`, and a map view shows the records on a map (see
+  [views](#views)). The form widget `point` has an input for the
+  latitude and one for the longitude. A column of a lines editor cannot
+  be a point.
 - A form field of a point field gets the widget `point`.
 - The FastAPI app gives a point as an object with `lat` and `lng`
   (the schema `GeoPoint`), and gives 422 for a latitude or a longitude
@@ -1518,6 +1526,37 @@ notifications:
   page with a detail view of the entity and one parameter in its path.
   "Mark all read" marks all notices of the user read.
 
+### Mentions
+
+A `text` field with `mentions: true` can mention users
+([ADR 0043](https://github.com/ds411/app-generator/blob/main/docs/adr/0043-mentions.md)). It needs `auth`: the users are the
+records of the user entity. A computed or a translatable text cannot
+have mentions.
+
+```yaml
+# example: room-booking
+# in: entities.Booking.fields
+notes: { type: text, max_length: 2000, mentions: true }
+```
+
+- A mention in the stored text is `@[<display value>](<ID of the
+  user>)`: for example `@[Ann Lee]`, and then the ID of the user in
+  parentheses. The display value has no brackets and no line breaks. A client of the
+  API writes a mention in the same form.
+- The widget of the field in a form is a text area. After `@` at the
+  start of a word, a list suggests the users whose display value has
+  the text after the `@`, and a choice puts the mention into the text.
+  The list needs the permission of the list of the user entity, as a
+  relation field to the user entity does.
+- The views show a mention as `@` and the display value, with a link to
+  the first page with a detail view of the user entity, if one exists.
+- A create or a change of a record gives a notice to each user that the
+  new text mentions and the text before did not: the built-in
+  notification `@mention`, with the text "You are mentioned in
+  {record}." (the display value of the record). The user that made the
+  change, and an ID without a user, get no notice. The text of the
+  notice is a key of the [translations](#translations).
+
 ## apis
 
 The optional `apis` section names the third-party APIs that the app
@@ -2208,6 +2247,52 @@ ui:
       link: booking_detail
 ```
 
+**Map** (`kind: map`): the records on a map, with a marker for each
+record, and the list of the records in the visible area of the map
+([ADR 0046](https://github.com/ds411/app-generator/blob/main/docs/adr/0046-geo-points.md)). `point` (a `point` field, also
+through a relation) gives the place of a record, `label` is its text
+(default: the display field), and `link` is a page that a record opens.
+A click on a marker, Enter on a focused marker, and a click on a record
+of the list open the page. A map takes `filters` and `sort` (the order
+of the list, default: the label), as a table does, but no `area`
+filter: a move of the map gives the area.
+
+```yaml
+entities:
+  Site:
+    display_field: name
+    crud: { operations: [list, read], views: [detail] }
+    fields:
+      name: { type: string, required: true }
+      location: { type: point, required: true, label: Location }
+pages:
+  site_map: { path: /map, title: Map, content: { view: site_map } }
+  site: { path: "/sites/{id}", title: Site, entity: Site, content: { view: site_detail } }
+ui:
+  views:
+    site_map:
+      kind: map
+      entity: Site
+      point: location
+      label: name
+      link: site
+      filters:
+        nearby: { kind: near, field: location, label: Near, distance: 5 }
+```
+
+- The map first shows all its markers. After each move, the list shows
+  the records in the visible area. With `x-react-data: api`, the map
+  loads the records of the list endpoint with `<point>_area`, and the
+  first load (before the first move) has all records.
+- The map loads its tiles from a tile server. The build variable
+  `NEXT_PUBLIC_MAP_TILES` (Next.js) or `VITE_MAP_TILES` (React) gives
+  the URL of the tiles, with `{z}`, `{x}`, and `{y}`, and
+  `NEXT_PUBLIC_MAP_ATTRIBUTION` or `VITE_MAP_ATTRIBUTION` their
+  attribution. Without a value, the map uses the standard tiles of
+  OpenStreetMap: read their tile usage policy before a production use.
+- An `area` filter of a table or a card list shows the same map in a
+  popover: the user moves the map, and uses its visible area.
+
 **Detail** (`kind: detail`): one record, from the path parameter of the
 page. `header` (`title`, `subtitle`, `badges`), `sections` (`title`,
 `description`, `fields`, `columns`, or `custom: true`), `tabs`
@@ -2463,8 +2548,8 @@ A dashboard has `title`, `description`, `grid`, `period`, and
 
 | Kind     | Keys                                                                      |
 | -------- | ------------------------------------------------------------------------- |
-| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`, `period_field`, `compare`. |
-| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, `period_field`. |
+| `stat`   | `entity`, `aggregate` (`count`, `sum`, `avg`, `min`, `max`), `field`, `filter`, `format`, `icon`, `color`, `link`, `period_field`, `compare`, `snapshots`. |
+| `chart`  | `chart` (`bar`, `line`, `donut`), `entity`, `group_by`, `interval`, `aggregate`, `field`, `filter`, `badge`, `period_field`; or `snapshots` and `days`. |
 | `list`   | `view`, `filter`, `sort`, `limit`, `link`, `period_field`.               |
 | `custom` | A generation gap.                                                         |
 
@@ -2494,6 +2579,41 @@ tasks_by_week:
   entity: Task
   group_by: due_date
   interval: week
+```
+
+A stat widget with `snapshots: daily` has a value for each day
+([ADR 0042](https://github.com/ds411/app-generator/blob/main/docs/adr/0042-stat-snapshots.md)): the built-in job
+`stat_snapshots` of the FastAPI and the Next.js apps runs at 00:00 UTC,
+and stores the value of the stat at that time as the value of the day.
+`$today` in the filter is the day of the run. A line chart with
+`snapshots`, the name of a stat widget of the same dashboard with
+`snapshots: daily`, shows the stored values of the last `days` days (2
+to 366, 30 by default), for example the burndown of the open tasks. A
+day without a value is not a point of the line. A chart of snapshots
+takes no `entity`, `group_by`, `interval`, `aggregate`, `field`,
+`filter`, `badge`, or `period_field`, and its stat takes no
+`period_field` or `compare`. A snapshot has the value of all records,
+so the entity of the stat cannot have a record rule, and the filter of
+the stat cannot have `$me`: the job has no signed-in user. The chart is
+empty until the first run of the job. The React app with mock data has
+no stored values: its chart shows the value of today. The Next.js app
+computes a snapshot in the database, so the field of the aggregate is a
+stored field of the entity of the stat. A job with the name
+`stat_snapshots`, or an entity with the table `stat_snapshots`, is a
+generation error.
+
+```yaml
+# in: ui.dashboards.overview.widgets
+open_tasks:
+  kind: stat
+  entity: Task
+  filter: { status: { ne: done } }
+  snapshots: daily
+burndown:
+  kind: chart
+  chart: line
+  snapshots: open_tasks
+  days: 14
 ```
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
@@ -3229,6 +3349,11 @@ use in the app does not show.
   `Show more` (a board of the API client),
   `Previous week`, `Next week`, `Previous month`, `Next month`, `Today`,
   `Calendar mode`, `Week`, `Month`.
+- Maps and the geo filters (see [views](#views)): `In the map`,
+  `{count} in the map`,
+  `No records in this part of the map. Move the map, or zoom out.`,
+  `{label}: lat, lng`, `Distance from {label}`, `{distance} km`,
+  `Use this area`, and the inputs of a point: `Latitude`, `Longitude`.
 - Date pickers: `Navigation bar`, `Go to the next month`,
   `Go to the previous month`, `Choose the month`, `Choose the year`,
   `Today, {date}`, `{date}, selected`.
@@ -3240,6 +3365,9 @@ use in the app does not show.
 - The bell of the notices (see [notifications](#notifications)):
   `Notices`, `Notices: {count} unread`, `Mark all read`,
   `No notices yet.`.
+- The mentions (see [Mentions](#mentions)): `Users` (the list of the
+  suggestions), and the text of the notice
+  `You are mentioned in {record}.`.
 - The change log of a record (see [History](#history)): `History`,
   `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
   `Older`, `No changes yet.`, `The history did not load.`,

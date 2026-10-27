@@ -10,6 +10,11 @@ notices of the signed-in user: a shared template.
 The front ends write the text of a notice from the name of the
 notification and the values of the record: the text is a key of the
 translations, and the values go into the translation.
+
+A `text` field with `mentions: true` (ADR 0043) gives a notice to each
+user that a new or a changed text mentions for the first time, with the
+built-in notification `@mention`. A mention in the text is
+`@[<display value>](<ID of the user>)`.
 """
 
 import json
@@ -24,6 +29,14 @@ from appgen.gen.binding import Output
 from appgen.gen.naming import camel
 
 _PARAM = re.compile(r"\{([a-z][a-z0-9_]*)\}")
+
+MENTION = "@mention"
+"""The name of the notices of the mentions (ADR 0043). A notification name cannot have `@`."""
+MENTION_TEXT = "You are mentioned in {record}."
+"""The text of the notices of the mentions: `record` is the display value of the record."""
+_UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+MENTION_PATTERN = rf"@\[([^\[\]\n]+)\]\(({_UUID})\)"
+"""A mention in a text: the display value of the user, and its ID."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,24 +85,86 @@ class NoticePlan:
     """For a transition: the state after the change."""
 
 
+@dataclass(frozen=True, slots=True)
+class MentionPlan:
+    """A `text` field with mentions (ADR 0043), in TypeScript terms."""
+
+    entity: str
+    name: str
+    """The name of the field."""
+    key: str
+    """The key of the field in the records, for example `notes`."""
+    id: str
+    """The element ID of the field."""
+    label: str | None
+    """The key of the stored display field of the entity, or None: the value is the ID."""
+
+
 def has_notices(definition: AppDefinition) -> bool:
-    """Return True if the app shows notices: it has notifications and a sign-in."""
-    return bool(definition.notifications) and definition.auth is not None
+    """Return True if the app shows notices: it has notifications or mentions, and a sign-in."""
+    return (
+        bool(definition.notifications) or has_mentions(definition)
+    ) and definition.auth is not None
+
+
+def has_mentions(definition: AppDefinition) -> bool:
+    """Return True if a field of the app has mentions and the app has a sign-in."""
+    return definition.auth is not None and any(
+        f.mentions for e in definition.entities.values() for f in e.fields.values()
+    )
+
+
+def mention_plans(definition: AppDefinition, entity: str | None = None) -> list[MentionPlan]:
+    """Return the fields with mentions, all or of one entity, in source order (ADR 0043)."""
+    if definition.auth is None:
+        return []
+    plans: list[MentionPlan] = []
+    for entity_name, e in definition.entities.items():
+        if entity is not None and entity_name != entity:
+            continue
+        label = e.display_field
+        if label is not None:
+            field = e.fields.get(label)
+            if field is None or field.computed is not None or field.is_file:
+                label = None
+        for name, f in e.fields.items():
+            if f.mentions:
+                plans.append(
+                    MentionPlan(
+                        entity_name, name, camel(name), f.id, camel(label) if label else None
+                    )
+                )
+    return plans
+
+
+def mention_link(definition: AppDefinition) -> tuple[str, str] | None:
+    """Return the detail page of the users for the links of the mentions, or None."""
+    if definition.auth is None:
+        return None
+    return _detail_page(definition, definition.auth.user_entity)
 
 
 def notice_rules() -> tuple[Output, ...]:
-    """Return the output rules of the bell of the notices, for the top bars and the bare layout."""
-    return tuple(
+    """Return the output rules of the bell of the notices, for the top bars and the bare layout,
+    and of the mentions (ADR 0043)."""
+    return (
+        *(
+            Output(
+                template=f"ui/features/notices/{template}.j2",
+                path=f"src/features/notices/{path}",
+                when="has_notices(definition)",
+            )
+            for template, path in (
+                ("index.ts", "index.ts"),
+                ("notice-texts.ts", "model/notice-texts.ts"),
+                ("notice-bell.tsx", "ui/notice-bell.tsx"),
+            )
+        ),
         Output(
-            template=f"ui/features/notices/{template}.j2",
-            path=f"src/features/notices/{path}",
-            when="has_notices(definition)",
-        )
-        for template, path in (
-            ("index.ts", "index.ts"),
-            ("notice-texts.ts", "model/notice-texts.ts"),
-            ("notice-bell.tsx", "ui/notice-bell.tsx"),
-        )
+            template="ui/features/notices/mentions.ts.j2",
+            path="src/shared/lib/mentions.ts",
+            when="has_mentions(definition)",
+        ),
     )
 
 
@@ -117,34 +192,55 @@ def notice_summary(notification: Notification) -> str:
 
 
 def notice_texts(definition: AppDefinition) -> dict[str, str]:
-    """Return the text of each notification, by name."""
+    """Return the text of each notification, by name, and the text of the mentions."""
     if not has_notices(definition):
         return {}
-    return {name: n.text for name, n in definition.notifications.items()}
+    texts = {name: n.text for name, n in definition.notifications.items()}
+    if has_mentions(definition):
+        texts[MENTION] = MENTION_TEXT
+    return texts
+
+
+def notice_ids(definition: AppDefinition) -> list[str]:
+    """Return the element IDs of the notifications and of the fields with mentions."""
+    if not has_notices(definition):
+        return []
+    ids = [n.id for n in definition.notifications.values()]
+    return ids + [m.id for m in mention_plans(definition)]
 
 
 def notice_links(definition: AppDefinition) -> dict[str, tuple[str, str]]:
-    """Return the detail page of each entity of a notification: the page name and its parameter.
+    """Return the detail page of each entity of a notice: the page name and its parameter.
 
-    The page shows a detail view of the entity, and has one parameter, the
-    ID of the record: `/bookings/{id}` gives the parameter `id`. An entity
-    without such a page has no link: its notices show only their text.
+    The entities are those of the notifications and of the fields with
+    mentions. The page shows a detail view of the entity, and has one
+    parameter, the ID of the record: `/bookings/{id}` gives the parameter
+    `id`. An entity without such a page has no link: its notices show only
+    their text.
     """
     if not has_notices(definition) or definition.ui is None:
         return {}
+    entities = [n.entity for n in definition.notifications.values()]
+    entities += [m.entity for m in mention_plans(definition)]
     links: dict[str, tuple[str, str]] = {}
-    for notification in definition.notifications.values():
-        entity = notification.entity
-        if entity in links:
-            continue
-        for page_name, page in definition.pages.items():
-            view_name = page.content.view if page.content is not None else None
-            view = definition.ui.views.get(view_name) if view_name is not None else None
-            params = _PARAM.findall(page.path)
-            if isinstance(view, DetailView) and view.entity == entity and len(params) == 1:
-                links[entity] = (page_name, params[0])
-                break
+    for entity in dict.fromkeys(entities):
+        link = _detail_page(definition, entity)
+        if link is not None:
+            links[entity] = link
     return links
+
+
+def _detail_page(definition: AppDefinition, entity: str) -> tuple[str, str] | None:
+    """Return the first page with a detail view of an entity and one parameter, or None."""
+    if definition.ui is None:
+        return None
+    for page_name, page in definition.pages.items():
+        view_name = page.content.view if page.content is not None else None
+        view = definition.ui.views.get(view_name) if view_name is not None else None
+        params = _PARAM.findall(page.path)
+        if isinstance(view, DetailView) and view.entity == entity and len(params) == 1:
+            return page_name, params[0]
+    return None
 
 
 def _plan(definition: AppDefinition, name: str, notification: Notification) -> NoticePlan:
@@ -226,15 +322,20 @@ class MockNotify:
     """The notices of the changes of an entity in the mock store of the React app."""
 
     notices: tuple[MockNotice, ...]
+    mentions: tuple[tuple[str, str], ...]
+    """The fields with mentions (ADR 0043): the element ID and the call of `addMentions`."""
     helpers: tuple[str, ...]
     """The names to import from `@/shared/api/notices`."""
     store: tuple[str, ...]
     """The names to import from `@/shared/api`: `pathIds` and `recordValue`."""
 
 
-def mock_notify(plans: list[NoticePlan]) -> MockNotify | None:
-    """Return the notifications of an entity as the code of the mock store, or None (ADR 0041)."""
-    if not plans:
+def mock_notify(
+    plans: list[NoticePlan], mentions: list[MentionPlan] | None = None, users: str = ""
+) -> MockNotify | None:
+    """Return the notifications and the mentions of an entity as the code of the mock store,
+    or None (ADR 0041, ADR 0043). `users` is the user entity."""
+    if not plans and not mentions:
         return None
     notices = tuple(
         MockNotice(
@@ -249,10 +350,26 @@ def mock_notify(plans: list[NoticePlan]) -> MockNotify | None:
         )
         for plan in plans
     )
+    calls = tuple(
+        (
+            m.id,
+            f"addMentions({_js(m.entity)}, record.id, "
+            f"{f'textValue(record.{m.label})' if m.label else 'record.id'}, "
+            f"record.{m.key}, before?.{m.key}, {_js(users)})",
+        )
+        for m in mentions or []
+    )
     code = " ".join(f"{n.condition} {n.users} {' '.join(c for _, c in n.values)}" for n in notices)
+    code += " ".join(c for _, c in calls)
+    helpers = (
+        *(("addMentions",) if calls else ()),
+        *(("addNotices",) if notices else ()),
+        *(name for name in ("changed", "textValue") if f"{name}(" in code),
+    )
     return MockNotify(
         notices=notices,
-        helpers=("addNotices", *(name for name in ("changed", "textValue") if f"{name}(" in code)),
+        mentions=calls,
+        helpers=helpers,
         store=tuple(name for name in ("pathIds", "recordValue") if f"{name}(" in code),
     )
 

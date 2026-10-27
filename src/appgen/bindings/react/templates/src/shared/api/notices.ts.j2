@@ -1,4 +1,4 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 {% if react.api %}
 import { apiRequest } from "./http";
 import type { Notice, NoticeApi } from "./types";
@@ -64,7 +64,13 @@ export const notices: NoticeApi = {
 };
 {% else %}
 import { currentUserId, userLabel } from "@/shared/auth";
+{% if has_mentions(definition) %}
+import { mentionedIds } from "@/shared/lib/mentions";
+{% endif %}
 
+{% if has_mentions(definition) %}
+import { recordValue } from "./mock-store";
+{% endif %}
 import { type Notice, type NoticeApi, NotFoundError } from "./types";
 
 // The notices of the users (ADR 0041), with mock data. The mock stores
@@ -129,6 +135,25 @@ export function changed(record: object, before: object | undefined, keys: readon
   return keys.some((key) => JSON.stringify(now[key] ?? null) !== JSON.stringify(old[key] ?? null));
 }
 
+{% if has_mentions(definition) %}
+/**
+ * Add a notice for each user that a text mentions and the text before
+ * did not (ADR 0043). A mention of an ID without a user gives no notice.
+ */
+export function addMentions(
+  entity: string,
+  recordId: string,
+  record: string,
+  text: unknown,
+  before: unknown,
+  users: string,
+): void {
+  const old = new Set(mentionedIds(before));
+  const ids = mentionedIds(text).filter((id) => !old.has(id) && recordValue(users, id, "id") !== null);
+  addNotices("@mention", entity, recordId, ids, { record });
+}
+
+{% endif %}
 /** Add a notice for each user. Each user gets one notice. The signed-in user of the change gets none. */
 export function addNotices(
   notification: string,

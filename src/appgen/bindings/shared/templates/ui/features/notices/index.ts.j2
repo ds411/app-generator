@@ -1,2 +1,2 @@
-{{ trace_header(*(definition.notifications.values() | map(attribute="id"))) }}
+{{ trace_header(*notice_ids(definition)) }}
 export { NoticeBell } from "./ui/notice-bell";

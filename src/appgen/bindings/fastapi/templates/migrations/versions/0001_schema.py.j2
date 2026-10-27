@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 {% set all_fields = py.entity_order() | map(attribute="fields") | sum(start=[]) %}
-{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history or py.notifications %}
+{% if all_fields | selectattr("sa_type", "equalto", "JSON_TYPE") | list or all_fields | selectattr("translatable") | list or py.file_entities or py.history or py.notices %}
 from sqlalchemy.dialects import postgresql
 {% endif %}
 
@@ -186,7 +186,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_history_entries_record_id", "history_entries", ["record_id"])
 {% endif %}
-{% if py.notifications %}
+{% if py.notices %}
 {% set u = py.entity(definition.auth.user_entity) %}
     op.create_table(
         "notices",
@@ -225,6 +225,16 @@ def upgrade() -> None:
         sa.UniqueConstraint("token_hash", name="uq_share_links_token_hash"),
     )
 {% endif %}
+{% if py.snapshots %}
+    op.create_table(
+        "stat_snapshots",
+        sa.Column("dashboard", sa.String(length=63), nullable=False),
+        sa.Column("widget", sa.String(length=63), nullable=False),
+        sa.Column("day", sa.Date(), nullable=False),
+        sa.Column("value", sa.Double(), nullable=True),
+        sa.PrimaryKeyConstraint("dashboard", "widget", "day", name="pk_stat_snapshots"),
+    )
+{% endif %}
 {% if py.jobs %}
     op.create_table(
         "job_runs",
@@ -251,7 +261,10 @@ def downgrade() -> None:
 {% if py.jobs %}
     op.drop_table("job_runs")
 {% endif %}
-{% if py.notifications %}
+{% if py.snapshots %}
+    op.drop_table("stat_snapshots")
+{% endif %}
+{% if py.notices %}
     op.drop_index("ix_notices_user_id", table_name="notices")
     op.drop_table("notices")
 {% endif %}

@@ -1,0 +1,20 @@
+{{ trace_header(*nextjs.snapshots.ids) }}
+import { date, doublePrecision, pgTable, primaryKey, varchar } from "drizzle-orm/pg-core";
+
+/**
+ * The daily values of the stat widgets with `snapshots: daily` (ADR 0042):
+ * one row for each stat and day. The FastAPI app has the same table, with
+ * the same columns.
+ */
+export const statSnapshotsTable = pgTable(
+  "stat_snapshots",
+  {
+    dashboard: varchar("dashboard", { length: 63 }).notNull(),
+    widget: varchar("widget", { length: 63 }).notNull(),
+    // The day of the value, in UTC.
+    day: date("day", { mode: "string" }).notNull(),
+    // The value of the stat at the time of the run, or null without numbers.
+    value: doublePrecision("value"),
+  },
+  (table) => [primaryKey({ name: "pk_stat_snapshots", columns: [table.dashboard, table.widget, table.day] })],
+);

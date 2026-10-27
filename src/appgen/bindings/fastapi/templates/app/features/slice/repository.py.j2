@@ -39,6 +39,9 @@
 {% if e.change_notifications %}
     await notify(session, record, before)
 {% endif %}
+{% if e.mentions %}
+    await mention(session, record, before)
+{% endif %}
 {% endmacro %}
 """The data access of the slice `{{ e.slice }}`, which its operations share."""
 
@@ -259,6 +262,9 @@ async def add(session: AsyncSession, data: {{ e.name }}Create) -> {{ e.name }}:
 {% endif %}
 {% if e.created_notifications %}
     await notify(session, record, None)
+{% endif %}
+{% if e.mentions %}
+    await mention(session, record, None)
 {% endif %}
     return record
 
@@ -576,6 +582,20 @@ async def on_deleted(session: AsyncSession, record: {{ e.name }}) -> None:
     {{ trace(n.id) }}
     if {{ n.condition() }}:
         {{ n.body(8) }}
+{% endfor %}
+{% endif %}
+{% if e.mentions %}
+
+
+{{ py.signature("async def mention", ["session: AsyncSession", "record: " ~ e.name, "before: dict[str, Any] | None"], " -> None:") }}
+    """Add a notice for each user that a text of the record mentions for the first time.
+
+    A mention is `@[<name>](<ID of the user>)` (ADR 0043). `before` is None
+    for a new record. The user that made the change gets no notice.
+    """
+{% for m in e.mentions %}
+    {{ trace(m.id) }}
+    {{ m.call(4) }}
 {% endfor %}
 {% endif %}
 

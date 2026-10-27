@@ -105,6 +105,9 @@ class WidgetPlan:
     """The TypeScript of the change of a stat from the previous period (`compare`), or None."""
     store: str | None = None
     """With the API client: the store of the records of a list widget, for example `taskApi`."""
+    action: str | None = None
+    """With stored snapshots (Next.js): the server action that gives the daily values of a
+    chart of snapshots, for example `overviewRoomsPerDayAction` (ADR 0042)."""
 
     @property
     def related_name(self) -> str:
@@ -141,6 +144,11 @@ class DashboardPlan:
     def compare(self) -> bool:
         """True if a stat widget shows the change from the previous period."""
         return any(w.change for w in self.widgets)
+
+    @property
+    def snapshot_actions(self) -> list[WidgetPlan]:
+        """The charts of snapshots that read their values with a server action (Next.js)."""
+        return [w for w in self.widgets if w.action is not None]
 
     def code(self) -> str:
         """Return the TypeScript of the widgets, to find the helpers that they call."""
@@ -218,6 +226,8 @@ def build_dashboard(ctx: ViewContext, name: str) -> DashboardPlan:
         )
         if isinstance(widget, StatWidget):
             _stat(ctx, plan, result, widget, entities)
+        elif isinstance(widget, ChartWidget) and widget.snapshots is not None:
+            _snapshot_chart(ctx, plan, result, widget, dashboard)
         elif isinstance(widget, ChartWidget):
             _chart(ctx, plan, result, widget, entities)
         elif isinstance(widget, ListWidget):
@@ -379,12 +389,13 @@ def _chart(
     widget: ChartWidget,
     entities: set[str],
 ) -> None:
-    entity = widget.entity
+    entity, group_by = widget.entity, widget.group_by
+    assert entity is not None and group_by is not None
     result.body = _rows(ctx, entity, widget.filter, entities, widget.period_field)
     result.takes_period = widget.period_field is not None
     result.takes_me = has_me(widget.filter)
-    _read(ctx, entity, [widget.group_by, *([widget.field] if widget.field else [])], entities)
-    group = ctx.value(entity, widget.group_by)
+    _read(ctx, entity, [group_by, *([widget.field] if widget.field else [])], entities)
+    group = ctx.value(entity, group_by)
     total = _aggregate(ctx, entity, widget.aggregate, widget.field, "group")
     if widget.aggregate != "count":
         total += " ?? 0"
@@ -432,6 +443,7 @@ def _chart(
 
 def _chart_labels(ctx: ViewContext, result: WidgetPlan, widget: ChartWidget) -> None:
     """Set the kind of the chart, its data type, and the label of its values."""
+    assert widget.entity is not None
     result.returns = "ChartDatum[]"
     result.chart = widget.chart
     entity_def = ctx.definition.entities[widget.entity]
@@ -440,6 +452,46 @@ def _chart_labels(ctx: ViewContext, result: WidgetPlan, widget: ChartWidget) -> 
         if widget.aggregate == "count"
         else ctx.value(widget.entity, widget.field or "").label
     )
+
+
+def snapshot_stat(dashboard: Dashboard, widget: ChartWidget) -> tuple[str, StatWidget]:
+    """Return the name and the stat widget of a chart of snapshots (the validator checks it)."""
+    name = widget.snapshots
+    assert name is not None
+    stat = dashboard.widgets[name]
+    assert isinstance(stat, StatWidget)
+    return name, stat
+
+
+def snapshot_action(dashboard: str, widget: str) -> str:
+    """Return the server action of the daily values of a chart of snapshots (Next.js)."""
+    return camel(f"{dashboard}_{widget}_action")
+
+
+def _snapshot_chart(
+    ctx: ViewContext,
+    plan: DashboardPlan,
+    result: WidgetPlan,
+    widget: ChartWidget,
+    dashboard: Dashboard,
+) -> None:
+    """A line chart of the daily values of a stat (ADR 0042).
+
+    With stored snapshots (Next.js), the dashboard data has the values of
+    the server action. Else the mock data has no snapshots: the chart shows
+    the value of today, from the function of the stat.
+    """
+    name, stat = snapshot_stat(dashboard, widget)
+    if ctx.snapshot_store:
+        result.action = snapshot_action(plan.name, result.name)
+        values = f"data.snapshots.{result.function}"
+    else:
+        values = f"[{{ key: today(), value: {camel(name)}(data) }}]"
+    result.body = [f"return snapshotData({values}, today(), {widget.days});"]
+    result.returns = "ChartDatum[]"
+    result.chart = widget.chart
+    result.value_label = stat.label or label(name)
+    plan.uses.update({"chart", "dates", "snapshots"})
 
 
 def _list(
@@ -497,8 +549,14 @@ def _server(
     result.takes_period = False
     result.takes_me = False
     data = f"data.{result.function}"
+    if isinstance(widget, ChartWidget) and widget.snapshots is not None:
+        # The stored values of the days up to today (ADR 0042).
+        result.data = "ChartValue[]"
+        result.body = [f"return snapshotData({data}, today(), {widget.days});"]
+        return
     if isinstance(widget, StatWidget | ChartWidget):
         # The dashboard loads again after a change of the records.
+        assert widget.entity is not None
         entities.add(widget.entity)
     if isinstance(widget, StatWidget):
         result.data = "number | null"
@@ -516,6 +574,7 @@ def _server(
         result.body = [f"return {data};"]
         return
     result.data = "ChartValue[]"
+    assert widget.entity is not None and widget.group_by is not None
     group = ctx.value(widget.entity, widget.group_by)
     groups = f", {result.groups}" if result.groups else ""
     if group.kind == "one":

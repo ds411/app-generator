@@ -1,0 +1,62 @@
+{{ trace_header("app") }}
+"use client";
+
+import { MapIcon, XIcon } from "lucide-react";
+import { useState } from "react";
+
+import type { GeoBox } from "@/shared/lib/geo";
+import { Button } from "@/shared/ui/button";
+import { GeoMap } from "@/shared/ui/geo-map";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+
+/**
+ * A box of a map for an area filter (ADR 0046): move the map, and use its
+ * visible area. No box keeps all records.
+ */
+export function AreaFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: GeoBox | null;
+  onChange: (value: GeoBox | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState<GeoBox | null>(value);
+  return (
+    <div className="flex items-center">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 border-dashed" aria-pressed={value !== null}>
+            <MapIcon />
+            {label}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(32rem,calc(100vw-2rem))] space-y-2 p-2" align="start">
+          <GeoMap markers={[]} bounds={value} label={label} onMove={setShown} className="h-72" />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+              {{ jsx_text("Cancel") }}
+            </Button>
+            <Button
+              size="sm"
+              disabled={shown === null}
+              onClick={() => {
+                onChange(shown);
+                setOpen(false);
+              }}
+            >
+              {{ jsx_text("Use this area") }}
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+      {value !== null && (
+        <Button variant="ghost" size="icon" className="size-8" aria-label={{ "{" ~ js_format("Clear {label}", label="label") ~ "}" }} onClick={() => onChange(null)}>
+          <XIcon />
+        </Button>
+      )}
+    </div>
+  );
+}
