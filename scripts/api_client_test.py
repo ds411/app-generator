@@ -299,7 +299,18 @@ function check(ok, message) {
     check(first.includes(String(test.optionCount)), `The owner field asked for ${first}.`);
     start = gets.length;
     await page.getByPlaceholder("Search").fill(test.searched.text);
-    await page.getByRole("option", { name: test.searched.name, exact: true }).click();
+    // Under load, the list of the search can change under the click: choose until the list closes.
+    const searched = page.getByRole("option", { name: test.searched.name, exact: true });
+    const closed = () =>
+      page
+        .getByRole("listbox")
+        .waitFor({ state: "hidden", timeout: 2000 })
+        .then(() => true, () => false);
+    for (let tries = 1; ; tries += 1) {
+      await searched.click({ timeout });
+      if (await closed()) break;
+      check(tries < 5, "The owner field stays open after the choice of an option.");
+    }
     const words = since(start, "/people").map((url) => url.searchParams.get("q"));
     check(words.includes(test.searched.text), `The owner field searched for ${words}.`);
     const patch = (response) => response.request().method() === "PATCH";
