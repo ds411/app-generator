@@ -49,10 +49,15 @@ test("a change of a task in one browser shows at once on the board of another br
     // The title is translatable: the first field is the title in English.
     await form.getByRole("textbox", { name: /^Title/ }).first().fill(title);
     const status = form.getByRole("combobox", { name: "Status", exact: true });
-    await status.click();
-    await editor.getByRole("option", { name: "Done", exact: true }).click();
-    // The list of the options closes before the click on the button.
-    await expect(status).toHaveText("Done");
+    // Under load, the list can ignore a click that comes too soon after it opens: try again
+    // until the list closes with the value.
+    await expect(async () => {
+      if (!(await editor.getByRole("listbox").isVisible())) {
+        await status.click({ timeout: 2_000 });
+      }
+      await editor.getByRole("option", { name: "Done", exact: true }).click({ timeout: 2_000 });
+      await expect(status).toHaveText("Done", { timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
     // One click only: a second click would add a second task.
     await form.getByRole("button", { name: "Create task", exact: true }).click();
     await expect(form).toBeHidden();
