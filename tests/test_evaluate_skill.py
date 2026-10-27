@@ -213,6 +213,52 @@ def solve_quickstart_mobile_api(work: Path) -> None:
     appgen("generate", definition, "-b", "fastapi", "-o", work / "fastapi")
 
 
+HELP_DESK = """\
+version: 0
+app: { name: it-help-desk, title: IT Help Desk }
+auth:
+  user_entity: Person
+  username_field: email
+  password: false
+  providers:
+    company:
+      title: Company account
+      issuer: https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Hd7Qm2xYz
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      authorize_params: { identity_provider: EntraID }
+      trust_email: true
+      create_users: true
+      claims: { name: name }
+entities:
+  Person:
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+  Ticket:
+    crud: true
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 200 }
+      status: { type: enum, values: [open, closed], default: open }
+apis:
+  jira:
+    document: jira.openapi.json
+    base_url_env: JIRA_API_URL
+    security: { scheme: basicAuth, username_env: JIRA_EMAIL, env: JIRA_API_TOKEN }
+    operations: [searchAndReconsileIssuesUsingJql]
+"""
+"""A help desk whose staff sign in with Entra ID through Cognito, and that calls Jira."""
+
+
+def solve_quickstart_company_jira(work: Path) -> None:
+    definition = work / "app.yaml"
+    rows = ("binding", "auth", "providers", "password", "apis")
+    definition.write_text(record(*rows) + HELP_DESK, encoding="utf-8")
+    appgen("generate", definition, "-b", "nextjs", "-o", work / "nextjs")
+
+
 RETURN_LOAN = {
     "nextjs": "nextjs/src/features/return-loan/api/return-loan.ext.ts",
     "fastapi": "fastapi/app/features/loans/return_loan_ext.py",
@@ -256,6 +302,7 @@ SOLUTIONS: dict[str, Callable[[Path], None]] = {
     "seed-csv": solve_seed_csv,
     "quickstart-tool-library": solve_quickstart_tool_library,
     "quickstart-mobile-api": solve_quickstart_mobile_api,
+    "quickstart-company-jira": solve_quickstart_company_jira,
     "quickstart-change-bindings": solve_quickstart_change_bindings,
 }
 
@@ -286,7 +333,9 @@ def test_prepare_and_score_an_unsolved_and_a_solved_task(task: str, tmp_path: Pa
     for skill in ("appgen", "appgen-quickstart"):
         assert (folder / "home" / ".claude" / "skills" / skill / "SKILL.md").is_file()
     if task.startswith("quickstart-"):
-        assert list((folder / "work").iterdir()) == []
+        # Only the files that the prompts name, for example an OpenAPI document.
+        files = script.TASK_BY_NAME[task].files
+        assert sorted(p.name for p in (folder / "work").iterdir()) == sorted(files)
 
     unsolved = score(folder)
 

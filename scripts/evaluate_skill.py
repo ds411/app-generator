@@ -6,7 +6,8 @@ the prompts of a task with more than one prompt. A run uses one folder:
 
 - `work/`: the folder of the agent. It has the definition and the app
   that the task starts from, and nothing else. The tasks of the
-  quick-start skill start from a folder without a definition.
+  quick-start skill start from a folder without a definition, with only
+  the files that their prompts name.
 - `home/`: an empty home folder with the installed skills
   (`appgen skills install --scope user`), so that the skills of appgen
   are the only skills of the agent.
@@ -141,6 +142,9 @@ async def cancel_booking(
     return record
 '''
 """The hand-written logic of `cancel_booking` before the task `change-definition`."""
+
+JIRA_DOCUMENT = ROOT / "tests" / "fixtures" / "jira" / "jira.openapi.json"
+"""The trimmed OpenAPI document of the Jira Cloud platform REST API."""
 
 ROOMS_CSV = """\
 Room,Floor,Seats,Rate per hour (EUR),Equipment
@@ -347,8 +351,9 @@ class Task:
     """The gaps that must be closed at the end, or ALL_GAPS."""
     check: Callable[[Path, Definition], list[str]]
     """The checks of the task: the problems of the work folder and of the definition."""
-    files: dict[str, str] = field(default_factory=dict[str, str])
-    """More files of the work folder before the run, by path. The app has its folder `app/`."""
+    files: dict[str, str | Path] = field(default_factory=dict[str, str | Path])
+    """More files of the work folder before the run, by path: a text, or a file of the repository
+    to copy. The app has its folder `app/`."""
     defaults: Defaults | None = None
     """The expected defaults of a task of the quick-start skill."""
 
@@ -404,6 +409,29 @@ TASK_LIST = [
         (),
         check_quickstart,
         defaults=Defaults({"fastapi": "fastapi"}, keys=("auth.user_entity",), rows=("binding",)),
+    ),
+    Task(
+        "quickstart-company-jira",
+        None,
+        None,
+        (),
+        check_quickstart,
+        {"jira.openapi.json": JIRA_DOCUMENT},
+        Defaults(
+            {"nextjs": "nextjs"},
+            keys=(
+                "auth.password: false",
+                "!auth.sign_up",
+                "auth.providers.<>.issuer: "
+                "https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Hd7Qm2xYz",
+                "auth.providers.<>.authorize_params.identity_provider: EntraID",
+                "auth.providers.<>.trust_email: true",
+                "auth.providers.<>.create_users: true",
+                "apis.<>.document: jira.openapi.json",
+                "apis.<>.security.username_env",
+            ),
+            rows=("binding", "auth", "providers", "password", "apis"),
+        ),
     ),
     Task(
         "quickstart-change-bindings",
@@ -462,9 +490,12 @@ def prepare(task: Task, folder: Path) -> list[str]:
         result = appgen("generate", work / "app.yaml", "-b", task.binding, "-o", work / APP)
         if result.returncode != 0:
             raise SystemExit(f"error: appgen generate failed:\n{result.stderr}")
-    for path, text in task.files.items():
+    for path, source in task.files.items():
         (work / path).parent.mkdir(parents=True, exist_ok=True)
-        (work / path).write_text(text, encoding="utf-8")
+        if isinstance(source, Path):
+            shutil.copyfile(source, work / path)
+        else:
+            (work / path).write_text(source, encoding="utf-8")
     env = {**os.environ, "HOME": str(home)}
     result = subprocess.run(
         [sys.executable, "-m", "appgen", "skills", "install", "--scope", "user"],

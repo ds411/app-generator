@@ -79,26 +79,47 @@ A key with `<...>` stands for a name that you choose, for example
 | `auth` | People who use the app: members, staff, mechanics, accounts, a sign-in, "my" records, or roles. A sign-in with an email address and a password. People that the app only keeps records of, for example the customers of a shop, are no signal. | `auth.user_entity`, `auth.username_field: email` |
 | `access` | Always with `auth`. The roles of the prompts, for example "only the librarians add tools". Without roles in the prompts: `admin`, and one role for the other users, for example `member`. The role with the most rights gets all operations and pages. | `access.role_field: role`, `access.roles.<role>.operations: ["*"]`, `access.roles.<role>.pages: ["*"]` |
 | `records` | Users see or change only their own records, for example "members see their loans". | `access.roles.<role>.records.<Entity>.owner` |
-| `sign_up` | A public app: anyone, customers, or visitors make their own accounts. | `auth.sign_up.fields`, `auth.sign_up.default_role`, `auth.password_reset`, `auth.delivery: smtp` |
+| `sign_up` | A public app: anyone, customers, or visitors make their own accounts. The emails go through an SMTP server, or through Amazon SES when the prompts name AWS or SES. | `auth.sign_up.fields`, `auth.sign_up.default_role`, `auth.password_reset`, `auth.delivery: smtp`, `auth.delivery: ses` |
 | `public` | Parts that visitors use without an account, for example a public catalog. | `auth.public_pages`, `auth.public_operations` |
 | `second_factor` | A second factor: two-factor, 2FA, or MFA. | `auth.second_factor.totp: true` |
-| `providers` | Company accounts: single sign-on (SSO), Microsoft Entra ID (Azure AD), Okta, Google Workspace, Amazon Cognito, or OpenID Connect. | `auth.providers.<provider>.issuer`, `auth.providers.<provider>.client_id_env`, `auth.providers.<provider>.client_secret_env`, `auth.providers.<provider>.create_users: true`, `auth.providers.<provider>.claims`, `auth.providers.<provider>.default_role` |
+| `providers` | Company accounts: single sign-on (SSO), Microsoft Entra ID (Azure AD), Okta, Google Workspace, Amazon Cognito, or OpenID Connect. With Amazon Cognito and an identity provider in the user pool, for example Entra ID, also the name of that identity provider and `trust_email` (see below). | `auth.providers.<provider>.issuer`, `auth.providers.<provider>.client_id_env`, `auth.providers.<provider>.client_secret_env`, `auth.providers.<provider>.create_users: true`, `auth.providers.<provider>.claims`, `auth.providers.<provider>.default_role`, `auth.providers.<provider>.authorize_params: { identity_provider: EntraID }`, `auth.providers.<provider>.trust_email: true` |
 | `password` | Only company accounts, for example "the staff sign in with their Microsoft account". | `auth.password: false` |
 | `translations` | More than one language, or a language other than English. The first language of the prompts is the default language. | `translations.default`, `translations.languages.<code>.label`, `translations.languages.<code>.text` |
 | `seed` | Data in the prompts, for example a list of rooms, or a data file (CSV, JSON, or YAML) that the prompts name. | `seed.<Entity>.records`, `seed.<Entity>.file` |
-| `apis` | An outside service that the app calls, with an OpenAPI document in the folder. | `apis.<api>.document`, `apis.<api>.base_url_env`, `apis.<api>.operations`, `apis.<api>.security` |
+| `apis` | An outside service that the app calls, with an OpenAPI document in the folder. The credentials of the prompts: a key or a token, a user name with a password or an API token (for example the email address and the API token of a Jira account), or the own account of each user. A list of the data of the service is a view of the API. | `apis.<api>.document`, `apis.<api>.base_url_env`, `apis.<api>.operations`, `apis.<api>.security`, `apis.<api>.security.username_env`, `apis.<api>.security.per_user: true`, `ui.views.<view>.source` |
 | `jobs` | Work at a time: "every night", "each Monday", or "a reminder one day before". | `jobs.<job>.schedule`, `jobs.<job>.entity`, `jobs.<job>.at`, `jobs.<job>.offset`, `jobs.<job>.operation` |
 | `notifications` | Tell users about a change: "notify", "tell the owner when", or "an alert". With "by email", also an email. | `notifications.<notification>.entity`, `notifications.<notification>.event: changed`, `notifications.<notification>.receivers`, `notifications.<notification>.text`, `notifications.<notification>.email: true` |
 | `workflows` | A status with fixed steps, for example "a request is approved or rejected". | `workflows.<workflow>.entity`, `workflows.<workflow>.field`, `workflows.<workflow>.initial`, `workflows.<workflow>.transitions` |
 | `files` | Files, photos, images, documents, or attachments. | `entities.<Entity>.fields.<field>.type: image`, `storage.kind: local` |
 | `places` | Addresses on a map, or "near me". | `entities.<Entity>.fields.<field>.type: point` |
 | `history` | "Who changed what", an audit log, or an undo of a change. | `entities.<Entity>.history: true` |
-| `live` | Users see the changes of other users at once, for example on a board. | `entities.<Entity>.live: true` |
+| `live` | Users see the changes of other users at once, for example on a board, or see who else has a record open. | `entities.<Entity>.live: true`, `pages.<page>.presence: true` |
 
 For Amazon Cognito, the issuer of a provider is
 `https://cognito-idp.<region>.amazonaws.com/<user pool ID>`. For
-Microsoft Entra ID, it is
+Microsoft Entra ID without Cognito, it is
 `https://login.microsoftonline.com/<tenant ID>/v2.0`.
+
+A user pool of Amazon Cognito with an identity provider, for example
+Entra ID, needs two more keys on the provider:
+
+- `authorize_params: { identity_provider: <name> }`, with the name of
+  the identity provider in the user pool, so that the users go at once
+  to their company sign-in. Without a name in the prompts, use
+  `EntraID`.
+- `trust_email: true`, because the user pool does not mark the email
+  address of a SAML user as verified.
+
+The roles from the groups of the provider (`roles`) need the IDs of the
+groups, and the sign-out at a user pool (`sign_out`) needs the domain of
+the user pool. Add them only when the prompts give these values. Else
+name them in the summary as parts to set up.
+
+For HTTP Basic, for example Jira with the email address of an account
+and an API token, the security of the API has `username_env` and `env`.
+When each user connects an own account, it has `per_user: true` in
+place of them, and `check` with an operation that gives the current
+user, if the document has one.
 
 ## Questions
 
