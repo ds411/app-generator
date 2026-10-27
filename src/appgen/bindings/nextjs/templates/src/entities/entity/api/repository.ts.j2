@@ -14,6 +14,9 @@ import "server-only";
 import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 
 {% endif %}
+{% if totals and totals.me %}
+import { requestUserId } from "@/shared/auth/session";
+{% endif %}
 import { {{ imports | unique | sort | join(", ") }} } from "@/shared/db";
 {% if element.history %}
 import type { HistoryMember } from "@/shared/db/history";
@@ -131,9 +134,13 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
 {% endfor %}
   ],
 {% endif %}
+{% if totals and totals.me %}
+  // The totals of the signed-in user (`$me`) read the user of the request.
+  me: requestUserId,
+{% endif %}
 {% if totals and totals.totals %}
   // The totals of the related records (ADR 0034): a subquery for each one, of the record `record`.
-  totals: (record) => ({
+  totals: (record{{ ", me" if totals.me }}) => ({
 {% for t in totals.totals %}
 {% for id in t.ids %}
     {{ trace(id) }}

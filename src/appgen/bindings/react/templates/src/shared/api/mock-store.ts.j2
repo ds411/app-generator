@@ -127,7 +127,10 @@ export type Total = {
   list?: string;
   /** The key of the number field of the related records. `count` has none. */
   field?: string;
-  /** The conditions of the related records: a key, an operator, and a value. */
+  /**
+   * The conditions of the related records: a key, an operator, and a value.
+   * A function gives the value at each read, for example the signed-in user.
+   */
   filter?: [string, TotalOp, unknown][];
 };
 
@@ -779,7 +782,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
         .filter((item) =>
           ids === undefined ? item[total.link ?? ""] === record.id : ids.includes(String(item.id)),
         )
-        .filter((item) => (total.filter ?? []).every(([key, op, operand]) => passes(item[key], op, operand)));
+        .filter((item) => (total.filter ?? []).every(([key, op, operand]) => passes(item[key], op, typeof operand === "function" ? (operand as () => unknown)() : operand)));
       values[total.key] = totalOf(total, items);
     }
     return values;

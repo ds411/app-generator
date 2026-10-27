@@ -1,6 +1,6 @@
 """The sign-in of the apps: the entity that holds the users, and the open parts."""
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import pydantic
 from pydantic import BeforeValidator
@@ -27,6 +27,20 @@ PROVIDER_PATHS = "/auth/"
 """With `auth.providers`: the start of the paths of the provider sign-in in the front ends."""
 MIN_PASSWORD_LENGTH = 8
 """The default and the lowest value of `auth.min_password_length`."""
+ME = "$me"
+"""The signed-in user, as the value of a relation to the user entity: in the filters of the
+views, the widgets, and the totals, and in the defaults of the forms."""
+
+
+def has_me(value: object) -> bool:
+    """Return True if a value of a filter or of a default is `$me` or has it: in a list, or
+    as an operand of a condition."""
+    if isinstance(value, dict):
+        return any(has_me(item) for item in cast(dict[str, object], value).values())
+    if isinstance(value, list):
+        return any(has_me(item) for item in cast(list[object], value))
+    return value == ME
+
 
 type Claim = Annotated[str, pydantic.StringConstraints(pattern=r"^[^\s\"\\]+$")]
 """The name of a claim of an ID token, or of a scope, for example `email`."""

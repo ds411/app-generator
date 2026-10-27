@@ -74,6 +74,7 @@ _APP_SHELL = (
         path="src/shared/lib/access.ts",
         when="definition.access",
     ),
+    Output(template="src/shared/lib/me.ts.j2", path="src/shared/lib/me.ts", when="me"),
     Output(
         template="ui/widgets/layout/layout.tsx.j2",
         path="src/widgets/layouts/ui/{{ name | kebab }}-layout.tsx",

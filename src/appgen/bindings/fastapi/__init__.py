@@ -161,6 +161,7 @@ BINDING = Binding(
             when="definition.access",
         ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
+        Output(template="tests/test_me.py.j2", path="tests/test_me.py", when="py.me_tests"),
         Output(
             template="tests/test_providers.py.j2",
             path="tests/test_providers.py",

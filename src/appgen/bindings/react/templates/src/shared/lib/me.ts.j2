@@ -1,0 +1,12 @@
+{{ trace_header(definition.auth.id) }}
+// The signed-in user of the values `$me`: the filters of the views and
+// the widgets, and the defaults of the forms. The session of the browser
+// tab gives the ID.{% if react.api %} The API reads the user of the token for the totals
+// and the widgets.{% else %} The mock store reads it for the totals.{% endif %}
+
+import { currentUserId } from "@/shared/auth";
+
+/** Return the ID of the signed-in user, or null without a session: the value `$me`. */
+export function useMe(): string | null {
+  return currentUserId();
+}

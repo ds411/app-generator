@@ -38,6 +38,9 @@ import { compute } from "@/shared/lib/compute";
 {% if plan.needs("formatValue") %}
 import { formatValue } from "@/shared/lib/format";
 {% endif %}
+{% if plan.me %}
+import { useMe } from "@/shared/lib/me";
+{% endif %}
 {% if plan.order %}
 import { orderChanges, placeItem, writeOrder } from "@/shared/lib/order";
 {% endif %}
@@ -233,6 +236,9 @@ const resource = useScrollPages(
   );
 {%- endmacro %}
 
+{#- The initial filters of a view in its component: `initial` with `$me`, else the constant. -#}
+{% macro initial(plan) %}{{ "initial" if plan.me else "INITIAL_FILTERS" }}{% endmacro %}
+
 {% macro filters(plan) -%}
 {% if plan.filters %}
 type Filters = {
@@ -241,11 +247,22 @@ type Filters = {
 {% endfor %}
 };
 
+{% if plan.me %}
+/** Return the filters of a new view: `me` is the ID of the signed-in user, or null. */
+function initialFilters(me: string | null): Filters {
+  return {
+{% for f in plan.filters %}
+    {{ f.key }}: {{ f.default }}, {{ trace(f.element_id) }}
+{% endfor %}
+  };
+}
+{% else %}
 const INITIAL_FILTERS: Filters = {
 {% for f in plan.filters %}
   {{ f.key }}: {{ f.default }}, {{ trace(f.element_id) }}
 {% endfor %}
 };
+{% endif %}
 
 {% if plan.server %}
 /** Return the query parameters of the list endpoint for the filters. */
@@ -474,7 +491,7 @@ const {{ name }}: Record<{{ keys }}, ActionSpec<{{ type }}>> = {
 {% endfor %}
 {% if plan.filters %}
         {filtered && (
-          <Button variant="ghost" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+          <Button variant="ghost" size="sm" onClick={() => updateFilters({{ initial(plan) }})}>
             {{ jsx_text("Reset") }}
             <XIcon />
           </Button>

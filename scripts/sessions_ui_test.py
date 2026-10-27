@@ -1,0 +1,354 @@
+"""Sign in to the course hub fixture, and check the values of the signed-in user in the front ends.
+
+M36 (users and sessions): the value `$me` is the signed-in user in the
+filters of the widgets, the views, and the totals, and in the defaults
+of the forms. This test proves it for tests/fixtures/courses.yaml:
+
+1. Generate the fixture with the binding, install it, run the lint, the
+   type check, and `appgen check`, and build it.
+2. Start the app: React with `vite preview` and its mock users, Next.js
+   with `pnpm start`, PGlite, and the seed users (`DATABASE_SEED` and
+   `SEED_PASSWORD`). The binding `react-api` is the React app with
+   `x-react-data: api` and the FastAPI app of the fixture (SQLite, with
+   the seed users).
+3. Run the UI test `ui-tests/tests/sessions.spec.ts`. For each user with
+   records, it signs in, and checks the stat widgets of the start page
+   with `$me`, the list page whose filter starts with the user, the
+   student of a new record of its form, and the totals of the user in
+   the table of the lessons. The values come from the seed records.
+
+Run it from the repository root:
+
+    uv run scripts/sessions_ui_test.py [binding ...] [--out folder]
+
+Without a binding, the script tests React, Next.js, and react-api.
+scripts/check-auth-ui.sh runs it. It needs uv, pnpm, and the Chromium of
+Playwright (see scripts/smoke_test.py). It uses the ports of
+scripts/auth_ui_test.py. It does not need Docker.
+"""
+
+import argparse
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, cast
+
+from auth_ui_test import (
+    API_PORT,
+    PASSWORDS,
+    PORTS,
+    UI_TESTS,
+    generate,
+    run,
+    started,
+    started_api,
+    wait_for,
+)
+from smoke_test import expected_ui
+
+from appgen.bindings.react.api_client import DATA_KEY
+from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.views import definition_display, label
+from appgen.dsl import AppDefinition, load_definition
+from appgen.dsl.auth import ME, has_me
+from appgen.dsl.expressions import Total, parse_expression
+from appgen.dsl.model import Page
+from appgen.dsl.ui.common import FormAction
+from appgen.dsl.ui.dashboards import RecordFilter, StatWidget
+from appgen.dsl.ui.views import ListViewBase, SelectFilter, TableView
+from appgen.gen.naming import kebab
+
+DEFINITION = Path("tests/fixtures/courses.yaml")
+BINDINGS = ("react", "nextjs", "react-api")
+
+type Record = dict[str, Any]
+
+
+class SessionsUiTestError(Exception):
+    """A failed check."""
+
+
+def log(binding: str, message: str) -> None:
+    print(f"sessions-ui-test: {binding}: {message}", flush=True)
+
+
+def ids_of(value: object) -> list[str]:
+    """Return the IDs of the value of a relation of a mock record: one, many, or none."""
+    if isinstance(value, list):
+        return [str(item) for item in cast(list[object], value)]
+    return [value] if isinstance(value, str) else []
+
+
+def passes(record: Record, record_filter: RecordFilter, user: str) -> bool:
+    """Return True if a mock record passes a filter, with `$me` as the ID of a user.
+
+    The test knows the conditions of the fixture: a field or a relation of
+    the record (no path), and the operators `eq`, `in`, `gte`, and `lte`.
+    """
+    for path, condition in record_filter.items():
+        if "." in path:
+            raise SessionsUiTestError(f"The test does not know the path {path!r}.")
+        if isinstance(condition, dict):
+            items = list(condition.items())
+        else:
+            items = [("in" if isinstance(condition, list) else "eq", condition)]
+        value = record.get(path)
+        for op, operand in items:
+            operands = cast(list[object], operand) if isinstance(operand, list) else [operand]
+            operands = [user if item == ME else item for item in operands]
+            values: list[object] = (
+                [*ids_of(cast(object, value))] if isinstance(value, list) else [value]
+            )
+            if op in ("eq", "in"):
+                ok = any(v in operands for v in values)
+            elif op in ("gte", "lte") and isinstance(value, int | float):
+                bound = cast(float, operands[0])
+                ok = value >= bound if op == "gte" else value <= bound
+            elif op in ("gte", "lte"):
+                ok = False
+            else:
+                raise SessionsUiTestError(f"The test does not know the operator {op!r}.")
+            if not ok:
+                return False
+    return True
+
+
+def start_dashboard(definition: AppDefinition) -> str:
+    """Return the dashboard of the start page."""
+    page = next(p for p in definition.pages.values() if p.path == "/")
+    if page.content is None or page.content.dashboard is None:
+        raise SessionsUiTestError("The start page has no dashboard.")
+    return page.content.dashboard
+
+
+def me_list(definition: AppDefinition) -> tuple[Page, ListViewBase, str]:
+    """Return the list page with a select filter of the default `$me`, the view, and the field."""
+    ui = definition.ui
+    assert ui is not None
+    for page in definition.pages.values():
+        view_name = page.content.view if page.content else None
+        view = ui.views.get(view_name or "")
+        if not isinstance(view, ListViewBase) or view_name is None:
+            continue
+        for f in view.filters.values():
+            if isinstance(f, SelectFilter) and f.default == ME and "." not in f.field:
+                return page, view, f.field
+    raise SessionsUiTestError("No list page has a select filter with the default $me.")
+
+
+def me_form(definition: AppDefinition, page: Page, user: Record) -> dict[str, str] | None:
+    """Return the form of a page action with the default `$me`: its button, widget, and text."""
+    ui, auth = definition.ui, definition.auth
+    assert ui is not None and auth is not None
+    display = definition_display(definition.entities[auth.user_entity])
+    for action_name, action in page.actions.items():
+        if not isinstance(action, FormAction):
+            continue
+        form = ui.forms[action.form]
+        for name in form.fields:
+            if form.defaults.get(name) == ME:
+                return {
+                    "label": str(action.label or label(action_name)),
+                    "id": f"{kebab(action.form)}-{kebab(name)}",
+                    "value": str(user[display]),
+                }
+    return None
+
+
+def me_totals(
+    definition: AppDefinition, data: dict[str, list[Record]], user: str
+) -> list[dict[str, Any]]:
+    """Return the table pages with a column of a count with `$me`, and the value of each row."""
+    ui = definition.ui
+    assert ui is not None
+    found: list[dict[str, Any]] = []
+    for page in definition.pages.values():
+        view = ui.views.get(page.content.view or "") if page.content else None
+        if not isinstance(view, TableView) or "{" in page.path:
+            continue
+        entity = definition.entities[view.entity]
+        for name, column in view.columns.items():
+            spec = entity.fields.get(name)
+            if spec is None or spec.computed is None or not has_me(spec.filter):
+                continue
+            total = parse_expression(spec.computed)
+            if not isinstance(total, Total) or total.function != "count":
+                raise SessionsUiTestError(f"The test knows only a count, not {spec.computed!r}.")
+            relation = entity.relations[total.relation]
+            inverse = relation.inverse or ""
+            display = definition_display(entity)
+            rows = [
+                {
+                    "title": str(record[display]),
+                    "value": str(
+                        sum(
+                            1
+                            for item in data[relation.target]
+                            if record["id"] in ids_of(item.get(inverse))
+                            and passes(item, spec.filter or {}, user)
+                        )
+                    ),
+                }
+                for record in data[view.entity]
+            ]
+            found.append(
+                {
+                    "path": page.path,
+                    "title": str(page.title),
+                    "column": str(column.label or spec.label or label(name)),
+                    "rows": rows,
+                }
+            )
+    return found
+
+
+def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]:
+    """Return the values of the UI test: for each user with records, what the pages show."""
+    ui, auth = definition.ui, definition.auth
+    assert ui is not None and auth is not None
+    data = mock_data(definition)
+    dashboard = ui.dashboards[start_dashboard(definition)]
+    page, view, field = me_list(definition)
+    title = definition_display(definition.entities[view.entity])
+    users: list[dict[str, Any]] = []
+    for user in data[auth.user_entity]:
+        records = data[view.entity]
+        own = [r for r in records if user["id"] in ids_of(r.get(field))]
+        if not own:
+            continue
+        own_titles = {str(r[title]) for r in own}
+        stats = [
+            {
+                "label": str(widget.label or label(name)),
+                "value": str(
+                    sum(1 for r in data[widget.entity] if passes(r, widget.filter, user["id"]))
+                ),
+            }
+            for name, widget in dashboard.widgets.items()
+            if isinstance(widget, StatWidget) and has_me(widget.filter)
+        ]
+        users.append(
+            {
+                "username": user[auth.username_field],
+                "stats": stats,
+                "list": {
+                    "path": page.path,
+                    "title": str(page.title),
+                    "own": sorted(own_titles),
+                    "others": sorted({str(r[title]) for r in records} - own_titles),
+                },
+                "form": me_form(definition, page, user),
+                "totals": me_totals(definition, data, user["id"]),
+            }
+        )
+    if len(users) < 2:
+        raise SessionsUiTestError("The test needs two users with records in the seed data.")
+    return {"password": PASSWORDS["nextjs" if binding == "react-api" else binding], "users": users}
+
+
+def check_ui(binding: str, definition: AppDefinition) -> None:
+    """Run the UI test of the signed-in users on the app that runs."""
+    name = f"{binding}-sessions"
+    expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
+    expected_file.parent.mkdir(exist_ok=True)
+    ui_binding = "react" if binding == "react-api" else binding
+    expected = {
+        **expected_ui(ui_binding, definition),
+        "sessions": expected_sessions(binding, definition),
+    }
+    expected_file.write_text(json.dumps(expected, indent=2) + "\n")
+    env = {
+        "APPGEN_BASE_URL": f"http://localhost:{PORTS[binding]}",
+        "APPGEN_UI_EXPECTED": str(expected_file),
+        "APPGEN_UI_OUTPUT": str((UI_TESTS / "test-results" / name).resolve()),
+    }
+    with (UI_TESTS / ".install.lock").open("w") as lock:
+        # Only one check at a time installs the packages of the UI tests.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        run("pnpm", "install", "--silent", "--frozen-lockfile", cwd=UI_TESTS)
+    command = ["pnpm", "exec", "playwright", "test", "tests/sessions.spec.ts", "--project", "light"]
+    run(*command, cwd=UI_TESTS, env=env)
+
+
+def build(binding: str, definition: Path, app: Path, env: dict[str, str] | None = None) -> None:
+    """Install the front end, run the lint, the type check, and the trace check, and build it."""
+    log(binding, "pnpm install, lint, type check, appgen check, and build")
+    run("pnpm", "install", "--silent", cwd=app)
+    run("pnpm", "--silent", "lint", cwd=app)
+    run("pnpm", "--silent", "typecheck", cwd=app, quiet=True)
+    run("uv", "run", "--locked", "appgen", "check", str(definition), str(app), quiet=True)
+    run("pnpm", "--silent", "build", cwd=app, env=env, quiet=True)
+
+
+def react_api_test(out: Path) -> None:
+    """Sign in to the React app with the FastAPI app of the fixture, with the seed users."""
+    binding, definition = "react-api", load_definition(DEFINITION)
+    source = out / "courses.yaml"
+    marker = "\napp:\n"
+    text = DEFINITION.read_text()
+    if marker not in text:
+        raise SessionsUiTestError(f"{DEFINITION} has no 'app:' line.")
+    source.write_text(text.replace(marker, f"{marker}  {DATA_KEY}: api\n", 1))
+    api, web = out / "react-api-fastapi", out / binding
+    generate(source, "fastapi", api)
+    generate(source, "react", web)
+    log(binding, "uv sync")
+    # The FastAPI app has its own virtual environment.
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    subprocess.run(["uv", "sync", "--quiet"], cwd=api, env=env, check=True)
+    build(binding, source, web, env={"VITE_API_URL": f"http://127.0.0.1:{API_PORT}"})
+    seed = {"DATABASE_SEED": "true", "SEED_PASSWORD": PASSWORDS["nextjs"]}
+    with started_api(api, seed), started(binding, web):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the signed-in users (Playwright)")
+        check_ui(binding, definition)
+    log(binding, "passed")
+
+
+def sessions_ui_test(binding: str, out: Path) -> None:
+    if binding == "react-api":
+        react_api_test(out)
+        return
+    definition = load_definition(DEFINITION)
+    app = out / binding
+    generate(DEFINITION, binding, app)
+    build(binding, DEFINITION, app)
+    with started(binding, app):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the signed-in users (Playwright)")
+        check_ui(binding, definition)
+    log(binding, "passed")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("bindings", nargs="*", metavar="binding", help=", ".join(BINDINGS))
+    parser.add_argument(
+        "--out", type=Path, help="The folder of the apps; the default is a new one."
+    )
+    args = parser.parse_args()
+    bindings: list[str] = args.bindings or list(BINDINGS)
+    unknown = [b for b in bindings if b not in BINDINGS]
+    if unknown:
+        parser.error(f"unknown binding: {', '.join(unknown)}")
+    folder = None if args.out else tempfile.TemporaryDirectory(prefix="appgen-sessions-ui.")
+    out = args.out.resolve() if args.out else Path(folder.name)  # pyright: ignore[reportOptionalMemberAccess]
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        for binding in bindings:
+            sessions_ui_test(binding, out)
+    except (SessionsUiTestError, subprocess.CalledProcessError) as error:
+        print(f"sessions-ui-test: failed: {error}", file=sys.stderr)
+        return 1
+    finally:
+        if folder is not None:
+            folder.cleanup()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

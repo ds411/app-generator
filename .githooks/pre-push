@@ -150,7 +150,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'tests/fixtures/jobs.yaml' 'tests/fixtures/files*' \
     'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
     'tests/fixtures/api-connections*' 'scripts/api_connection_test.py' \
-    'tests/fixtures/invoices.yaml' 'tests/fixtures/listings*' \
+    'tests/fixtures/invoices.yaml' 'tests/fixtures/listings*' 'tests/fixtures/courses*' \
     'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
     'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps fastapi"
@@ -205,6 +205,7 @@ if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py'
     'scripts/smoke_test.py' 'ui-tests/*' \
     'tests/fixtures/api-connections*' 'scripts/connection_ui_test.py' 'scripts/mock_api.py' \
     'tests/fixtures/listings*' 'scripts/listings_ui_test.py' \
+    'tests/fixtures/courses*' 'scripts/sessions_ui_test.py' \
     'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
     apps="$apps auth-ui"
 fi

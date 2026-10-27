@@ -22,6 +22,7 @@ from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSec
 from appgen.dsl.auth import (
     CONNECTIONS_PATH,
     FORGOT_PASSWORD_PATH,
+    ME,
     PROVIDER_PATHS,
     RESET_PASSWORD_PATH,
     SECOND_FACTOR_PATH,
@@ -740,17 +741,24 @@ def _check_total_filter(
         return
     for target in targets:
         fields = definition.entities[target].stored_fields
+        relations = definition.entities[target].relations
+        known: dict[str, object] = {}
         for path, condition in field.filter.items():
-            if path not in fields:
+            text = json.dumps(condition)
+            if path in relations and _only_me(condition):
+                # A total of the records of the signed-in user, for example the unread messages.
+                known[path] = condition
+            elif path not in fields:
                 yield _error(
                     "unknown-reference",
                     f"The filter of the totals names '{path}', which is not a stored field of "
                     f"the entity '{target}'.",
                     field,
                     at="filter",
-                    hint="A filter of a total names the fields of the related records.",
+                    hint="A filter of a total names the fields of the related records, or a "
+                    "relation to the user entity with $me.",
                 )
-            elif "$" in json.dumps(condition):
+            elif "$today" in text or "$now" in text:
                 yield _error(
                     "invalid-value",
                     f"The filter of the totals cannot use $today or $now ('{path}').",
@@ -758,8 +766,19 @@ def _check_total_filter(
                     at="filter",
                     hint="The apps compute a total in each query, without the time of a request.",
                 )
-        known = {p: c for p, c in field.filter.items() if p in fields and "$" not in json.dumps(c)}
-        yield from check_record_filter(definition, field, target, known)
+            else:
+                known[path] = condition
+        yield from check_record_filter(definition, field, target, known, me={"many_to_one"})
+
+
+def _only_me(condition: object) -> bool:
+    """Return True if `$me` is the only value of a condition, for example `{ne: $me}`."""
+    found: list[object] = []
+    for value in (
+        cast(dict[str, object], condition).values() if isinstance(condition, dict) else [condition]
+    ):
+        found += cast(list[object], value) if isinstance(value, list) else [value]
+    return bool(found) and all(value == ME for value in found)
 
 
 def _unknown_member(
@@ -1180,7 +1199,7 @@ def check_jobs(definition: AppDefinition) -> Iterator[Diagnostic]:
                     job,
                     at="at",
                 )
-        yield from check_record_filter(definition, job, job.entity, job.filter)
+        yield from check_record_filter(definition, job, job.entity, job.filter, me=None)
 
 
 def _check_job_time(job: Job) -> Iterator[Diagnostic]:

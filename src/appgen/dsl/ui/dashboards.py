@@ -18,7 +18,8 @@ RELATIVE_DATES = ("$today", "$now")
 type RecordFilter = dict[FieldPath, JsonValue]
 """A mapping from a field path to a value (equal to), or to a mapping of operators.
 
-A value is a literal, or `$today` or `$now` for a date.
+A value is a literal, `$today` or `$now` for a date, or `$me` for the signed-in user (a
+relation to the user entity).
 """
 
 

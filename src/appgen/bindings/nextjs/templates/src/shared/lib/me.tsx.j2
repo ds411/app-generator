@@ -1,0 +1,21 @@
+{{ trace_header(definition.auth.id) }}
+"use client";
+
+// The signed-in user of the values `$me` in the browser: the filters of
+// the views and the widgets, and the defaults of the forms. The root
+// layout reads the session on the server. The repositories read the user
+// of the request for the totals.
+import { createContext, type ReactNode, useContext } from "react";
+
+// Without a provider, no user is signed in.
+const MeContext = createContext<string | null>(null);
+
+/** Give the ID of the signed-in user to the UI: null without a session. */
+export function MeProvider({ me, children }: { me: string | null; children: ReactNode }) {
+  return <MeContext value={me}>{children}</MeContext>;
+}
+
+/** Return the ID of the signed-in user, or null without a session: the value `$me`. */
+export function useMe(): string | null {
+  return useContext(MeContext);
+}

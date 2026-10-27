@@ -1,0 +1,74 @@
+{{ trace_header("app") }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set tests = py.me_tests %}
+{% macro sig(fn) %}
+{{ py.signature("async def " ~ fn, ["client: AsyncClient", "session: AsyncSession"], " -> None:") }}
+{% endmacro %}
+"""The tests of `$me`, the signed-in user: the totals and the widgets of the user of a request.
+
+Each test stores records of two users, and reads the value with the
+token of each user, and without a token. A request without a token has
+no user, so the filter keeps no records.
+"""
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import make_token
+{% set factories = ["make_" ~ u.snake] %}
+{% for t in tests %}
+{% set _ = factories.append("make_" ~ t.records.snake) %}
+{% if t.owner %}{% set _ = factories.append("make_" ~ t.owner.snake) %}{% endif %}
+{% endfor %}
+{{ py.from_import("tests.factories", factories | unique | list) }}
+
+pytestmark = pytest.mark.anyio
+
+
+async def _users(session: AsyncSession) -> list[tuple[str, dict[str, str]]]:
+    """Store two users, and return the ID and the headers with a token of each."""
+    found: list[tuple[str, dict[str, str]]] = []
+    for _ in range(2):
+        user = await make_{{ u.snake }}(session)
+        token = make_token(b"test-secret", user.id)
+        found.append((str(user.id), {"Authorization": f"Bearer {token}"}))
+    return found
+{% for t in tests %}
+
+
+{{ trace(t.element_id) }}
+{% if t.kind == "total" %}
+{{ sig("test_" ~ t.name ~ "_counts_the_records_of_the_user") }}    (first, first_headers), (second, second_headers) = await _users(session)
+    record = await make_{{ t.owner.snake }}(session)
+    for user in (first, first, second):
+        await make_{{ t.records.snake }}(session, {{ t.link }}=record.id{% for attr in t.user_attrs %}, {{ attr }}=user{% endfor %})
+
+    for headers, expected in ((first_headers, 2), (second_headers, 1), ({}, 0)):
+        response = await client.get(f"{{ t.path }}", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["{{ t.key }}"] == expected
+{% elif t.kind == "stat" %}
+{{ sig("test_" ~ t.name ~ "_counts_the_records_of_the_user") }}    (first, first_headers), (second, second_headers) = await _users(session)
+    for user in (first, first, second):
+        await make_{{ t.records.snake }}(session{% for attr in t.user_attrs %}, {{ attr }}=user{% endfor %})
+
+    for headers, expected in ((first_headers, 2), (second_headers, 1), ({}, 0)):
+        response = await client.get("{{ t.path }}", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["value"] == expected
+{% else %}
+{{ sig("test_" ~ t.name ~ "_lists_the_records_of_the_user") }}    (first, first_headers), (second, second_headers) = await _users(session)
+    owned: dict[str, set[str]] = {first: set(), second: set()}
+    for user in (first, first, second):
+        record = await make_{{ t.records.snake }}(session{% for attr in t.user_attrs %}, {{ attr }}=user{% endfor %})
+        owned[user].add(str(record.id))
+
+    for headers, expected in ((first_headers, owned[first]), (second_headers, owned[second]), ({}, set())):
+        response = await client.get("{{ t.path }}", headers=headers)
+        assert response.status_code == 200, response.text
+        ids = {item["id"] for item in response.json()}
+        assert ids <= expected
+        assert len(ids) == min(len(expected), {{ t.limit }})
+{% endif %}
+{% endfor %}

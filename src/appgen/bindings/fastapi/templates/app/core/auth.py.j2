@@ -60,7 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 {% endif %}
 
-{% set user_key = ["USER_KEY"] if py.user_key else [] %}
+{% set user_key = (["USER_KEY"] if py.user_key else []) + (["SIGNED_IN"] if py.me else []) %}
 {% if sign_up %}
 {{ py.from_import("app.core.db", ["Base", "SessionDep", "commit", "flush"] + user_key) }}
 {% elif password %}
@@ -327,6 +327,20 @@ async def current_user(
 
 CurrentUser = Annotated[{{ u.name }}, Depends(current_user)]
 """The signed-in user, as a parameter of an endpoint."""
+{% if py.me %}
+
+
+async def remember_user(request: Request) -> None:
+    """Keep the ID of the user of a valid token for the request: the value `$me` (`me()`).
+
+    The app runs this dependency for each request, also for a public
+    endpoint, which does not check the token. Without a valid token, `$me`
+    is no user.
+    """
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    bearer = scheme.lower() == "bearer" and token.strip()
+    SIGNED_IN.set(read_token(signing_key(request), token.strip()) if bearer else None)
+{% endif %}
 {% if password %}
 
 

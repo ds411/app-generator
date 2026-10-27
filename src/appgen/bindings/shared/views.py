@@ -25,6 +25,7 @@ from appgen.bindings.shared.auth import kind_operations
 from appgen.bindings.shared.gaps import gap_spec
 from appgen.bindings.shared.totals import has_totals, total_key
 from appgen.bindings.shared.ui import css_class_var, css_var, js
+from appgen.dsl.auth import ME
 from appgen.dsl.expressions import (
     Binary,
     Call,
@@ -172,6 +173,9 @@ class FilterPlan:
     """A TypeScript expression of the options `{ value, label }[]` of a select."""
     source: str | None = None
     """For a select of a relation that searches the server: the options of the target."""
+    me: bool = False
+    """True if the default has `$me`: the initial state reads `me`, the ID of the signed-in
+    user, or null."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +426,11 @@ class ViewPlan:
     @property
     def var(self) -> str:
         return camel(self.entity)
+
+    @property
+    def me(self) -> bool:
+        """True if a filter has the default `$me`: the initial filters are a function of `me`."""
+        return any(f.me for f in self.filters)
 
     @property
     def sources(self) -> list[str]:
@@ -1597,7 +1606,7 @@ class ViewContext:
             options = self._options(value)
         if filter_.multiple:
             defaults = filter_.default if isinstance(filter_.default, list) else []
-            default = js([str(item) for item in defaults if item is not None])
+            default = _multiple_default([str(item) for item in defaults if item is not None])
             if value.kind == "many":
                 some = f"{value.key_expr}.some((id) => {state}.includes(id))"
                 match = f"{state}.length === 0 || {some}"
@@ -1616,9 +1625,12 @@ class ViewContext:
                 multiple=True,
                 options=options,
                 source=source,
+                me=ME in defaults,
             )
         default_value = filter_.default
         default = js(str(default_value)) if isinstance(default_value, str | int) else "null"
+        if default_value == ME:
+            default = "me"
         if value.kind == "many":
             match = f"{state} === null || {value.key_expr}.includes({state})"
         else:
@@ -1635,6 +1647,7 @@ class ViewContext:
             value=value,
             options=options,
             source=source,
+            me=default_value == ME,
         )
 
     def _options(self, value: Value) -> str:
@@ -2034,3 +2047,13 @@ def view_rules() -> tuple[Output, ...]:
             when="ui_views.action_bar(element_id).actions",
         ),
     )
+
+
+def _multiple_default(values: list[str]) -> str:
+    """Return the initial state of a multiple select as TypeScript: `$me` is `me`, if not null."""
+    if ME not in values:
+        return js(values)
+    if values == [ME]:
+        return "me === null ? [] : [me]"
+    items = ["...(me === null ? [] : [me])" if v == ME else js(v) for v in values]
+    return "[" + ", ".join(items) + "]"

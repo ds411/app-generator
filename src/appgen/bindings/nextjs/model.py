@@ -16,7 +16,7 @@ from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
-from appgen.bindings.shared.auth import auth_pages, record_rules
+from appgen.bindings.shared.auth import auth_pages, record_rules, uses_me
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
@@ -317,6 +317,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         check_notice_table(by_entity)
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
+    totals = repository_totals(definition, by_entity)
     return {
         "ts_apis": apis,
         "ts_connections": ts_connections(apis),
@@ -328,6 +329,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The values `$me` of the filters and of the defaults: the hook `useMe`.
+        "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
         "record_totals": {
             name: total_keys(definition, name, api=False) for name in definition.entities
@@ -373,7 +376,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # The events (ADR 0031): the repositories run their operations.
             "events": has_events(definition),
             # The totals of the related records (ADR 0034): the subqueries of the repositories.
-            "totals": repository_totals(definition, by_entity),
+            "totals": totals,
+            # The totals of the signed-in user (`$me`): the repositories read the user of the
+            # request.
+            "me_totals": any(t.me for t in totals.values()),
             # The compare rules with totals of the lines (ADR 0034): the repositories check
             # them after a change.
             "total_rules": any(

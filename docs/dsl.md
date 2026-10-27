@@ -45,6 +45,7 @@ valid.
   - [Grids](#grids)
   - [UI states and defaults](#ui-states-and-defaults)
 - [auth](#auth)
+  - [The signed-in user](#the-signed-in-user)
 - [access](#access)
 - [translations](#translations)
 - [Extension keys](#extension-keys)
@@ -337,7 +338,10 @@ and `max`.
 `filter` selects the related records of all totals of the expression.
 It is the filter of the [dashboards](#dashboards): stored fields of the
 related entity, each with a value or with operators, but without
-`$today` and `$now`. A field without totals takes no `filter`.
+`$today` and `$now`. A `many_to_one` relation of the related entity to
+the user entity takes only `$me`, the signed-in user (see
+[The signed-in user](#the-signed-in-user)), for example the unread
+messages of the user. A field without totals takes no `filter`.
 
 ```yaml
 # in: entities
@@ -1931,7 +1935,10 @@ the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), or `date_range` (`field`). All
-filters take `label` and `default`.
+filters take `label` and `default`. The `default` of a `select` filter
+of a relation to the user entity can be `$me`, the signed-in user (see
+[The signed-in user](#the-signed-in-user)): the view starts with the
+records of the user, and a clear of the filter shows all records.
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page
@@ -2241,7 +2248,7 @@ ui:
 | `sections`      | `title`, `description`, and `fields` (a list of form field names). |
 | `grid`          | The column grid.                                                   |
 | `rules`         | Rules across fields: `kind: compare` (`field`, `op`, `other`, `message`) or `kind: custom` (a generation gap). |
-| `defaults`      | A literal, or `$route.<param>` for a path parameter of the page.  |
+| `defaults`      | A literal, `$route.<param>` for a path parameter of the page, or `$me` for the signed-in user. |
 | `on_success`    | `toast`, `close`, and `navigate`.                                  |
 
 A form field has `widget`, `label`, `placeholder`, `help`, `span`,
@@ -2338,7 +2345,8 @@ tasks_by_week:
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are
-date values.
+date values. `$me` is the signed-in user, for a relation to the user
+entity (see [The signed-in user](#the-signed-in-user)).
 
 A dashboard with `period` has a picker of a date range above its
 widgets ([ADR 0038](adr/0038-dashboard-period.md)). `default` is the
@@ -2656,6 +2664,57 @@ with `return_to` set to its page `/auth/callback`: add the origin of
 the React app to `CORS_ORIGINS` of the FastAPI app. The React app with
 mock data signs in a mock user at once, as a demonstration. A failed
 sign-in opens the sign-in page with a message.
+
+### The signed-in user
+
+The value `$me` is the signed-in user, as the value of a relation to
+the user entity. It needs the section `auth`. A queue of tickets, for
+example, starts with the tickets of the agent, and the agent can still
+clear the filter and see all tickets. These places take `$me`:
+
+- The `default` of a `select` filter of a view, for a `many_to_one`,
+  `one_to_one`, or `many_to_many` relation to the user entity. With
+  `multiple`, write `[$me]`.
+- The `filter` of a widget of a dashboard, for the same relations.
+- The `defaults` of a form, for a field of the form with such a
+  relation: a new record belongs to the user.
+- The `filter` of a computed field with totals, for a `many_to_one`
+  relation of the related records to the user entity: each user gets
+  the total of the own records.
+
+A job runs without a user, so its filter does not take `$me`. Without a
+signed-in user, `$me` is a value that no record has: `eq` keeps no
+records, and `ne` keeps all records.
+
+```yaml
+# example: room-booking
+# in: ui
+views:
+  my_bookings:
+    kind: table
+    entity: Booking
+    columns: { title: {}, room: {}, starts_at: {} }
+    filters:
+      organizer: { kind: select, field: organizer, default: $me }
+forms:
+  new_booking:
+    defaults: { organizer: $me }
+dashboards:
+  overview:
+    widgets:
+      my_bookings:
+        kind: stat
+        label: My bookings
+        entity: Booking
+        filter: { organizer: $me }
+```
+
+The FastAPI app reads the user of the token of each request, also on a
+public endpoint, and gives it to the SQL of the totals and of the
+widgets. The Next.js app reads the user of the session: the root layout
+gives it to the views, the forms, and the widgets, and the repositories
+read it for the totals. The React app reads the user of the browser
+tab. With mock data, the mock store reads it for the totals.
 
 ## access
 

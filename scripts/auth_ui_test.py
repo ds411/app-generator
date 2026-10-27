@@ -791,8 +791,11 @@ def generate(definition: Path, binding: str, app: Path) -> None:
 
 
 @contextmanager
-def started_api(app: Path) -> Generator[None]:
-    """Start the FastAPI app with SQLite and the mock provider, and stop it at the end."""
+def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[None]:
+    """Start the FastAPI app with SQLite and the mock provider, and stop it at the end.
+
+    `settings` are more environment variables of the app, for example the seed.
+    """
     port, web = str(API_PORT), f"http://localhost:{PORTS['react-api']}"
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     env |= {
@@ -802,6 +805,7 @@ def started_api(app: Path) -> Generator[None]:
         "PUBLIC_URL": f"http://127.0.0.1:{port}",
         "LOG_JSON": "false",
         **provider_env(load_definition(DEFINITION)),
+        **(settings or {}),
     }
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
     log_file = app / "server.log"

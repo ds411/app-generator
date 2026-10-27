@@ -124,6 +124,8 @@ class Column(Element):
 class FilterBase(Element):
     label: Text | None = None
     default: JsonScalar | list[JsonScalar] = None
+    """The value of a new view. `$me` is the signed-in user, for a select filter of a relation
+    to the user entity."""
 
 
 class SearchFilter(FilterBase):

@@ -32,6 +32,7 @@ from pydantic import JsonValue
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, from_import, import_block, string
 from appgen.bindings.fastapi.queries import Call, Expr, PyPath, render, resolve_path
 from appgen.bindings.shared.views import definition_display
+from appgen.dsl.auth import ME
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.model import Field as DslField
 from appgen.dsl.ui.dashboards import ChartWidget, ListWidget, StatWidget
@@ -113,6 +114,7 @@ class PyWidget:
     aggregate: str = "count"
     today: bool = False
     now: bool = False
+    me: bool = False
     joins: dict[str, tuple[str, str]] = field(default_factory=dict[str, tuple[str, str]])
     """The aliases of the joined entities: the class and the join condition."""
     where: list[Expr] = field(default_factory=list[Expr])
@@ -270,7 +272,9 @@ class PyDashboard:
             "from fastapi import APIRouter, Depends"
             if any(w.protected or w.scoped or w.hides for w in self.widgets)
             else "from fastapi import APIRouter",
-            "from app.core.db import SessionDep",
+            "from app.core.db import SessionDep, me"
+            if any(w.me for w in self.widgets)
+            else "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
         }
         sql = {n for n in ("and_", "false", "not_", "or_", "select", "true") if f"{n}(" in code}
@@ -445,6 +449,8 @@ class FilterTarget(Protocol):
     where: list[Expr]
     today: bool
     """True if a condition uses `day`, the date of `$today`."""
+    me: bool
+    """True if a condition uses `me()`, the signed-in user of `$me`."""
     now: bool
     """True if a condition uses `moment`, the time of `$now`."""
 
@@ -454,7 +460,8 @@ class FilterBuilder:
 
     A condition of `$today` uses the variable `day`, and a condition of
     `$now` on a date-time field uses `moment`. The code of the widget or of
-    the job sets them.
+    the job sets them. A condition of `$me` uses `me()` of `app.core.db`:
+    the signed-in user of the request.
     """
 
     def __init__(
@@ -542,6 +549,9 @@ class FilterBuilder:
             value = self.literal(path, operand)
             if op == "eq":
                 return f"{column} == {value}"
+            if operand == ME:
+                # Without a signed-in user, `$me` is null: all records pass.
+                return Call("or_", (f"{column}.is_(None)", f"{column}.is_distinct_from({value})"))
             return Call("or_", (f"{column}.is_(None)", f"{column} != {value}"))
         if op in ("in", "not_in"):
             values = [self.literal(path, o) for o in operands if o is not None]
@@ -597,7 +607,7 @@ class FilterBuilder:
         source = self.source(path)
         target = path.entity.target(relation)
         operands = operand if isinstance(operand, list) else [operand]
-        ids = [f'UUID("{o}")' for o in operands if o is not None]
+        ids = [self.literal(path, o) for o in operands if o is not None]
         if op not in ("eq", "in", "ne", "not_in"):
             return "false()"
         if not ids:
@@ -609,6 +619,9 @@ class FilterBuilder:
     def literal(self, path: PyPath, value: JsonValue, *, day: bool = False) -> str:
         """Return a value of the filter as a Python expression for the column of a path."""
         f = path.field
+        if value == ME:
+            self.widget.me = True
+            return "me()"
         if value == "$today" or (value == "$now" and (day or (f is not None and f.type == "date"))):
             self.widget.today = True
             return "day"
