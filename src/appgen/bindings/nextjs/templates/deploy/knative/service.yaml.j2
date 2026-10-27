@@ -76,6 +76,13 @@ spec:
             - name: SMTP_TLS
               value: starttls
 {% endif %}
+{% if nextjs.ses %}
+            # Amazon SES sends the messages of the sign-in with the IAM role of the pod.
+            - name: AWS_REGION
+              value: us-east-1
+            - name: SES_FROM
+              value: no-reply@example.com
+{% endif %}
 {% if definition.auth %}
 {% for provider, p in definition.auth.providers.items() %}
             {{ trace(p.id) }}

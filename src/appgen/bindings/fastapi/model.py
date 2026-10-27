@@ -2605,6 +2605,8 @@ class PyApp:
     """True if the app sends emails by SMTP (`auth.delivery: smtp`): the messages of the
     sign-in, not with the extension file `app/core/messages_ext.py`, and the emails of the
     notices (ADR 0044)."""
+    ses: bool = False
+    """True if the app sends the same emails with the API of Amazon SES (`auth.delivery: ses`)."""
     dashboards: dict[str, PyDashboard] = field(default_factory=dict[str, PyDashboard])
     """The dashboards with the endpoints of their widgets, by name."""
     access: bool = False
@@ -3073,6 +3075,9 @@ def python_app(definition: AppDefinition) -> PyApp:
         smtp=(bool(_message_elements(definition)) or notice_emails is not None)
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
+        ses=(bool(_message_elements(definition)) or notice_emails is not None)
+        and definition.auth is not None
+        and definition.auth.delivery == "ses",
         dashboards=dashboards,
         access=definition.access is not None,
         auth=auth is not None,

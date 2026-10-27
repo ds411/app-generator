@@ -109,7 +109,8 @@ const LINK_PAGES: Record<string, string> = {
 
 /**
  * Return the links of a kind that the app sent to an address, from the
- * emails that the mock SMTP server wrote to its file (one JSON line each).
+ * emails that the mock SMTP or SES server wrote to its file (one JSON line
+ * each).
  */
 function messageLinks(mailbox: string, kind: string, to: string): string[] {
   if (!existsSync(mailbox)) return [];
@@ -208,16 +209,22 @@ test("the password reset pages ask for a link, and set a new password", async ({
   test.skip(!reset, "The app has no password reset pages.");
   if (!reset) return;
   const mode = modeOf(testInfo.project.name);
+  // An app of another delivery of the messages has the same pages: only the delivery is new.
+  const screenshots = auth?.screenshots !== false;
   await page.goto("/sign-in");
   await page.getByRole("link", { name: "Did you forget the password?" }).click();
   await page.waitForURL((url) => url.pathname === "/forgot-password");
   await expect(page.getByRole("heading", { name: "Reset the password" })).toBeVisible();
   await page.waitForLoadState("networkidle");
-  await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "forgot-password.png"]);
+  if (screenshots) {
+    await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "forgot-password.png"]);
+  }
   await page.goto("/reset-password?token=example");
   await expect(page.getByRole("heading", { name: "Set a new password" })).toBeVisible();
   await page.waitForLoadState("networkidle");
-  await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "reset-password.png"]);
+  if (screenshots) {
+    await expect(page).toHaveScreenshot([expected.binding, auth?.app ?? "", mode, "reset-password.png"]);
+  }
   if (testInfo.project.name !== "light") return;
 
   // Ask for a link, and find it in the emails of the app.

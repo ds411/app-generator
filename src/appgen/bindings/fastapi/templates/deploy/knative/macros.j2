@@ -47,6 +47,13 @@
             - name: SMTP_TLS
               value: starttls
 {% endif %}
+{% if py.ses %}
+            # Amazon SES sends the messages of the sign-in with the IAM role of the pod.
+            - name: AWS_REGION
+              value: us-east-1
+            - name: SES_FROM
+              value: no-reply@example.com
+{% endif %}
 {% for api in py_apis.values() %}
             {{ trace(api.id) }}
             - name: {{ api.url_env }}

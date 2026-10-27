@@ -71,14 +71,38 @@ without new packages and with no table except `credentials`.
   validator gives an error for `smtp` without one. The room booking
   example uses `smtp`, and `scripts/check-auth-ui.sh` reads the links in
   the emails of the mock SMTP server `scripts/mock_smtp.py`.
+- Update (#491): `auth.delivery: ses` sends the messages with
+  `SendEmail` of the API v2 of Amazon SES. SES also has an SMTP
+  interface, but it needs the SMTP credentials of an IAM user: a secret
+  with a long life. The API takes the credentials of the default chain
+  of the AWS SDK: the environment variables, EKS Pod Identity or the
+  web identity of EKS (IRSA), the role of an ECS task, or the instance
+  profile. The settings then have no secret for the email: only
+  `AWS_REGION`, `SES_FROM` (a verified sender), and the optional
+  `SES_CONFIGURATION_SET`. The FastAPI app has `app/core/mail.py` with
+  boto3 in a thread (the client of boto3 blocks), and the dependency
+  `boto3` only with `ses`. The Next.js app has `src/shared/auth/mail.ts`
+  with the package `@aws-sdk/client-sesv2`. Without `SES_FROM`, the apps
+  keep the behavior of the stub. When SES does not send a message, the
+  apps answer as for an error of the SMTP server, and the log has the
+  error code of SES but not the link. Both SDKs read the endpoint of SES
+  from `AWS_ENDPOINT_URL_SESV2`, so the apps have no code for the
+  endpoint: `scripts/check-auth-ui.sh` points it to the mock SES server
+  `scripts/mock_ses.py`, which checks the header of AWS Signature
+  Version 4 and keeps each message.
 
 ## Consequences
 
 - The trace check reports the delivery as an open gap until a developer
   writes it, or until the definition selects `delivery: smtp`.
 - A delivery by SMTP needs a server and its settings in each
-  environment. A mail service with only an HTTP API still needs the
-  hook (`delivery: extension`).
+  environment. A mail service with only an HTTP API, other than Amazon
+  SES, still needs the hook (`delivery: extension`).
+- A delivery with SES needs a verified sender, and the IAM permission
+  `ses:SendEmail` for the role of the app. In the sandbox of SES, the
+  apps can send only to verified addresses. boto3 is a large
+  dependency, so the FastAPI app has it only with `ses` or with the
+  files in S3.
 - A token stays valid until it ends or the password changes. A second
   request gives a second valid token: both are valid until the password
   changes.

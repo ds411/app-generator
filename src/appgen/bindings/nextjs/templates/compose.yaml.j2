@@ -68,6 +68,12 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TLS: ${SMTP_TLS:-starttls}
 {% endif %}
+{% if nextjs.ses %}
+      # Amazon SES sends the messages of the sign-in (see .env.example).
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM: ${SES_FROM:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+{% endif %}
 {% for name, p in definition.auth.providers.items() %}
       {{ trace(p.id) }}
       {{ name | upper }}_ISSUER: ${{ "{" }}{{ name | upper }}_ISSUER:-{{ p.issuer }}{{ "}" }}

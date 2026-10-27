@@ -7,7 +7,7 @@
 The job runs on the schedule `{{ job.schedule.expression }}` (UTC). Each run sends the
 emails of the oldest notices that wait, up to {{ e.batch }}, and marks them done in
 the transaction of the run. A user that turned off the emails of a
-notification gets none. At the first error of the SMTP server, the run
+notification gets none. At the first error of {{ "Amazon SES" if py.ses else "the SMTP server" }}, the run
 stops, and the other notices wait for the next run. The emails have the
 default language of the app. `app/worker.py` runs the job.
 """

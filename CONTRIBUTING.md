@@ -370,6 +370,9 @@ git config core.hooksPath .githooks
   (`scripts/auth_ui_test.py`). The Next.js app sends the links of the
   sign-up and of the reset as emails to the mock SMTP server
   `scripts/mock_smtp.py`, and the test opens the links of the emails.
+  It does the sign-up and the reset again with `auth.delivery: ses` in
+  Next.js and react-api: the apps send the emails to the mock SES server
+  `scripts/mock_ses.py`.
   It also builds `tests/fixtures/record-rules.yaml`, and checks its
   rules with conditions and owner paths. It builds
   `tests/fixtures/cognito-sign-in.yaml` with Next.js and react-api, and

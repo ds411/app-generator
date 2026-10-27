@@ -200,6 +200,16 @@ def test_the_hash_of_an_app_changes_with_its_keys() -> None:
     assert plan.app_hashes(ROOT, [totals]) == {totals: hashes[totals]}
 
 
+def test_the_hash_of_an_app_changes_with_its_replacements() -> None:
+    rooms = plan.App(plan.ROOMS, "fastapi")
+    ses = plan.App(plan.ROOMS, "fastapi", replace=plan.SES)
+    wrong = plan.App(plan.ROOMS, "fastapi", replace=(("  delivery: none\n", "  delivery: ses\n"),))
+    hashes = plan.app_hashes(ROOT, [rooms, ses, wrong])
+    assert hashes[rooms] is not None and hashes[ses] is not None
+    assert hashes[rooms] != hashes[ses]
+    assert hashes[wrong] is None
+
+
 def test_record_keeps_the_sections_of_the_passed_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -10,7 +10,13 @@ import { inRequestLanguage } from "@/shared/lib/i18n-server";
 {% endif %}
 // The messages of the sign-in to the users (ADR 0023): a subject, a text,
 // and a link. The app makes each message in the language of the request.
-// {{ "The delivery by SMTP `mail.ts` sends it." if nextjs.smtp else "The delivery hook `messages.ext.ts` sends it." }}
+{% if nextjs.smtp %}
+// The delivery by SMTP `mail.ts` sends it.
+{% elif nextjs.ses %}
+// The delivery with Amazon SES `mail.ts` sends it.
+{% else %}
+// The delivery hook `messages.ext.ts` sends it.
+{% endif %}
 
 /** The title of the app in the messages. */
 const APP_TITLE = {{ app.title | tojson }};

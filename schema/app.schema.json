@@ -1003,7 +1003,8 @@
           "default": "extension",
           "enum": [
             "extension",
-            "smtp"
+            "smtp",
+            "ses"
           ],
           "title": "Delivery",
           "type": "string"

@@ -84,7 +84,7 @@ export type ExpectedAuth = {
     /**
      * The verification of the email address (ADR 0023), only if the app has
      * the page of the link: the widget of the address, and the file of the
-     * mock SMTP server with the emails of the app.
+     * mock SMTP or SES server with the emails of the app.
      */
     verifyEmail?: { addressId: string; mailbox: string } | null;
   };
@@ -92,9 +92,11 @@ export type ExpectedAuth = {
   passwordReset?: {
     /** A user whose password the test changes. */
     username: string;
-    /** The file of the mock SMTP server with the emails of the app: the reset links. */
+    /** The file of the mock SMTP or SES server with the emails of the app: the reset links. */
     mailbox: string;
   };
+  /** False: the tests compare no screenshots, for an app of another delivery of the messages. */
+  screenshots?: boolean;
   /**
    * The second factor (ADR 0024): a user who turns it on, signs out, and
    * signs in with a code that the test computes. The menu is the menu of
