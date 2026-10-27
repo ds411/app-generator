@@ -179,6 +179,7 @@ the React app.
 | `rules`         | No       | Rules over more than one field or record (see [Entity rules](#entity-rules)). |
 | `events`        | No       | Custom operations that run after a record is created, changed, or deleted (see [Events](#events)). |
 | `history`       | No       | The change log of the records: `true`, or a mapping (see [History](#history)). |
+| `live`          | No       | The live updates of the records in the open views: `true`, or a mapping (see [Live updates](#live-updates)). |
 
 ### The CRUD shorthand
 
@@ -230,6 +231,7 @@ entities:
 | `json`     | A JSON value.                        |                                       |
 | `file`     | One file, for example a PDF.         | `max_size`, `types`                   |
 | `image`    | One image, for example a photo.      | `max_size`, `types`                   |
+| `point`    | A place: a latitude and a longitude. |                                       |
 
 All fields also take `description`, `label`, `required` (default
 `false`), `unique` (default `false`), `default`, `format`, and
@@ -267,6 +269,7 @@ language of `translations` (see
 [Values in each language](#values-in-each-language)).
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
+A `point` field holds a place on the earth (see [Point fields](#point-fields)).
 
 `sequence` gives a `string` or an `integer` field the next number of a
 sequence (see [Sequence numbers](#sequence-numbers)).
@@ -533,6 +536,53 @@ The front ends (React and Next.js) show and upload the files:
   endpoints of the FastAPI app.
 - The sign-up form cannot ask for a file field.
 
+### Point fields
+
+A `point` field holds a place on the earth: a latitude and a longitude
+in degrees (WGS 84), for example the place of a listing
+([ADR 0046](https://github.com/ds411/app-generator/blob/main/docs/adr/0046-geo-points.md)). The value is a mapping with `lat`
+(from -90 to 90) and `lng` (from -180 to 180), for example
+`{lat: 38.7223, lng: -9.1393}`. A seed record also takes the text
+`<lat>,<lng>`, for example `"38.7223,-9.1393"` in a CSV data file.
+
+```yaml
+entities:
+  Site:
+    display_field: name
+    crud: [list]
+    fields:
+      name: { type: string, required: true }
+      location: { type: point, required: true, label: Location }
+ui:
+  views:
+    site_table:
+      kind: table
+      entity: Site
+      columns: { name: {} }
+      filters:
+        nearby: { kind: near, field: location, label: Near, distance: 5 }
+        in_map: { kind: area, field: location }
+```
+
+- A point field takes `required`, `label`, `description`, and a
+  `default` point. It takes no `unique`, and it cannot be computed.
+- The apps keep a point in two columns of numbers, `<field>_lat` and
+  `<field>_lng`, with an index of the two columns. They need no PostGIS,
+  so that the FastAPI tests run on SQLite. No other field or relation of
+  the entity can have the name of one of the two columns.
+- An entity rule, a sort, and the `filter` of a dashboard widget or of a
+  job cannot use a point field. The list views filter the points with
+  the filters `near` and `area` (see [views](#views)).
+- A point field cannot be the `display_field`, a field or a value of a
+  notification, or a field of the sign-up form. The param of an
+  operation cannot be a point: use two `decimal` params.
+- A form field of a point field gets the widget `point`.
+- The FastAPI app gives a point as an object with `lat` and `lng`
+  (the schema `GeoPoint`), and gives 422 for a latitude or a longitude
+  out of its range. The change log keeps a point as an object too.
+- The React and Next.js apps do not generate point fields yet: they stop
+  with an error.
+
 ### Entity rules
 
 `rules` is a mapping from rule name to rule. A rule checks more than
@@ -701,6 +751,51 @@ Booking:
 - A tab of a detail view with `history: true` shows the entries (see
   [views](#views)).
 
+### Live updates
+
+`live` sends the creates, the changes, and the deletes of the records
+of the entity to the open views of the apps, so that a user sees the
+changes of the other users at once
+([ADR 0051](https://github.com/ds411/app-generator/blob/main/docs/adr/0051-live-updates.md)).
+
+| Key           | Required | Content |
+| ------------- | -------- | ------- |
+| `description` | No       | Text.   |
+
+`live: true` is the short form. The entity needs a list or a read
+operation (the validator reports `missing-key`).
+
+```yaml
+# in: entities.Task
+# The open views show the changes of the tasks at once.
+live: true
+```
+
+- An event has the type (`created`, `changed`, or `deleted`), the
+  entity, and the ID of the record, but no values: a view reads the
+  record again with the operations of the entity. The event comes after
+  the commit of the transaction. A transaction that rolls back gives no
+  event.
+- All the code that writes through the database sessions of the app
+  gives the events: the generated and the custom operations, the
+  [events](#events), the restores of the [history](#history), and the
+  jobs. A change outside these sessions gives none: SQL in a script, a
+  record that the database deletes with `on_delete: cascade`, and an
+  `update` or a `delete` statement of many records.
+- A user gets the events of an entity if the role of the user may call
+  a list or a read operation of the entity. With a
+  record rule ([access](#access)) for the reads, a user gets only the
+  events of the records that the user may read before or after the
+  change.
+- The FastAPI app has the endpoint `GET /live`: a stream of
+  server-sent events. The first event is `open`. The event `reset`
+  tells the client to read its views again, for example after a loss of
+  events. With Redis in the setting `LIVE_EVENTS_URL`, all replicas and
+  the worker of the jobs send their changes to the streams of all
+  replicas. Without it, each process sends only its own changes.
+- The Next.js app and the React app do not show the live updates yet:
+  `appgen check` lists `live` as excluded by design.
+
 ### Relations
 
 | Kind           | Meaning                                            | Foreign key          |
@@ -804,6 +899,7 @@ The values:
 | `datetime`                                 | An ISO 8601 date-time, for example `2026-01-05T09:30:00Z`. A date-time without an offset is in UTC. |
 | `json`                                     | Any value.                                         |
 | `file`, `image`                            | The path of a local file, from the folder of the definition, for example `files/board.png`. |
+| `point`                                    | A mapping `{lat: 38.7223, lng: -9.1393}`, or a text `<lat>,<lng>`. |
 
 The file of a `file` or an `image` field must suit the `max_size` and
 the `types` of its field, and have 1 MB or less: the apps keep the seed
@@ -1972,11 +2068,29 @@ format for the field type. `avatar` is for a relation (the initials of
 the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
-`multiple`), `boolean` (`field`), or `date_range` (`field`). All
-filters take `label` and `default`. The `default` of a `select` filter
-of a relation to the user entity can be `$me`, the signed-in user (see
-[The signed-in user](#the-signed-in-user)): the view starts with the
-records of the user, and a clear of the filter shows all records.
+`multiple`), `boolean` (`field`), `date_range` (`field`), `near`
+(`field`, `distance`), or `area` (`field`). All filters take `label`,
+and all filters except `near` and `area` take `default`. The `default`
+of a `select` filter of a relation to the user entity can be `$me`, the
+signed-in user (see [The signed-in user](#the-signed-in-user)): the view
+starts with the records of the user, and a clear of the filter shows all
+records.
+
+The filters `near` and `area` are for a `point` field
+([ADR 0046](https://github.com/ds411/app-generator/blob/main/docs/adr/0046-geo-points.md)). `near` keeps the records whose
+point is at most a distance from a point. `distance` is the distance in
+kilometers until the user picks another one, by default 10. `area` keeps
+the records whose point is in a box, for example the visible part of a
+map. The list endpoint of the FastAPI app takes these query parameters
+for a filter of the field path `<path>`:
+
+- `near`: `<path>_near`, a point `<lat>,<lng>`, for example
+  `38.72,-9.14`, and `<path>_distance` in kilometers. The default of
+  the distance is the `distance` of the first `near` filter of the path.
+  The app gives the distances on a sphere (the haversine formula).
+- `area`: `<path>_area`, a box `<south>,<west>,<north>,<east>`, for
+  example `38.69,-9.23,38.80,-9.09`. A box whose west is greater than
+  its east crosses the antimeridian.
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page
@@ -2294,8 +2408,9 @@ A form field has `widget`, `label`, `placeholder`, `help`, `span`,
 `max_length`, `pattern`, `min`, `max`, each with `value` and
 `message`). The widgets are `text`, `textarea`, `number`, `select`,
 `radio`, `checkbox`, `switch`, `date`, `datetime`, `relation`, `file`
-(for a `file` or an `image` field), `lines` (for a `one_to_many`
-relation), and `custom` (a generation gap). The default widget comes
+(for a `file` or an `image` field), `point` (for a `point` field),
+`lines` (for a `one_to_many` relation), and `custom` (a generation
+gap). The default widget comes
 from the field type.
 
 The widget `lines` is a lines editor ([ADR 0035](https://github.com/ds411/app-generator/blob/main/docs/adr/0035-lines.md)):

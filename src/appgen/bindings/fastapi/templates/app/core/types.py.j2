@@ -7,7 +7,12 @@ from typing import Annotated, TypedDict
 from typing import Annotated
 {% endif %}
 
+{% if py.points %}
+from pydantic import AfterValidator, AnyUrl, Field
+from pydantic.dataclasses import dataclass
+{% else %}
 from pydantic import AfterValidator, AnyUrl
+{% endif %}
 
 
 def _check_url(value: str) -> str:
@@ -32,4 +37,23 @@ class StoredFile(TypedDict):
     """The size of the file, in bytes."""
     type: str
     """The media type, for example `image/png`."""
+{% endif %}
+{% if py.points %}
+
+
+{% for e in py.entity_order() %}
+{% for f in e.points %}
+{{ trace(f.id) }}
+{% endfor %}
+{% endfor %}
+@dataclass
+class GeoPoint:
+    """A place on the earth, in degrees (WGS 84): the value of a `point` field (ADR 0046).
+
+    The model of a record keeps it in two columns, `<field>_lat` and
+    `<field>_lng`, and gives it as one composite attribute.
+    """
+
+    lat: Annotated[float, Field(ge=-90, le=90, description="The latitude, from -90 to 90.")]
+    lng: Annotated[float, Field(ge=-180, le=180, description="The longitude, from -180 to 180.")]
 {% endif %}

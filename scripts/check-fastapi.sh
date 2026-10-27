@@ -8,7 +8,8 @@
 # database with data (scripts/check_schema_change.py), the full-text
 # search and its migration on Postgres (scripts/check_full_text_search.py),
 # the rate limit that two processes share in Redis
-# (scripts/check_shared_rate_limit.py),
+# (scripts/check_shared_rate_limit.py), the live events that two
+# processes send through Redis (scripts/check_live_events.py),
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
 # example, which has the sign-in, the sign-up, the roles, and a
@@ -48,10 +49,13 @@
 # on SQLite), and check it and run its tests on Postgres and SQLite.
 # Then generate tests/fixtures/listings.yaml with the hand-written
 # queries of tests/fixtures/listings/extensions/fastapi/ (ADR 0045), and
-# check it and run its tests on Postgres and SQLite. Last, generate
+# check it and run its tests on Postgres and SQLite. Then generate
 # tests/fixtures/courses.yaml (the users and the sessions of M36: the
 # totals and the widgets of the signed-in user, `$me`), and check it and
-# run its tests on Postgres and SQLite.
+# run its tests on Postgres and SQLite. Last, generate
+# tests/fixtures/places.yaml (the point fields and the filters `near` and
+# `area`, ADR 0046), and check it and run its tests on Postgres and
+# SQLite.
 # The pre-push hook runs this script when a push changes the generator
 # or the FastAPI binding. Run it by hand from the repository root:
 #
@@ -65,14 +69,16 @@
 # "<output folder>-jobs", "<output folder>-files",
 # "<output folder>-inbound-email", "<output folder>-api-connections",
 # "<output folder>-totals", "<output folder>-invoices",
-# "<output folder>-listings", "<output folder>-courses", and
-# "<output folder>-rate-limit" (the app of the rate limit check). The
+# "<output folder>-listings", "<output folder>-courses",
+# "<output folder>-places", "<output folder>-rate-limit" (the app of
+# the rate limit check), and "<output folder>-live-events" (the app of
+# the live events check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
 # Environment variables:
 #   POSTGRES_IMAGE            The Postgres image of the tests and the smoke test.
-#   REDIS_IMAGE               The Redis image of the shared rate limit check.
+#   REDIS_IMAGE               The Redis image of the shared rate limit and live events checks.
 #   KUBERNETES_VERSION        The version of the Kubernetes schemas of the deployment files.
 #   APPGEN_SCHEMA_CACHE       The folder of the downloaded schemas (default ~/.cache/appgen/schemas).
 #   UV_IMAGE, PYTHON_IMAGE    Build arguments of the Docker image.
@@ -95,6 +101,7 @@ totals_definition=tests/fixtures/totals.yaml
 invoices_definition=tests/fixtures/invoices.yaml
 listings_definition=tests/fixtures/listings.yaml
 courses_definition=tests/fixtures/courses.yaml
+places_definition=tests/fixtures/places.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -102,7 +109,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-rate-limit"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
@@ -118,6 +125,7 @@ totals_out="$out-totals"
 invoices_out="$out-invoices"
 listings_out="$out-listings"
 courses_out="$out-courses"
+places_out="$out-places"
 
 step() {
     echo "check-fastapi: $*"
@@ -184,6 +192,10 @@ uv run --locked scripts/check_full_text_search.py "$out"
 step "shared rate limit"
 rm -rf "$out-rate-limit"
 uv run --locked scripts/check_shared_rate_limit.py fastapi "$out-rate-limit"
+
+step "live events"
+rm -rf "$out-live-events"
+uv run --locked scripts/check_live_events.py "$out-live-events"
 
 step "deployment files"
 uv run --locked scripts/check_deploy_files.py fastapi
@@ -435,6 +447,23 @@ uv run pyright
 step "courses: pytest"
 uv run pytest -q
 step "courses: pytest on SQLite"
+TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+rm -f test.db
+cd "$root"
+
+step "generate $places_definition in $places_out"
+rm -rf "$places_out"
+uv run --locked appgen generate "$places_definition" -b fastapi -o "$places_out" >/dev/null
+uv run --locked appgen check "$places_definition" "$places_out"
+cd "$places_out"
+step "places: uv sync, ruff, pyright"
+uv sync --quiet
+uv run ruff check
+uv run ruff format --check
+uv run pyright
+step "places: pytest"
+uv run pytest -q
+step "places: pytest on SQLite"
 TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
 rm -f test.db
 cd "$root"

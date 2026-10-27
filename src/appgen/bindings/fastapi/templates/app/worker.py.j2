@@ -11,6 +11,11 @@ runs the times of the last `JOBS_WINDOW_MINUTES` that are not done.
 - `python -m app.worker --once` runs one pass, and stops.
 - `--once --now 2026-06-15T12:00:00Z` runs one pass at a fixed time, for
   example in a test.
+{% if py.live %}
+
+With `LIVE_EVENTS_URL`, the changes of the jobs go to the open views
+through Redis (ADR 0051).
+{% endif %}
 """
 
 import argparse
@@ -28,6 +33,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.db import make_engine, make_sessions
 from app.core.jobs import utc_now
+{% if py.live %}
+from app.core.live import BROKER_KEY, Broker
+{% endif %}
 from app.core.logging import configure_logging
 {{ py.from_import("app.jobs", py.jobs.values() | map(attribute="module") | list) }}
 from app.models import configure_models
@@ -131,6 +139,15 @@ async def work(settings: Settings, *, once: bool, now: dt.datetime | None) -> in
     """Run one pass, or the passes until a signal. Return the exit code."""
     engine = make_engine(settings.database_url)
     sessions = make_sessions(engine)
+{% if py.live %}
+{% for id in py.live_ids %}
+    {{ trace(id) }}
+{% endfor %}
+    # Without Redis, the API processes do not get the events of the worker.
+    broker = Broker(settings.live_events_url) if settings.live_events_url else None
+    if broker is not None:
+        sessions.configure(info={BROKER_KEY: broker})
+{% endif %}
     try:
         if once:
             count = await run_jobs(sessions, settings, now or utc_now())
@@ -138,6 +155,10 @@ async def work(settings: Settings, *, once: bool, now: dt.datetime | None) -> in
         else:
             await run_passes(sessions, settings)
     finally:
+{% if py.live %}
+        if broker is not None:
+            await broker.close()
+{% endif %}
         await engine.dispose()
     return 0
 

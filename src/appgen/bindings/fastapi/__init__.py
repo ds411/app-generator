@@ -112,6 +112,7 @@ BINDING = Binding(
         Output(template="app/core/errors.py.j2", path="app/core/errors.py"),
         Output(template="app/core/pagination.py.j2", path="app/core/pagination.py"),
         Output(template="app/core/search.py.j2", path="app/core/search.py", when="py.full_text"),
+        Output(template="app/core/geo.py.j2", path="app/core/geo.py", when="py.geo_filters"),
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/logging.py.j2", path="app/core/logging.py"),
         Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
@@ -294,6 +295,7 @@ BINDING = Binding(
         ),
         Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
         Output(template="app/core/sharing.py.j2", path="app/core/sharing.py", when="py.shares"),
+        Output(template="app/core/live.py.j2", path="app/core/live.py", when="py.live"),
         *(
             Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
             for module, when in (
@@ -346,6 +348,7 @@ BINDING = Binding(
             path="tests/test_notices.py",
             when="py.notifications",
         ),
+        Output(template="tests/test_live.py.j2", path="tests/test_live.py", when="py.live"),
         Output(
             template="tests/features/slice/test_notifications.py.j2",
             path=_TESTS + "/test_notifications.py",
@@ -541,7 +544,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
-        | {"job", "event", "history", "notification"}
+        | {"job", "event", "history", "notification", "live"}
         | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),

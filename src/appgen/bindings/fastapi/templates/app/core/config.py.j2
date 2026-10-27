@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     """True: give 503 when the Redis of the rate limit is not available. False: log a
     warning, and let the request through."""
 {% endif %}
+{% if py.live %}
+{% for id in py.live_ids %}
+    {{ trace(id) }}
+{% endfor %}
+    live_events_url: str | None = None
+    """The Redis of the live events, for example `redis://localhost:6379/0`, so that each
+    replica gets the events of all replicas. Without it, each process sends only its own
+    events (ADR 0051)."""
+{% endif %}
 {% if py.jobs %}
     jobs_interval_seconds: float = 60
     """The time between two passes of the worker over the jobs, in seconds."""

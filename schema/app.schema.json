@@ -864,6 +864,40 @@
       "pattern": "^[a-z][a-z0-9-]*$",
       "type": "string"
     },
+    "AreaFilter": {
+      "additionalProperties": false,
+      "description": "The records whose `point` field is in a box, for example the visible part of a map.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "area",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "AreaFilter",
+      "type": "object"
+    },
     "Auth": {
       "additionalProperties": false,
       "description": "The sign-in with a user name and a password (ADR 0011), or with providers (ADR 0020).\n\nThe users are the records of `user_entity`. Each app stores the\npassword hashes apart from the records. All pages and operations need\na signed-in user, except the public ones.",
@@ -2804,6 +2838,10 @@
         "history": {
           "$ref": "#/$defs/HistoryInput",
           "default": null
+        },
+        "live": {
+          "$ref": "#/$defs/LiveInput",
+          "default": null
         }
       },
       "required": [
@@ -3407,7 +3445,8 @@
         "enum",
         "json",
         "file",
-        "image"
+        "image",
+        "point"
       ],
       "type": "string"
     },
@@ -3424,6 +3463,12 @@
         },
         {
           "$ref": "#/$defs/DateRangeFilter"
+        },
+        {
+          "$ref": "#/$defs/NearFilter"
+        },
+        {
+          "$ref": "#/$defs/AreaFilter"
         }
       ]
     },
@@ -4411,6 +4456,41 @@
       "title": "ListWidget",
       "type": "object"
     },
+    "Live": {
+      "additionalProperties": false,
+      "description": "The live updates of the records of an entity.\n\nThe apps send an event for each create, change, and delete of a record\nto the users that may read the record, and the open views of the\nentity show the change. The short form is `live: true`.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Live",
+      "type": "object"
+    },
+    "LiveInput": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/Live"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "LoadingState": {
       "additionalProperties": false,
       "description": "What a view shows while it loads its data.",
@@ -4766,6 +4846,47 @@
         "page"
       ],
       "title": "NavigateAction",
+      "type": "object"
+    },
+    "NearFilter": {
+      "additionalProperties": false,
+      "description": "The records whose `point` field is at most a distance from a point (ADR 0046).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "near",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "distance": {
+          "default": 10.0,
+          "exclusiveMinimum": 0,
+          "maximum": 20038.0,
+          "title": "Distance",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "NearFilter",
       "type": "object"
     },
     "Notification": {
@@ -7982,6 +8103,7 @@
         "datetime",
         "relation",
         "file",
+        "point",
         "lines",
         "custom"
       ],

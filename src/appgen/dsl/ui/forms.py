@@ -20,6 +20,7 @@ type Widget = Literal[
     "datetime",
     "relation",
     "file",
+    "point",
     "lines",
     "custom",
 ]

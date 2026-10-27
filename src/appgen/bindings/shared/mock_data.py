@@ -46,6 +46,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
+from appgen.dsl.geo import point_value
 from appgen.dsl.model import AppDefinition, Entity, Field
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.seed import link_keys, normal_value, record_id
@@ -464,10 +465,24 @@ def _typed_value(
             return f"https://example.com/{entity.label or 'item'}/{index + 1}".lower()
         case "json":
             return {}
+        case "point":
+            return _point(rng, field)
         case "text":
             return _text(rng)
         case _:
             return _string(rng, entity, name, field, index)
+
+
+def _point(rng: random.Random, field: Field) -> dict[str, float]:
+    """Return a place near the default of the field, or near Lisbon: a map shows them together."""
+    center = point_value(field.default) if field.default is not None else _MOCK_CENTER
+    lat = min(max(center["lat"] + rng.uniform(-0.05, 0.05), -90.0), 90.0)
+    lng = min(max(center["lng"] + rng.uniform(-0.08, 0.08), -180.0), 180.0)
+    return {"lat": round(lat, 5), "lng": round(lng, 5)}
+
+
+_MOCK_CENTER = {"lat": 38.7223, "lng": -9.1393}
+"""The center of the mock places of a point field without a default."""
 
 
 def _date(rng: random.Random, name: str, record: Record) -> str:

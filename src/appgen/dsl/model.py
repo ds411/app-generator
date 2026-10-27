@@ -16,6 +16,7 @@ from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.events import EventInput, EventName
 from appgen.dsl.history import HistoryInput
 from appgen.dsl.jobs import Job
+from appgen.dsl.live import LiveInput
 from appgen.dsl.notifications import Notification
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
@@ -61,6 +62,7 @@ type FieldType = Literal[
     "json",
     "file",
     "image",
+    "point",
 ]
 type RelationKind = Literal["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 type OnDelete = Literal["restrict", "cascade", "set_null"]
@@ -140,6 +142,11 @@ class Field(Element):
         return self.type in FILE_TYPES
 
     @property
+    def is_point(self) -> bool:
+        """True for a place on the earth: a `point` field, with a latitude and a longitude."""
+        return self.type == "point"
+
+    @property
     def size_limit(self) -> int:
         """The largest file of a file field in bytes: `max_size`, else 10 MB."""
         return self.max_size if self.max_size is not None else DEFAULT_MAX_SIZE
@@ -188,6 +195,8 @@ class Entity(Element):
     """The custom operations that run after a record is created, changed, or deleted (ADR 0031)."""
     history: HistoryInput = None
     """The change log of the records (ADR 0040)."""
+    live: LiveInput = None
+    """The live updates of the records: the apps push the changes to the open views (ADR 0051)."""
 
     @property
     def stored_fields(self) -> dict[str, Field]:

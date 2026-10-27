@@ -16,6 +16,7 @@ from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rules, uses_me
 from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.geo import reject_point_fields
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -143,6 +144,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
+    reject_point_fields(definition, "react")
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}

@@ -231,6 +231,10 @@ generated app has a stub for it, and the check reports it in `gaps`.
   relations. A tab of a detail view with `history: true` shows the
   entries with a restore button, and the CRUD detail view of the entity
   has one.
+- `live: true` sends each create, change, and delete of a record to the
+  open views of the users that may read it, so that a user sees the
+  changes of the other users at once (ADR 0051), for example on a task
+  board. The entity needs a list or a read operation.
 
 ## Operations
 

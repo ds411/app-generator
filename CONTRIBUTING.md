@@ -245,7 +245,8 @@ git config core.hooksPath .githooks
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
   the output. It also starts two processes of the app with Redis, and
-  checks that they share the rate limit, and it validates the
+  checks that they share the rate limit and that both send the live
+  events of the changes of each process (`scripts/check_live_events.py`), and it validates the
   deployment files of each target against their schemas (it downloads
   the schemas once). Then it generates the room booking example
   (sign-in, sign-up, roles, and a provider) and
@@ -261,11 +262,12 @@ git config core.hooksPath .githooks
   `tests/fixtures/record-rules.yaml` (the record rules with conditions
   and owner paths) and the other fixtures of the script header, for
   example `tests/fixtures/totals.yaml` (the totals of the relations),
-  `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037), and
+  `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037),
   `tests/fixtures/listings.yaml` (queries with hand-written logic, ADR
-  0045), and `tests/fixtures/courses.yaml` (the totals and the widgets
-  of the signed-in user, `$me`), and runs the same checks on them. It
-  needs Docker.
+  0045), `tests/fixtures/courses.yaml` (the totals and the widgets of
+  the signed-in user, `$me`), and `tests/fixtures/places.yaml` (point
+  fields and the filters `near` and `area`, ADR 0046), and runs the
+  same checks on them. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).

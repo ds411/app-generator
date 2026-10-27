@@ -81,6 +81,7 @@ from appgen.dsl.expressions import (
     expression_paths,
     parse_expression,
 )
+from appgen.dsl.geo import point_columns
 from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.dsl.rules import EntityCompareRule, EntityUniqueRule
 from appgen.dsl.storage import FILE_TYPES, format_size, type_allows
@@ -275,9 +276,38 @@ class PyField:
     def mutable_default(self) -> bool:
         return self.type == "json" and self.default[:1] in ("[", "{")
 
+    @property
+    def is_point(self) -> bool:
+        """True for a `point` field: two columns of numbers, and a composite attribute."""
+        return self.type == "point"
+
+    @property
+    def point_attrs(self) -> tuple[str, str]:
+        """The attributes of the columns of a point field, for example `place_lat`, `place_lng`."""
+        return point_columns(self.attr)
+
+    @property
+    def point_columns(self) -> tuple[str, str]:
+        """The columns of a point field, for example `place_lat` and `place_lng` (ADR 0046)."""
+        return point_columns(self.name)
+
     def column(self) -> str:
-        """Return the declaration of the model attribute, for example `title: Mapped[str] = ...`."""
+        """Return the declaration of the model attribute, for example `title: Mapped[str] = ...`.
+
+        A point field has an attribute for each of its two columns, and a
+        composite attribute `GeoPoint` of the two (ADR 0046).
+        """
         type_ = self.model_type + (" | None" if self.nullable else "")
+        if self.is_point:
+            lines: list[str] = []
+            number = "float" + (" | None" if self.nullable else "")
+            for attr, column in zip(self.point_attrs, self.point_columns, strict=True):
+                args = [f'"{column}"'] if self.aliased else []
+                args.append("Double")
+                lines.append(call(f"{attr}: Mapped[{number}] = ", "mapped_column", args))
+            attrs = [f'"{attr}"' for attr in self.point_attrs]
+            lines.append(call(f"{self.attr}: Mapped[{type_}] = ", "composite", attrs))
+            return "\n    ".join(lines)
         args = [f'"{self.name}"'] if self.aliased else []
         args.append(self.sa_type)
         if self.unique:
@@ -339,7 +369,13 @@ class PyField:
         return f"{self.translations_attr}: (\n        {type_}\n    ) = {default}"
 
     def migration_column(self) -> str:
-        """Return the `sa.Column` of the field in the migration."""
+        """Return the `sa.Column` of the field in the migration: two for a point field."""
+        if self.is_point:
+            nullable = f"nullable={not self.required}"
+            return "\n        ".join(
+                call("", "sa.Column", [f'"{c}"', "sa.Double()", nullable], 8, ",")
+                for c in self.point_columns
+            )
         args = [f'"{self.name}"', self.migration_type(), f"nullable={not self.required}"]
         one_line = call("", "sa.Column", args, 8, ",")
         if "\n" in one_line:
@@ -863,6 +899,33 @@ class PyHistory:
     """The attribute of the user entity that names the user of an entry."""
 
 
+@dataclass(frozen=True, slots=True)
+class PyLive:
+    """The live updates of the records of an entity (ADR 0051)."""
+
+    id: str
+    readers: tuple[str, ...]
+    """The list and the read operations of the entity: a role that may call one of them gets
+    the events of the records."""
+    public: bool = False
+    """True if a list or a read operation is public: all clients get the events, without the
+    record rules."""
+    owner: tuple[str, ...] = ()
+    """The attributes of the owner path of the record rules (ADR 0025), or none."""
+
+    def entry(self, entity: str) -> str:
+        """Return the entry of the entity in the table `LIVE` of `app/core/live.py`.
+
+        For example `Task: LiveEntity("Task", ("list_tasks", "read_task")),`.
+        """
+        args = [string(entity), _python_tuple(list(self.readers))]
+        if self.public:
+            args.append("public=True")
+        if self.owner:
+            args.append(f"owner={_python_tuple(list(self.owner))}")
+        return call(f"{entity}: ", "LiveEntity", args, 4, ",")
+
+
 @dataclass(slots=True)
 class PyJoinTable:
     """A join table of a many-to-many relation."""
@@ -1262,6 +1325,8 @@ class PyEntity:
     """The secret links of the records (ADR 0049), or None."""
     notifications: list[PyNotification] = field(default_factory=list[PyNotification])
     """The notifications of the changes of the records (ADR 0041)."""
+    live: PyLive | None = None
+    """The live updates of the records (ADR 0051), or None."""
 
     @property
     def guard_module(self) -> str:
@@ -1330,6 +1395,22 @@ class PyEntity:
     def sequences(self) -> list[PySequence]:
         """The sequences of the fields with `sequence`."""
         return [f.sequence for f in self.fields if f.sequence is not None]
+
+    @property
+    def points(self) -> list[PyField]:
+        """The `point` fields (ADR 0046): each has two columns and an index of the two."""
+        return [f for f in self.fields if f.is_point]
+
+    def point_index(self, point: PyField) -> str:
+        """Return the `Index` of the columns of a point field, an item of `__table_args__`."""
+        columns = [f'"{c}"' for c in point.point_columns]
+        return call("", "Index", [f'"ix_{self.table}_{point.name}"', *columns], 8, ",")
+
+    def point_index_migration(self, point: PyField) -> str:
+        """Return the statement of the migration that adds the index of a point field."""
+        columns = "[" + ", ".join(f'"{c}"' for c in point.point_columns) + "]"
+        args = [f'"ix_{self.table}_{point.name}"', f'"{self.table}"', columns]
+        return call("", "op.create_index", args)
 
     @property
     def filters(self) -> list[PyField]:
@@ -1994,6 +2075,8 @@ class PyEntity:
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
         if self.files:
             lines.add("from app.core.storage import Storage, delete_files")
+        if self.points:
+            lines.add("from app.core.types import GeoPoint")
         if self.history is not None:
             names = {"Action", "HistoryEntry", "add_entry", "old_values", "snapshot"}
             lines.add(from_import("app.core.history", names))
@@ -2071,6 +2154,10 @@ class PyEntity:
         }
         if search:
             lines.add(from_import("app.core.search", search))
+        geo = {n for n in ("near", "in_area") if n + "(" in code}
+        geo |= {t for t in ("PointText", "BoxText") if t in types}
+        if geo:
+            lines.add(from_import("app.core.geo", geo))
         classes = {self.name} | {e.name for e in query.entities()}
         if query.aliases or self.totals:
             # `aliased()` prepares the mappers, and `app.models` adds the totals (ADR 0034):
@@ -2153,6 +2240,7 @@ class PyEntity:
         sa_types = {f.sa_type.split("(")[0] for f in self.fields if not f.enum}
         if self.translatable or self.files:
             sa_types.add("JSON_TYPE")
+        types.discard("GeoPoint")
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
@@ -2173,6 +2261,8 @@ class PyEntity:
             sqlalchemy |= {"Column", "ForeignKey", "Table", "Uuid"}
         if self.unique_rules:
             sqlalchemy.add("UniqueConstraint")
+        if self.points:
+            sqlalchemy.add("Index")
         if self.search_index is not None:
             sqlalchemy.add("Index")
             lines.add("from app.core.search import search_vector")
@@ -2183,6 +2273,8 @@ class PyEntity:
         orm = {"Mapped", "mapped_column"}
         if self.relations:
             orm.add("relationship")
+        if self.points:
+            orm.add("composite")
         if self.sequences:
             orm.add("declared_attr")
         lines.add(from_import("sqlalchemy.orm", orm))
@@ -2194,8 +2286,10 @@ class PyEntity:
         lines.add(from_import("app.core.db", core))
         if self.computed:
             lines.add("from app.core import compute")
-        if self.files:
-            lines.add("from app.core.types import StoredFile")
+        types_ = {"StoredFile"} if self.files else set[str]()
+        types_ |= {"GeoPoint"} if self.points else set[str]()
+        if types_:
+            lines.add(from_import("app.core.types", types_))
         if field_enums:
             lines.add(from_import(f"app.features.{self.slice}.enums", field_enums))
         block = import_block(lines)
@@ -2281,8 +2375,9 @@ class PyEntity:
             if self.required_translatable:
                 i18n.add("reject_empty_default")
             lines.add(from_import("app.core.i18n", i18n))
-        if "UrlStr" in types:
-            lines.add("from app.core.types import UrlStr")
+        app_types = {t for t in ("GeoPoint", "UrlStr") if t in types}
+        if app_types:
+            lines.add(from_import("app.core.types", app_types))
         if self.files:
             lines.add("from app.core.storage import FileRead")
         if self.enums:
@@ -2338,6 +2433,24 @@ class PyStorage:
         return self.kind == "s3"
 
 
+type PyLiveReader = tuple[PyEntity, str | None]
+"""A live entity, and a role that reads all its records (None without roles)."""
+
+
+@dataclass(slots=True)
+class PyLiveTests:
+    """The data of the generated tests of the live updates (ADR 0051)."""
+
+    readers: list[PyLiveReader] = field(default_factory=list[PyLiveReader])
+    """Each live entity that a test can read, with a role that reads all its records (None
+    without roles). An entity whose readers all have a record rule has no test of its own:
+    the tests of the rules check it."""
+    denied: tuple[PyEntity, str] | None = None
+    """A live entity, and a role that may not read it: its stream gives 403."""
+    rules: list[PyRuleTest] = field(default_factory=list[PyRuleTest])
+    """The tests of the record rules (ADR 0025) of the reads of the live entities."""
+
+
 @dataclass(slots=True)
 class PyApp:
     """The whole app definition in the terms of the binding."""
@@ -2382,6 +2495,8 @@ class PyApp:
     """The attribute of the user entity that names a user, for example in the change log."""
     me_tests: list[PyMeTest] = field(default_factory=list[PyMeTest])
     """The generated tests of the totals and the widgets with `$me`, the signed-in user."""
+    live_tests: PyLiveTests = field(default_factory=PyLiveTests)
+    """The data of the generated tests of the live updates (ADR 0051)."""
 
     @property
     def events(self) -> bool:
@@ -2397,6 +2512,16 @@ class PyApp:
     def history_ids(self) -> list[str]:
         """The IDs of the change logs of the entities, in the order of the tables."""
         return [e.history.id for e in self.history if e.history is not None]
+
+    @property
+    def live(self) -> list[PyEntity]:
+        """The entities with live updates (ADR 0051), in the order of the tables."""
+        return [e for e in self.entity_order() if e.live is not None]
+
+    @property
+    def live_ids(self) -> list[str]:
+        """The IDs of the live updates of the entities, in the order of `live`."""
+        return [e.live.id for e in self.live if e.live is not None]
 
     @property
     def notifications(self) -> list[PyNotification]:
@@ -2514,6 +2639,24 @@ class PyApp:
     def sequences(self) -> list[PySequence]:
         """The sequences of the fields with `sequence`, in source order."""
         return [s for e in self.entity_order() for s in e.sequences]
+
+    @property
+    def points(self) -> bool:
+        """True if an entity has a `point` field (ADR 0046): `app/core/types.py` has `GeoPoint`."""
+        return any(e.points for e in self.entities.values())
+
+    @property
+    def near(self) -> bool:
+        """True if a list endpoint has a `near` filter: SQLite gets the functions `sin` and
+        `cos`."""
+        return any(p.kind == "near" for e in self.entities.values() for p in e.query.params)
+
+    @property
+    def geo_filters(self) -> bool:
+        """True if a list endpoint has a `near` or an `area` filter: `app/core/geo.py` has them."""
+        return any(
+            p.kind in ("near", "area") for e in self.entities.values() for p in e.query.params
+        )
 
     @property
     def file_slices(self) -> list[PyEntity]:
@@ -2725,6 +2868,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _record_rules(definition, entities)
     _history(definition, entities)
     python_shares(definition, entities)
+    _live(definition, entities)
     python_notifications(definition, entities)
     for entity in entities.values():
         for notification in entity.notifications:
@@ -2747,6 +2891,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         entity.query = list_query(definition, entity)
         entity.totals_test = totals_test(definition, entity)
     dashboards = python_dashboards(definition, entities)
+    rule_tests = _rule_tests(definition, entities)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -2759,7 +2904,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         providers=_providers(definition, entities),
         translated=definition.translations is not None,
         message_elements=_message_elements(definition),
-        rule_tests=_rule_tests(definition, entities),
+        rule_tests=rule_tests,
         embed_tests=_embed_tests(definition, entities),
         smtp=bool(_message_elements(definition))
         and definition.auth is not None
@@ -2772,6 +2917,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         storage=_storage(definition, entities),
         user_label_attr=_user_label_attr(definition, entities),
         me_tests=me_tests(definition, entities, dashboards),
+        live_tests=_live_tests(definition, entities, rule_tests),
     )
 
 
@@ -3280,6 +3426,57 @@ def _history(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
         )
 
 
+def _live(definition: AppDefinition, entities: dict[str, PyEntity]) -> None:
+    """Give the entities with `live` their live updates (ADR 0051)."""
+    for name, entity in definition.entities.items():
+        if entity.live is None:
+            continue
+        py_entity = entities[name]
+        readers = [op for op in py_entity.operations if op.kind in ("list", "read")]
+        path = py_entity.owner_path
+        py_entity.live = PyLive(
+            id=entity.live.id,
+            readers=tuple(op.name for op in readers),
+            public=definition.auth is not None and any(not op.protected for op in readers),
+            owner=tuple(rel.attr for _, rel in path.steps) if path is not None else (),
+        )
+
+
+def _live_tests(
+    definition: AppDefinition, entities: dict[str, PyEntity], rule_tests: list[PyRuleTest]
+) -> PyLiveTests:
+    """Return the data of the tests of the live updates: the roles that read the entities."""
+    tests = PyLiveTests()
+    access = definition.access
+    for entity in entities.values():
+        live = entity.live
+        if live is None:
+            continue
+        if access is None:
+            tests.readers.append((entity, None))
+            continue
+        for name, role in access.roles.items():
+            reads = any(role.allows_operation(op) for op in live.readers)
+            rule = role.records.get(entity.name)
+            if reads and (rule is None or "read" not in rule.operations or live.public):
+                tests.readers.append((entity, name))
+                break
+        for name, role in access.roles.items():
+            reads = any(role.allows_operation(op) for op in live.readers)
+            if tests.denied is None and not live.public and not reads:
+                tests.denied = (entity, name)
+    tests.readers.sort(key=lambda item: item[0].snake)
+    tests.rules = [
+        t
+        for t in rule_tests
+        if t.entity.live is not None
+        and not t.entity.live.public
+        and t.reads
+        and ("list" in t.ops or "read" in t.ops)
+    ]
+    return tests
+
+
 def _user_label_attr(definition: AppDefinition, entities: dict[str, PyEntity]) -> str | None:
     """Return the attribute that names a user: the display field, else the user name field.
 
@@ -3451,6 +3648,8 @@ def _types(f: Field, enum: PyEnum | None) -> tuple[str, str, str]:
         case "enum":
             assert enum is not None
             return enum.name, enum.name, f'enum_type({enum.name}, "{enum.constraint}")'
+        case "point":
+            return "GeoPoint", "GeoPoint", "Double"
         case _:
             return "Any", "JsonValue", "JSON_TYPE"
 
@@ -3477,6 +3676,9 @@ def _default(f: Field, enum: PyEnum | None) -> str:
             return "True" if value else "False"
         case "json":
             return _python_literal(value)
+        case "point":
+            point = cast(dict[str, float], value)
+            return f"GeoPoint(lat={point['lat']!r}, lng={point['lng']!r})"
         case _:
             return json.dumps(value, ensure_ascii=False)
 
@@ -3562,6 +3764,9 @@ def _sample(f: Field, enum: PyEnum | None) -> str:
             assert enum is not None
             values = [v for _, v in enum.members]
             return f"{json.dumps(values)}[n % {len(values)}]"
+        case "point":
+            # Places near Lisbon, about 1 km from each other.
+            return '{"lat": 38.7 + n % 50 / 100, "lng": -9.1 - n % 50 / 100}'
         case _:
             return '{"n": n}'
 

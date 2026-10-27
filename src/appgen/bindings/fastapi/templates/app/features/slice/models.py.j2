@@ -26,11 +26,18 @@ class {{ e.name }}(Record):
     """{{ (e.description or ("A record of the entity " ~ e.name ~ ".")) | replace('"', "'") }}"""
 
     __tablename__ = "{{ e.table }}"
-{% if e.unique_rules %}
+{% if e.unique_rules or e.points %}
     __table_args__ = (
 {% for r in e.unique_rules %}
         {{ trace(r.id) }}
         {{ r.unique_constraint("") }},
+{% endfor %}
+{% for f in e.points %}
+{% if loop.first %}
+        # The filters `near` and `area` read the latitude first (ADR 0046).
+{% endif %}
+        {{ trace(f.id) }}
+        {{ e.point_index(f) }}
 {% endfor %}
     )
 {% endif %}

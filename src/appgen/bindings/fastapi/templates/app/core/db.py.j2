@@ -38,6 +38,9 @@ from sqlalchemy.sql.expression import ColumnElement
 {% endif %}
 
 from app.core.errors import ProblemError
+{% if py.near %}
+from app.core.geo import add_math_functions
+{% endif %}
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
@@ -183,6 +186,10 @@ def make_engine(database_url: str) -> AsyncEngine:
     engine = create_async_engine(database_url, pool_pre_ping=True)
     if engine.dialect.name == "sqlite":
         event.listen(engine.sync_engine, "connect", _enable_foreign_keys)
+{% if py.near %}
+        # The filter `near` computes distances with `sin` and `cos` (ADR 0046).
+        event.listen(engine.sync_engine, "connect", add_math_functions)
+{% endif %}
     return engine
 
 
