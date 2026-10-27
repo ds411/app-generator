@@ -9,7 +9,7 @@ import "server-only";
 
 {% endif %}
 {% set oauth = server and api.credential == "oauth2" %}
-{# The authorization code flow: the client sends the token of a user (ADR 0033). #}
+{# The authorization code flow or `per_user`: the client sends the token or the credentials of a user (ADR 0033). #}
 {% set user = server and api.user %}
 {% if endpoint %}
 import { API_URL, apiFetch } from "@/shared/api/http";
@@ -21,11 +21,13 @@ import {
   tokenUrl,
   type ClientOptions,
 } from "@/shared/api/third-party";
+{% elif server and api.credential == "basic" %}
+import { basicAuthorization, HttpClient, type ClientOptions } from "@/shared/api/third-party";
 {% else %}
 import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
 {% endif %}
 {% if user %}
-import { UserToken } from "@/shared/auth/connections";
+import { {{ api.token_source }} } from "@/shared/auth/connections";
 {% endif %}
 {% set types = api.used_types() %}
 {% if mock or types %}
@@ -81,6 +83,9 @@ export class {{ api.client }} {
     });
 {% elif user %}
     this.http = new HttpClient({{ api.name | tojson }}, options.baseUrl ?? {{ api.base_url_const }}, {
+{% if api.user_basic %}
+      scheme: "Basic",
+{% endif %}
       token: options.token,
       timeoutMs: options.timeoutMs,
       fetch: options.fetch,
@@ -137,7 +142,26 @@ export class {{ api.client }} {
 {% endfor %}
 }
 
-{% if user %}
+{% if user and api.user_basic %}
+/**
+ * Return a client with the base URL of the environment (`{{ api.url_env }}`)
+ * that calls the API with the user name and the password of the signed-in
+ * user (ADR 0033). Without a connection of the user to the API, or when the
+ * API did not accept the credentials, a call throws a `NotConnectedError`:
+ * the user connects an account on the page `/connections`.
+ */
+export function {{ api.factory }}(): {{ api.client }} {
+  return {{ api.client_for }}(null);
+}
+
+/** Return a client that calls the API with the credentials of a user, or of the signed-in user for `null`. */
+export function {{ api.client_for }}(userId: string | null): {{ api.client }} {
+  return new {{ api.client }}({
+    baseUrl: process.env.{{ api.url_env }} || undefined,
+    token: new UserCredentials({{ api.name | tojson }}, userId),
+  });
+}
+{% elif user %}
 /**
  * Return a client with the base URL of the environment (`{{ api.url_env }}`)
  * that calls the API with the access token of the signed-in user (ADR 0033).
@@ -162,6 +186,10 @@ export function {{ api.client_for }}(userId: string | null): {{ api.client }} {
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`, the client ID in `{{ api.client_id_env }}`, and the client
  * secret in `{{ api.secret_env }}`.
+{% elif server and api.username_env %}
+ * Return a client with the settings of the environment: the base URL in
+ * `{{ api.url_env }}`, the user name in `{{ api.username_env }}`, and the
+ * password in `{{ api.secret_env }}`.
 {% elif server %}
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`{% if api.secret_env %}, and the secret in `{{ api.secret_env }}`{% endif %}.
@@ -182,6 +210,9 @@ export function {{ api.factory }}(): {{ api.client }} {
     baseUrl: process.env.{{ api.url_env }} || undefined,
 {% if oauth %}
     clientId: process.env.{{ api.client_id_env }},
+{% endif %}
+{% if api.username_env %}
+    username: process.env.{{ api.username_env }},
 {% endif %}
 {% if api.secret_env %}
     secret: process.env.{{ api.secret_env }},

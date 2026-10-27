@@ -146,13 +146,19 @@ BINDING = Binding(
         Output(
             template="app/core/messages_ext.py.j2",
             path="app/core/messages_ext.py",
-            when="py.message_elements and not py.smtp",
+            when="py.message_elements and not py.smtp and not py.ses",
             extension=True,
         ),
-        *(
-            Output(template=f"{path}.j2", path=path, when="py.smtp")
-            for path in ("app/core/mail.py", "tests/test_mail.py")
+        Output(template="app/core/mail.py.j2", path="app/core/mail.py", when="py.smtp"),
+        # The tests of the SMTP module check the messages of the sign-in.
+        Output(
+            template="tests/test_mail.py.j2",
+            path="tests/test_mail.py",
+            when="py.smtp and py.message_elements",
         ),
+        # The same modules with the API of Amazon SES (`auth.delivery: ses`).
+        Output(template="app/core/mail_ses.py.j2", path="app/core/mail.py", when="py.ses"),
+        Output(template="tests/test_mail_ses.py.j2", path="tests/test_mail.py", when="py.ses"),
         Output(
             template="app/core/access.py.j2", path="app/core/access.py", when="definition.access"
         ),
@@ -504,7 +510,12 @@ BINDING = Binding(
         Output(
             template="tests/test_connections.py.j2",
             path="tests/test_connections.py",
-            when="py_connections",
+            when="py_code_flows",
+        ),
+        Output(
+            template="tests/test_credentials.py.j2",
+            path="tests/test_credentials.py",
+            when="py_connections | selectattr('user_basic') | list",
         ),
         Output(template="app/core/webhooks.py.j2", path="app/core/webhooks.py", when="py_webhooks"),
         Output(
@@ -588,6 +599,7 @@ BINDING = Binding(
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
+        | {"provider_roles", "provider_sign_out"}
         | {"access", "role", "record_rule", "memberships", "membership_role"}
         | {"api", "api_operation"}
         | {"webhook"}

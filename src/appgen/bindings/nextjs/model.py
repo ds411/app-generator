@@ -242,6 +242,8 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.S3_PACKAGES
     if uses_smtp(definition):
         dependencies |= versions.SMTP_PACKAGES
+    if uses_ses(definition):
+        dependencies |= versions.SES_PACKAGES
     if uses_redis(definition) or any(e.live for e in definition.entities.values()):
         dependencies |= versions.REDIS_PACKAGES
     return {
@@ -279,14 +281,26 @@ def uses_smtp(definition: AppDefinition) -> bool:
     verification of the email address, and the emails of the notices with
     a notification with `email: true` (ADR 0044).
     """
+    return _delivery(definition) == "smtp"
+
+
+def uses_ses(definition: AppDefinition) -> bool:
+    """Return True if the app sends the same emails with Amazon SES (`auth.delivery: ses`)."""
+    return _delivery(definition) == "ses"
+
+
+def _delivery(definition: AppDefinition) -> str | None:
+    """Return the delivery of the emails of the app, or None if the app sends no emails."""
     auth = definition.auth
-    if auth is None or auth.delivery != "smtp":
-        return False
-    return (
+    if auth is None:
+        return None
+    if not (
         auth.password_reset is not None
         or (auth.sign_up is not None and auth.sign_up.verify_email is not None)
         or has_notice_emails(definition)
-    )
+    ):
+        return None
+    return auth.delivery
 
 
 def uses_redis(definition: AppDefinition) -> bool:
@@ -351,6 +365,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     return {
         "ts_apis": apis,
         "ts_connections": ts_connections(apis),
+        "ts_code_flows": [api for api in ts_connections(apis) if not api.user_basic],
         "ts_webhooks": ts_webhooks(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
@@ -413,6 +428,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "curl_version": versions.CURL_VERSION,
             "redis": uses_redis(definition),
             "smtp": uses_smtp(definition),
+            "ses": uses_ses(definition),
             "deploy": deploy_targets(definition),
             # The jobs (ADR 0029): a route handler and a module for each job, and the CronJobs
             # that call the routes.

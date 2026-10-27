@@ -1,4 +1,6 @@
-{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{{ trace_header(*(ts_code_flows | map(attribute="id"))) }}
+{# With `per_user` APIs too, the names of the flows have a type of their own. #}
+{% set is_flow = "isFlowName" if ts_code_flows | length != ts_connections | length else "isConnectionName" %}
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
@@ -9,7 +11,7 @@ import {
   connectionFlowCookie,
   connectionFlowPath,
   connectionsPage,
-  isConnectionName,
+  {{ is_flow }},
   startConnection,
 } from "@/shared/auth/connections";
 import { SIGN_IN_PATH, sessionUserId } from "@/shared/auth/session";
@@ -20,7 +22,7 @@ import { inRequestLanguage } from "@/shared/lib/i18n-server";
 /** Send the browser of the signed-in user to the page where the user allows the access to an API (ADR 0033). */
 export async function GET(_request: NextRequest, { params }: RouteContext<"/connections/[api]/start">) {
   const { api } = await params;
-  if (!isConnectionName(api)) notFound();
+  if (!{{ is_flow }}(api)) notFound();
   const userId = await sessionUserId();
   if (userId === null) redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(CONNECTIONS_PATH)}`);
   let target: string;

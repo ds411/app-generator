@@ -84,7 +84,7 @@ export type ExpectedAuth = {
     /**
      * The verification of the email address (ADR 0023), only if the app has
      * the page of the link: the widget of the address, and the file of the
-     * mock SMTP server with the emails of the app.
+     * mock SMTP or SES server with the emails of the app.
      */
     verifyEmail?: { addressId: string; mailbox: string } | null;
   };
@@ -92,9 +92,11 @@ export type ExpectedAuth = {
   passwordReset?: {
     /** A user whose password the test changes. */
     username: string;
-    /** The file of the mock SMTP server with the emails of the app: the reset links. */
+    /** The file of the mock SMTP or SES server with the emails of the app: the reset links. */
     mailbox: string;
   };
+  /** False: the tests compare no screenshots, for an app of another delivery of the messages. */
+  screenshots?: boolean;
   /**
    * The second factor (ADR 0024): a user who turns it on, signs out, and
    * signs in with a code that the test computes. The menu is the menu of
@@ -123,8 +125,19 @@ export type ExpectedAuth = {
     /** The form of a new record on the list page: the label of its button, a widget that shows, and the widgets that do not. */
     form: { label: string; firstId: string; hiddenIds: string[] } | null;
   }[];
-  /** The sign-in with each provider that makes users (ADR 0020): the button, and the menu of the user. */
-  providers?: { name: string; title: string; menu: string[] }[];
+  /**
+   * The sign-in with each provider that makes users (ADR 0020): the button,
+   * and the sign-ins in turn with the menu of the user after each one.
+   * `loginHint` and `groups` go to the mock provider in the authorization
+   * request: the user and the groups of the claim of `roles`.
+   */
+  providers?: {
+    name: string;
+    title: string;
+    signIns: { loginHint?: string; groups?: string[]; menu: string[] }[];
+    /** With `sign_out`: the logout URL of the mock provider, the client ID, and the parameter of the page after the sign-out. */
+    signOut: { url: string; clientId: string; returnParam: string } | null;
+  }[];
   /**
    * The notices (ADR 0041): a user with all operations changes the state
    * of a record of the receiver with the edit form of its detail page.
@@ -184,8 +197,14 @@ export type ExpectedAuth = {
 
 /** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */
 export type ExpectedConnections = {
-  /** The APIs with the authorization code flow: the name in the paths, and the title. */
-  apis: { api: string; title: string }[];
+  /**
+   * The APIs that the app calls in the name of a user: the name in the paths, the title, and
+   * the kind (`oauth` for the authorization code flow, `basic` for the credentials of each user).
+   * `rejected` is the message of the check of wrong credentials, or null without a check.
+   */
+  apis: { api: string; title: string; kind: "oauth" | "basic"; rejected: string | null }[];
+  /** The credentials of an API with `basic` that the mock server accepts, and a wrong password. */
+  credentials: { username: string; password: string; wrong: string };
   /** The inputs of the sign-up of a new user, by ID: `{n}` in a value is a new number. */
   signUp: { id: string; value: string }[];
   password: string;

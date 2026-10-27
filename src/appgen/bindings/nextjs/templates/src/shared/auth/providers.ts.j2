@@ -3,6 +3,10 @@
 {% set username = table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[auth.username_field].id) | first %}
 {% set var = auth.user_entity | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
+{% set grouped = (auth.providers.values() | selectattr("roles") | list) if role_key else [] %}
+{% set signs_out = auth.providers.values() | selectattr("sign_out") | list %}
+{% set role_column = (table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[definition.access.role_field].id) | first) if grouped else none %}
+{% set codes = '"provider" | "unknown-user"' + (' | "no-role"' if grouped else "") %}
 {% set creates = auth.providers.values() | selectattr("create_users") | list %}
 {% set verify = auth.sign_up.verify_email if auth.sign_up else none %}
 {% set address = (table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[definition.address_field()].id) | first) if verify else none %}
@@ -44,6 +48,10 @@ const TIMEOUT_MS = 10_000;
 /** The names of the providers. */
 export const PROVIDER_NAMES = [{{ auth.providers | map("tojson") | join(", ") }}] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
+{% if grouped %}
+/** A role of the app. */
+type Role = NonNullable<(typeof {{ table.const }}.$inferInsert)["{{ role_column.key }}"]>;
+{% endif %}
 
 /** A provider of the definition, with the values of its settings. */
 type Provider = {
@@ -55,7 +63,22 @@ type Provider = {
   createUsers: boolean;
   /** The fields of a new user, and the claims that give their values. */
   claims: Record<string, string>;
-{% if role_key %}
+  /** The fixed parameters of the authorization request, for example the identity provider. */
+  authorizeParams: Record<string, string>;
+  /** Accept an email address that the ID token does not mark as verified. */
+  trustEmail: boolean;
+{% if signs_out %}
+  /** The logout URL (empty: the `end_session_endpoint` of the discovery document), and its parameter of the page after the sign-out. */
+  signOut?: { url: string; returnParam: string };
+{% endif %}
+{% if grouped %}
+  /** The role of a new user. With `roles`: the role of a user whose groups have no role. */
+  defaultRole?: Role;
+  /** The claim with the groups of the user: the app sets the role at each sign-in. */
+  rolesClaim?: string;
+  /** Each group and its role, in the order of the check. */
+  roleMap?: [string, Role][];
+{% elif role_key %}
   /** The role of a new user. */
   defaultRole?: string;
 {% endif %}
@@ -63,9 +86,9 @@ type Provider = {
 
 /** A sign-in that failed. The code selects the message of the sign-in page. */
 export class ProviderError extends Error {
-  readonly code: "provider" | "unknown-user";
+  readonly code: {{ codes }};
 
-  constructor(message: string, code: "provider" | "unknown-user" = "provider") {
+  constructor(message: string, code: {{ codes }} = "provider") {
     super(message);
     this.name = "ProviderError";
     this.code = code;
@@ -90,8 +113,23 @@ function providerOf(name: ProviderName): Provider {
       usernameClaim: {{ p.username_claim | tojson }},
       createUsers: {{ "true" if p.create_users else "false" }},
       claims: { {%- for field, claim in p.claims.items() %} {{ field | camel }}: {{ claim | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.claims }}},
-{% if role_key and p.create_users and p.default_role %}
+      authorizeParams: { {%- for key, value in p.authorize_params.items() %} {{ key | tojson }}: {{ value | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.authorize_params }}},
+      trustEmail: {{ "true" if p.trust_email else "false" }},
+{% if p.sign_out %}
+      {{ trace(p.sign_out.id) }}
+      signOut: { url: process.env.{{ name | upper }}_SIGN_OUT_URL || {{ (p.sign_out.endpoint or "") | tojson }}, returnParam: {{ p.sign_out.return_param | tojson }} },
+{% endif %}
+{% if role_key and p.default_role and (p.create_users or p.roles) %}
       defaultRole: {{ p.default_role | tojson }},
+{% endif %}
+{% if role_key and p.roles %}
+      {{ trace(p.roles.id) }}
+      rolesClaim: {{ p.roles.claim | tojson }},
+      roleMap: [
+{% for group, role in p.roles.map.items() %}
+        [{{ group | tojson }}, {{ role | tojson }}],
+{% endfor %}
+      ],
 {% endif %}
     },
 {% endfor %}
@@ -165,6 +203,9 @@ const metadataSchema = z.object({
   authorization_endpoint: z.url(),
   token_endpoint: z.url(),
   jwks_uri: z.url(),
+{% if signs_out %}
+  end_session_endpoint: z.url().optional(),
+{% endif %}
 });
 type Metadata = z.infer<typeof metadataSchema>;
 
@@ -210,7 +251,9 @@ export async function startProviderSignIn(name: ProviderName, next: string): Pro
   const metadata = await discover(provider);
   const [state, nonce, verifier] = [randomText(), randomText(), randomText()];
   const url = new URL(metadata.authorization_endpoint);
+  // The parameters of the flow come last: the definition cannot change them.
   const query = {
+    ...provider.authorizeParams,
     response_type: "code",
     client_id: provider.clientId,
     redirect_uri: callbackUrl(name),
@@ -279,28 +322,80 @@ async function checkIdToken(provider: Provider, metadata: Metadata, idToken: str
   return claims;
 }
 
-/** Return the ID of the user of the claims of an ID token. With `create_users`, make a new user. */
+{% if grouped %}
+/**
+ * Return the groups of the value of a claim: a list, or a text in the form
+ * `[a, b]`, `a,b`, or `a`. A SAML attribute with more than one value can
+ * come as such a text.
+ */
+function groupsOf(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== "string") return [];
+  let text = value.trim();
+  if (text.startsWith("[")) {
+    try {
+      const found: unknown = JSON.parse(text);
+      return Array.isArray(found) ? found.map(String) : [];
+    } catch {
+      text = text.replace(/^\[/, "").replace(/\]$/, "");
+    }
+  }
+  return text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
+}
+
+/**
+ * Return the role of the groups in the claims: the first role of the
+ * provider whose group is in the claim, else the default role. Throw a
+ * ProviderError without a role.
+ */
+function roleOf(provider: Provider, claims: JWTPayload): Role {
+  const groups = new Set(groupsOf(claims[provider.rolesClaim ?? ""]));
+  const found = provider.roleMap?.find(([group]) => groups.has(group));
+  if (found) return found[1];
+  if (provider.defaultRole === undefined) {
+    throw new ProviderError("The groups of the user at the provider give no role in this app.", "no-role");
+  }
+  return provider.defaultRole;
+}
+
+{% endif %}
+/** Return the ID of the user of the claims of an ID token. With `create_users`, make a new user.{% if grouped %} With `roles`, set the role of the user from the groups in the claims.{% endif %} */
 async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
   const username = claims[provider.usernameClaim];
   if (typeof username !== "string" || !username) {
     throw new ProviderError(`The ID token has no claim '${provider.usernameClaim}'.`);
   }
-  if (provider.usernameClaim === "email" && (claims.email_verified === false || claims.email_verified === "false")) {
+  // With trustEmail, the provider gives only the addresses of the company (ADR 0020).
+  const unverified = claims.email_verified === false || claims.email_verified === "false";
+  if (provider.usernameClaim === "email" && unverified && !provider.trustEmail) {
     throw new ProviderError("The provider did not verify the email address.");
   }
+{% if grouped %}
+  const role = provider.rolesClaim === undefined ? undefined : roleOf(provider, claims);
+{% endif %}
   const rows = await getDb()
-    .select({ id: {{ table.const }}.id{% if verify %}, address: {{ table.const }}.{{ address.key }}{% endif %} })
+    .select({ id: {{ table.const }}.id{% if verify %}, address: {{ table.const }}.{{ address.key }}{% endif %}{% if grouped %}, role: {{ table.const }}.{{ role_column.key }}{% endif %} })
     .from({{ table.const }})
     .where(eq({{ table.const }}.{{ username.key }}, username))
     .limit(1);
   const [found] = rows;
+{% if grouped %}
+  if (found && role !== undefined && found.role !== role) {
+    // The groups at the provider changed after the last sign-in.
+    await getDb().update({{ table.const }}).set({ {{ "role" if role_column.key == "role" else role_column.key ~ ": role" }} }).where(eq({{ table.const }}.id, found.id));
+  }
+{% endif %}
 {% if verify %}
   if (found) {
     {{ trace(verify.id) }}
     // The provider verified the email address. Nobody proved that the person who chose the
     // password of the sign-up owns the address, so the password must not give access to the
     // account (ADR 0023). The user can set a new password with a reset link.
-    if ((claims.email_verified === true || claims.email_verified === "true") && claims.email === found.address) {
+    const verified = provider.trustEmail || claims.email_verified === true || claims.email_verified === "true";
+    if (verified && claims.email === found.address) {
       await getDb()
         .delete(credentialsTable)
         .where(and(eq(credentialsTable.userId, found.id), isNull(credentialsTable.emailVerifiedAt)));
@@ -316,7 +411,12 @@ async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
   }
   const values: Record<string, unknown> = Object.fromEntries(Object.entries(provider.claims).map(([key, claim]) => [key, claims[claim]]));
   values.{{ username.key }} = username;
-{% if role_key %}
+{% if grouped %}
+  const newRole = role ?? provider.defaultRole;
+  if (newRole !== undefined) {
+    values.{{ role_key }} = newRole;
+  }
+{% elif role_key %}
   if (provider.defaultRole !== undefined) {
     values.{{ role_key }} = provider.defaultRole;
   }
@@ -350,3 +450,25 @@ export async function finishProviderSignIn(name: ProviderName, flow: Flow, query
   const idToken = await exchange(provider, metadata, code, callbackUrl(name), flow.verifier);
   return userOf(provider, await checkIdToken(provider, metadata, idToken, flow.nonce));
 }
+{% if signs_out %}
+
+/**
+ * Return the logout URL of a provider with `sign_out`, with the client ID
+ * and the sign-in page of the app as the page after the sign-out, else
+ * null. The provider ends the session of the user there.
+ */
+export async function providerSignOutUrl(name: string): Promise<string | null> {
+  if (!isProviderName(name)) return null;
+  const provider = providerOf(name);
+  if (provider.signOut === undefined) return null;
+  const endpoint = provider.signOut.url || (await discover(provider)).end_session_endpoint;
+  if (!endpoint) {
+    console.warn(`The provider ${name} has no logout URL. Set its sign-out URL.`);
+    return null;
+  }
+  const url = new URL(endpoint);
+  url.searchParams.set("client_id", provider.clientId);
+  url.searchParams.set(provider.signOut.returnParam, `${publicUrl()}${SIGN_IN_PATH}`);
+  return url.toString();
+}
+{% endif %}

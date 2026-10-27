@@ -440,7 +440,7 @@ BINDING = Binding(
                 ),
             )
         ),
-        # The connections of the users to the APIs with the authorization code flow (ADR 0033).
+        # The connections of the users to the APIs that the app calls in their name (ADR 0033).
         *(
             Output(template=template, path=path, when="ts_connections")
             for template, path in (
@@ -454,6 +454,12 @@ BINDING = Binding(
                     "src/shared/auth/connection-actions.ts",
                 ),
                 ("app/connections/page.tsx.j2", "app/connections/page.tsx"),
+            )
+        ),
+        # The routes of the authorization code flow.
+        *(
+            Output(template=template, path=path, when="ts_code_flows")
+            for template, path in (
                 ("app/connections/start/route.ts.j2", "app/connections/[api]/start/route.ts"),
                 (
                     "app/connections/callback/route.ts.j2",
@@ -476,7 +482,7 @@ BINDING = Binding(
         ),
         # One delivery hook for the messages of the password reset and of the verification of
         # the email address (ADR 0023).
-        # With `auth.delivery: smtp`, `mail.ts` sends them, and the hook is not there.
+        # With `auth.delivery: smtp` or `ses`, `mail.ts` sends them, and the hook is not there.
         Output(
             template="src/shared/auth/messages.ts.j2",
             path="src/shared/auth/messages.ts",
@@ -485,13 +491,18 @@ BINDING = Binding(
         Output(
             template="src/shared/auth/messages.ext.ts.j2",
             path="src/shared/auth/messages.ext.ts",
-            when=f"not nextjs.smtp and {_MESSAGES}",
+            when=f"not nextjs.smtp and not nextjs.ses and {_MESSAGES}",
             extension=True,
         ),
         Output(
             template="src/shared/auth/mail.ts.j2",
             path="src/shared/auth/mail.ts",
             when="nextjs.smtp",
+        ),
+        Output(
+            template="src/shared/auth/mail-ses.ts.j2",
+            path="src/shared/auth/mail.ts",
+            when="nextjs.ses",
         ),
         *(
             Output(template=template, path=path, when=_VERIFY_EMAIL)
@@ -706,7 +717,7 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
         | {"memberships", "membership_role"}
-        | {"email_verification", "second_factor"}
+        | {"email_verification", "second_factor", "provider_roles", "provider_sign_out"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
         | {"webhook"}

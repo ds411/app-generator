@@ -47,6 +47,13 @@
             - name: SMTP_TLS
               value: starttls
 {% endif %}
+{% if py.ses %}
+            # Amazon SES sends the messages of the sign-in with the IAM role of the pod.
+            - name: AWS_REGION
+              value: us-east-1
+            - name: SES_FROM
+              value: no-reply@example.com
+{% endif %}
 {% for api in py_apis.values() %}
             {{ trace(api.id) }}
             - name: {{ api.url_env }}
@@ -79,7 +86,7 @@
             - name: STORAGE_LINK_SECONDS
               value: "3600"
 {% endif %}
-{% if py_connections and not py.providers %}
+{% if py_code_flows and not py.providers %}
             # The URL of the API for the browsers: the authorization servers of the APIs send the users back to it.
             - name: PUBLIC_URL
               value: https://api.example.com
@@ -145,11 +152,13 @@
 {% endif %}
 {% for api in py_apis.values() if api.secret_env %}
             {{ trace(api.id) }}
-            - name: {{ api.secret_env }}
+{% for env in api.secret_envs %}
+            - name: {{ env }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ app.name }}-{{ api.secret_env | lower | replace("_", "-") }}
+                  name: {{ app.name }}-{{ env | lower | replace("_", "-") }}
                   key: latest
+{% endfor %}
 {% endfor %}
 {% for w in py_webhooks.values() %}
             {{ trace(w.id) }}

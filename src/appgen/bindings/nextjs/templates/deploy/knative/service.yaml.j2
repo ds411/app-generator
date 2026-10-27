@@ -58,7 +58,7 @@ spec:
             - name: JOBS_WINDOW_MINUTES
               value: "60"
 {% endif %}
-{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition)) %}
+{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_code_flows or has_notice_emails(definition)) %}
             # The URL of the app for the browsers.
             - name: PUBLIC_URL
               value: https://app.example.com
@@ -75,6 +75,13 @@ spec:
               value: no-reply@example.com
             - name: SMTP_TLS
               value: starttls
+{% endif %}
+{% if nextjs.ses %}
+            # Amazon SES sends the messages of the sign-in with the IAM role of the pod.
+            - name: AWS_REGION
+              value: us-east-1
+            - name: SES_FROM
+              value: no-reply@example.com
 {% endif %}
 {% if definition.auth %}
 {% for provider, p in definition.auth.providers.items() %}
@@ -178,11 +185,13 @@ spec:
 {% endif %}
 {% for api in ts_apis.values() if api.secret_env %}
             {{ trace(api.id) }}
-            - name: {{ api.secret_env }}
+{% for env in api.secret_envs %}
+            - name: {{ env }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ name }}-{{ api.secret_env | lower | replace("_", "-") }}
+                  name: {{ name }}-{{ env | lower | replace("_", "-") }}
                   key: latest
+{% endfor %}
 {% endfor %}
 {% for w in ts_webhooks.values() %}
             {{ trace(w.id) }}

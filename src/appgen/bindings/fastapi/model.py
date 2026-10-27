@@ -1158,6 +1158,18 @@ def _braces(prefix: str, items: list[str], indent: int) -> str:
     return f"{prefix}{{\n{inner}{pad}}}"
 
 
+def _pairs(prefix: str, pairs: list[tuple[str, str]], indent: int) -> str:
+    """Return `<prefix>((<a>, <b>), ...)`, a tuple of pairs of texts, on one line if it fits,
+    else with one pair on each line. A tuple of one pair ends with a comma."""
+    items = [f"({string(a)}, {string(b)})" for a, b in pairs]
+    one_line = f"{prefix}({items[0]},)" if len(items) == 1 else f"{prefix}({', '.join(items)})"
+    if indent + len(one_line) + 1 <= LINE_LENGTH:
+        return one_line
+    pad = " " * indent
+    inner = "".join(f"{pad}    {item},\n" for item in items)
+    return f"{prefix}(\n{inner}{pad})"
+
+
 def _link(rel: PyRelation, value: str) -> str:
     """Return the keyword argument of a factory that links a record to the record of an ID."""
     if rel.side == "fk":
@@ -2501,9 +2513,32 @@ class PyProvider:
     username_claim: str
     create_users: bool
     default_role: str | None
-    """With `create_users` and `access`: the role of a new user."""
+    """With `create_users` and `access`: the role of a new user. With `roles`: the role of a user
+    whose groups have no role."""
     claims: list[tuple[PyField, str]]
     """With `create_users`: the fields of a new user, and the claims that give their values."""
+    authorize_params: list[tuple[str, str]]
+    """The fixed parameters of the authorization request, in source order."""
+    trust_email: bool
+    """Accept an email address that the ID token does not mark as verified."""
+    roles_claim: str | None = None
+    """With `roles`: the claim with the groups of the user."""
+    role_map: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    """With `roles`: each group and its role, in the order of the check."""
+    roles_id: str | None = None
+    """With `roles`: the ID of the element `roles`, for its trace."""
+    sign_out_id: str | None = None
+    """With `sign_out`: the ID of the element `sign_out`, for its trace."""
+    sign_out_endpoint: str = ""
+    """With `sign_out`: the logout URL, or empty for the `end_session_endpoint` of the discovery
+    document."""
+    sign_out_return_param: str = "post_logout_redirect_uri"
+    """With `sign_out`: the parameter of the logout URL with the page after the sign-out."""
+
+    def pairs_arg(self, key: str, pairs: list[tuple[str, str]]) -> str:
+        """Return the keyword argument `<key>=` of the provider in `provider_of`: a tuple of
+        pairs of texts, in the format of the Ruff formatter at the indent 12."""
+        return _pairs(f"{key}=", pairs, 12) + ","
 
 
 @dataclass(frozen=True, slots=True)
@@ -2580,6 +2615,8 @@ class PyApp:
     """True if the app sends emails by SMTP (`auth.delivery: smtp`): the messages of the
     sign-in, not with the extension file `app/core/messages_ext.py`, and the emails of the
     notices (ADR 0044)."""
+    ses: bool = False
+    """True if the app sends the same emails with the API of Amazon SES (`auth.delivery: ses`)."""
     dashboards: dict[str, PyDashboard] = field(default_factory=dict[str, PyDashboard])
     """The dashboards with the endpoints of their widgets, by name."""
     access: bool = False
@@ -3064,6 +3101,9 @@ def python_app(definition: AppDefinition) -> PyApp:
         smtp=(bool(_message_elements(definition)) or notice_emails is not None)
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
+        ses=(bool(_message_elements(definition)) or notice_emails is not None)
+        and definition.auth is not None
+        and definition.auth.delivery == "ses",
         dashboards=dashboards,
         access=definition.access is not None,
         auth=auth is not None,
@@ -3162,8 +3202,9 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
     found: list[PyProvider] = []
     for name, provider in auth.providers.items():
         default_role = provider.default_role
+        # With `roles`, a user whose groups have no role gets only `default_role`.
         if default_role is None and role is not None and provider.create_users:
-            value = users.fields[role].default
+            value = users.fields[role].default if provider.roles is None else None
             default_role = str(value) if value is not None else None
         found.append(
             PyProvider(
@@ -3178,6 +3219,18 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
                 create_users=provider.create_users,
                 default_role=default_role,
                 claims=[(fields[f], claim) for f, claim in provider.claims.items()],
+                authorize_params=list(provider.authorize_params.items()),
+                trust_email=provider.trust_email,
+                roles_claim=provider.roles.claim if provider.roles else None,
+                role_map=list(provider.roles.map.items()) if provider.roles else [],
+                roles_id=provider.roles.id if provider.roles else None,
+                sign_out_id=provider.sign_out.id if provider.sign_out else None,
+                sign_out_endpoint=(provider.sign_out.endpoint or "") if provider.sign_out else "",
+                sign_out_return_param=(
+                    provider.sign_out.return_param
+                    if provider.sign_out
+                    else "post_logout_redirect_uri"
+                ),
             )
         )
     return found
@@ -4280,6 +4333,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py_api_mocks_imports": mocks_imports(apis),
         "py_api_features": py_features(apis),
         "py_connections": python_connections(apis),
+        "py_code_flows": [api for api in python_connections(apis) if not api.user_basic],
         "i18n": plan,
         "i18n_test": language_test(plan) if plan is not None else None,
     }

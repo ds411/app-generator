@@ -274,7 +274,7 @@ the change log.
 {% if py.notice_emails %}
 - The notifications {% for name in py.notice_emails.names %}`{{ name }}`{{ ", " if not loop.last }}{% endfor %} also
   send each notice by email. The job `notice_emails` of the worker sends
-  the emails that wait each minute, with the SMTP server of `SMTP_*`.
+  the emails that wait each minute, {% if py.ses %}with Amazon SES from `SES_FROM`{% else %}with the SMTP server of `SMTP_*`{% endif %}.
   The links of an email (the record, and the page of the settings) start
   with `FRONT_END_URL`.
 - `GET /notices/settings` gives the state of the emails of each
@@ -364,7 +364,7 @@ of a front end show them at once (ADR 0051).
 {% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if py.redis else [])
     + (["LIVE_EVENTS_URL"] if py.live else [])
     + (["AUTH_SECRET"] if definition.auth else [])
-    + (py_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list)
+    + (py_apis.values() | map(attribute="secret_envs") | sum(start=[]))
     + (py.providers | map(attribute="client_secret_env") | list) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
@@ -462,6 +462,21 @@ the token of each request, also on a public endpoint. Without a token,
   `none`). Without `SMTP_HOST`, the links go to the log with
   `ENVIRONMENT=development`, and the endpoints that send a message give
   501 in production.
+{% elif py.ses %}
+- The app sends the messages with the links as emails with the API of
+  Amazon SES (`SendEmail` of the API v2), from `SES_FROM`, a verified
+  identity of SES, in the region `AWS_REGION`, with the optional
+  configuration set `SES_CONFIGURATION_SET`. The app reads the AWS
+  credentials from the default chain of the AWS SDK: the environment
+  variables, the web identity or EKS Pod Identity, the role of an ECS
+  task, or the instance profile. The role needs the IAM permission
+  `ses:SendEmail` on the identity of the sender. On EKS, give the role
+  to the service account of the pod with EKS Pod Identity or IRSA. In
+  the sandbox of SES, the app can send only to verified addresses.
+  Without `SES_FROM`, the links go to the log with
+  `ENVIRONMENT=development`, and the endpoints that send a message give
+  501 in production. `AWS_ENDPOINT_URL_SESV2` changes the endpoint of
+  SES, for example for a test server.
 {% elif py.message_elements %}
 - Write the delivery of the messages with the links (for example an
   email) in `app/core/messages_ext.py`. Until then, the links go to the
@@ -478,6 +493,14 @@ the token of each request, also on a public endpoint. Without a token,
   Register `<PUBLIC_URL>/auth/providers/<name>/callback` as the
   redirect URI of the app at the provider. Set the issuer, the client
   ID, and the client secret of each provider (see `.env.example`).
+{% set signs_out = py.providers | selectattr("sign_out_id") | list %}
+{% if signs_out %}
+- `GET /auth/providers/<name>/sign-out?return_to=<page>` sends the
+  browser to the logout URL of a provider ({% for p in signs_out %}`{{ p.name }}`{{ ", " if not loop.last }}{% endfor %}), which ends the
+  session of the user there and sends the browser back to the page. The
+  front end deletes the token first. Register the page as a sign-out URL
+  of the app at the provider. `<NAME>_SIGN_OUT_URL` sets the logout URL.
+{% endif %}
 {% endif %}
 {% set sf = definition.auth.second_factor if password else none %}
 {% if sf %}
@@ -562,7 +585,7 @@ environment.
 | API | Client | Base URL | Secret |
 | --- | ------ | -------- | ------ |
 {% for api in py_apis.values() %}
-| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.username_env ~ "` (user name), ") if api.username_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
 {% endfor %}
 
 An endpoint gets a client as a dependency, for example
@@ -594,10 +617,12 @@ The endpoints need a signed-in user. The roles do not apply to them.
 {% endfor %}
 {% endif %}
 {% if py_connections %}
+{% set basic_users = py_connections | selectattr("user_basic") | list %}
 
 ### Connections of the users
+{% if py_code_flows %}
 
-The clients of {% for api in py_connections %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} send the access token of a user: the
+The clients of {% for api in py_code_flows %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} send the access token of a user: the
 authorization code flow of OAuth 2.0. A user connects an account of the service first
 (`app/core/connections.py`):
 
@@ -620,6 +645,29 @@ gives 409 if the signed-in user has no connection. Other code, for
 example a job, gets a client with `<api>_client_for(settings, sessions,
 user_id)`. With SQLite, a job cannot get a new access token: use
 Postgres for the worker.
+{% endif %}
+{% if basic_users %}
+
+The clients of {% for api in basic_users %}`{{ api.name }}`{{ ", " if not loop.last }}{% endfor %} send the user name and the password of a user
+with HTTP Basic, for example the email address and an API token of Jira. A user connects
+an account of the service first (`app/core/connections.py`):
+
+1. `POST /auth/connections/<api>` with `{"username": "<user name>",
+   "password": "<password>"}` keeps the credentials of the signed-in
+   user. If the API has a check operation, the app calls it with the
+   credentials first, and gives 422 if the API does not accept them.
+2. `GET /auth/connections` lists the APIs and the connections of the
+   user, with the user name. No answer contains the password.
+   `DELETE /auth/connections/<api>` deletes a connection.
+
+The table `api_connections` keeps the password of each user, encrypted
+with a key from `AUTH_SECRET`: a new `AUTH_SECRET` ends the connections.
+After an answer with the status 401, the connection is `rejected`, and
+the user gives new credentials. An endpoint with the client gives 409
+if the signed-in user has no connection, or a rejected one. Other code,
+for example a job, gets a client with `<api>_client_for(settings,
+sessions, user_id)`.
+{% endif %}
 {% endif %}
 
 {% endif %}

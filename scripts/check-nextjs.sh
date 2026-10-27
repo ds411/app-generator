@@ -38,10 +38,13 @@
 # Then generate tests/fixtures/totals.yaml (totals of relations and the
 # compare rules over totals, ADR 0034), and run lint, type check, appgen
 # check, and the totals test (scripts/totals_test.py) on it.
-# Last, generate tests/fixtures/listings.yaml with the hand-written
+# Then generate tests/fixtures/listings.yaml with the hand-written
 # queries of tests/fixtures/listings/extensions/nextjs/ (ADR 0045), and
 # run lint, type check, appgen check, and the queries test
 # (scripts/queries_test.py) on it.
+# Last, generate tests/fixtures/jira.yaml (an API with HTTP Basic), run
+# lint, type check, and appgen check on it, and call the mock Jira API
+# from the app (scripts/api_calls.py).
 # The pre-push hook runs only the sections of this script that a push
 # changes (scripts/check_plan.py). Run it by hand from the repository
 # root, to run all sections:
@@ -97,14 +100,17 @@ totals_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-totals.XXXXXX")
 # The app of the listings fixture (ADR 0045), in a temporary folder.
 listings_definition=tests/fixtures/listings.yaml
 listings_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-listings.XXXXXX")
+# The app of the Jira fixture (HTTP Basic), in a temporary folder.
+jira_definition=tests/fixtures/jira.yaml
+jira_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-jira.XXXXXX")
 
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out" "$jira_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out" "$jira_out"' EXIT
 fi
 
 step() {
@@ -390,6 +396,25 @@ if section nextjs:listings; then
 
     step "queries test"
     uv run --locked scripts/queries_test.py --app "$listings_out"
+fi
+
+if section nextjs:jira; then
+    step "generate $jira_definition in $jira_out"
+    uv run --locked appgen generate "$jira_definition" -b nextjs -o "$jira_out" >/dev/null
+    (
+        cd "$jira_out"
+        step "pnpm install (jira)"
+        pnpm install --silent
+        step "pnpm lint (jira)"
+        pnpm --silent lint
+        step "pnpm typecheck (jira)"
+        pnpm --silent typecheck
+    )
+    step "appgen check (jira)"
+    uv run --locked appgen check "$jira_definition" "$jira_out"
+
+    step "the calls of the mock Jira API with HTTP Basic"
+    uv run --locked scripts/api_calls.py nextjs "$jira_out" "$jira_definition"
 fi
 
 step "passed"

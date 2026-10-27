@@ -1,16 +1,35 @@
 {{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{% set oauth = ts_connections | rejectattr("user_basic") | list %}
+{% set basic = ts_connections | selectattr("user_basic") | list %}
+{# The names of the APIs with the authorization code flow, in a type of their own when the app also has `per_user`. #}
+{% set flow_type = "FlowName" if basic else "ConnectionName" %}
 import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
+{% if oauth %}
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+{% else %}
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+{% endif %}
 
 import { and, eq } from "drizzle-orm";
+{% if oauth %}
 import { z } from "zod";
+{% endif %}
 
+{% if basic %}
+import { basicAuthorization, type TokenSource } from "@/shared/api/third-party";
+{% else %}
 import type { TokenSource } from "@/shared/api/third-party";
+{% endif %}
 import { apiConnectionsTable, getDb, ownDb } from "@/shared/db";
 
+{% if oauth %}
 import { authSecret, publicUrl, sessionUserId, sign } from "./session";
+{% else %}
+import { authSecret, sessionUserId } from "./session";
+{% endif %}
+{% if oauth %}
 
 // The connections of the users to the APIs with the authorization code flow
 // of OAuth 2.0 (ADR 0033). The route `/connections/<api>/start` sends the
@@ -25,19 +44,97 @@ import { authSecret, publicUrl, sessionUserId, sign } from "./session";
 // A client of the API reads the access token of the user (`UserToken`), and
 // gets a new access token with the refresh token a little before the token
 // ends, or after an answer with the status 401.
+{% endif %}
+{% if basic %}
+
+// The connections of the users to the APIs with HTTP Basic and `per_user`
+// (ADR 0033): each user gives a user name and a password, for example the
+// email address and an API token of Jira, on the page `/connections`. The
+// server action calls the check operation of the API with them, if the API
+// has one, and keeps them in the table `api_connections`: the password
+// encrypted with a key from AUTH_SECRET. A client of the API sends the
+// credentials of the user (`UserCredentials`). After an answer with the
+// status 401, the connection is rejected: the user gives new credentials.
+{% endif %}
+{% if oauth %}
 
 /** The time that a user has to allow the access at the authorization server. */
 export const FLOW_SECONDS = 600;
 /** A client gets a new access token this time before the token ends. */
 const EARLY_SECONDS = 30;
+{% endif %}
+{% if oauth and basic %}
+/** The time that the app waits for an answer of a token endpoint or of a check of credentials. */
+{% elif oauth %}
 /** The time that the app waits for an answer of a token endpoint. */
+{% else %}
+
+/** The time that the app waits for an answer of a check of credentials. */
+{% endif %}
 const TIMEOUT_MS = 10_000;
 /** The page of the connections of the signed-in user. */
 export const CONNECTIONS_PATH = "/connections";
 
+{% if basic %}
+/** The APIs that the users connect, by their names in the paths. */
+{% else %}
 /** The APIs with the authorization code flow, by their names in the paths. */
+{% endif %}
 export const CONNECTION_NAMES = [{{ ts_connections | map(attribute="connection_name") | map("tojson") | join(", ") }}] as const;
 export type ConnectionName = (typeof CONNECTION_NAMES)[number];
+{% if oauth and basic %}
+/** The APIs with the authorization code flow, by their names in the paths. */
+export const FLOW_NAMES = [{{ oauth | map(attribute="connection_name") | map("tojson") | join(", ") }}] as const;
+export type FlowName = (typeof FLOW_NAMES)[number];
+{% endif %}
+{% if basic %}
+
+/** An API that the users connect: its name in the definition, its title, and its kind. */
+type ConnectionApi = { api: string; title: string; kind: "oauth" | "basic" };
+
+/** Return the API of a name in the paths. */
+function connectionApi(name: ConnectionName): ConnectionApi {
+  const apis: Record<ConnectionName, ConnectionApi> = {
+{% for api in ts_connections %}
+    {{ trace(api.id) }}
+    {{ api.connection_name | tojson }}: { api: {{ api.name | tojson }}, title: {{ tr(js(api.title)) }}, kind: {{ ("basic" if api.user_basic else "oauth") | tojson }} },
+{% endfor %}
+  };
+  return apis[name];
+}
+
+/** An API with HTTP Basic and the credentials of each user, with its settings. */
+type BasicApi = {
+  /** The name of the API in the definition. */
+  api: string;
+  baseUrl: string;
+  /** The method and the path of the operation that checks new credentials, or null. */
+  check: { method: string; path: string } | null;
+};
+
+/** Return an API with HTTP Basic and the credentials of each user, with the values of the environment. */
+function basicApi(name: ConnectionName): BasicApi {
+  const apis: Partial<Record<ConnectionName, BasicApi>> = {
+{% for api in basic %}
+    {{ trace(api.id) }}
+    {{ api.connection_name | tojson }}: {
+      api: {{ api.name | tojson }},
+      baseUrl: process.env.{{ api.url_env }} || {{ api.base_url | tojson }},
+      check: {{ ("{ method: " ~ (api.check_method | tojson) ~ ", path: " ~ (api.check_path | tojson) ~ " }") if api.check_method else "null" }},
+    },
+{% endfor %}
+  };
+  const found = apis[name];
+  if (found === undefined) throw new Error(`The API ${name} has no HTTP Basic with the credentials of each user.`);
+  return found;
+}
+
+/** Return true if a name in the paths is the name of an API with the credentials of each user. */
+export function isBasicName(name: ConnectionName): boolean {
+  return connectionApi(name).kind === "basic";
+}
+{% endif %}
+{% if oauth %}
 
 /** The client of the app at the authorization server of an API, with its settings. */
 type OAuthApp = {
@@ -54,9 +151,9 @@ type OAuthApp = {
 };
 
 /** Return the client of the app at the authorization server of an API, with the values of the environment. */
-function oauthApp(name: ConnectionName): OAuthApp {
-  const apps: Record<ConnectionName, OAuthApp> = {
-{% for api in ts_connections %}
+function oauthApp(name: {{ flow_type }}): OAuthApp {
+  const apps: Record<{{ flow_type }}, OAuthApp> = {
+{% for api in oauth %}
     {{ trace(api.id) }}
     {{ api.connection_name | tojson }}: {
       api: {{ api.name | tojson }},
@@ -75,9 +172,9 @@ function oauthApp(name: ConnectionName): OAuthApp {
 }
 
 /** Return the name in the paths of an API of the definition. */
-function nameOf(api: string): ConnectionName {
-  const names: Record<string, ConnectionName> = {
-{% for api in ts_connections %}
+function nameOf(api: string): {{ flow_type }} {
+  const names: Record<string, {{ flow_type }}> = {
+{% for api in oauth %}
     {{ api.name | tojson }}: {{ api.connection_name | tojson }},
 {% endfor %}
   };
@@ -86,16 +183,45 @@ function nameOf(api: string): ConnectionName {
   return name;
 }
 
+{% if oauth and basic %}
+
 /** Return true if a name is the name of an API with the authorization code flow in the paths. */
-export function isConnectionName(name: string): name is ConnectionName {
-  return (CONNECTION_NAMES as readonly string[]).includes(name);
+export function isFlowName(name: string): name is FlowName {
+  return (FLOW_NAMES as readonly string[]).includes(name);
 }
+{% endif %}
 
 /** Return a URL of the flow of an API. A path is under the base URL of the API. */
 function urlOf(app: OAuthApp, value: string): string {
   return value.startsWith("/") ? app.baseUrl.replace(/\/+$/, "") + value : value;
 }
+{% endif %}
 
+{% if basic %}
+/** Return true if a name is the name of an API that the users connect, in the paths. */
+{% else %}
+/** Return true if a name is the name of an API with the authorization code flow in the paths. */
+{% endif %}
+export function isConnectionName(name: string): name is ConnectionName {
+  return (CONNECTION_NAMES as readonly string[]).includes(name);
+}
+
+{% if basic %}
+/** The user has no connection to an API, or the API did not accept its credentials: the user connects an account first. */
+export class NotConnectedError extends Error {
+  constructor(
+    readonly api: string,
+    readonly rejected = false,
+  ) {
+    super(
+      rejected
+        ? {{ js_format("The API {api} did not accept the credentials of the account. Connect the account again.", api="api") }}
+        : {{ js_format("Connect an account of the API {api} first.", api="api") }},
+    );
+    this.name = "NotConnectedError";
+  }
+}
+{% else %}
 /** The user has no connection to an API: the user connects an account first. */
 export class NotConnectedError extends Error {
   constructor(readonly api: string) {
@@ -103,6 +229,7 @@ export class NotConnectedError extends Error {
     this.name = "NotConnectedError";
   }
 }
+{% endif %}
 
 /** A connection that failed. The page of the connections shows the message. */
 export class ConnectionError extends Error {
@@ -112,6 +239,7 @@ export class ConnectionError extends Error {
   }
 }
 
+{% if oauth %}
 /** The token endpoint did not accept the code or the refresh token (400 or 401). */
 class GrantError extends Error {}
 
@@ -121,6 +249,7 @@ function checkApp(app: OAuthApp): void {
     throw new ConnectionError({{ js_format("The server has no client ID or client secret for the API {api}.", api="app.api") }});
   }
 }
+{% endif %}
 
 /** The key of the tokens: an HMAC of AUTH_SECRET, as in the FastAPI app. */
 function encryptionKey(): Buffer {
@@ -159,6 +288,7 @@ function contextOf(api: string, userId: string, column: "access_token" | "refres
   return `${api}.${userId}.${column}`;
 }
 
+{% if oauth %}
 /** The answer of a token endpoint (RFC 6749, section 5.1). */
 const tokenAnswerSchema = z.object({
   access_token: z.string(),
@@ -211,6 +341,7 @@ async function requestTokens(app: OAuthApp, url: string, form: Record<string, st
   }
   return answer.data;
 }
+{% endif %}
 
 /** Return the connection of a user to an API, or null. */
 async function findConnection(api: string, userId: string): Promise<Connection | null> {
@@ -222,22 +353,39 @@ async function findConnection(api: string, userId: string): Promise<Connection |
   return row ?? null;
 }
 
+{% if basic %}
+/** Return true if a user has a connection to an API (the name in the definition), and the API did not reject it. */
+export async function connected(api: string, userId: string | null): Promise<boolean> {
+  const connection = userId === null ? null : await findConnection(api, userId);
+  return connection !== null && connection.rejectedAt === null;
+}
+{% else %}
 /** Return true if a user has a connection to an API (the name in the definition). */
 export async function connected(api: string, userId: string | null): Promise<boolean> {
   return userId !== null && (await findConnection(api, userId)) !== null;
 }
+{% endif %}
 
 /** The user of the work of `asUser()`. */
 const actingUser = new AsyncLocalStorage<string>();
 
+{% if basic %}
+/**
+ * Run work in the name of a user, for example a run of a job: the clients
+ * of the APIs that the users connect send the token or the credentials of
+ * the user.
+ */
+{% else %}
 /**
  * Run work in the name of a user, for example a run of a job: the clients
  * of the APIs with the authorization code flow send the token of the user.
  */
+{% endif %}
 export function asUser<T>(userId: string, work: () => Promise<T>): Promise<T> {
   return actingUser.run(userId, work);
 }
 
+{% if oauth %}
 /** The new tokens of each user and API that the server gets now: two requests wait for the same tokens. */
 const refreshes = new Map<string, Promise<string>>();
 
@@ -327,7 +475,152 @@ export class UserToken implements TokenSource {
     }
   }
 }
+{% endif %}
+{% if basic %}
 
+/** Return the Base64 of the credentials of a connection, or null if the API rejected them or a new AUTH_SECRET ended them. */
+function credentialsOf(key: Buffer, connection: Connection): string | null {
+  if (connection.rejectedAt !== null || connection.username === null) return null;
+  const password = unseal(key, connection.accessToken, contextOf(connection.api, connection.userId, "access_token"));
+  return password === null ? null : Buffer.from(`${connection.username}:${password}`, "utf8").toString("base64");
+}
+
+/**
+ * The user name and the password of a user for an API with HTTP Basic: the
+ * token source of a client.
+ *
+ * The source reads the credentials of the user in the table
+ * `api_connections`, and gives the Base64 of `<user name>:<password>` (RFC
+ * 7617): the client sends it with the scheme `Basic`. If the API does not
+ * accept the credentials (401), the source marks the connection as
+ * rejected, and the user gives new credentials.
+ */
+export class UserCredentials implements TokenSource {
+  private rejected: string | null = null;
+
+  /** `userId` null: the user of `asUser()`, else the signed-in user. */
+  constructor(
+    readonly api: string,
+    readonly userId: string | null,
+  ) {}
+
+  /** Return the credentials of the user. Throw a NotConnectedError without a connection, or when the API did not accept the credentials. */
+  async get(): Promise<string> {
+    const userId = this.userId ?? actingUser.getStore() ?? (await sessionUserId());
+    if (userId === null) throw new NotConnectedError(this.api);
+    const connection = await findConnection(this.api, userId);
+    if (connection === null) throw new NotConnectedError(this.api);
+    const value = credentialsOf(encryptionKey(), connection);
+    if (value === null || value === this.rejected) {
+      // The API did not accept the credentials, or a new AUTH_SECRET ended them.
+      if (connection.rejectedAt === null) {
+        await ownDb().update(apiConnectionsTable).set({ rejectedAt: new Date() }).where(eq(apiConnectionsTable.id, connection.id));
+      }
+      throw new NotConnectedError(this.api, true);
+    }
+    return value;
+  }
+
+  /** Keep credentials that the API did not accept: `get` rejects the connection. */
+  reset(token: string): void {
+    this.rejected = token;
+  }
+}
+{% endif %}
+
+{% if basic %}
+/** An API that the users connect, and the connection of the signed-in user. */
+export type ConnectionState = {
+  /** The name of the API in the paths of the connections. */
+  api: ConnectionName;
+  title: string;
+  /** `oauth`: the authorization code flow. `basic`: the user name and the password of the user. */
+  kind: "oauth" | "basic";
+  connected: boolean;
+  /** HTTP Basic: the user name of the connection, or null. No answer has the password. */
+  username: string | null;
+  /** HTTP Basic: true if the API did not accept the credentials. The user gives new ones. */
+  rejected: boolean;
+  /** The time of the connection, as an ISO 8601 text, or null. */
+  connectedAt: string | null;
+};
+
+/** List the APIs that the users connect, with the connections of a user. */
+export async function listConnections(userId: string): Promise<ConnectionState[]> {
+  const rows = await getDb().select().from(apiConnectionsTable).where(eq(apiConnectionsTable.userId, userId));
+  return CONNECTION_NAMES.map((name) => {
+    const { api, title, kind } = connectionApi(name);
+    const row = rows.find((item) => item.api === api);
+    return {
+      api: name,
+      title,
+      kind,
+      connected: row !== undefined,
+      username: row?.username ?? null,
+      rejected: row !== undefined && row.rejectedAt !== null,
+      connectedAt: row ? row.connectedAt.toISOString() : null,
+    };
+  });
+}
+
+/** Delete the connection of a user to an API, and its tokens or credentials. */
+export async function deleteConnection(name: ConnectionName, userId: string): Promise<void> {
+  const { api } = connectionApi(name);
+  await getDb()
+    .delete(apiConnectionsTable)
+    .where(and(eq(apiConnectionsTable.api, api), eq(apiConnectionsTable.userId, userId)));
+}
+
+/**
+ * Call the check operation of an API with new credentials, if the API has
+ * one. Throw a ConnectionError if the API does not accept them (401 or
+ * 403), gives another error, or gives no answer.
+ */
+async function checkCredentials(target: BasicApi, username: string, password: string): Promise<void> {
+  if (target.check === null) return;
+  let response: Response;
+  try {
+    response = await fetch(target.baseUrl.replace(/\/+$/, "") + target.check.path, {
+      method: target.check.method,
+      headers: { Accept: "application/json", Authorization: basicAuthorization(username, password) },
+      cache: "no-store",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new ConnectionError({{ js_format("The API {api} gave no valid answer.", api="target.api") }});
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new ConnectionError({{ js_format("The API {api} did not accept the user name and the password.", api="target.api") }});
+  }
+  if (!response.ok) {
+    throw new ConnectionError({{ js_format("The API {api} gave no valid answer.", api="target.api") }});
+  }
+}
+
+/**
+ * Check the user name and the password of a user at an API with HTTP
+ * Basic, and keep them: the password encrypted. New credentials end the
+ * rejection of the old ones.
+ */
+export async function connectWithCredentials(name: ConnectionName, userId: string, username: string, password: string): Promise<void> {
+  const target = basicApi(name);
+  const key = encryptionKey();
+  await checkCredentials(target, username, password);
+  const values = {
+    username,
+    accessToken: seal(key, password, contextOf(target.api, userId, "access_token")),
+    refreshToken: null,
+    expiresAt: null,
+    scope: "",
+    rejectedAt: null,
+    connectedAt: new Date(),
+  };
+  await getDb()
+    .insert(apiConnectionsTable)
+    .values({ userId, api: target.api, ...values })
+    .onConflictDoUpdate({ target: [apiConnectionsTable.userId, apiConnectionsTable.api], set: values });
+}
+{% else %}
 /** An API with the authorization code flow, and the connection of the signed-in user. */
 export type ConnectionState = {
   /** The name of the API in the paths of the connections. */
@@ -355,19 +648,21 @@ export async function deleteConnection(name: ConnectionName, userId: string): Pr
     .delete(apiConnectionsTable)
     .where(and(eq(apiConnectionsTable.api, api), eq(apiConnectionsTable.userId, userId)));
 }
+{% endif %}
+{% if oauth %}
 
 /** The name of the cookie of the flow of an API. */
-export function connectionFlowCookie(name: ConnectionName): string {
+export function connectionFlowCookie(name: {{ flow_type }}): string {
   return `connection_flow_${name}`;
 }
 
 /** The path of the cookie of the flow: only the routes of the API get it. */
-export function connectionFlowPath(name: ConnectionName): string {
+export function connectionFlowPath(name: {{ flow_type }}): string {
   return `${CONNECTIONS_PATH}/${name}`;
 }
 
 /** Return the page of the connections with the API of a new connection, or with the message of an error. */
-export function connectionsPage(result: { connected: ConnectionName } | { error: unknown }): string {
+export function connectionsPage(result: { connected: {{ flow_type }} } | { error: unknown }): string {
   if ("connected" in result) {
     return `${CONNECTIONS_PATH}#${new URLSearchParams({ connected: result.connected })}`;
   }
@@ -384,12 +679,12 @@ const flowSchema = z.object({
 });
 export type ConnectionFlow = z.infer<typeof flowSchema>;
 
-function flowSignature(name: ConnectionName, body: string): string {
+function flowSignature(name: {{ flow_type }}, body: string): string {
   return sign(`connection-flow.${name}.${body}`);
 }
 
 /** Return the flow of a valid signed text that has not ended, else null. */
-export function readConnectionFlow(name: ConnectionName, text: string): ConnectionFlow | null {
+export function readConnectionFlow(name: {{ flow_type }}, text: string): ConnectionFlow | null {
   const [body = "", signature = ""] = text.split(".");
   const expected = flowSignature(name, body);
   if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
@@ -404,7 +699,7 @@ export function readConnectionFlow(name: ConnectionName, text: string): Connecti
 }
 
 /** Return the URL that the authorization server sends the browser back to. */
-function callbackUrl(name: ConnectionName): string {
+function callbackUrl(name: {{ flow_type }}): string {
   return `${publicUrl()}${connectionFlowPath(name)}/callback`;
 }
 
@@ -412,7 +707,7 @@ function callbackUrl(name: ConnectionName): string {
  * Start a connection of a user to an API: return the URL of the page where
  * the user allows the access, and the signed flow for the cookie.
  */
-export function startConnection(name: ConnectionName, userId: string): { url: string; flow: string } {
+export function startConnection(name: {{ flow_type }}, userId: string): { url: string; flow: string } {
   const app = oauthApp(name);
   checkApp(app);
   const [state, verifier] = [randomBytes(32).toString("base64url"), randomBytes(32).toString("base64url")];
@@ -439,7 +734,7 @@ export function startConnection(name: ConnectionName, userId: string): { url: st
  * query of the callback, change the code for the tokens of the user, and
  * keep them. The user of the flow must be the signed-in user.
  */
-export async function finishConnection(name: ConnectionName, flow: ConnectionFlow, query: URLSearchParams, userId: string | null): Promise<void> {
+export async function finishConnection(name: {{ flow_type }}, flow: ConnectionFlow, query: URLSearchParams, userId: string | null): Promise<void> {
   const error = query.get("error");
   if (error !== null) {
     throw new ConnectionError({{ js_format("The authorization server gave the error '{error}'.", error="error.slice(0, 200)") }});
@@ -476,3 +771,4 @@ export async function finishConnection(name: ConnectionName, flow: ConnectionFlo
     .values({ userId: flow.user, api: app.api, ...values })
     .onConflictDoUpdate({ target: [apiConnectionsTable.userId, apiConnectionsTable.api], set: values });
 }
+{% endif %}

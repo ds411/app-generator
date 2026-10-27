@@ -4,6 +4,8 @@
 {% set access = definition.access %}
 {% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
 {% set creates = py.providers | selectattr("create_users") | list %}
+{% set grouped = (py.providers | selectattr("roles_claim") | list) if role else [] %}
+{% set signs_out = py.providers | selectattr("sign_out_id") | list %}
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
 """The sign-in with OpenID Connect providers (ADR 0020).
@@ -20,16 +22,34 @@ With `return_to` (a page of a front end in `CORS_ORIGINS`), the callback
 sends the browser back to the page with the token in the fragment of the
 URL: `#access_token=...&token_type=bearer&expires_in=...`, or `#error=...`.
 Without `return_to`, the callback returns the token as JSON.
+{% if grouped %}
+
+A provider with `roles` sets the role of the user at each sign-in, from
+the groups in a claim of the ID token.
+{% endif %}
+{% if signs_out %}
+
+`GET /auth/providers/<name>/sign-out?return_to=...` sends the browser to
+the logout URL of a provider with `sign_out`: the provider ends its
+session, and sends the browser back to `return_to`. The front end deletes
+the token of the app first.
+{% endif %}
 """
 
 import base64
 import hashlib
 import hmac
+{% if grouped %}
+import json
+{% endif %}
+{% if signs_out %}
+import logging
+{% endif %}
 import secrets
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal{{ ", cast" if grouped }}
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
@@ -41,7 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 {{ py.from_import("app.core.auth", ["Token", "find_user", "make_token", "sign", "signing_key", "unsign"] + (["remove_unverified_password"] if verify else [])) }}
 from app.core.config import Settings
-{% if creates %}
+{% if creates or grouped %}
 from app.core.db import SessionDep, commit
 {% else %}
 from app.core.db import SessionDep
@@ -53,11 +73,18 @@ from app.core.i18n import t
 {% if creates %}
 from app.features.{{ u.slice }} import repository
 {% endif %}
+{% if grouped %}
+from app.features.{{ u.slice }}.enums import {{ role.enum.name }}
+{% endif %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
 {% if creates %}
 from app.features.{{ u.slice }}.schemas import {{ u.name }}Create
 {% endif %}
 
+{% if signs_out %}
+logger = logging.getLogger("app.auth")
+
+{% endif %}
 FLOW_SECONDS = 600
 """The time that a user has for the sign-in at the provider."""
 ALGORITHMS = frozenset(
@@ -85,6 +112,24 @@ class Provider:
     default_role: str | None = None
     claims: tuple[tuple[str, str], ...] = ()
     """The fields of a new user, and the claims that give their values."""
+    authorize_params: tuple[tuple[str, str], ...] = ()
+    """The fixed parameters of the authorization request, for example the identity provider."""
+    trust_email: bool = False
+    """Accept an email address that the ID token does not mark as verified."""
+{% if grouped %}
+    roles_claim: str | None = None
+    """The claim with the groups of the user: the app sets the role at each sign-in."""
+    role_map: tuple[tuple[str, str], ...] = ()
+    """Each group and its role, in the order of the check."""
+{% endif %}
+{% if signs_out %}
+    sign_out: bool = False
+    """End the session at the provider at the sign-out of the app."""
+    sign_out_url: str = ""
+    """The logout URL. Empty: the `end_session_endpoint` of the discovery document."""
+    sign_out_return_param: str = "post_logout_redirect_uri"
+    """The parameter of the logout URL with the page after the sign-out."""
+{% endif %}
 
 
 def provider_of(settings: Settings, name: ProviderName) -> Provider:
@@ -101,11 +146,32 @@ def provider_of(settings: Settings, name: ProviderName) -> Provider:
             username_claim={{ p.username_claim | tojson }},
 {% if p.create_users %}
             create_users=True,
+{% endif %}
 {% if p.default_role and role %}
             default_role="{{ p.default_role }}",
 {% endif %}
+{% if p.create_users %}
 {% if p.claims %}
             claims=({% for f, claim in p.claims %}("{{ f.attr }}", {{ claim | tojson }}),{% if not loop.last %} {% endif %}{% endfor %}),
+{% endif %}
+{% endif %}
+{% if p.authorize_params %}
+            {{ p.pairs_arg("authorize_params", p.authorize_params) }}
+{% endif %}
+{% if p.trust_email %}
+            trust_email=True,
+{% endif %}
+{% if p.roles_claim and role %}
+            {{ trace(p.roles_id) }}
+            roles_claim={{ p.roles_claim | tojson }},
+            {{ p.pairs_arg("role_map", p.role_map) }}
+{% endif %}
+{% if p.sign_out_id %}
+            {{ trace(p.sign_out_id) }}
+            sign_out=True,
+            sign_out_url=settings.{{ p.name }}_sign_out_url,
+{% if p.sign_out_return_param != "post_logout_redirect_uri" %}
+            sign_out_return_param={{ p.sign_out_return_param | tojson }},
 {% endif %}
 {% endif %}
         ),
@@ -124,6 +190,9 @@ class ProviderMetadata(BaseModel):
     authorization_endpoint: str
     token_endpoint: str
     jwks_uri: str
+{% if signs_out %}
+    end_session_endpoint: str | None = None
+{% endif %}
 
 
 class TokenAnswer(BaseModel):
@@ -229,23 +298,68 @@ async def check_id_token(
     return claims
 
 
+{% if grouped %}
+def groups_of(value: Any) -> list[str]:
+    """Return the groups of the value of a claim: a list, or a text in the form `[a, b]`, `a,b`,
+    or `a`. A SAML attribute with more than one value can come as such a text."""
+    if isinstance(value, list):
+        return [str(item) for item in cast(list[object], value)]
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            found = json.loads(text)
+        except ValueError:
+            text = text.removeprefix("[").removesuffix("]")
+        else:
+            return groups_of(found) if isinstance(found, list) else []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def role_of(provider: Provider, claims: dict[str, Any]) -> {{ role.enum.name }}:
+    """Return the role of the groups in the claims: the first role of the provider whose group
+    is in the claim, else the default role. Give 403 without a role."""
+    groups = set(groups_of(claims.get(provider.roles_claim or "")))
+    for group, name in provider.role_map:
+        if group in groups:
+            return {{ role.enum.name }}(name)
+    if provider.default_role is None:
+        {{ py.problem(403, "Your groups at the provider give you no role in this app. Ask an administrator.", 8) }}
+    return {{ role.enum.name }}(provider.default_role)
+
+
+{% endif %}
 async def user_of(
     session: AsyncSession,
     provider: Provider,
     claims: dict[str, Any],
 ) -> {{ u.name }}:
-    """Return the user of the claims of an ID token. With `create_users`, make a new user."""
+    """Return the user of the claims of an ID token. With `create_users`, make a new user.{% if grouped %} With
+    `roles`, set the role of the user from the groups in the claims.{% endif %}"""
     username = claims.get(provider.username_claim)
     if not isinstance(username, str) or not username:
         {{ py.problem(401, "The ID token has no claim '{claim}'.", 8, claim="provider.username_claim") }}
-    if provider.username_claim == "email" and claims.get("email_verified") in (False, "false"):
+    # With trust_email, the provider gives only the addresses of the company (ADR 0020).
+    unverified = claims.get("email_verified") in (False, "false")
+    if provider.username_claim == "email" and unverified and not provider.trust_email:
         {{ py.problem(401, "The provider did not verify the email address.", 8) }}
+{% if grouped %}
+    role = role_of(provider, claims) if provider.roles_claim is not None else None
+{% endif %}
     user = await find_user(session, username)
     if user is not None:
+{% if grouped %}
+        if role is not None and user.{{ role.attr }} != role:
+            # The groups at the provider changed after the last sign-in.
+            user.{{ role.attr }} = role
+            await commit(session)
+{% endif %}
 {% if verify %}
         {{ trace(verify.id) }}
         email = claims.get("email")
-        if claims.get("email_verified") in (True, "true") and email == user.{{ address.attr }}:
+        verified = provider.trust_email or claims.get("email_verified") in (True, "true")
+        if verified and email == user.{{ address.attr }}:
             await remove_unverified_password(session, user)
 {% endif %}
         return user
@@ -254,7 +368,12 @@ async def user_of(
         {{ py.problem(403, "No user has the user name {username}. Ask an administrator.", 8, username="username") }}
     values: dict[str, Any] = {attr: claims.get(claim) for attr, claim in provider.claims}
     values["{{ username.attr }}"] = username
-{% if role %}
+{% if grouped %}
+    if role is not None:
+        values["{{ role.attr }}"] = role
+    elif provider.default_role is not None:
+        values["{{ role.attr }}"] = provider.default_role
+{% elif role %}
     if provider.default_role is not None:
         values["{{ role.attr }}"] = provider.default_role
 {% endif %}
@@ -318,7 +437,9 @@ async def start_provider_sign_in(
     state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(3))
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
     redirect_uri = callback_url(request, name)
+    # The parameters of the flow come last: the definition cannot change them.
     query = {
+        **dict(provider.authorize_params),
         "response_type": "code",
         "client_id": provider.client_id,
         "redirect_uri": redirect_uri,
@@ -413,3 +534,34 @@ async def finish_provider_sign_in(
     redirect = RedirectResponse(target, status_code=303)
     redirect.delete_cookie(_cookie(name))
     return redirect
+{% if signs_out %}
+
+
+@router.get(
+    "/{name}/sign-out",
+    status_code=303,
+    response_class=RedirectResponse,
+    responses=problem_responses(404, 422, 500, 502),
+    operation_id="sign_out_at_provider",
+)
+async def sign_out_at_provider(
+    name: ProviderName,
+    request: Request,
+    client: ProviderClient,
+    return_to: Annotated[str, Query(max_length=2000)],
+) -> RedirectResponse:
+    """Send the browser to the logout URL of a provider with `sign_out`. The provider ends the
+    session of the user, and sends the browser back to `return_to`."""
+    provider = provider_of(request.app.state.settings, name)
+    if not provider.sign_out:
+        {{ py.problem(404, "The provider {name} has no sign-out.", 8, name="name") }}
+    _check_return_to(request, return_to)
+    endpoint = provider.sign_out_url or (await discover(client, provider)).end_session_endpoint
+    if not endpoint:
+        # The session of the app has ended, but the provider gives no logout URL.
+        logger.warning("The provider %s has no logout URL. Set its sign-out URL.", name)
+        return RedirectResponse(return_to, status_code=303)
+    query = {"client_id": provider.client_id, provider.sign_out_return_param: return_to}
+    separator = "&" if "?" in endpoint else "?"
+    return RedirectResponse(f"{endpoint}{separator}{urlencode(query)}", status_code=303)
+{% endif %}

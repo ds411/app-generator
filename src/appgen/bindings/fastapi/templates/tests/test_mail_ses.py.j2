@@ -1,0 +1,133 @@
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set reset = definition.auth.password_reset %}
+{% set address = u.fields | selectattr("name", "eq", definition.address_field()) | first %}
+{{ trace_header(*((py.message_elements | list) + (py.notice_emails.ids if py.notice_emails else []))) }}
+"""The tests of the delivery of the emails with Amazon SES.
+
+The stubber of botocore answers the calls of the client of SES: the
+tests send no request.
+"""
+
+import logging
+from collections.abc import Iterator
+
+import pytest
+from botocore.stub import Stubber
+
+from app.core import mail
+from app.core.config import Settings
+{% if py.message_elements %}
+from app.core.messages import Message, {{ "password_reset_message" if reset else "email_verification_message" }}
+{{ py.from_import("app.features." ~ u.slice ~ ".models", [u.name]) }}
+{% endif %}
+
+pytestmark = pytest.mark.anyio
+
+LINK = "https://app.example.com/page?token=abc"
+REGION = "eu-west-1"
+{% if py.message_elements %}
+
+
+def _message() -> Message:
+    user = {{ u.name }}({{ address.attr }}="user@example.com")
+    return {{ "password_reset_message" if reset else "email_verification_message" }}(user, LINK)
+{% endif %}
+
+
+@pytest.fixture
+def stubber() -> Iterator[Stubber]:
+    """Answer the calls of the client of SES of the region of the tests."""
+    with Stubber(mail.ses_client(REGION)) as stub:
+        yield stub
+        stub.assert_no_pending_responses()
+
+
+async def test_an_email_goes_to_ses(stubber: Stubber) -> None:
+    settings = Settings(
+        aws_region=REGION,
+        ses_from="App <no-reply@example.com>",
+        ses_configuration_set="emails",
+    )
+    email = mail.new_email(settings, "user@example.com", "Hello", f"Open {LINK}")
+    stubber.add_response(
+        "send_email",
+        {"MessageId": "message-1"},
+        {
+            "FromEmailAddress": "App <no-reply@example.com>",
+            "Destination": {"ToAddresses": ["user@example.com"]},
+            "Content": {
+                "Simple": {
+                    "Subject": {"Data": "Hello", "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": f"Open {LINK}\n", "Charset": "UTF-8"}},
+                }
+            },
+            "ConfigurationSetName": "emails",
+        },
+    )
+
+    assert await mail.deliver_email(settings, email, "the emails of the tests") is True
+
+
+async def test_an_email_that_ses_rejects_gives_an_error_without_the_text(
+    stubber: Stubber, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = Settings(aws_region=REGION, ses_from="no-reply@example.com")
+    email = mail.new_email(settings, "user@example.com", "Hello", f"Open {LINK}")
+    stubber.add_client_error(
+        "send_email", service_error_code="MessageRejected", http_status_code=400
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.mail"), pytest.raises(mail.MailError) as error:
+        await mail.deliver_email(settings, email, "the emails of the tests")
+
+    assert "MessageRejected" in str(error.value)
+    assert "MessageRejected" in caplog.text
+    assert LINK not in caplog.text
+    assert LINK not in str(error.value)
+
+
+async def test_without_a_sender_the_development_app_sends_no_email() -> None:
+    settings = Settings(ses_from="", environment="development")
+    email = mail.new_email(settings, "user@example.com", "Hello", f"Open {LINK}")
+
+    assert await mail.deliver_email(settings, email, "the emails of the tests") is False
+
+
+async def test_without_a_sender_the_production_app_gives_an_error() -> None:
+    settings = Settings(ses_from="", environment="production")
+    email = mail.new_email(settings, "user@example.com", "Hello", f"Open {LINK}")
+
+    with pytest.raises(NotImplementedError):
+        await mail.deliver_email(settings, email, "the emails of the tests")
+{% if py.message_elements %}
+
+
+async def test_a_message_goes_to_ses(stubber: Stubber) -> None:
+    settings = Settings(aws_region=REGION, ses_from="App <no-reply@example.com>")
+    message = _message()
+    stubber.add_response(
+        "send_email",
+        {"MessageId": "message-1"},
+        {
+            "FromEmailAddress": "App <no-reply@example.com>",
+            "Destination": {"ToAddresses": ["user@example.com"]},
+            "Content": mail.email_content(mail.email_message(settings, message)),
+        },
+    )
+
+    await mail.deliver_message(settings, message)
+
+    assert message.to == "user@example.com"
+    assert LINK in message.text
+
+
+async def test_without_a_sender_the_development_app_writes_the_link_to_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = Settings(ses_from="", environment="development")
+
+    with caplog.at_level(logging.WARNING, logger="app.auth"):
+        await mail.deliver_message(settings, _message())
+
+    assert LINK in caplog.text
+{% endif %}

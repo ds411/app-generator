@@ -1,0 +1,139 @@
+{{ trace_header(*((py.message_elements | list) + (py.notice_emails.ids if py.notice_emails else []))) }}
+"""The delivery of {% if py.message_elements %}the messages of the sign-in{% endif %}{% if py.message_elements and py.notice_emails %} and of {% endif %}{% if py.notice_emails %}the emails of the notices (ADR 0044){% endif %} with
+Amazon SES (`auth.delivery: ses`).
+
+The app sends each email with `SendEmail` of the API v2 of Amazon SES,
+from `SES_FROM` to the address of the user. boto3 reads the AWS
+credentials from its default chain: the environment variables, the web
+identity or EKS Pod Identity, the role of an ECS task, or the instance
+profile. `AWS_ENDPOINT_URL_SESV2` changes the endpoint, for example for a
+test server. The client of boto3 blocks, so the delivery runs in a
+thread. Without `SES_FROM`, the development app writes a note to the
+log, and the production app gives an error{{ " (501 for a message of the sign-in)" if py.message_elements }}.
+"""
+
+import asyncio
+import logging
+from email.message import EmailMessage
+from functools import cache
+from typing import TYPE_CHECKING
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
+
+from app.core.config import Settings
+{% if py.message_elements %}
+from app.core.messages import Message
+{% endif %}
+
+if TYPE_CHECKING:
+    from types_boto3_sesv2 import SESV2Client
+    from types_boto3_sesv2.type_defs import EmailContentTypeDef
+
+logger = logging.getLogger("app.mail")
+{% if py.message_elements %}
+auth_logger = logging.getLogger("app.auth")
+{% endif %}
+
+TIMEOUT_SECONDS = 10
+"""The time that the app waits for the connection to SES, and for each answer."""
+
+
+class MailError(Exception):
+    """SES did not send an email. The text has the error code of SES, but not the email."""
+
+
+@cache
+def ses_client(region: str) -> SESV2Client:
+    """Return the client of the API v2 of SES for a region (empty: the AWS configuration)."""
+    return boto3.client(
+        "sesv2",
+        region_name=region or None,
+        config=Config(
+            connect_timeout=TIMEOUT_SECONDS,
+            read_timeout=TIMEOUT_SECONDS,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
+    )
+
+
+def new_email(settings: Settings, to: str, subject: str, text: str) -> EmailMessage:
+    """Return an email from `SES_FROM` to an address, with a subject and a plain text."""
+    email = EmailMessage()
+    email["From"] = settings.ses_from
+    email["To"] = to
+    email["Subject"] = subject
+    email.set_content(text)
+    return email
+{% if py.message_elements %}
+
+
+def email_message(settings: Settings, message: Message) -> EmailMessage:
+    """Return the email of a message: from `SES_FROM` to the address of the user."""
+    return new_email(settings, message.to, message.subject, message.text)
+{% endif %}
+
+
+def email_content(email: EmailMessage) -> EmailContentTypeDef:
+    """Return the content of an email for SES: the subject and the text, in UTF-8."""
+    return {
+        "Simple": {
+            "Subject": {"Data": str(email["Subject"]), "Charset": "UTF-8"},
+            "Body": {"Text": {"Data": email.get_content(), "Charset": "UTF-8"}},
+        }
+    }
+
+
+def send_email(settings: Settings, email: EmailMessage) -> None:
+    """Send an email with SES. The call blocks."""
+    client = ses_client(settings.aws_region)
+    if settings.ses_configuration_set:
+        response = client.send_email(
+            FromEmailAddress=str(email["From"]),
+            Destination={"ToAddresses": [str(email["To"])]},
+            Content=email_content(email),
+            ConfigurationSetName=settings.ses_configuration_set,
+        )
+    else:
+        response = client.send_email(
+            FromEmailAddress=str(email["From"]),
+            Destination={"ToAddresses": [str(email["To"])]},
+            Content=email_content(email),
+        )
+    logger.info("Amazon SES sent the email %s", response.get("MessageId", ""))
+
+
+async def deliver_email(settings: Settings, email: EmailMessage, what: str) -> bool:
+    """Send an email with SES in a thread. `what` names the emails in the errors.
+
+    Return False without `SES_FROM` in the development app: the caller
+    writes a note to the log. Without `SES_FROM`, the production app gives
+    an error. When SES does not send the email, raise `MailError`.
+    """
+    if not settings.ses_from:
+        if settings.environment == "development":
+            return False
+        raise NotImplementedError(f"Set SES_FROM to send {what}.")
+    try:
+        await asyncio.to_thread(send_email, settings, email)
+    except ClientError as error:
+        # For example MessageRejected, or an address that the sandbox of SES does not allow.
+        code = error.response.get("Error", {}).get("Code", "unknown")
+        logger.error("Amazon SES did not send one of %s: %s", what, code)
+        raise MailError(f"Amazon SES did not send the email: {code}.") from None
+    except BotoCoreError as error:
+        # For example no credentials, or no connection to the endpoint.
+        name = type(error).__name__
+        logger.error("Amazon SES did not send one of %s: %s", what, name)
+        raise MailError(f"Amazon SES did not send the email: {name}.") from None
+    return True
+{% if py.message_elements %}
+
+
+async def deliver_message(settings: Settings, message: Message) -> None:
+    """Send a message of the sign-in to a user with Amazon SES."""
+    email = email_message(settings, message)
+    if not await deliver_email(settings, email, "the messages of the sign-in"):
+        auth_logger.warning("The %s link of %s: %s", message.kind, message.to, message.link)
+{% endif %}

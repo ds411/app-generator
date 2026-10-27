@@ -14,7 +14,13 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, PrivateAttr, String
 
 from appgen.dsl.diagnostics import Diagnostic
 from appgen.dsl.element import Element, Text
-from appgen.dsl.openapi import ClientSpec, DocumentError, OpenApiDocument, read_document
+from appgen.dsl.openapi import (
+    ClientSpec,
+    DocumentError,
+    OpenApiDocument,
+    Operation,
+    read_document,
+)
 from appgen.dsl.source import SourceMap
 
 OPERATION_ID_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
@@ -61,10 +67,14 @@ class ApiSecurity(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     scheme: Text
-    """A key of `components.securitySchemes` of the document: an API key, a bearer token, or
-    OAuth 2.0 with the client credentials flow."""
+    """A key of `components.securitySchemes` of the document: an API key, a bearer token, HTTP
+    Basic, or OAuth 2.0."""
     env: EnvName | None = None
-    """The environment variable that holds the API key or the bearer token."""
+    """The environment variable that holds the API key, the bearer token, or the password of
+    HTTP Basic (for Jira, the API token)."""
+    username_env: EnvName | None = None
+    """HTTP Basic: the environment variable that holds the user name (for Jira, the email
+    address of the account)."""
     client_id_env: EnvName | None = None
     """OAuth 2.0: the environment variable that holds the client ID."""
     client_secret_env: EnvName | None = None
@@ -74,6 +84,14 @@ class ApiSecurity(BaseModel):
     flow: Literal["clientCredentials", "authorizationCode"] | None = None
     """OAuth 2.0: the flow of the scheme. `authorizationCode` calls the API in the name of a
     user (ADR 0033). The default is the client credentials flow if the scheme has it."""
+    per_user: bool = False
+    """HTTP Basic: each user gives their own user name and password (for Jira, the email
+    address and an API token) on the page `/connections`, in place of `username_env` and
+    `env`. The app calls the API in the name of the user (ADR 0033)."""
+    check: OperationId | None = None
+    """With `per_user`: an operation of `operations` without required parameters (for Jira,
+    `getCurrentUser`). The app calls it with new credentials, and stores them only if the API
+    accepts them."""
 
     @property
     def secret_env(self) -> str | None:
@@ -84,7 +102,7 @@ class ApiSecurity(BaseModel):
     @property
     def variables(self) -> list[tuple[str, str]]:
         """The key and the environment variable of each variable of the credential."""
-        keys = ("env", "client_id_env", "client_secret_env")
+        keys = ("username_env", "env", "client_id_env", "client_secret_env")
         return [(key, value) for key in keys if (value := getattr(self, key)) is not None]
 
 
@@ -195,6 +213,31 @@ class Api(Element):
         """True for OAuth 2.0 with the authorization code flow: the app calls the API with the
         token of a user (ADR 0033)."""
         return self.oauth_flow == "authorizationCode"
+
+    @property
+    def user_basic(self) -> bool:
+        """True for HTTP Basic with `per_user`: the app calls the API with the user name and the
+        password of a user (ADR 0033)."""
+        security, document = self.security, self._openapi
+        scheme = document.security_schemes.get(security.scheme) if document and security else None
+        return (
+            security is not None
+            and security.per_user
+            and scheme is not None
+            and (scheme.type, scheme.scheme) == ("http", "basic")
+        )
+
+    @property
+    def check_operation(self) -> Operation | None:
+        """`per_user`: the operation that checks new credentials (`security.check`), or None."""
+        check = self.security.check if self.security is not None and self.user_basic else None
+        return next((o for o in self.spec.operations if o.id == check), None)
+
+    @property
+    def per_user(self) -> bool:
+        """True if the app calls the API in the name of a user: with the authorization code
+        flow, or with the HTTP Basic credentials of each user (ADR 0033)."""
+        return self.user_flow or self.user_basic
 
     @property
     def label(self) -> str:

@@ -77,14 +77,34 @@ def files_of(text: str, binding: Binding) -> dict[str, str]:
     return {f.path: f.content for f in generate(definition, binding).files}
 
 
-def test_the_emails_of_a_notification_need_the_delivery_smtp() -> None:
+def test_the_emails_of_a_notification_need_the_delivery_smtp_or_ses() -> None:
     assert codes(BASE) == []
+    assert codes(BASE.replace("  delivery: smtp\n", "  delivery: ses\n")) == []
     definition = load_definition_text(BASE, "app.yaml")
     assert definition.notifications["task_assigned"].email is True
     assert definition.notifications["task_closed"].email is False
     text = BASE.replace("  delivery: smtp\n", "")
     assert codes(text) == [("invalid-option", "notifications.task_assigned")]
     assert codes(WITHOUT_EMAILS.replace("  delivery: smtp\n", "")) == []
+
+
+def test_the_emails_of_the_notices_go_with_ses_also_without_the_messages_of_the_sign_in() -> None:
+    text = BASE.replace("  password_reset: {}\n  delivery: smtp\n", "  delivery: ses\n")
+    assert codes(text) == []
+
+    py = files_of(text, fastapi.BINDING)
+    ts = files_of(text, nextjs.BINDING)
+
+    mail = py["app/core/mail.py"]
+    assert "async def deliver_email(" in mail
+    assert "deliver_message" not in mail and "app.core.messages" not in mail
+    assert "without `SES_FROM`, the app writes the emails to the log." in py["app/core/config.py"]
+    assert "async def test_an_email_goes_to_ses(" in py["tests/test_mail.py"]
+    assert "app.core.messages" not in py["tests/test_mail.py"]
+    assert "from app.core.mail import deliver_email, new_email\n" in py["app/jobs/notice_emails.py"]
+    assert "export async function sendEmail(" in ts["src/shared/auth/mail.ts"]
+    assert "deliverMessage" not in ts["src/shared/auth/mail.ts"]
+    assert "@aws-sdk/client-sesv2" in ts["package.json"]
 
 
 def test_a_page_cannot_use_the_path_of_the_settings() -> None:

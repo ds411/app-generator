@@ -50,7 +50,9 @@ async def {{ op.name }}(
 
 {% for api_name in op.apis %}
     `{{ py_apis[api_name].param }}` calls the API {{ api_name }} ({{ py_apis[api_name].title }}).
-{% if py_apis[api_name].user %}
+{% if py_apis[api_name].user_basic %}
+    It sends the credentials of the signed-in user, or in a job of the user of the record.
+{% elif py_apis[api_name].user %}
     It sends the access token of the signed-in user, or in a job of the user of the record.
 {% endif %}
 {% endfor %}

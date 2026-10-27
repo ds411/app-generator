@@ -64,7 +64,7 @@ def test_the_delivery_is_the_extension_file_by_default() -> None:
     assert definition.auth is not None and definition.auth.delivery == "smtp"
     without = load_definition_text(BASE.replace("  delivery: smtp\n", ""), "app.yaml")
     assert without.auth is not None and without.auth.delivery == "extension"
-    with pytest.raises(DefinitionError, match="'extension' or 'smtp'"):
+    with pytest.raises(DefinitionError, match="'extension', 'smtp' or 'ses'"):
         load_definition_text(BASE.replace("delivery: smtp", "delivery: post"), "app.yaml")
 
 

@@ -76,7 +76,11 @@ export function ProviderCallbackRoute() {
   useEffect(() => {
     const next = new URLSearchParams(window.location.search).get("next");
     const page = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+{% if definition.auth.providers.values() | selectattr("sign_out") | list %}
+    finishProviderSignIn(window.location.hash, new URLSearchParams(window.location.search).get("provider")).then((ok) => {
+{% else %}
     finishProviderSignIn(window.location.hash).then((ok) => {
+{% endif %}
       window.location.replace(ok ? page : `/sign-in?error=provider&next=${encodeURIComponent(page)}`);
     });
   }, []);

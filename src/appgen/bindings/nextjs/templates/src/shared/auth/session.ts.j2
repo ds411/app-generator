@@ -1,6 +1,7 @@
 {% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
 {% set username = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.auth.username_field].id) | first %}
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {{ trace_header(definition.auth.id) }}
 import "server-only";
 
@@ -48,6 +49,18 @@ export function sign(body: string): string {
   return createHmac("sha256", authSecret()).update(body).digest("base64url");
 }
 
+{% if signs_out %}
+/** Return a signed session token for a user, with the name of the provider of the sign-in. */
+export function makeToken(userId: string, provider?: string): string {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  const body = Buffer.from(JSON.stringify({ sub: userId, exp, idp: provider })).toString("base64url");
+  return `${body}.${sign(body)}`;
+}
+
+/** Set the session cookie of a user: the user is signed in. `provider` is the provider of the sign-in. */
+export async function startSession(userId: string, provider?: string): Promise<void> {
+  (await cookies()).set(SESSION_COOKIE, makeToken(userId, provider), {
+{% else %}
 /** Return a signed session token for a user. */
 export function makeToken(userId: string): string {
   const exp = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
@@ -58,6 +71,7 @@ export function makeToken(userId: string): string {
 /** Set the session cookie of a user: the user is signed in. */
 export async function startSession(userId: string): Promise<void> {
   (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
+{% endif %}
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -87,6 +101,16 @@ export async function sessionUserId(): Promise<string | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return token ? readToken(token) : null;
 }
+{% if signs_out %}
+
+/** Return the provider of the session of the signed-in user, or null: for example after a sign-in with a password. */
+export async function sessionProvider(): Promise<string | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  if (readToken(token) === null) return null;
+  const payload = JSON.parse(Buffer.from(token.split(".")[0] ?? "", "base64url").toString()) as { idp?: unknown };
+  return typeof payload.idp === "string" ? payload.idp : null;
+}
+{% endif %}
 
 {% if nextjs.me_totals %}
 /**
@@ -124,7 +148,7 @@ export async function requirePageUser(path: string, params: Record<string, strin
     redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(next)}`);
   }
 }
-{% if definition.auth.password_reset or definition.auth.providers or verify or ts_connections or has_notice_emails(definition) %}
+{% if definition.auth.password_reset or definition.auth.providers or verify or ts_code_flows or has_notice_emails(definition) %}
 
 /** Return the URL of the app for the browsers: PUBLIC_URL, or the local URL in development. */
 export function publicUrl(): string {

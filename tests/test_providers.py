@@ -195,7 +195,8 @@ def test_the_nextjs_app_has_the_flow_of_each_provider() -> None:
     assert "// @trace auth.providers.company\n    company: {\n" in providers
     assert '      issuer: process.env.COMPANY_ISSUER || "https://login.example.com",\n' in providers
     assert '      clientSecret: process.env.COMPANY_CLIENT_SECRET ?? "",\n' in providers
-    assert '      claims: { name: "name" },\n      defaultRole: "member",\n' in providers
+    assert '      claims: { name: "name" },\n      authorizeParams: {},\n' in providers
+    assert '      trustEmail: false,\n      defaultRole: "member",\n' in providers
     assert 'code_challenge_method: "S256",' in providers
     assert 'requiredClaims: ["aud", "exp", "iat", "iss", "nonce", "sub"],' in providers
     assert "return (await memberRepository.create(input.data)).id;" in providers
@@ -259,3 +260,250 @@ def test_the_front_ends_without_a_password_have_only_the_providers() -> None:
         assert "export async function signIn(" not in auth
         assert "MOCK_PASSWORD" not in auth
         assert "export async function signInWithProvider(" in auth
+
+
+COGNITO = ROOT / "tests" / "fixtures" / "cognito-sign-in.yaml"
+
+
+def test_the_flow_sets_its_own_parameters_of_the_authorization_request() -> None:
+    lines = "      authorize_params: { identity_provider: EntraID, prompt: login }\n"
+    assert codes(with_provider(lines)) == []
+    for name in ("state", "nonce", "redirect_uri", "scope", "code_challenge"):
+        lines = f"      authorize_params: {{ {name}: x }}\n"
+        assert codes(with_provider(lines)) == [("reserved-name", "auth.providers.company")]
+    with pytest.raises(DefinitionError, match="does not match the pattern"):
+        load_definition_text(with_provider('      authorize_params: { "a b": x }\n'), "app.yaml")
+
+
+def test_a_provider_trusts_no_email_address_by_default() -> None:
+    definition = load_definition_text(BASE, "app.yaml")
+    assert definition.auth is not None
+    provider = definition.auth.providers["company"]
+    assert not provider.trust_email
+    assert provider.authorize_params == {}
+    files = {f.path: f.content for f in generate(load_definition(EXAMPLE), fastapi.BINDING).files}
+    assert "trust_email=True" not in files["app/core/providers.py"]
+    assert "authorize_params=(" not in files["app/core/providers.py"]
+    assert '"unverified-email",' in files["tests/test_providers.py"]
+
+
+def test_the_fastapi_app_sends_the_parameters_and_trusts_the_email_of_cognito() -> None:
+    definition = load_definition(COGNITO)
+    assert validate_definition(definition) == []
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    providers = files["app/core/providers.py"]
+    assert '            authorize_params=(("identity_provider", "EntraID"),),\n' in providers
+    assert "            trust_email=True,\n" in providers
+    assert "        **dict(provider.authorize_params),\n" in providers
+    assert "unverified and not provider.trust_email:" in providers
+    tests = files["tests/test_providers.py"]
+    assert "async def test_the_start_sends_the_fixed_parameters_of_the_provider_company(" in tests
+    assert '    assert query["identity_provider"] == ["EntraID"]\n' in tests
+    assert "def test_the_provider_company_trusts_an_email_address_that_is_not_verified(" in tests
+    assert '"unverified-email",' not in tests
+
+
+def test_the_fixed_parameters_are_in_the_format_of_the_ruff_formatter() -> None:
+    text = COGNITO.read_text().replace(
+        "{ identity_provider: EntraID }",
+        "{ identity_provider: EntraID, prompt: login, lang: en-GB-oxendict-variant }",
+    )
+    definition = load_definition_text(text, str(COGNITO))
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+
+    assert (
+        "            authorize_params=(\n"
+        '                ("identity_provider", "EntraID"),\n'
+        '                ("prompt", "login"),\n'
+        '                ("lang", "en-GB-oxendict-variant"),\n'
+        "            ),\n"
+    ) in files["app/core/providers.py"]
+
+
+def test_the_nextjs_app_sends_the_parameters_and_trusts_the_email_of_cognito() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), nextjs.BINDING).files}
+    providers = files["src/shared/auth/providers.ts"]
+    assert '      authorizeParams: { "identity_provider": "EntraID" },\n' in providers
+    assert "      trustEmail: true,\n" in providers
+    assert "    ...provider.authorizeParams,\n" in providers
+    assert "unverified && !provider.trustEmail)" in providers
+
+
+ROLES = '      roles: { claim: groups, map: { "Admins": admin, "Readers": viewer } }\n'
+
+
+def test_the_roles_of_a_provider_need_access_and_known_roles() -> None:
+    assert codes(with_provider(ROLES)) == []
+    # With `roles`, `default_role` is the role of a user without a group, also without
+    # `create_users`.
+    assert codes(with_provider(ROLES + "      default_role: viewer\n")) == []
+    assert codes(with_provider(ROLES + "      default_role: guest\n")) == [
+        ("unknown-reference", "auth.providers.company")
+    ]
+    assert codes(with_provider(ROLES.replace("viewer }", "guest }"))) == [
+        ("unknown-reference", "auth.providers.company")
+    ]
+    without_access = with_provider(ROLES).split("access:\n")[0]
+    assert codes(without_access) == [("invalid-option", "auth.providers.company")]
+    with pytest.raises(DefinitionError, match="one or more items"):
+        load_definition_text(with_provider("      roles: { claim: groups, map: {} }\n"), "app.yaml")
+
+
+def test_the_roles_have_no_role_of_the_field_default() -> None:
+    # Without `default_role`, a user without a group gets no role: the default of the role field
+    # does not count, and the app refuses the sign-in.
+    text = COGNITO.read_text().replace("      default_role: staff\n", "")
+    definition = load_definition_text(text, str(COGNITO))
+    assert validate_definition(definition) == []
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+
+    assert "default_role=" not in files["app/core/providers.py"].split("def provider_of")[1]
+    tests = files["tests/test_providers.py"]
+    assert "async def test_a_user_without_a_group_of_a_role_cannot_sign_in(" in tests
+    nextjs_files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+    assert "defaultRole:" not in nextjs_files["src/shared/auth/providers.ts"]
+
+
+def test_the_fastapi_app_sets_the_role_of_the_groups_at_each_sign_in() -> None:
+    definition = load_definition(COGNITO)
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    providers = files["app/core/providers.py"]
+
+    assert "            # @trace auth.providers.company.roles\n" in providers
+    assert '            roles_claim="custom:groups",\n' in providers
+    assert (
+        "            role_map=(\n"
+        '                ("0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e", "admin"),\n'
+        '                ("5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f", "staff"),\n'
+        "            ),\n"
+    ) in providers
+    assert "def groups_of(value: Any) -> list[str]:" in providers
+    assert "def role_of(provider: Provider, claims: dict[str, Any]) -> PersonRole:" in providers
+    assert "        if role is not None and user.role != role:\n" in providers
+    tests = files["tests/test_providers.py"]
+    assert (
+        "async def test_a_new_group_at_the_provider_changes_the_role_at_the_next_sign_in(" in tests
+    )
+    assert "async def test_a_user_without_a_group_of_a_role_gets_the_default_role(" in tests
+
+
+def test_an_app_without_roles_has_no_role_of_the_groups() -> None:
+    for binding, path in (
+        (fastapi.BINDING, "app/core/providers.py"),
+        (nextjs.BINDING, "src/shared/auth/providers.ts"),
+    ):
+        files = {f.path: f.content for f in generate(load_definition(EXAMPLE), binding).files}
+        assert "groups" not in files[path].lower().replace("cognito:groups", "")
+        assert "no-role" not in files.get("src/features/sign-in/ui/sign-in-form.tsx", "")
+
+
+def test_the_nextjs_app_sets_the_role_of_the_groups_at_each_sign_in() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), nextjs.BINDING).files}
+    providers = files["src/shared/auth/providers.ts"]
+
+    assert 'type Role = NonNullable<(typeof personTable.$inferInsert)["role"]>;' in providers
+    assert "      // @trace auth.providers.company.roles\n" in providers
+    assert '      rolesClaim: "custom:groups",\n' in providers
+    assert '        ["0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e", "admin"],\n' in providers
+    assert '      defaultRole: "staff",\n' in providers
+    assert "function roleOf(provider: Provider, claims: JWTPayload): Role {" in providers
+    assert "await getDb().update(personTable).set({ role }).where(" in providers
+    assert '"provider" | "unknown-user" | "no-role"' in providers
+    form = files["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert 'if (code === "no-role") return "Your groups at the provider give you no role' in form
+
+
+def test_the_react_app_with_mock_data_signs_in_a_user_of_the_first_role() -> None:
+    definition = load_definition(COGNITO)
+    files = {f.path: f.content for f in generate(definition, react.BINDING).files}
+    admin = next(u for u in mock_data(definition)["Person"] if u.get("role") == "admin")
+
+    auth = files["src/shared/auth/index.ts"]
+    assert "  // @trace auth.providers.company.roles\n" in auth
+    assert f'  company: "{admin["id"]}", // @trace auth.providers.company\n' in auth
+
+
+def test_the_sign_out_at_the_provider_is_off_by_default_and_has_two_forms() -> None:
+    definition = load_definition_text(BASE, "app.yaml")
+    assert definition.auth is not None
+    assert definition.auth.providers["company"].sign_out is None
+
+    definition = load_definition_text(with_provider("      sign_out: true\n"), "app.yaml")
+    assert definition.auth is not None
+    sign_out = definition.auth.providers["company"].sign_out
+    assert sign_out is not None
+    assert (sign_out.endpoint, sign_out.return_param) == (None, "post_logout_redirect_uri")
+    assert codes(with_provider("      sign_out: true\n")) == []
+
+    lines = "      sign_out: { endpoint: https://pool.test/logout, return_param: client_id }\n"
+    assert codes(with_provider(lines)) == [("reserved-name", "auth.providers.company.sign_out")]
+    with pytest.raises(DefinitionError, match="does not match the pattern"):
+        load_definition_text(
+            with_provider("      sign_out: { endpoint: http://pool.test/logout }\n"), "app.yaml"
+        )
+
+
+def test_the_fastapi_app_sends_the_browser_to_the_logout_endpoint_of_cognito() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), fastapi.BINDING).files}
+    providers = files["app/core/providers.py"]
+
+    assert "            # @trace auth.providers.company.sign_out\n" in providers
+    assert "            sign_out_url=settings.company_sign_out_url,\n" in providers
+    assert '            sign_out_return_param="logout_uri",\n' in providers
+    assert '    "/{name}/sign-out",\n' in providers
+    assert "    end_session_endpoint: str | None = None\n" in providers
+    config = files["app/core/config.py"]
+    endpoint = "https://staff-portal.auth.eu-west-1.amazoncognito.com/logout"
+    assert f'    company_sign_out_url: str = "{endpoint}"\n' in config
+    assert f"COMPANY_SIGN_OUT_URL={endpoint}\n" in files[".env.example"]
+    tests = files["tests/test_providers.py"]
+    assert (
+        "async def test_the_sign_out_sends_the_browser_to_the_logout_url_of_the_provider(" in tests
+    )
+    assert f'    assert location.startswith("{endpoint}?")\n' in tests
+    assert '    assert query["logout_uri"] == [page]\n' in tests
+
+
+def test_the_nextjs_app_keeps_the_provider_in_the_session_for_the_sign_out() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), nextjs.BINDING).files}
+
+    session = files["src/shared/auth/session.ts"]
+    assert "export async function startSession(userId: string, provider?: string)" in session
+    assert "export async function sessionProvider(): Promise<string | null> {" in session
+    callback = files["app/auth/providers/[name]/callback/route.ts"]
+    assert "request.nextUrl.searchParams), name);" in callback
+    providers = files["src/shared/auth/providers.ts"]
+    assert (
+        "      signOut: { url: process.env.COMPANY_SIGN_OUT_URL || "
+        '"https://staff-portal.auth.eu-west-1.amazoncognito.com/logout", '
+        'returnParam: "logout_uri" },\n'
+    ) in providers
+    assert "export async function providerSignOutUrl(name: string)" in providers
+    actions = files["src/shared/auth/actions.ts"]
+    assert "export async function signOutAction(): Promise<string | null> {" in actions
+    button = files["src/features/sign-out/ui/sign-out-button.tsx"]
+    assert "window.location.assign(logoutUrl);" in button
+
+
+def test_the_react_app_with_the_api_opens_the_sign_out_route_of_the_fastapi_app() -> None:
+    text = COGNITO.read_text().replace("\napp:\n", "\napp:\n  x-react-data: api\n", 1)
+    definition = load_definition_text(text, str(COGNITO))
+    files = {f.path: f.content for f in generate(definition, react.BINDING).files}
+
+    auth = files["src/shared/auth/index.ts"]
+    assert '  "company", // @trace auth.providers.company.sign_out\n' in auth
+    assert "export async function signOut(): Promise<string | null> {" in auth
+    assert "/sign-out?return_to=${encodeURIComponent(returnTo)}" in auth
+    assert "&provider=${encodeURIComponent(name)}" in auth
+    route = files["src/app/auth/require-auth.tsx"]
+    assert 'new URLSearchParams(window.location.search).get("provider")' in route
+
+
+def test_an_app_without_the_sign_out_at_a_provider_signs_out_as_before() -> None:
+    for binding in (fastapi.BINDING, nextjs.BINDING, react.BINDING):
+        files = {f.path: f.content for f in generate(load_definition(EXAMPLE), binding).files}
+        assert all(
+            "sign_out" not in content and "signOutUrl" not in content
+            for path, content in files.items()
+            if "auth" in path or "provider" in path
+        )

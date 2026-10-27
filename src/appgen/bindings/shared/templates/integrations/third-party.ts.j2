@@ -3,7 +3,10 @@
 {% set features = ts_features(ts_apis) %}
 {% set forms = "form" in features or "multipart" in features %}
 {% set oauth = server and "oauth2" in features %}
-{# The client credentials flow, or the token of a user (ADR 0033). #}
+{% set user_basic = server and "user_basic" in features %}
+{# `basicAuthorization`: HTTP Basic, also with the credentials of each user (ADR 0033). #}
+{% set basic = server and ("basic" in features or user_basic) %}
+{# The client credentials flow, or the token or the credentials of a user (ADR 0033). #}
 {% set tokens = server and ("oauth2" in features or "user" in features) %}
 {{ trace_header(*(ts_apis.values() | map(attribute="id"))) }}
 {% if server %}
@@ -34,14 +37,18 @@ export interface ClientOptions {
   /** The base URL. The default is the first server of the OpenAPI document. */
   baseUrl?: string;
 {% if server %}
-  /** The API key, the bearer token, or the client secret of an API with security. */
+  /** The API key, the bearer token, the password, or the client secret of an API with security. */
   secret?: string;
+{% if server and "basic" in features %}
+  /** The user name of an API with HTTP Basic. */
+  username?: string;
+{% endif %}
 {% if oauth %}
   /** The client ID of an API with OAuth 2.0. */
   clientId?: string;
 {% endif %}
 {% if "user" in features %}
-  /** The access tokens of a user, for an API with the authorization code flow. */
+  /** The access tokens or the credentials of a user, for an API with the authorization code flow or `per_user`. */
   token?: TokenSource;
 {% endif %}
 {% endif %}
@@ -98,6 +105,10 @@ export class HttpClient {
     private readonly options: {
       headers?: Record<string, string>;
       query?: Record<string, string>;
+{% if user_basic %}
+      /** The scheme of the header `Authorization` with the value of the token source: `Basic` for the credentials of a user. The default is `Bearer`. */
+      scheme?: string;
+{% endif %}
 {% if tokens %}
       /** The access tokens of an API with OAuth 2.0. */
       token?: TokenSource;
@@ -163,7 +174,11 @@ export class HttpClient {
     let token = tokens ? await tokens.get() : undefined;
     let response: Response | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
+{% if user_basic %}
+      if (token !== undefined) headers.set("Authorization", `${this.options.scheme ?? "Bearer"} ${token}`);
+{% else %}
       if (token !== undefined) headers.set("Authorization", `Bearer ${token}`);
+{% endif %}
       response = await send(url, {
         method,
         headers,
@@ -238,6 +253,16 @@ function multipartBody(form: object): FormData {
   return body;
 }
 {% endif %}
+{% endif %}
+{% if basic %}
+
+/**
+ * Return the value of the header `Authorization` of HTTP Basic (RFC 7617):
+ * the Base64 of the UTF-8 bytes of `<user name>:<password>`.
+ */
+export function basicAuthorization(username: string, password: string): string {
+  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+}
 {% endif %}
 {% if oauth %}
 

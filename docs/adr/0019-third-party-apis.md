@@ -167,6 +167,28 @@ We looked at two ways to read the documents:
   parameter cannot hold, a form body, or an answer that is not JSON,
   because the endpoints take and give JSON.
 
+### HTTP Basic (update for #486)
+
+- A scheme with `type: http` and `scheme: basic` is supported. Its
+  security has `username_env` (the user name) and `env` (the password),
+  and the validator requires both. It checks `username_env` as it
+  checks `env`: a variable of the apps, a variable with a public prefix,
+  or a variable with two uses is an error.
+- The clients send the header `Authorization: Basic` with the Base64 of
+  the UTF-8 bytes of `<user name>:<password>` (RFC 7617). The FastAPI
+  client gets the user name and the password from the settings, and the
+  Next.js client from the environment (`Buffer`, because `btoa` fails on
+  characters outside Latin-1). Without a password, a client sends no
+  credential, as without an API key.
+- Both variables are secrets: the deployment files and the README of
+  each app list them as secrets, and the React app has no client for
+  such an API unless the API has `expose: true`.
+- The first use is the Jira Cloud REST API: the user name is the email
+  address of an Atlassian account, and the password is an API token
+  (tests/fixtures/jira.yaml). Its OpenAPI document gives each example as
+  a string with the JSON text. The reader reads such a string as JSON
+  when the answer cannot be a string.
+
 ## Consequences
 
 - A definition with `apis` gives the same output on each run, without a
@@ -177,6 +199,9 @@ We looked at two ways to read the documents:
   bodies (for example XML), the other OAuth flows, OpenID Connect, or
   mutual TLS. The validator reports these cases, so that the author can
   call such an operation from hand-written code.
+- With HTTP Basic, the password goes with each request, so the server
+  of the API must use HTTPS. The clients do not check the scheme of the
+  base URL: a local mock server uses HTTP.
 - Each process keeps its own token. Two instances of an app get two
   tokens, and a token that the API revokes costs one failed request.
 - The reader checks less than a full validator of the specification. A

@@ -288,7 +288,13 @@ git config core.hooksPath .githooks
   Ruff, pyright, the generated tests, and `appgen check` on them. A
   browser signs in to both apps through the mock OpenID Connect provider
   `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). Then it
-  generates `tests/fixtures/account-security.yaml` (the verification of
+  generates `tests/fixtures/cognito-sign-in.yaml` (a user pool of Amazon
+  Cognito with Entra ID as its SAML provider), checks it in the same
+  way, and signs in through the mock user pool of `scripts/mock_oidc.py`:
+  one user with a group of each role of `roles` in turn, and then
+  without a group. The sign-out route sends the browser to the logout
+  endpoint of the mock provider (`sign_out`).
+  Then it generates `tests/fixtures/account-security.yaml` (the verification of
   the email address, and the second factor), and runs Ruff, pyright,
   the generated tests, and `appgen check` on it. Then it generates
   `tests/fixtures/seed-data.yaml` (seed records, ADR 0021), checks it in
@@ -301,7 +307,11 @@ git config core.hooksPath .githooks
   0045, and the available filters, ADR 0047), `tests/fixtures/courses.yaml` (the totals and the widgets of
   the signed-in user, `$me`), and `tests/fixtures/places.yaml` (point
   fields and the filters `near` and `area`, ADR 0046), and runs the
-  same checks on them. It needs Docker.
+  same checks on them. For `tests/fixtures/jira.yaml` (an API with HTTP
+  Basic), it also calls the mock Jira API from the app
+  (`scripts/api_calls.py`). It also checks
+  `tests/fixtures/jira-accounts.yaml` (the credentials of each user)
+  with its hand-written logic. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
@@ -323,8 +333,10 @@ git config core.hooksPath .githooks
   the queries with PGlite (`scripts/queries_test.py`), and
   `tests/fixtures/record-rules.yaml`, whose test reads the stream of the
   live updates of each user and the users on a task page with PGlite,
-  and with two brokers and one Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
-  with `scripts/check-nextjs.sh [output folder]`.
+  and with two brokers and one Redis (`scripts/live_test.py`), and
+  `tests/fixtures/jira.yaml`, whose check calls the mock Jira API with
+  HTTP Basic (`scripts/api_calls.py`). It needs pnpm and Docker. Run it
+  by hand with `scripts/check-nextjs.sh [output folder]`.
 - The hook runs the selected sections of `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs
   `pnpm install`, lint, type check, build, `docker build`, and
@@ -360,14 +372,24 @@ git config core.hooksPath .githooks
   (`scripts/auth_ui_test.py`). The Next.js app sends the links of the
   sign-up and of the reset as emails to the mock SMTP server
   `scripts/mock_smtp.py`, and the test opens the links of the emails.
+  It does the sign-up and the reset again with `auth.delivery: ses` in
+  Next.js and react-api: the apps send the emails to the mock SES server
+  `scripts/mock_ses.py`.
   It also builds `tests/fixtures/record-rules.yaml`, and checks its
-  rules with conditions and owner paths. The binding `react-api` is the React app
+  rules with conditions and owner paths. It builds
+  `tests/fixtures/cognito-sign-in.yaml` with Next.js and react-api, and
+  signs in through the mock user pool of Amazon Cognito, as one user
+  with the groups of each role in turn, and signs out through its logout
+  endpoint. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
   in through the flow of the FastAPI app. Then it builds
   `tests/fixtures/api-connections.yaml` with React, Next.js, and
   react-api, connects an account of the calendar API at the mock OAuth
   server of `scripts/mock_api.py`, syncs a calendar, and disconnects
   the account on the page `/connections` (`scripts/connection_ui_test.py`).
+  The same script builds `tests/fixtures/jira-accounts.yaml`, connects
+  a Jira account with a wrong password and then with the right one,
+  files an issue, and disconnects the account.
   Then it builds `tests/fixtures/listings.yaml` with React, Next.js, and
   react-api, and checks the views of its queries: a table that pages the
   rows of its filters, a card list of a path parameter, a calendar, and
