@@ -4,6 +4,13 @@
 import { {{ table.orm_imports | join(", ") }} } from "drizzle-orm";
 {% endif %}
 import { {{ table.pg_imports | join(", ") }} } from "drizzle-orm/pg-core";
+{% if table.points %}
+
+import type { GeoPoint } from "@/shared/api";
+{% if table.related_modules and not table.files %}
+
+{% endif %}
+{% endif %}
 {% if table.files %}
 
 import type { StoredFile } from "@/shared/storage";

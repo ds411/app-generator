@@ -75,6 +75,7 @@ from appgen.dsl.ui.views import (
     DetailView,
     Filter,
     ListViewBase,
+    MapView,
     NearFilter,
     Pagination,
     QueryCalendarView,
@@ -418,7 +419,11 @@ def _check_lines_column(
         problem = "is computed"
     elif isinstance(member, Field) and member.translatable:
         problem = "is translatable, and a column edits one language only"
-    elif column.relation_kind not in (None, *SINGLE_KINDS) or default_widget(column) is None:
+    elif (
+        column.relation_kind not in (None, *SINGLE_KINDS)
+        or default_widget(column) is None
+        or column.type == "point"
+    ):
         problem = f"({column.relation_kind or column.type}) has no widget in a lines editor"
     if problem is not None:
         yield _error(
@@ -510,6 +515,8 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
             yield from _check_order_field(definition, entity, view)
         case CalendarView():
             yield from _check_calendar(definition, entity, view)
+        case MapView():
+            yield from _check_map(definition, entity, view)
         case DetailView():
             yield from _check_detail(definition, entity, view)
 
@@ -1422,6 +1429,32 @@ def _check_calendar(
             view,
             at="end",
         )
+
+
+def _check_map(definition: AppDefinition, entity: str, view: MapView) -> Iterator[Diagnostic]:
+    """The point of a map is a `point` field, and the map itself filters by its visible area."""
+    if view.label is not None:
+        yield from _check_paths(definition, view, "label", entity, [view.label])
+    target = yield from _resolve(definition, view, "point", entity, view.point)
+    if target is not None and target.type != "point":
+        yield _error(
+            "unsuitable-field",
+            f"The point of a map view must be a 'point' field, but '{view.point}' has the type "
+            f"'{target.relation_kind or target.type}'.",
+            view,
+            at="point",
+        )
+    for filter_ in view.filters.values():
+        if isinstance(filter_, AreaFilter):
+            yield _error(
+                "invalid-option",
+                "A map view filters its records by the visible area of the map, so it takes no "
+                "'area' filter.",
+                filter_,
+                hint="Remove the filter: a move of the map gives the area.",
+            )
+        else:
+            yield from _check_filter(definition, entity, filter_)
 
 
 def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Iterator[Diagnostic]:

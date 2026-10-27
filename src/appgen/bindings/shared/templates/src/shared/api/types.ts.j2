@@ -155,6 +155,14 @@ export interface NoticeApi {
 }
 
 {% endif %}
+{% if has_points(definition) %}
+/** A place on the earth: a latitude from -90 to 90 and a longitude from -180 to 180, in degrees (ADR 0046). */
+export type GeoPoint = {
+  lat: number;
+  lng: number;
+};
+
+{% endif %}
 {% if definition.storage %}
 /** A file of a record (ADR 0027): the name, the size in bytes, the media type, and the URL of the file. */
 export type FileValue = {

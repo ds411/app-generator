@@ -1,0 +1,67 @@
+{{ trace_header("app") }}
+"use client";
+
+import type { GeoPoint } from "@/shared/api";
+import { Input } from "@/shared/ui/input";
+
+/** Return the text of a coordinate in its input: empty for no number. */
+function part(value: number | undefined): number | "" {
+  return value === undefined || Number.isNaN(value) ? "" : value;
+}
+
+/**
+ * The widget of a point field (ADR 0046): an input for the latitude and
+ * one for the longitude. Two empty inputs give `null`. One empty input
+ * gives `NaN` for its coordinate, so that the zod schema reports it.
+ */
+export function PointInput({
+  id,
+  value,
+  onChange,
+  disabled,
+  invalid,
+}: {
+  id: string;
+  value: GeoPoint | null;
+  onChange: (value: GeoPoint | null) => void;
+  disabled?: boolean;
+  invalid?: boolean;
+}) {
+  const change = (key: keyof GeoPoint, text: string) => {
+    const next = { lat: value?.lat ?? Number.NaN, lng: value?.lng ?? Number.NaN };
+    next[key] = text === "" ? Number.NaN : Number(text);
+    onChange(Number.isNaN(next.lat) && Number.isNaN(next.lng) ? null : next);
+  };
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <Input
+        id={id}
+        type="number"
+        inputMode="decimal"
+        step="any"
+        min={-90}
+        max={90}
+        placeholder={{ jsx_attr("Latitude") }}
+        aria-label={{ jsx_attr("Latitude") }}
+        value={part(value?.lat)}
+        onChange={(event) => change("lat", event.target.value)}
+        disabled={disabled}
+        aria-invalid={invalid}
+      />
+      <Input
+        id={`${id}-lng`}
+        type="number"
+        inputMode="decimal"
+        step="any"
+        min={-180}
+        max={180}
+        placeholder={{ jsx_attr("Longitude") }}
+        aria-label={{ jsx_attr("Longitude") }}
+        value={part(value?.lng)}
+        onChange={(event) => change("lng", event.target.value)}
+        disabled={disabled}
+        aria-invalid={invalid}
+      />
+    </div>
+  );
+}

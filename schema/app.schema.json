@@ -4587,6 +4587,119 @@
       "title": "LoadingState",
       "type": "object"
     },
+    "MapView": {
+      "additionalProperties": false,
+      "description": "The records on a map, by a `point` field, with a list of the records in the visible area\n(ADR 0046).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/EntityName"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "actions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "map",
+          "title": "Kind",
+          "type": "string"
+        },
+        "point": {
+          "$ref": "#/$defs/FieldPath"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Filter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "entity",
+        "kind",
+        "point"
+      ],
+      "title": "MapView",
+      "type": "object"
+    },
     "MemberName": {
       "pattern": "^[a-z][a-z0-9_]*$",
       "type": "string"
@@ -7812,6 +7925,9 @@
         },
         {
           "$ref": "#/$defs/CalendarView"
+        },
+        {
+          "$ref": "#/$defs/MapView"
         },
         {
           "$ref": "#/$defs/DetailView"

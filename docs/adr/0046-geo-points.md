@@ -67,8 +67,46 @@ In the FastAPI app:
   some builds of SQLite do not have them.
 - The change log keeps a point as an object `{lat, lng}`.
 
-The React and Next.js bindings stop with an error for a point field,
-until they generate its code.
+### The front ends and the map view
+
+The React and Next.js apps have a point as `GeoPoint` (`{ lat, lng }`)
+of `@/shared/api`, with a zod schema of the ranges. A view shows a point
+as its latitude and its longitude, and the form widget `point` has an
+input for each. The Next.js app keeps a point in one `jsonb` column: its
+views read all records and filter them in the browser, so the column
+needs no index. The FastAPI app keeps the two columns and the index,
+because its list endpoint filters the records.
+
+A view of `kind: map` shows a marker for each record with a point, and
+the list of the records in the visible area of the map. `point` is the
+point field, `label` the text of a record, and `link` the page that a
+record opens. A map takes the filters of a table, except `area`: a move
+of the map gives the area. The front ends filter the points in the
+browser (`src/shared/lib/geo.ts`, with the haversine formula of the
+FastAPI app), and the React app with the FastAPI app sends the filters
+and `<point>_area` to the list endpoint.
+
+The options for the map:
+
+- **Leaflet.** A small library of maps with raster tiles, without a
+  key, and with the keyboard support of the markers and of the map.
+- **MapLibre GL.** Vector tiles, but a larger bundle, WebGL, and a
+  style for each tile provider.
+- **A map of a provider (Google Maps, Mapbox).** It needs a key and an
+  account.
+
+The front ends use Leaflet 1.9. The map loads Leaflet in the browser
+after its first render, so that the server render of the Next.js app
+does not need the browser. The markers are HTML (`divIcon`), with the
+colors of the theme, and need no images of Leaflet. The tile URL is a
+build setting: `NEXT_PUBLIC_MAP_TILES` or `VITE_MAP_TILES`, with
+`{z}`, `{x}`, and `{y}`, and the attribution `NEXT_PUBLIC_MAP_ATTRIBUTION`
+or `VITE_MAP_ATTRIBUTION`. The default is the standard tiles of
+OpenStreetMap, with their attribution. The UI tests use a local tile
+server (`scripts/places_ui_test.py`), so that they need no network.
+
+An `area` filter of a table or a card list shows the same map in a
+popover: the user moves the map, and uses its visible area.
 
 ## Consequences
 
@@ -82,5 +120,10 @@ until they generate its code.
 - A point field is a `field`. The element kinds `near_filter` and
   `area_filter` and the form widget `point` are new. The FastAPI binding
   traces the filters in its list endpoints and their tests.
-- The front ends need the point fields before a view can show the
-  records on a map.
+- The element kind `map_view` is new. The apps with a map view or an
+  `area` filter get the packages `leaflet` and `@types/leaflet`.
+- The standard tiles of OpenStreetMap have a usage policy: a production
+  app sets the tile URL of a tile server of its own or of a provider.
+- A map of the FastAPI app loads all records before its first move, to
+  show all markers. After each move, it loads the records of the
+  visible area only.

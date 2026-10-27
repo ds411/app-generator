@@ -1,0 +1,73 @@
+{{ trace_header("app") }}
+// The points of the map views and of the geo filters (ADR 0046). The list
+// endpoints of the API take a point as `<lat>,<lng>`, and a box as
+// `<south>,<west>,<north>,<east>`.
+
+import type { GeoPoint } from "@/shared/api";
+
+/** A box in degrees, for example the visible part of a map. A west greater than the east crosses the antimeridian. */
+export type GeoBox = { south: number; west: number; north: number; east: number };
+
+/** The state of a near filter: the text of a point (`<lat>,<lng>`), and the largest distance in kilometers. */
+export type NearValue = { point: string; distance: number };
+
+/** The mean radius of the earth, in kilometers. */
+const EARTH_RADIUS = 6371.0088;
+const DEGREE = Math.PI / 180;
+
+/** Return the point of a text `<lat>,<lng>`, for example `38.72, -9.14`, or null. */
+export function parsePoint(text: string): GeoPoint | null {
+  const parts = text.split(",").map((part) => part.trim());
+  if (parts.length !== 2 || parts.some((part) => part === "")) return null;
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+/** Return the distance between two points on a sphere, in kilometers (the haversine formula). */
+export function distanceKm(a: GeoPoint, b: GeoPoint): number {
+  const halfLat = Math.sin(((b.lat - a.lat) * DEGREE) / 2);
+  const halfLng = Math.sin(((b.lng - a.lng) * DEGREE) / 2);
+  const term = halfLat * halfLat + Math.cos(a.lat * DEGREE) * Math.cos(b.lat * DEGREE) * halfLng * halfLng;
+  return 2 * EARTH_RADIUS * Math.asin(Math.min(1, Math.sqrt(term)));
+}
+
+/** Return true if a point is at most the distance of the filter from its point. A filter without a point keeps all records. */
+export function isNear(point: GeoPoint | null | undefined, filter: NearValue): boolean {
+  const center = parsePoint(filter.point);
+  if (center === null) return true;
+  return !!point && distanceKm(point, center) <= filter.distance;
+}
+
+/** Return true if a point is in a box. No box keeps all records. */
+export function inBox(point: GeoPoint | null | undefined, box: GeoBox | null): boolean {
+  if (box === null) return true;
+  if (!point || point.lat < box.south || point.lat > box.north) return false;
+  return box.west <= box.east
+    ? point.lng >= box.west && point.lng <= box.east
+    : point.lng >= box.west || point.lng <= box.east;
+}
+
+/** Return the query parameter of the point of a near filter, or null for no point. */
+export function nearParam(filter: NearValue): string | null {
+  const center = parsePoint(filter.point);
+  return center === null ? null : `${center.lat},${center.lng}`;
+}
+
+/** Return the query parameter of a box: `<south>,<west>,<north>,<east>`. */
+export function boxText(box: GeoBox): string {
+  return [box.south, box.west, box.north, box.east].map((value) => value.toFixed(6)).join(",");
+}
+
+/**
+ * Return the box of the visible part of a map. A map can show more than
+ * one copy of the world: the longitudes go back into -180 to 180, and a map
+ * that shows all longitudes gives the full range.
+ */
+export function mapBox(south: number, west: number, north: number, east: number): GeoBox {
+  const clamp = (value: number) => Math.max(-90, Math.min(90, value));
+  if (east - west >= 360) return { south: clamp(south), west: -180, north: clamp(north), east: 180 };
+  const wrap = (value: number) => ((((value + 180) % 360) + 360) % 360) - 180;
+  return { south: clamp(south), west: wrap(west), north: clamp(north), east: east === 180 ? 180 : wrap(east) };
+}
