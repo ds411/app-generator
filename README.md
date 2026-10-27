@@ -56,6 +56,7 @@ and change it. The docs:
 | [docs/dsl.md](docs/dsl.md)           | The reference of the app definition, with examples.  |
 | [docs/traces.md](docs/traces.md)     | The trace format, generation gaps, and the checker reports. |
 | [docs/bindings.md](docs/bindings.md) | How to write a binding.                              |
+| [docs/cognito-entra-id.md](docs/cognito-entra-id.md) | The sign-in with Amazon Cognito and Entra ID over SAML. |
 | [docs/evaluation.md](docs/evaluation.md) | The evaluation of the proof of concept, and the next steps. |
 | [docs/evaluation-skills.md](docs/evaluation-skills.md) | The evaluation of the agent skill with agent tasks. |
 | [docs/adr/](docs/adr/)               | The architecture decision records.                   |

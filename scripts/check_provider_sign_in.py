@@ -8,7 +8,10 @@ sign-in at the provider, and the callback. A provider that makes users
 signs in a new user, and `/auth/me` gives the user of the token. A
 provider that does not make users refuses the unknown user (403). With
 the first provider, the script also checks the callback to a page of a
-front end (`return_to`).
+front end (`return_to`). A provider with the parameter
+`identity_provider` (`authorize_params`) signs in at the mock user pool of
+Amazon Cognito, whose ID tokens do not mark the email address as
+verified: the provider needs `trust_email`.
 
 Run it from the repository root, with an app that a check script
 generated and installed (`uv sync`):
@@ -81,14 +84,18 @@ def _expect(status: int, expected: int, what: str, body: str) -> None:
 
 
 def sign_in(
-    browser: Browser, name: str, email: str, return_to: str | None = None
+    browser: Browser,
+    name: str,
+    provider: mock_oidc.MockProvider,
+    email: str,
+    return_to: str | None = None,
 ) -> tuple[int, Any, str]:
     """Do the steps of the browser, and return the answer of the callback."""
     query = f"?{urlencode({'return_to': return_to})}" if return_to else ""
     status, headers, body = browser.get(f"{APP_URL}/auth/providers/{name}/start{query}")
     _expect(status, 302, f"GET /auth/providers/{name}/start", body)
     location: str = headers["Location"]
-    if not location.startswith(f"http://127.0.0.1:{mock_oidc.DEFAULT_PORT}/authorize?"):
+    if not location.startswith(f"{provider.authorization_endpoint}?"):
         raise CheckError(f"The start sent the browser to {location}, not to the provider.")
     status, headers, body = browser.get(f"{location}&{urlencode({'login_hint': email})}")
     _expect(status, 302, "the sign-in at the mock provider", body)
@@ -98,9 +105,13 @@ def sign_in(
     return browser.get(callback)
 
 
-def check_provider(name: str, provider: Provider, first: bool) -> None:
+def check_provider(
+    name: str, provider: Provider, mock: mock_oidc.MockProvider, first: bool
+) -> None:
+    if mock.identity_provider:
+        log(f"{name}: the mock user pool of Amazon Cognito with {mock.identity_provider}")
     email = f"{name}.user@example.com"
-    status, _, body = sign_in(Browser(), name, email)
+    status, _, body = sign_in(Browser(), name, mock, email)
     if not provider.create_users:
         _expect(status, 403, f"the sign-in of an unknown user with {name}", body)
         log(f"{name}: the app refuses an unknown user (403)")
@@ -116,7 +127,7 @@ def check_provider(name: str, provider: Provider, first: bool) -> None:
         raise CheckError(f"GET /auth/me gave {me}, not the user {email}.")
     log(f"{name}: a new user signs in, and GET /auth/me gives the user")
     if first:
-        status, headers, body = sign_in(Browser(), name, email, return_to=f"{FRONT_END}/home")
+        status, headers, body = sign_in(Browser(), name, mock, email, return_to=f"{FRONT_END}/home")
         _expect(status, 303, f"the callback of {name} with return_to", body)
         page, _, fragment = headers["Location"].partition("#")
         if page != f"{FRONT_END}/home" or "access_token" not in parse_qs(fragment):
@@ -151,7 +162,8 @@ def started(app: Path, providers: dict[str, Provider], temp: Path) -> Generator[
         "LOG_JSON": "false",
     }
     for name, provider in providers.items():
-        env[f"{name.upper()}_ISSUER"] = f"http://127.0.0.1:{mock_oidc.DEFAULT_PORT}"
+        port = mock_oidc.DEFAULT_PORT
+        env[f"{name.upper()}_ISSUER"] = mock_oidc.issuer_of(port, provider.authorize_params)
         env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
         env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
@@ -183,11 +195,13 @@ def main() -> int:
     try:
         with (
             tempfile.TemporaryDirectory(prefix="appgen-provider-sign-in.") as temp,
-            mock_oidc.serving(),
+            mock_oidc.serving() as plain,
             started(args.app.resolve(), auth.providers, Path(temp)),
         ):
             for index, (name, provider) in enumerate(auth.providers.items()):
-                check_provider(name, provider, first=index == 0)
+                pool = "identity_provider" in provider.authorize_params
+                mock = plain.cognito if pool and plain.cognito else plain
+                check_provider(name, provider, mock, first=index == 0)
     except (CheckError, subprocess.CalledProcessError) as error:
         print(f"provider-sign-in: failed: {error}", file=sys.stderr)
         return 1

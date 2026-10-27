@@ -77,6 +77,27 @@ its own until now.
   so that a link cannot put another text on the page.
 - No page can use a path under `/auth/` with providers: the routes of
   the front ends use them.
+- Amazon Cognito with a SAML identity provider (update for #483). A user
+  pool of Cognito is an OpenID Connect provider, and it does the SAML
+  part with an identity provider such as Microsoft Entra ID. Thus the
+  apps need no SAML code. Two keys of a provider make this work:
+  - `authorize_params` adds fixed parameters to the authorization
+    request, for example `identity_provider: EntraID`, so that the user
+    pool sends the user at once to Entra ID. The flow sets its own
+    parameters after them, and the validator rejects their names
+    (`reserved-name`), so that a definition cannot change the checks of
+    the flow.
+  - `trust_email: true` accepts an email address that the ID token does
+    not mark as verified. The user pool sets `email_verified` to `false`
+    for a SAML user when no attribute of the assertion maps to it, and
+    Entra ID sends no such attribute. Without the key, the apps refuse
+    such a token as before. With the key, the address also counts as
+    verified for the removal of a password of a sign-up that is not
+    verified (ADR 0023).
+  `docs/cognito-entra-id.md` gives the setup. The mock provider
+  `scripts/mock_oidc.py` also acts as a user pool: its issuer has a
+  path, its endpoints are on another origin, it needs `identity_provider`,
+  and its ID tokens have `email_verified: "false"`.
 
 ## Consequences
 
@@ -94,3 +115,8 @@ its own until now.
 - The checks of the repository sign in through the mock provider in the
   front ends too: `scripts/auth_ui_test.py` with Next.js, and with React
   and the FastAPI app.
+- `trust_email` moves the check of the address to the provider. The docs
+  tell to use it only for a provider that gives only the addresses of
+  the company. A sign-in that starts at the identity provider (for
+  example the My Apps portal of Entra ID) has no `state`, and the apps
+  refuse it.

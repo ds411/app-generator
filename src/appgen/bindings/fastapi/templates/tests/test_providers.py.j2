@@ -246,6 +246,36 @@ async def test_an_unknown_user_cannot_sign_in_with_the_provider_{{ p.name }}(
 
     assert_problem(response, 403)
 {% endif %}
+{% if p.authorize_params %}
+
+
+async def test_the_start_sends_the_fixed_parameters_of_the_provider_{{ p.name }}(
+    browser: AsyncClient,
+) -> None:
+    query = parse_qs(urlsplit(await _start(browser)).query)
+
+{% for key, value in p.authorize_params %}
+    assert query[{{ key | tojson }}] == [{{ value | tojson }}]
+{% endfor %}
+    assert query["response_type"] == ["code"]
+{% endif %}
+{% if p.trust_email %}
+
+
+@pytest.mark.parametrize("verified", [None, False, "false"], ids=["missing", "false", "text"])
+async def test_the_provider_{{ p.name }}_trusts_an_email_address_that_is_not_verified(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider, verified: object
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims: dict[str, Any] = {"{{ p.username_claim }}": user.{{ username.attr }}}
+    if verified is not None:
+        claims["email_verified"] = verified
+
+    response = await _sign_in(browser, provider, claims)
+
+    assert response.status_code == 200, response.text
+    assert (await _me(browser, response.json()["access_token"]))["id"] == str(user.id)
+{% endif %}
 
 
 async def test_the_callback_sends_the_token_to_the_page_of_return_to(
@@ -291,7 +321,7 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
         {"aud": "another-client"},
         {"exp": int(time.time()) - 3600},
         {"nonce": "another-nonce"},
-{% if p.username_claim == "email" %}
+{% if p.username_claim == "email" and not p.trust_email %}
         {"email_verified": False},
 {% endif %}
     ],
@@ -300,7 +330,7 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
         "audience",
         "end",
         "nonce",
-{% if p.username_claim == "email" %}
+{% if p.username_claim == "email" and not p.trust_email %}
         "unverified-email",
 {% endif %}
     ],

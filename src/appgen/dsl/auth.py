@@ -47,6 +47,21 @@ def has_me(value: object) -> bool:
 
 type Claim = Annotated[str, pydantic.StringConstraints(pattern=r"^[^\s\"\\]+$")]
 """The name of a claim of an ID token, or of a scope, for example `email`."""
+type ParamName = Annotated[str, pydantic.StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")]
+"""The name of a parameter of the authorization request, for example `identity_provider`."""
+FLOW_PARAMS = frozenset(
+    {
+        "client_id",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "redirect_uri",
+        "response_type",
+        "scope",
+        "state",
+    }
+)
+"""The parameters of the authorization request that the flow sets (ADR 0020)."""
 
 
 def flag_input(value: object) -> object:
@@ -138,6 +153,13 @@ class Provider(Element):
     """With `create_users` and `access`: the role of a new user."""
     claims: dict[MemberName, Claim] = pydantic.Field(default_factory=dict[str, str])
     """With `create_users`: the fields of a new user from claims, for example `name: name`."""
+    authorize_params: dict[ParamName, Text] = pydantic.Field(default_factory=dict[str, str])
+    """Fixed parameters of the authorization request, for example `identity_provider: EntraID`:
+    a user pool of Amazon Cognito then sends the user at once to that identity provider."""
+    trust_email: bool = False
+    """Accept the email address of an ID token also when `email_verified` is missing or false.
+    Only for a provider that gives only the addresses of the company, for example a user pool
+    of Amazon Cognito with a single-tenant Entra ID as its SAML identity provider."""
 
 
 class Auth(Element):

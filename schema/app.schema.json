@@ -5808,6 +5808,10 @@
       "title": "Pagination",
       "type": "object"
     },
+    "ParamName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+      "type": "string"
+    },
     "PasswordReset": {
       "additionalProperties": false,
       "description": "The reset of a forgotten password (ADR 0017): a message with a one-time link.\n\nThe definition does not know the mail service, so the delivery of the\nmessage is a generation gap.",
@@ -5949,6 +5953,21 @@
           },
           "title": "Claims",
           "type": "object"
+        },
+        "authorize_params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Text"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/ParamName"
+          },
+          "title": "Authorize Params",
+          "type": "object"
+        },
+        "trust_email": {
+          "default": false,
+          "title": "Trust Email",
+          "type": "boolean"
         }
       },
       "required": [

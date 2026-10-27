@@ -85,6 +85,10 @@ class Provider:
     default_role: str | None = None
     claims: tuple[tuple[str, str], ...] = ()
     """The fields of a new user, and the claims that give their values."""
+    authorize_params: tuple[tuple[str, str], ...] = ()
+    """The fixed parameters of the authorization request, for example the identity provider."""
+    trust_email: bool = False
+    """Accept an email address that the ID token does not mark as verified."""
 
 
 def provider_of(settings: Settings, name: ProviderName) -> Provider:
@@ -107,6 +111,12 @@ def provider_of(settings: Settings, name: ProviderName) -> Provider:
 {% if p.claims %}
             claims=({% for f, claim in p.claims %}("{{ f.attr }}", {{ claim | tojson }}),{% if not loop.last %} {% endif %}{% endfor %}),
 {% endif %}
+{% endif %}
+{% if p.authorize_params %}
+            {{ p.pairs_arg("authorize_params", p.authorize_params) }}
+{% endif %}
+{% if p.trust_email %}
+            trust_email=True,
 {% endif %}
         ),
 {% endfor %}
@@ -238,14 +248,17 @@ async def user_of(
     username = claims.get(provider.username_claim)
     if not isinstance(username, str) or not username:
         {{ py.problem(401, "The ID token has no claim '{claim}'.", 8, claim="provider.username_claim") }}
-    if provider.username_claim == "email" and claims.get("email_verified") in (False, "false"):
+    # With trust_email, the provider gives only the addresses of the company (ADR 0020).
+    unverified = claims.get("email_verified") in (False, "false")
+    if provider.username_claim == "email" and unverified and not provider.trust_email:
         {{ py.problem(401, "The provider did not verify the email address.", 8) }}
     user = await find_user(session, username)
     if user is not None:
 {% if verify %}
         {{ trace(verify.id) }}
         email = claims.get("email")
-        if claims.get("email_verified") in (True, "true") and email == user.{{ address.attr }}:
+        verified = provider.trust_email or claims.get("email_verified") in (True, "true")
+        if verified and email == user.{{ address.attr }}:
             await remove_unverified_password(session, user)
 {% endif %}
         return user
@@ -318,7 +331,9 @@ async def start_provider_sign_in(
     state, nonce, verifier = (secrets.token_urlsafe(32) for _ in range(3))
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
     redirect_uri = callback_url(request, name)
+    # The parameters of the flow come last: the definition cannot change them.
     query = {
+        **dict(provider.authorize_params),
         "response_type": "code",
         "client_id": provider.client_id,
         "redirect_uri": redirect_uri,

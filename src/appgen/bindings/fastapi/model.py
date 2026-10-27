@@ -1158,6 +1158,18 @@ def _braces(prefix: str, items: list[str], indent: int) -> str:
     return f"{prefix}{{\n{inner}{pad}}}"
 
 
+def _pairs(prefix: str, pairs: list[tuple[str, str]], indent: int) -> str:
+    """Return `<prefix>((<a>, <b>), ...)`, a tuple of pairs of texts, on one line if it fits,
+    else with one pair on each line. A tuple of one pair ends with a comma."""
+    items = [f"({string(a)}, {string(b)})" for a, b in pairs]
+    one_line = f"{prefix}({items[0]},)" if len(items) == 1 else f"{prefix}({', '.join(items)})"
+    if indent + len(one_line) + 1 <= LINE_LENGTH:
+        return one_line
+    pad = " " * indent
+    inner = "".join(f"{pad}    {item},\n" for item in items)
+    return f"{prefix}(\n{inner}{pad})"
+
+
 def _link(rel: PyRelation, value: str) -> str:
     """Return the keyword argument of a factory that links a record to the record of an ID."""
     if rel.side == "fk":
@@ -2504,6 +2516,15 @@ class PyProvider:
     """With `create_users` and `access`: the role of a new user."""
     claims: list[tuple[PyField, str]]
     """With `create_users`: the fields of a new user, and the claims that give their values."""
+    authorize_params: list[tuple[str, str]]
+    """The fixed parameters of the authorization request, in source order."""
+    trust_email: bool
+    """Accept an email address that the ID token does not mark as verified."""
+
+    def pairs_arg(self, key: str, pairs: list[tuple[str, str]]) -> str:
+        """Return the keyword argument `<key>=` of the provider in `provider_of`: a tuple of
+        pairs of texts, in the format of the Ruff formatter at the indent 12."""
+        return _pairs(f"{key}=", pairs, 12) + ","
 
 
 @dataclass(frozen=True, slots=True)
@@ -3178,6 +3199,8 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
                 create_users=provider.create_users,
                 default_role=default_role,
                 claims=[(fields[f], claim) for f, claim in provider.claims.items()],
+                authorize_params=list(provider.authorize_params.items()),
+                trust_email=provider.trust_email,
             )
         )
     return found
