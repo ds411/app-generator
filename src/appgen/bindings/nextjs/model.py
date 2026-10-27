@@ -12,6 +12,7 @@ from typing import Any, cast
 from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
+from appgen.bindings.nextjs.live import live_entities
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
@@ -208,9 +209,9 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
     The app gets the npm packages of the shadcn/ui components that it uses,
     with providers `jose` (ADR 0020), with the delivery by SMTP
-    `nodemailer`, with the rate limit in Redis `@redis/client`
-    (ADR 0013), and with the storage kind `s3` `@aws-sdk/client-s3`
-    (ADR 0027).
+    `nodemailer`, with the rate limit in Redis or with live entities
+    `@redis/client` (ADR 0013, ADR 0051), and with the storage kind `s3`
+    `@aws-sdk/client-s3` (ADR 0027).
     """
     components = shadcn.used_components(definition)
     dependencies = {
@@ -228,7 +229,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
         dependencies |= versions.S3_PACKAGES
     if uses_smtp(definition):
         dependencies |= versions.SMTP_PACKAGES
-    if uses_redis(definition):
+    if uses_redis(definition) or any(e.live for e in definition.entities.values()):
         dependencies |= versions.REDIS_PACKAGES
     dev_dependencies = {**versions.DEV_DEPENDENCIES, **versions.UI_DEV_DEPENDENCIES}
     return {
@@ -403,6 +404,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             "history": has_history(definition),
             # The notices (ADR 0041): one table for all users, and the helpers.
             "notices": has_notices(definition),
+            # The live entities (ADR 0051): the repositories note their changes, and the route
+            # `/api/live` sends them as events.
+            "live": live_entities(definition, by_entity),
             "frame_headers": frame_headers(definition),
             # The public pages with metadata: `sitemap.xml` and `robots.txt`.
             "sitemap": sitemap_pages(definition),

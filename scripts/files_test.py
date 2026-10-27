@@ -57,7 +57,7 @@ MOTO = "moto[server]>=5.2"
 TEST = Path(__file__).with_suffix(".ts")
 """The test, which the script copies into the app: it imports the modules of the app."""
 
-_HOOKS = """\
+HOOKS = """\
 import { register } from "node:module";
 
 // Replace the modules of Next.js that need a request with stubs.
@@ -79,7 +79,7 @@ export async function resolve(specifier, context, next) {
 register("data:text/javascript," + encodeURIComponent(source));
 """
 
-_STUBS = {
+STUBS = {
     "next-headers.mjs": """\
 const jar = (globalThis.appgenCookies ??= new Map());
 export async function cookies() {
@@ -180,8 +180,8 @@ def run(definition_path: Path, app: Path) -> None:
     folder = app / FOLDER
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir()
-    (folder / "hooks.mjs").write_text(_HOOKS, encoding="utf-8")
-    for name, text in _STUBS.items():
+    (folder / "hooks.mjs").write_text(HOOKS, encoding="utf-8")
+    for name, text in STUBS.items():
         (folder / name).write_text(text, encoding="utf-8")
     try:
         with moto_server() as endpoint, tempfile.TemporaryDirectory() as files:

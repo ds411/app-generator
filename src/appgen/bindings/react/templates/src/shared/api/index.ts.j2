@@ -1,12 +1,19 @@
 {{ trace_header("app") }}
 {% if react.api %}
+{% if react.live and definition.auth %}
+export { API_URL, ApiError, accessToken, apiRequest, setAccessToken, subscribeAccessToken } from "./http";
+{% else %}
 export { API_URL, ApiError, accessToken, apiRequest, setAccessToken } from "./http";
+{% endif %}
 export {
   type ApiParam,
   type ApiParams,
   type ApiQuery,
   type ApiShape,
   HttpStore,
+{% if react.live %}
+  notifyChange,
+{% endif %}
   type OptionSource,
   type RecordOption,
 } from "./http-store";

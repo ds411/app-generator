@@ -3,10 +3,11 @@
 from pathlib import Path
 from textwrap import dedent
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs, react
 from appgen.dsl import load_definition, load_definition_text, validate_definition
 from appgen.dsl.live import Live
 from appgen.dsl.schema import json_schema
+from appgen.gen.binding import Binding
 from appgen.gen.elements import element_kind
 from appgen.gen.generator import generate
 
@@ -62,9 +63,18 @@ def with_auth(text: str) -> str:
     return text + USER + AUTH
 
 
-def files_of(text: str) -> dict[str, str]:
+def files_of(text: str, binding: Binding = fastapi.BINDING) -> dict[str, str]:
     definition = load_definition_text(text, "app.yaml")
-    return {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    return {f.path: f.content for f in generate(definition, binding).files}
+
+
+def with_api_data(text: str) -> str:
+    """Return a definition whose React app uses the FastAPI app (`x-react-data: api`)."""
+    return text.replace(
+        "app: { name: tracker, title: Tracker }",
+        "app: { name: tracker, title: Tracker, x-react-data: api }",
+        1,
+    )
 
 
 def test_live_is_true_or_a_mapping_with_a_description() -> None:
@@ -121,6 +131,7 @@ def test_the_fastapi_app_streams_the_changes_of_the_live_entities() -> None:
     assert "RECORD_RULES" not in live
     assert "Audience" not in live
     assert "    return Viewer(frozenset(entity or NAMES))\n" in live
+    assert "ticket" not in live
     main = files["app/main.py"]
     assert "    app.state.live = Broker(settings.live_events_url)\n" in main
     assert "    app.state.sessions.configure(info={BROKER_KEY: app.state.live})\n" in main
@@ -165,8 +176,13 @@ def test_with_the_sign_in_the_stream_needs_a_user_except_for_a_public_operation(
         in (live)
     )
     assert "    responses=problem_responses(401),\n" in live
+    # A browser opens the stream with a short ticket: EventSource sends no header.
+    assert '    "/live/ticket",\n' in live
+    assert "async def live_ticket(request: Request, user: CurrentUser) -> LiveTicket:\n" in live
+    assert "        user_id = _ticket_user(key, ticket)\n" in live
     tests = files["tests/test_live.py"]
     assert "async def test_the_stream_needs_a_signed_in_user(app: FastAPI) -> None:\n" in tests
+    assert "async def test_a_ticket_opens_the_stream_of_its_user(app: FastAPI) -> None:\n" in tests
     assert '    async with open_stream(app, "entity=Task") as stream:\n' in tests
 
 
@@ -186,3 +202,131 @@ def test_the_record_rules_decide_who_gets_the_events() -> None:
         assert f"async def {name}(\n" in tests
     # Each role may read the tasks: no role gets 403.
     assert "gets_403" not in tests
+
+
+NEXTJS_LIVE_FILES = (
+    "src/shared/db/live.ts",
+    "app/api/live/route.ts",
+    "src/shared/lib/live.ts",
+    "src/app/providers/live-updates.tsx",
+)
+
+
+def test_the_nextjs_app_sends_the_changes_of_the_repositories_as_events() -> None:
+    files = files_of(BASE, nextjs.BINDING)
+    for path in NEXTJS_LIVE_FILES:
+        assert path in files, path
+    live = files["src/shared/db/live.ts"]
+    assert (
+        '  "Task": { readers: ["read_task", "list_tasks"], public: false }, '
+        "// @trace entities.Task.live\n"
+    ) in live
+    assert 'const CHANNEL = "tracker:live";\n' in live
+    # Without the sign-in, all clients get the events, and no record rule applies.
+    assert "export function liveViewer(names: string[]): Viewer | 400 {\n" in live
+    assert "liveAudience" not in live
+    assert "src/shared/db/paths.ts" not in files
+    route = files["app/api/live/route.ts"]
+    assert "  const viewer = liveViewer(names);\n" in route
+    assert '      "Cache-Control": "no-cache, no-transform",\n' in route
+    repository = files["src/shared/db/repository.ts"]
+    assert 'import { type LiveAction, liveChanges, noteChange } from "./live";\n' in repository
+    assert "    return liveChanges(() => getDb().transaction(work));\n" in repository
+    assert '      this.noteLive(String(row.id), "created");\n' in repository
+    assert '      this.noteLive(id, "changed");\n' in repository
+    assert '        this.noteLive(id, "deleted");\n' in repository
+    tasks = files["src/entities/task/api/task-repository.ts"]
+    assert "  live: true, // @trace entities.Task.live\n" in tasks
+    assert "live: true" not in files["src/entities/project/api/project-repository.ts"]
+    assert "          <LiveUpdates />\n" in files["app/layout.tsx"]
+    assert '"@redis/client"' in files["package.json"]
+    assert "LIVE_EVENTS_URL=\n" in files[".env.example"]
+    assert "      LIVE_EVENTS_URL: ${LIVE_EVENTS_URL:-}\n" in files["compose.yaml"]
+    assert "    profiles: [redis]\n" in files["compose.yaml"]
+    assert "## Live updates\n" in files["README.md"]
+    client = files["src/app/providers/live-updates.tsx"]
+    assert 'watchLive(() => Promise.resolve("/api/live"), batched(notifyChange))' in client
+
+
+def test_the_nextjs_app_without_live_has_no_stream() -> None:
+    files = files_of(with_live("false"), nextjs.BINDING)
+    for path in NEXTJS_LIVE_FILES:
+        assert path not in files, path
+    assert "live" not in files["src/shared/db/repository.ts"].lower().replace("delivery", "")
+    assert "LiveUpdates" not in files["app/layout.tsx"]
+    assert '"@redis/client"' not in files["package.json"]
+    assert "LIVE_EVENTS_URL" not in files[".env.example"]
+
+
+def test_the_nextjs_stream_with_the_sign_in_follows_the_user() -> None:
+    files = files_of(with_auth(with_live("true", entity="Project")), nextjs.BINDING)
+    live = files["src/shared/db/live.ts"]
+    assert (
+        '  "Project": { readers: ["read_project", "list_projects"], public: true }, '
+        "// @trace entities.Project.live\n"
+    ) in live
+    assert (
+        "export function liveViewer(names: string[], user: string | null): Viewer | 400 | 401 {\n"
+    ) in live
+    assert (
+        "  const viewer = liveViewer(names, await sessionUserId());\n"
+        in files["app/api/live/route.ts"]
+    )
+    layout = files["app/layout.tsx"]
+    assert "  const userId = await sessionUserId();\n" in layout
+    assert '          <LiveUpdates key={userId ?? ""} />\n' in layout
+
+
+def test_the_nextjs_events_follow_the_record_rules() -> None:
+    definition = load_definition(RULES)
+    files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+    live = files["src/shared/db/live.ts"]
+    assert '      "member": { owner: true, where: { status: ["open", "in_progress"] } },\n' in live
+    assert '      "reviewer": { where: { status: ["done"] } },\n' in live
+    assert "      [personTeamsTable, personTeamsTable.teamId, personTeamsTable.personId],\n" in live
+    assert 'import { personTeamsTable, projectTable, taskTable } from "./schema";\n' in live
+    assert "export async function liveAudience(" in live
+    # The notices and the live events share the steps of the paths.
+    assert "export async function pathUsers(" in files["src/shared/db/paths.ts"]
+    route = files["app/api/live/route.ts"]
+    assert (
+        "  const viewer = liveViewer(names, await sessionUserId(), await currentRole());\n" in route
+    )
+    repository = files["src/shared/db/repository.ts"]
+    assert "      const audience = await this.audience(tx, id);\n" in repository
+    assert '      await this.noteLive(tx, id, "changed", audience);\n' in repository
+    assert '        await this.noteLive(tx, id, "deleted", audience);\n' in repository
+
+
+def test_the_react_app_with_mock_data_has_no_stream() -> None:
+    files = files_of(BASE, react.BINDING)
+    assert "src/shared/lib/live.ts" not in files
+    assert "src/app/providers/live-updates.tsx" not in files
+    api = files["src/entities/task/api/task-api.ts"]
+    assert "// The mock records stay in this browser tab" in api
+    assert "// @trace entities.Task.live\n" in api
+
+
+def test_the_react_app_with_the_fastapi_app_reads_its_stream() -> None:
+    files = files_of(with_auth(with_api_data(BASE)), react.BINDING)
+    client = files["src/app/providers/live-updates.tsx"]
+    assert (
+        "  const token = useSyncExternalStore(subscribeAccessToken, accessToken, () => null);\n"
+        in client
+    )
+    assert (
+        "  useEffect(() => watchLive(() => streamUrl(token), batched(notifyChange)), [token]);\n"
+        in client
+    )
+    assert "      <LiveUpdates />\n" in files["src/app/providers/index.tsx"]
+    store = files["src/shared/api/http-store.ts"]
+    assert "export function notifyChange(entity?: string): void {\n" in store
+    assert "    set.add(() => this.notify());\n" in store
+    http = files["src/shared/api/http.ts"]
+    assert "export function subscribeAccessToken(listener: () => void): () => void {\n" in http
+    assert "// @trace entities.Task.live\n" in files["src/entities/task/api/task-api.ts"]
+    assert "export function watchLive(" in files["src/shared/lib/live.ts"]
+    without_auth = files_of(with_api_data(BASE), react.BINDING)
+    assert "subscribeAccessToken" not in without_auth["src/shared/api/http.ts"]
+    client = without_auth["src/app/providers/live-updates.tsx"]
+    assert "watchLive(() => Promise.resolve(`${API_URL}/live`), batched(notifyChange))" in client

@@ -72,7 +72,8 @@ def test_the_proxy_limits_the_requests_in_memory(result: GenerationResult) -> No
     ) in limit
     assert 'matchLanguage(request.headers.get("accept-language"))' in limit
     package = json.loads(files["package.json"])
-    assert "@redis/client" not in package["dependencies"]
+    # The Redis client is for the live updates of the tasks (ADR 0051), not for the limit.
+    assert "@redis/client" in package["dependencies"]
     env = files[".env.example"]
     assert "RATE_LIMIT_PER_MINUTE=0\n" in env and "RATE_LIMIT_TRUSTED_HOPS=1\n" in env
     assert "RATE_LIMIT_STORE_URL" not in env
@@ -80,7 +81,8 @@ def test_the_proxy_limits_the_requests_in_memory(result: GenerationResult) -> No
     # Local runs have no limit: the UI tests make more requests than a user.
     assert "RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}" in compose
     assert "RATE_LIMIT_PER_MINUTE=1200\n" in files["deploy/kubernetes/config.env"]
-    assert "redis" not in compose
+    # The Redis service of Compose is for the live updates: the limit does not use it.
+    assert "RATE_LIMIT_STORE_URL" not in compose
 
 
 def test_the_health_route_checks_the_database(result: GenerationResult) -> None:

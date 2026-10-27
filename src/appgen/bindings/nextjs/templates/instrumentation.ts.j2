@@ -5,6 +5,13 @@
  * database migrations before it serves requests. With
  * `DATABASE_SEED=true`, it then fills the empty tables with the seed
  * records (as `pnpm db:seed` does).
+{% if nextjs.live %}
+ *
+ * At SIGTERM and SIGINT, the server waits for its open requests before
+ * it stops. The streams of the live updates (ADR 0051) stay open, so they
+ * end at the signal, and the clients open new streams, for example at
+ * another replica.
+{% endif %}
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") {
@@ -19,4 +26,10 @@ export async function register() {
     const { seedDatabase } = await import("@/shared/db/seed");
     await seedDatabase(getDb());
   }
+{% if nextjs.live %}
+  const { liveBroker } = await import("@/shared/db/live");
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => liveBroker().endStreams());
+  }
+{% endif %}
 }

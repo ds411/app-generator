@@ -1,0 +1,30 @@
+{{ trace_header("app") }}
+import "server-only";
+
+import { inArray } from "drizzle-orm";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+
+import type { Database } from "./client";
+
+/**
+ * A step of a path of relations from a record to the users: the receiver
+ * paths of the notifications (ADR 0041), and the owner paths of the record
+ * rules (ADR 0025). The step has its table, the column of the IDs of the
+ * step before, and the column of the next IDs. A many-to-one step reads
+ * the foreign key of the records, and a many-to-many step reads its join
+ * table.
+ */
+export type PathStep = readonly [table: PgTable, from: PgColumn, to: PgColumn];
+
+/** Return the IDs of the users at the end of a path of a record, as the transaction has them. */
+export async function pathUsers(tx: Database, recordId: string, steps: readonly PathStep[]): Promise<string[]> {
+  let ids = [recordId];
+  for (const [table, from, to] of steps) {
+    if (ids.length === 0) {
+      return [];
+    }
+    const rows = await tx.select({ id: to }).from(table).where(inArray(from, ids));
+    ids = rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  }
+  return ids;
+}

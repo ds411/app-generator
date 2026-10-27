@@ -85,7 +85,19 @@ export const {{ var }}Options = {{ var }}Api.options((item) => String(item.{{ ap
 {{ trace(event.element_id) }}
 {% endfor %}
 {% endif %}
+{% if element.live %}
+
+// A change of {{ type }} in another browser loads the open views again: the
+// stream of the FastAPI app (ADR 0051, src/app/providers/live-updates.tsx).
+{{ trace(element.live.id) }}
+{% endif %}
 {% else %}
+{% if element.live %}
+// The mock records stay in this browser tab: no other browser changes
+// them, so the live updates need the FastAPI app (`x-react-data: api`, ADR 0051).
+{{ trace(element.live.id) }}
+
+{% endif %}
 import { {{ var }}Defaults, type {{ type }}{{ ", type " ~ type ~ "FileField" if has_files }}, type {{ type }}Input } from "../model/types";
 import { {{ var }}MockData } from "./{{ name | kebab }}-mock-data";
 

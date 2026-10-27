@@ -3,6 +3,9 @@
 {% set history = has_history(definition) %}
 {% set storage = definition.storage %}
 {% set transactions = nextjs.jobs or lines_ops %}
+{% set live_scoped = nextjs.live | selectattr("rules") | list %}
+{# With live entities (ADR 0051), the changes run in `this.write`, which sends their events after the commit. #}
+{% set begin = "this.write" if nextjs.live else "getDb().transaction" %}
 import "server-only";
 
 import {
@@ -64,6 +67,11 @@ import { deleteFiles, type StoredFile } from "@/shared/storage";
 import { {{ "checkAtEnd, " if nextjs.total_rules and transactions }}type Database, getDb{{ ", runEvent" if nextjs.events }} } from "./client";
 {% if history %}
 import { addEntry, type HistoryMember, snapshot } from "./history";
+{% endif %}
+{% if live_scoped %}
+import { type Audience, type LiveAction, liveAudience, liveChanges, noteChange } from "./live";
+{% elif nextjs.live %}
+import { type LiveAction, liveChanges, noteChange } from "./live";
 {% endif %}
 
 type Row = Record<string, unknown>;
@@ -213,6 +221,13 @@ export type RepositoryOptions<T> = {
 {% if nextjs.events %}
   /** The events of the entity. An error of an operation rolls back the change. */
   events?: Events<T>;
+{% endif %}
+{% if nextjs.live %}
+  /**
+   * True for a live entity (ADR 0051): a create, a change, and a delete of
+   * a record give an event after the commit of the transaction.
+   */
+  live?: boolean;
 {% endif %}
 {% if nextjs.totals %}
   /**
@@ -368,6 +383,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.events %}
   private readonly events: Events<T>;
 {% endif %}
+{% if nextjs.live %}
+  private readonly live: boolean;
+{% endif %}
 {% if nextjs.totals %}
   private readonly totals: RepositoryOptions<T>["totals"];
 {% if nextjs.me_totals %}
@@ -404,6 +422,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.events %}
     this.events = options.events ?? {};
+{% endif %}
+{% if nextjs.live %}
+    this.live = options.live ?? false;
 {% endif %}
 {% if nextjs.totals %}
     this.totals = options.totals;
@@ -539,7 +560,7 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% else %}
     const values: Row = { ...this.defaults, ...input };
 {% endif %}
-    return getDb().transaction(async (tx) => {
+    return {{ begin }}(async (tx) => {
       const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
       const [row] = rows as [Row];
       this.checkWorkflows(undefined, row);
@@ -565,6 +586,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.notices %}
         await this.addNotices(tx, String(row.id), undefined);
 {% endif %}
+{% if live_scoped %}
+        await this.noteLive(tx, String(row.id), "created");
+{% elif nextjs.live %}
+        this.noteLive(String(row.id), "created");
+{% endif %}
         return this.reread(tx, String(row.id));
       }
 {% endif %}
@@ -573,6 +599,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.notices %}
       await this.addNotices(tx, String(row.id), undefined);
+{% endif %}
+{% if live_scoped %}
+      await this.noteLive(tx, String(row.id), "created");
+{% elif nextjs.live %}
+      this.noteLive(String(row.id), "created");
 {% endif %}
       return record as T;
     });
@@ -603,7 +634,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
   async update(id: string, patch: Partial<TInput>): Promise<T> {
     const where = eq(this.table.id, id);
 {% endif %}
-    return getDb().transaction(async (tx) => {
+    return {{ begin }}(async (tx) => {
+{% if live_scoped %}
+      // The live event goes to the users that may read the record before or after the change.
+      const audience = await this.audience(tx, id);
+{% endif %}
 {% set reads_history = (" || this.history.length > 0" if history else "") ~ (" || this.notify !== undefined" if nextjs.notices else "") %}
 {% if translatable %}
       const reads = this.workflows.length > 0 || this.translatable.length > 0{{ " || this.events.changed !== undefined" if nextjs.events }}{{ reads_history }};
@@ -654,6 +689,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% if nextjs.notices %}
         await this.addNotices(tx, id, before[0]);
 {% endif %}
+{% if live_scoped %}
+        await this.noteLive(tx, id, "changed", audience);
+{% elif nextjs.live %}
+        this.noteLive(id, "changed");
+{% endif %}
         return this.reread(tx, id);
       }
 {% endif %}
@@ -662,6 +702,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.notices %}
       await this.addNotices(tx, id, before[0]);
+{% endif %}
+{% if live_scoped %}
+      await this.noteLive(tx, id, "changed", audience);
+{% elif nextjs.live %}
+      this.noteLive(id, "changed");
 {% endif %}
       return record as T;
     });
@@ -677,20 +722,19 @@ export class Repository<T extends EntityRecord, TInput extends object>
   async remove(id: string): Promise<void> {
 {% set where = "eq(this.table.id, id)" %}
 {% endif %}
-{% if nextjs.events or history %}
-{% if nextjs.events and history %}
+{% set users = (["the operation of the event"] if nextjs.events else []) + (["the change log"] if history else []) + (["the live event"] if nextjs.live else []) %}
+{% if users %}
+{% set conditions = (["deleted !== undefined"] if nextjs.events else []) + (["this.history.length > 0"] if history else []) + (["this.live"] if nextjs.live else []) %}
+{% set subject = users[0] if users | length == 1 else (users[0] ~ " and " ~ users[1] if users | length == 2 else users[:-1] | join(", ") ~ ", and " ~ users[-1]) %}
+{% if nextjs.events %}
     const deleted = this.events.deleted;
-    if (deleted !== undefined || this.history.length > 0) {
-      // The operation of the event and the change log get the record, in the transaction of the delete.
-{% elif nextjs.events %}
-    const deleted = this.events.deleted;
-    if (deleted !== undefined) {
-      // The operation of the event gets the record, in the transaction of the delete.
-{% else %}
-    if (this.history.length > 0) {
-      // The change log gets the record, in the transaction of the delete.
 {% endif %}
-      {{ "const removed: Row[] = " if storage }}await getDb().transaction(async (tx) => {
+    if ({{ conditions | join(" || ") }}) {
+      // {{ subject[0] | upper }}{{ subject[1:] }} {{ "gets" if users | length == 1 else "get" }} the record, in the transaction of the delete.
+      {{ "const removed: Row[] = " if storage }}await {{ begin }}(async (tx) => {
+{% if live_scoped %}
+        const audience = await this.audience(tx, id);
+{% endif %}
         const rows: Row[] = await tx.select().from(this.table).where({{ where }}).limit(1);
 {% if nextjs.events %}
         const [record] = await this.toRecords(tx, this.found(rows, id));
@@ -703,6 +747,11 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if history %}
         await this.log(tx, id, "deleted", rows[0]);
+{% endif %}
+{% if live_scoped %}
+        await this.noteLive(tx, id, "deleted", audience);
+{% elif nextjs.live %}
+        this.noteLive(id, "deleted");
 {% endif %}
 {% if storage %}
         return rows;
@@ -764,15 +813,23 @@ export class Repository<T extends EntityRecord, TInput extends object>
     if (!Object.hasOwn(this.files, key)) {
       throw new ValidationError(`${this.entity} has no file field ${key}.`);
     }
-    return getDb().transaction(async (tx) => {
+    return {{ begin }}(async (tx) => {
       const rows: Row[] = await tx.select().from(this.table).where(where).limit(1).for("update");
       const before = (this.found(rows, id)[0]?.[key] as StoredFile | null | undefined) ?? null;
+{% if live_scoped %}
+      const audience = await this.audience(tx, id);
+{% endif %}
       const changed: Row[] = await tx
         .update(this.table)
         .set({ [key]: file })
         .where(eq(this.table.id, id))
         .returning();
       const [record] = await this.toRecords(tx, changed);
+{% if live_scoped %}
+      await this.noteLive(tx, id, "changed", audience);
+{% elif nextjs.live %}
+      this.noteLive(id, "changed");
+{% endif %}
       return { record: record as T, before };
     });
   }
@@ -853,6 +910,40 @@ export class Repository<T extends EntityRecord, TInput extends object>
       await this.notify(tx, rows[0], before);
     }
   }
+{% endif %}
+{% if nextjs.live %}
+
+  /**
+   * Run the work of a change in a transaction. After the commit, the
+   * changes of a live entity that the work notes go to the clients
+   * (ADR 0051). In the work of another change, for example an event, they
+   * wait for the commit of that change.
+   */
+  private write<R>(work: (tx: Transaction) => Promise<R>): Promise<R> {
+    return liveChanges(() => getDb().transaction(work));
+  }
+{% if live_scoped %}
+
+  /** Return who may read a record now, for the live event of a change (ADR 0051), or undefined. */
+  private async audience(tx: Transaction, id: string): Promise<Audience | undefined> {
+    return this.live ? liveAudience(tx, this.entity, id) : undefined;
+  }
+
+  /** Note a change of a record of a live entity, with the audience before the change (ADR 0051). */
+  private async noteLive(tx: Transaction, id: string, action: LiveAction, before?: Audience): Promise<void> {
+    if (this.live) {
+      await noteChange(tx, this.entity, id, action, before);
+    }
+  }
+{% else %}
+
+  /** Note a change of a record of a live entity (ADR 0051). */
+  private noteLive(id: string, action: LiveAction): void {
+    if (this.live) {
+      noteChange(this.entity, id, action);
+    }
+  }
+{% endif %}
 {% endif %}
 
   /**

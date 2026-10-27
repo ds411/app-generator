@@ -89,8 +89,51 @@ live entities that the client may read.
   of the server. The clients connect again, for example to another
   replica.
 
-The Next.js app and the React app use the same events to read their
-open views again.
+The Next.js app has the same stream at `GET /api/live`, with the
+session cookie of the user:
+
+- **The changes.** The repositories note each create, change, and
+  delete of a record of a live entity in their transactions, and give
+  the changes to a broker after the commit. A rollback drops them. A
+  change in the operation of an event (ADR 0031) joins the changes of
+  its transaction. The record rules give the audiences before and after
+  each change, as in the FastAPI app.
+- **The replicas.** The broker of the Next.js app uses `LIVE_EVENTS_URL`
+  in the same way: a Redis channel, a warning and the changes of the
+  process when Redis is not available, and `reset` when Redis comes
+  back.
+- **The stop of the server.** The Next.js server waits for its open
+  requests at SIGTERM too. The instrumentation hook of the app ends the
+  streams at SIGINT and SIGTERM.
+
+The front ends read the events with the browser API `EventSource`:
+
+- **One stream for each page.** A component in the providers of the app
+  opens the stream: the route `/api/live` in the Next.js app, and
+  `/live` of the FastAPI app in the React app with the API client
+  (`x-react-data: api`). The React app with mock data has no stream.
+- **The views.** An event marks the data of its entity as old, and the
+  open views of the entity load their data again, with the usual
+  operations. The events of 50 ms give one load for each entity. After
+  `reset`, and after each new connection after the first, all open
+  views load their data again.
+- **The sign-in.** `EventSource` cannot send the bearer token of the
+  React app. The FastAPI app with the sign-in has the endpoint
+  `POST /live/ticket`: it gives the signed-in user a ticket that is
+  valid for 30 seconds, signed with the key of the sessions. The client
+  opens `/live?ticket=...`, and the stream has the user of the ticket.
+  After a sign-in or a sign-out, the client opens a new stream. In the
+  Next.js app, the browser sends the session cookie.
+- **The errors.** The browser connects again by itself after a lost
+  connection. After an error response, for example while a new version
+  of the server starts, the client gets a new URL and opens the stream
+  again after a wait of 1 second, which doubles up to 30 seconds. An
+  error before the first stream, for example 401, stops the client.
+
+A stream with `fetch` could send the bearer token. But `EventSource`
+has the reconnection of the browser, and the browser tests can wait
+for the idle network with an open `EventSource` (Playwright does not
+count its requests).
 
 ## Consequences
 
@@ -110,3 +153,7 @@ open views again.
   closes the streams at that limit. The clients connect again.
 - An open stream holds a connection of the server, but no connection of
   the database.
+- A user also gets the events of the own changes: the open views load
+  their data a second time.
+- A ticket in the URL can go into the logs of a proxy. It is valid for
+  only 30 seconds, and only for the stream.

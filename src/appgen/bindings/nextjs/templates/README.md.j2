@@ -152,6 +152,7 @@ starts the service `jobs`, which calls each route each minute.
 {# The secrets of deploy/knative/service.yaml: each one is a secret of its own. #}
 {% set secrets = ["DATABASE_URL"] + (["JOBS_SECRET"] if nextjs.jobs else [])
     + (["RATE_LIMIT_STORE_URL"] if nextjs.redis else [])
+    + (["LIVE_EVENTS_URL"] if nextjs.live else [])
     + (["AUTH_SECRET"] if definition.auth else [])
     + ((definition.auth.providers.values() | map(attribute="client_secret_env") | list) if definition.auth else [])
     + (ts_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
@@ -464,6 +465,45 @@ not index them.
   record has one link at most. The token shows one time only.
 - A new link stops the old link, and a revoke stops the link. A link
   does not expire.
+
+{% endif %}
+{% if nextjs.live %}
+## Live updates
+
+The open views show the creates, the changes, and the deletes of the
+records of these entities in other browsers at once (ADR 0051). The
+route `/api/live` sends them as server-sent events, and each browser tab
+reads its views again after an event.
+
+| Entity | Operations that read it |
+| ------ | ----------------------- |
+{% for e in nextjs.live %}
+| {{ e.name }} | {% for op in e.readers %}`{{ op }}`{{ ", " if not loop.last }}{% endfor %} |
+{% endfor %}
+
+- The repositories note the changes, and send them after the commit of
+  the transaction. A change that rolls back sends nothing.
+- Each event has the type (`created`, `changed`, or `deleted`), the
+  entity, and the ID of the record, but no values: the views read the
+  record again with the access rules of the request.
+{% if definition.access %}
+- The stream gives a user only the events of the entities that the role
+  of the user may list or read. With record rules (ADR 0025), a user gets
+  only the events of the records that the user may read, before or after
+  the change.
+{% elif definition.auth %}
+- The stream of an entity with protected operations needs a signed-in
+  user.
+{% endif %}
+- Without `LIVE_EVENTS_URL`, each process sends the changes of its own
+  requests. With Redis in `LIVE_EVENTS_URL`, all processes send all the
+  changes. Compose starts Redis with `--profile redis`. When Redis is not
+  available, the app logs a warning and sends the changes of its own
+  requests.
+- A change outside the repositories gives no event: SQL in a script, a
+  delete of the database (`on_delete: cascade`), and the seed.
+- After a lost connection, the browser opens the stream again, and the
+  views read all their data again.
 
 {% endif %}
 {% if ui_plan.embedded_pages %}

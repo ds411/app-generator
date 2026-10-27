@@ -6,6 +6,10 @@ import { LanguageProvider } from "@/shared/lib/language-provider";
 {% endif %}
 import { ThemeProvider } from "@/shared/lib/theme";
 import { Toaster } from "@/shared/ui/sonner";
+{% if react.live %}
+
+import { LiveUpdates } from "./live-updates";
+{% endif %}
 
 {% if i18n %}
 /** The toasts, with their labels in the selected language. */
@@ -21,7 +25,7 @@ function Toasts() {
 }
 
 {% endif %}
-/** The providers of the app: the color mode{% if i18n %}, the language,{% endif %} and the toasts. */
+/** The providers of the app: the color mode{% if i18n %}, the language,{% endif %}{{ ", the live updates," if react.live }} and the toasts. */
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <ThemeProvider
@@ -30,6 +34,9 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
       enableSystem
       disableTransitionOnChange
     >
+{% if react.live %}
+      <LiveUpdates />
+{% endif %}
 {% if i18n %}
       <LanguageProvider>
         {children}

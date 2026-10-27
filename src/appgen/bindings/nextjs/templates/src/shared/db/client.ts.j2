@@ -22,6 +22,11 @@ const ambient = new AsyncLocalStorage<Database>();
 /** True in the operation of an event (ADR 0031). */
 const inEvent = new AsyncLocalStorage<true>();
 {% endif %}
+{% if nextjs.live and transactions %}
+
+/** The callbacks that run after the commit of the transaction of `inTransaction()` (ADR 0051). */
+const commits = new AsyncLocalStorage<(() => void)[]>();
+{% endif %}
 
 /**
  * Return the database client. It connects on the first call, so that
@@ -82,6 +87,20 @@ export function ownDb(): Database {
  */
 {% if nextjs.total_rules %}
 export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
+{% if nextjs.live %}
+  return committed(() =>
+    getDb().transaction((transaction) =>
+      ambient.run(transaction, async () => {
+        const pending: Check[] = [];
+        const result = await checks.run(pending, work);
+        for (const check of pending) {
+          await check();
+        }
+        return result;
+      }),
+    ),
+  );
+{% else %}
   return getDb().transaction((transaction) =>
     ambient.run(transaction, async () => {
       const pending: Check[] = [];
@@ -92,6 +111,7 @@ export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
       return result;
     }),
   );
+{% endif %}
 }
 
 /** A check of a change that runs at the end of the work of `inTransaction()`. */
@@ -116,7 +136,11 @@ export async function checkAtEnd(db: Database, check: (db: Database) => Promise<
 }
 {% else %}
 export async function inTransaction<T>(work: () => Promise<T>): Promise<T> {
+{% if nextjs.live %}
+  return committed(() => getDb().transaction((transaction) => ambient.run(transaction, work)));
+{% else %}
   return getDb().transaction((transaction) => ambient.run(transaction, work));
+{% endif %}
 }
 {% endif %}
 {% endif %}
@@ -136,5 +160,51 @@ export async function runEvent(transaction: Database, operation: () => Promise<v
   }
   await inEvent.run(true, () => ambient.run(transaction, operation));
   return true;
+}
+{% endif %}
+{% if nextjs.live %}
+{% if transactions %}
+
+/**
+ * Run the work of `inTransaction()`, and after the commit of its
+ * transaction the callbacks of `afterCommit()`, for example the live
+ * events of the changes (ADR 0051). An error of the work drops them.
+ */
+async function committed<T>(work: () => Promise<T>): Promise<T> {
+  if (commits.getStore() !== undefined) {
+    return work();
+  }
+  const callbacks: (() => void)[] = [];
+  const result = await commits.run(callbacks, work);
+  for (const callback of callbacks) {
+    callback();
+  }
+  return result;
+}
+{% endif %}
+
+{% if transactions %}
+/**
+ * Run a callback after the commit of the changes of the caller, for
+ * example the live events of a change (ADR 0051). In the work of
+ * `inTransaction()`, the callback waits for the commit of its transaction.
+ * Outside of it, the caller has committed, and the callback runs now.
+ */
+{% else %}
+/**
+ * Run a callback after the commit of the changes of the caller, for
+ * example the live events of a change (ADR 0051). The caller has
+ * committed, so the callback runs now.
+ */
+{% endif %}
+export function afterCommit(callback: () => void): void {
+{% if transactions %}
+  const callbacks = commits.getStore();
+  if (callbacks !== undefined) {
+    callbacks.push(callback);
+    return;
+  }
+{% endif %}
+  callback();
 }
 {% endif %}
