@@ -18,6 +18,9 @@ export {
 {% if shares.get(name) %}
   {{ var }}Sharing,
 {% endif %}
+{% if react.ranges.get(name) %}
+  {{ var }}Ranges,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

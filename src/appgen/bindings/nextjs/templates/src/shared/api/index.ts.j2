@@ -31,6 +31,9 @@ export type {
   Notice,
   NoticeApi,
 {% endif %}
+{% if has_available(definition) %}
+  OwnerRange,
+{% endif %}
   Search,
 {% if shares %}
   SharedRecord,

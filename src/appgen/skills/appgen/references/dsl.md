@@ -610,7 +610,9 @@ foreign keys). A compare rule compares two numbers, two dates, two
 date-times, or two texts. The start and the end of a `no_overlap` rule
 are two `date` or two `datetime` fields. An empty value passes a
 compare rule and a `no_overlap` rule: `required` checks it. The mock
-data keeps the compare and the unique rules.
+data keeps the compare and the unique rules. The `available` filter of a
+view keeps the records without a related record in the picked days of a
+`no_overlap` rule (see [views](#views)).
 
 A side of a compare rule can also be a total of the lines of the
 record, as in a [computed field](#computed-fields): `count(<relation>)`,
@@ -2108,8 +2110,9 @@ the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), `date_range` (`field`), `near`
-(`field`, `distance`), or `area` (`field`). All filters take `label`,
-and all filters except `near` and `area` take `default`. The `default`
+(`field`, `distance`), `area` (`field`), or `available` (`rule`). All
+filters take `label`, and all filters except `near`, `area`, and
+`available` take `default`. The `default`
 of a `select` filter of a relation to the user entity can be `$me`, the
 signed-in user (see [The signed-in user](#the-signed-in-user)): the view
 starts with the records of the user, and a clear of the filter shows all
@@ -2130,6 +2133,50 @@ for a filter of the field path `<path>`:
 - `area`: `<path>_area`, a box `<south>,<west>,<north>,<east>`, for
   example `38.69,-9.23,38.80,-9.09`. A box whose west is greater than
   its east crosses the antimeridian.
+
+The filter `available` keeps the records without a related record whose
+range overlaps the days that the user picks
+([ADR 0047](https://github.com/ds411/app-generator/blob/main/docs/adr/0047-available-filter.md)), for example the rooms
+without a booking. `rule` is a relation to many records (`one_to_many`
+or `many_to_many`) and a `no_overlap` rule of the related entity, with
+a dot: the `start` and the `end` of the rule give the range of a related
+record (see [Entity rules](#entity-rules)). The filter shows the widget
+of a date range.
+
+```yaml
+# example: room-booking
+ui:
+  views:
+    free_rooms:
+      kind: table
+      entity: Room
+      columns: { name: {}, capacity: {} }
+      filters:
+        free: { kind: available, rule: bookings.no_double_booking, label: Free on }
+```
+
+- The range of a related record is from its start up to its end: a
+  range that ends when another starts does not overlap it, as for the
+  rule. A related record without a start or an end has no range.
+- On date fields, the picked days are the range of a new related
+  record: from the first day up to the end day, for example a check-in
+  and a check-out. A record is free on the day that a booking ends.
+  Without an end day after the first day, the range is the first day.
+- On date-time fields, the picked days are whole days in UTC: from the
+  start of the first day to the end of the last day.
+- Without a first day, the filter keeps all records.
+- The list endpoint of the FastAPI app takes `<relation>_free_from` and
+  `<relation>_free_to`, for example
+  `?bookings_free_from=2026-03-06&bookings_free_to=2026-03-09`. The
+  Next.js app and the React app with mock data read the ranges of the
+  related records with the access of the list of the records, and filter
+  in the browser. The ranges come from all related records: a record
+  rule that hides the bookings of another user does not make a room
+  free.
+- `appgen validate` reports a relation that does not exist or is not to
+  many records (`unknown-reference`, `unsuitable-field`), and a rule
+  that does not exist or is not a `no_overlap` rule (`unknown-reference`,
+  `invalid-option`).
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page

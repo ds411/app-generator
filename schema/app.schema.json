@@ -1015,6 +1015,40 @@
       "title": "Auth",
       "type": "object"
     },
+    "AvailableFilter": {
+      "additionalProperties": false,
+      "description": "The records without a related record whose time range overlaps the picked days (ADR 0047).\n\n`rule` is a relation to many records and a `no_overlap` rule of their\nentity, for example `bookings.no_double_booking`: the start and the end\nof the rule give the range of a related record.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "kind": {
+          "const": "available",
+          "title": "Kind",
+          "type": "string"
+        },
+        "rule": {
+          "$ref": "#/$defs/RuleRef"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "rule"
+      ],
+      "title": "AvailableFilter",
+      "type": "object"
+    },
     "BadgeRef": {
       "additionalProperties": false,
       "description": "A field that shows as a badge.",
@@ -3517,6 +3551,9 @@
         },
         {
           "$ref": "#/$defs/AreaFilter"
+        },
+        {
+          "$ref": "#/$defs/AvailableFilter"
         }
       ]
     },
@@ -6621,6 +6658,10 @@
       },
       "title": "Role",
       "type": "object"
+    },
+    "RuleRef": {
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+      "type": "string"
     },
     "SearchFilter": {
       "additionalProperties": false,

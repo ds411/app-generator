@@ -16,8 +16,10 @@ binding, the test:
 3. Runs the UI test `ui-tests/tests/listings.spec.ts`: the table of the
    page /stays pages the listings of its filters, the card list of the
    page /booking-months/{year} shows the months of the year of its path,
-   and the calendar of the page /listings/{id}/calendar shows the
-   bookings of one listing.
+   the calendar of the page /listings/{id}/calendar shows the bookings
+   of one listing, and the available filter of the table of the page
+   /free keeps the listings without a booking in the picked days
+   (ADR 0047).
 
 Run it from the repository root:
 
@@ -87,6 +89,28 @@ QUERY_VIEWS = {
     },
 }
 """What the UI test expects of the views of the seed records of the fixture."""
+AVAILABLE = {
+    "path": "/free",
+    "label": "Dates",
+    "today": "2026-03-01T12:00:00Z",
+    "all": ["Canal room", "Harbour loft", "Old town flat", "River house"],
+    "ranges": [
+        # Ana has the harbour loft from 2 to 6 March.
+        {
+            "from": "Tuesday, March 3rd, 2026",
+            "to": "Thursday, March 5th, 2026",
+            "titles": ["Canal room", "Old town flat", "River house"],
+        },
+        # The harbour loft is free from the check-out day of Ana, and Ben has the old town flat
+        # from 10 to 12 March.
+        {
+            "from": "Friday, March 6th, 2026",
+            "to": "Wednesday, March 11th, 2026",
+            "titles": ["Canal room", "Harbour loft", "River house"],
+        },
+    ],
+}
+"""What the UI test expects of the available filter of the page /free (ADR 0047)."""
 
 
 class ListingsUiTestError(Exception):
@@ -179,6 +203,7 @@ def check_ui(binding: str, definition: AppDefinition) -> None:
     expected = {
         **expected_ui("react" if binding == "react-api" else binding, definition),
         "queryViews": QUERY_VIEWS,
+        "available": AVAILABLE,
     }
     expected_file.write_text(json.dumps(expected, indent=2) + "\n")
     env = {

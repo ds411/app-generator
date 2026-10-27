@@ -175,6 +175,18 @@ export type ExpectedConnections = {
 };
 
 /** The views of the rows of the queries of tests/fixtures/listings.yaml, for scripts/listings_ui_test.py (ADR 0045). */
+/** A table of listings with an available filter of their bookings (ADR 0047). */
+export type ExpectedAvailable = {
+  path: string;
+  /** The label of the filter, and the day that the browser shows first (UTC). */
+  label: string;
+  today: string;
+  /** The titles of all listings, in the order of the table. */
+  all: string[];
+  /** The labels of the first and the last day of a pick in the calendar, and the free listings. */
+  ranges: { from: string; to: string; titles: string[] }[];
+};
+
 export type ExpectedQueryViews = {
   /** A table of a query of records, with a required text filter and a number filter. */
   table: {
@@ -277,6 +289,8 @@ export type Expected = {
   connections?: ExpectedConnections;
   /** Only for the test of the views of the queries. */
   queryViews?: ExpectedQueryViews;
+  /** Only for the test of the available filter of the listings. */
+  available?: ExpectedAvailable;
   /** Only for the test of the signed-in users. */
   sessions?: ExpectedSessions;
   /** Only for the test of the map views. */

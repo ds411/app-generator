@@ -7,7 +7,8 @@
 {% set files = element.file_fields if definition.storage else {} %}
 {% set history = element.history %}
 {% set share = shares.get(name) %}
-{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + (["createHistoryApi"] if history else []) + (["createSharingApi"] if share else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type HistoryApi"] if history else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) + (["type SharingApi"] if share else []) %}
+{% set ranges = nextjs.ranges.get(name) %}
+{% set api_names = ["createEntityApi"] + (["createFileApi"] if files else []) + (["createHistoryApi"] if history else []) + (["createSharingApi"] if share else []) + ["type EntityApi"] + (["type FileApi"] if files else []) + (["type HistoryApi"] if history else []) + (["type ListQuery", "type ListResult"] if lists or ops | selectattr("1.kind", "eq", "list") | list else []) + (["type OwnerRange"] if ranges else []) + (["type SharingApi"] if share else []) + (["unwrap"] if ranges else []) %}
 import { {{ api_names | join(", ") }} } from "@/shared/api";
 
 import type { {{ type }}, {{ type }}Input{{ ", " ~ type ~ "FileField" if files }} } from "../model/types";
@@ -23,6 +24,9 @@ import {
   list{{ type }}Action,
 {% if history %}
   list{{ type }}HistoryAction,
+{% endif %}
+{% if ranges %}
+  list{{ type }}RangesAction,
 {% endif %}
   remove{{ type }}Action,
 {% if files %}
@@ -72,6 +76,13 @@ export const {{ var }}Sharing: SharingApi = createSharingApi({ {{ trace(share.pa
   create: create{{ type }}ShareLinkAction,
   revoke: revoke{{ type }}ShareLinkAction,
 });
+{% endif %}
+{% if ranges %}
+
+/** Return the ranges of the related records of an available filter of {{ type }} (ADR 0047). */
+export async function {{ var }}Ranges(key: {{ ranges.keys }}): Promise<OwnerRange[]> {
+  return unwrap(await list{{ type }}RangesAction(key));
+}
 {% endif %}
 {% for op_name, op in ops %}
 
