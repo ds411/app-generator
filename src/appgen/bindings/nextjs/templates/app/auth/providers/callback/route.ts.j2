@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/auth/
     if (flow === null) {
       throw new ProviderError("The sign-in has no valid flow. Sign in again.");
     }
-    await startSession(await finishProviderSignIn(name, flow, request.nextUrl.searchParams));
+    await startSession(await finishProviderSignIn(name, flow, request.nextUrl.searchParams){{ ", name" if definition.auth.providers.values() | selectattr("sign_out") | list }});
     target = flow.next;
   } catch (error) {
     console.error(error);

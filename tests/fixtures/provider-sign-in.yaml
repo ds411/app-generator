@@ -36,6 +36,8 @@ auth:
       create_users: true
       default_role: staff
       claims: { name: name }
+      # The sign-out also ends the session at the provider: its end_session_endpoint.
+      sign_out: true
     partner:
       issuer: https://partner.example.com/realms/staff
       client_id_env: PARTNER_OIDC_CLIENT

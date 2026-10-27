@@ -14,7 +14,10 @@ Amazon Cognito, whose ID tokens do not mark the email address as
 verified: the provider needs `trust_email`. A provider with `roles` signs
 in one user with each group of `roles.map` in turn, and then without a
 group: `/auth/me` gives the role of the group each time, and at last the
-default role, or the app refuses the sign-in (403).
+default role, or the app refuses the sign-in (403). A provider with
+`sign_out` sends the browser of the sign-out route to the logout endpoint
+of the mock provider, with the client ID and the page after the sign-out,
+and the mock provider sends it back to the page.
 
 Run it from the repository root, with an app that a check script
 generated and installed (`uv sync`):
@@ -147,6 +150,35 @@ def check_roles(
     log(f"{name}: without a group, the user gets the default role {found}")
 
 
+def check_sign_out(name: str, provider: Provider, mock: mock_oidc.MockProvider) -> None:
+    """With `sign_out`: the sign-out route sends the browser to the logout endpoint, and the
+    logout endpoint sends it back to the page of `return_to`."""
+    assert provider.sign_out is not None
+    page = f"{FRONT_END}/sign-in"
+    browser = Browser()
+    status, headers, body = browser.get(
+        f"{APP_URL}/auth/providers/{name}/sign-out?{urlencode({'return_to': page})}"
+    )
+    _expect(status, 303, f"GET /auth/providers/{name}/sign-out", body)
+    location: str = headers["Location"]
+    endpoint = mock_oidc.sign_out_url_of(mock_oidc.DEFAULT_PORT, provider.authorize_params)
+    if not location.startswith(f"{endpoint}?"):
+        raise CheckError(f"The sign-out sent the browser to {location}, not to {endpoint}.")
+    count = len(mock.logouts)
+    status, headers, body = browser.get(location)
+    _expect(status, 302, "the logout endpoint of the mock provider", body)
+    if headers["Location"] != page or len(mock.logouts) != count + 1:
+        raise CheckError(f"The logout endpoint sent the browser to {headers['Location']}.")
+    query = mock.logouts[-1]
+    if query.get("client_id") != mock_oidc.DEFAULT_CLIENT_ID:
+        raise CheckError(f"The logout request has the client ID {query.get('client_id')}.")
+    log(f"{name}: the sign-out ends the session at the provider ({provider.sign_out.return_param})")
+    status, _, body = browser.get(
+        f"{APP_URL}/auth/providers/{name}/sign-out?{urlencode({'return_to': 'https://x.test/'})}"
+    )
+    _expect(status, 422, "the sign-out with a return_to of another origin", body)
+
+
 def check_provider(
     name: str, provider: Provider, mock: mock_oidc.MockProvider, first: bool
 ) -> None:
@@ -201,6 +233,9 @@ def started(app: Path, providers: dict[str, Provider], temp: Path) -> Generator[
     for name, provider in providers.items():
         port = mock_oidc.DEFAULT_PORT
         env[f"{name.upper()}_ISSUER"] = mock_oidc.issuer_of(port, provider.authorize_params)
+        if provider.sign_out is not None and provider.sign_out.endpoint is not None:
+            sign_out_url = mock_oidc.sign_out_url_of(port, provider.authorize_params)
+            env[f"{name.upper()}_SIGN_OUT_URL"] = sign_out_url
         env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
         env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
@@ -242,6 +277,8 @@ def main() -> int:
                 check_provider(name, provider, mock, first=index == 0)
                 if provider.roles is not None and access is not None:
                     check_roles(name, provider, mock, access.role_field)
+                if provider.sign_out is not None:
+                    check_sign_out(name, provider, mock)
     except (CheckError, subprocess.CalledProcessError) as error:
         print(f"provider-sign-in: failed: {error}", file=sys.stderr)
         return 1

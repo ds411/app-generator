@@ -2959,6 +2959,35 @@ auth:
           0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
           5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
   ```
+- `sign_out: true` makes the sign-out of the app also end the session
+  of the user at the provider. Without it, the sign-out ends only the
+  session of the app, and the next sign-in with the provider can go
+  through without a password. The Next.js app keeps the provider of the
+  sign-in in the session, and the button sends the browser to the logout
+  URL of the provider with `client_id` and the sign-in page of the app
+  (`<PUBLIC_URL>/sign-in`). The React app with `x-react-data: api`
+  deletes its token, and opens `GET /auth/providers/<name>/sign-out` of
+  the FastAPI app with `return_to`, a page in `CORS_ORIGINS`, as the
+  start of the sign-in does. The provider ends its session, and sends
+  the browser back to the sign-in page: register this page as a sign-out
+  URL of the app at the provider. `true` uses the `end_session_endpoint`
+  of the discovery document, with the page in
+  `post_logout_redirect_uri` (OpenID Connect RP-Initiated Logout). The
+  mapping form sets another logout URL: `endpoint`, an `https` URL, and
+  `return_param`, the parameter of the page (default
+  `post_logout_redirect_uri`, not `client_id`). The setting
+  `<NAME>_SIGN_OUT_URL` changes the URL. A user pool of Amazon Cognito
+  has no `end_session_endpoint`:
+
+  ```yaml
+  sign_out:
+    endpoint: https://staff-portal.auth.eu-west-1.amazoncognito.com/logout
+    return_param: logout_uri
+  ```
+
+  Without a logout URL, the apps end only the session of the app, and
+  write a warning to the log. With mock data, the React app has no
+  session at the provider.
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up`, `password_reset`, or `second_factor`.

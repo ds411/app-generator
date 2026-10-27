@@ -2520,6 +2520,13 @@ class PyProvider:
     """With `roles`: each group and its role, in the order of the check."""
     roles_id: str | None = None
     """With `roles`: the ID of the element `roles`, for its trace."""
+    sign_out_id: str | None = None
+    """With `sign_out`: the ID of the element `sign_out`, for its trace."""
+    sign_out_endpoint: str = ""
+    """With `sign_out`: the logout URL, or empty for the `end_session_endpoint` of the discovery
+    document."""
+    sign_out_return_param: str = "post_logout_redirect_uri"
+    """With `sign_out`: the parameter of the logout URL with the page after the sign-out."""
 
     def pairs_arg(self, key: str, pairs: list[tuple[str, str]]) -> str:
         """Return the keyword argument `<key>=` of the provider in `provider_of`: a tuple of
@@ -3186,6 +3193,13 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
                 roles_claim=provider.roles.claim if provider.roles else None,
                 role_map=list(provider.roles.map.items()) if provider.roles else [],
                 roles_id=provider.roles.id if provider.roles else None,
+                sign_out_id=provider.sign_out.id if provider.sign_out else None,
+                sign_out_endpoint=(provider.sign_out.endpoint or "") if provider.sign_out else "",
+                sign_out_return_param=(
+                    provider.sign_out.return_param
+                    if provider.sign_out
+                    else "post_logout_redirect_uri"
+                ),
             )
         )
     return found

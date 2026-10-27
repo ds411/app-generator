@@ -58,7 +58,10 @@ test proves it for the room booking example (`examples/room-booking`):
    in with a group of each role of `roles` in turn, and then without a
    group, and sees the menu of the role each time: the test changes the
    redirect of the start of the sign-in, so that the authorization
-   request has `login_hint` and the mock parameter `groups`.
+   request has `login_hint` and the mock parameter `groups`. Then the
+   user signs out: the browser goes through the logout endpoint of the
+   mock user pool, with the client ID and the sign-in page as
+   `logout_uri`, and comes back to the sign-in page (`sign_out`).
 
 Run it from the repository root:
 
@@ -677,7 +680,9 @@ def expected_providers(binding: str, definition: AppDefinition) -> list[dict[str
     each role in turn, and then without a group: the user gets the role of
     the group each time, and at last the default role. With mock data, the
     React app signs in the mock user of the provider: the first one with
-    the first role of `roles`, or else with the default role.
+    the first role of `roles`, or else with the default role. With
+    `sign_out`, the sign-out after the last sign-in goes through the
+    logout endpoint of the mock provider (`signOut`).
     """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
@@ -710,7 +715,21 @@ def expected_providers(binding: str, definition: AppDefinition) -> list[dict[str
                 sign_ins.append(
                     {"loginHint": email, "groups": [], "menu": menu(provider.default_role)}
                 )
-        checks.append({"name": name, "title": str(provider.title or name), "signIns": sign_ins})
+        sign_out: dict[str, str] | None = None
+        if provider.sign_out is not None and binding != "react":
+            sign_out = {
+                "url": mock_oidc.sign_out_url_of(OIDC_PORT, provider.authorize_params),
+                "clientId": mock_oidc.DEFAULT_CLIENT_ID,
+                "returnParam": provider.sign_out.return_param,
+            }
+        checks.append(
+            {
+                "name": name,
+                "title": str(provider.title or name),
+                "signIns": sign_ins,
+                "signOut": sign_out,
+            }
+        )
     return checks
 
 
@@ -848,6 +867,9 @@ def provider_env(definition: AppDefinition) -> dict[str, str]:
     env: dict[str, str] = {}
     for name, provider in definition.auth.providers.items():
         env[f"{name.upper()}_ISSUER"] = mock_oidc.issuer_of(OIDC_PORT, provider.authorize_params)
+        if provider.sign_out is not None and provider.sign_out.endpoint is not None:
+            url = mock_oidc.sign_out_url_of(OIDC_PORT, provider.authorize_params)
+            env[f"{name.upper()}_SIGN_OUT_URL"] = url
         env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
         env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
     return env

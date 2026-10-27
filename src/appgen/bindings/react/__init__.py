@@ -423,7 +423,7 @@ BINDING = Binding(
         | {"translations", "language"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
-        | {"email_verification", "second_factor", "provider_roles"}
+        | {"email_verification", "second_factor", "provider_roles", "provider_sign_out"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}
         | {"entity_seed", "seed_record"}

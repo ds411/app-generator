@@ -2006,6 +2006,14 @@ def _check_provider(
                 at="authorize_params",
                 hint="Remove the parameter. Use 'scopes' for the scopes.",
             )
+    if provider.sign_out is not None and provider.sign_out.return_param == "client_id":
+        yield _error(
+            "reserved-name",
+            "The sign-out sets the parameter 'client_id' of the logout URL.",
+            provider.sign_out,
+            at="return_param",
+            hint="Name the parameter of the URL after the sign-out, for example 'logout_uri'.",
+        )
     yield from _check_provider_roles(definition, provider)
     if not provider.create_users:
         # With `roles`, the default role is the role of a user whose groups have no role.

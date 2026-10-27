@@ -113,6 +113,9 @@ class FakeProvider:
                     "authorization_endpoint": f"{ISSUER}/authorize",
                     "token_endpoint": f"{ISSUER}/token",
                     "jwks_uri": f"{ISSUER}/jwks",
+{% if p.sign_out_id and not p.sign_out_endpoint %}
+                    "end_session_endpoint": f"{ISSUER}/logout",
+{% endif %}
                 },
             )
         if request.url.path == "/jwks":
@@ -443,6 +446,36 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
     )
 
     assert_problem(response, 422)
+{% if p.sign_out_id %}
+
+
+async def test_the_sign_out_sends_the_browser_to_the_logout_url_of_the_provider(
+    browser: AsyncClient,
+) -> None:
+    page = f"{FRONT_END}/sign-in"
+    params = {"return_to": page}
+
+    response = await browser.get("/auth/providers/{{ p.name }}/sign-out", params=params)
+
+    assert response.status_code == 303, response.text
+    location = response.headers["location"]
+{% if p.sign_out_endpoint %}
+    assert location.startswith({{ (p.sign_out_endpoint ~ "?") | tojson }})
+{% else %}
+    assert location.startswith(f"{ISSUER}/logout?")
+{% endif %}
+    query = parse_qs(urlsplit(location).query)
+    assert query["client_id"] == [CLIENT_ID]
+    assert query[{{ p.sign_out_return_param | tojson }}] == [page]
+
+
+async def test_the_sign_out_refuses_a_return_to_of_another_origin(browser: AsyncClient) -> None:
+    params = {"return_to": "https://another.test/sign-in"}
+
+    response = await browser.get("/auth/providers/{{ p.name }}/sign-out", params=params)
+
+    assert_problem(response, 422)
+{% endif %}
 
 
 @pytest.mark.parametrize(
