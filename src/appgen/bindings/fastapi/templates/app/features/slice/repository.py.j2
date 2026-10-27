@@ -655,5 +655,11 @@ async def _apply(session: AsyncSession, record: {{ e.name }}, values: dict[str, 
     if (ids := values.pop("{{ r.ids_field }}", None)) is not None:
         record.{{ r.attr }} = await load_all(session, {{ r.target }}, ids, "{{ r.ids_field }}")
 {% endfor %}
+{% for f in e.points %}
+    {{ trace(f.id) }}
+    if (point := values.get("{{ f.attr }}")) is not None:
+        # The input gives the point as a mapping: the model keeps a GeoPoint.
+        values["{{ f.attr }}"] = GeoPoint(**point)
+{% endfor %}
     for name, value in values.items():
         setattr(record, name, value)

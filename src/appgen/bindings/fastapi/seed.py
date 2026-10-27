@@ -308,6 +308,12 @@ def _row(
     link: list[tuple[str, str]] = []
     # The database gives the values of the fields with a sequence.
     for py_field in entity.input_fields:
+        if py_field.is_point:
+            # A point has two columns (ADR 0046).
+            point = cast(dict[str, float] | None, record.get(py_field.name))
+            for column, key in zip(py_field.point_columns, ("lat", "lng"), strict=True):
+                row.append((column, repr(point[key]) if point is not None else "None"))
+            continue
         row.append((py_field.name, _value(py_field, record.get(py_field.name), uses)))
     for py_file in entity.files:
         value = (files or {}).get(py_file.name)

@@ -114,6 +114,57 @@ async def _ids(client: AsyncClient, params: dict[str, Any]) -> list[str]:
     assert first not in await _ids(client, {"{{ to_name }}": before})
     assert first not in await _ids(client, {"{{ p.name }}": after})
 {% endfor %}
+{% for p in query.params if p.kind in ("near", "area") and not p.path.hops %}
+{% set point = p.path.field.name %}
+
+
+{% for id in p.ids %}
+{{ trace(id) }}
+{% endfor %}
+{% if p.kind == "near" %}
+{{ sig("test_" ~ op.name ~ "_filters_by_the_distance_from_a_point_of_" ~ p.path.field.attr, "client: AsyncClient, session: AsyncSession") }}    near, distance = "{{ p.name }}", "{{ p.name[:-5] ~ "_distance" }}"
+
+    async def at(lat: float, lng: float) -> str:
+        return str((await make_{{ e.snake }}(session, {{ point }}={"lat": lat, "lng": lng})).id)
+
+    lisbon = await at(38.7223, -9.1393)
+    # Porto is about 274 km from Lisbon.
+    porto = await at(41.1579, -8.6291)
+    # A point on the other side of the antimeridian, about 17 km from (0, 179.9).
+    east = await at(0, -179.95)
+
+    ids = await _ids(client, {near: "38.7223,-9.1393", distance: 10})
+
+    assert lisbon in ids
+    assert porto not in ids
+    assert {lisbon, porto} <= set(await _ids(client, {near: "38.7223,-9.1393", distance: 300}))
+    assert lisbon not in await _ids(client, {near: "41.1579,-8.6291", distance: 250})
+    assert await _ids(client, {near: "0,179.9", distance: 20}) == [east]
+    for params in ({near: "38.7"}, {near: "95,0"}, {near: "a,b"}, {near: "0,0", distance: 0}):
+        response = await client.get("{{ url }}", params=params)
+        assert response.status_code == 422, params
+{% else %}
+{{ sig("test_" ~ op.name ~ "_filters_by_an_area_of_" ~ p.path.field.attr, "client: AsyncClient, session: AsyncSession") }}    area = "{{ p.name }}"
+
+    async def at(lat: float, lng: float) -> str:
+        return str((await make_{{ e.snake }}(session, {{ point }}={"lat": lat, "lng": lng})).id)
+
+    lisbon = await at(38.7223, -9.1393)
+    porto = await at(41.1579, -8.6291)
+    fiji = await at(-17.7, 179.5)
+
+    ids = await _ids(client, {area: "38.6,-9.3,38.8,-9"})
+
+    assert lisbon in ids
+    assert porto not in ids
+    # A west greater than the east crosses the antimeridian.
+    assert await _ids(client, {area: "-18,179,-17,-179"}) == [fiji]
+    assert fiji not in await _ids(client, {area: "-18,-179,-17,179"})
+    for value in ("38.6,-9.3,38.8", "38.8,-9.3,38.6,-9", "38.6,-190,38.8,-9"):
+        response = await client.get("{{ url }}", params={area: value})
+        assert response.status_code == 422, value
+{% endif %}
+{% endfor %}
 {% if query.search %}
 {% set s = query.search %}
 {% if s.test %}

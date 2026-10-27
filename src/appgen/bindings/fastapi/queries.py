@@ -23,6 +23,11 @@ searches the display field of the entity, so that a form can search the
 options of a reference field. A board adds a filter of its group field,
 so that it loads each column, and a calendar adds the date ranges of its
 start (and of its end), so that it loads the records of the shown dates.
+
+A `near` filter of a point field adds `<field>_near` (a point
+`<lat>,<lng>`) and `<field>_distance` (in kilometers), and an `area`
+filter adds `<field>_area` (a box `<south>,<west>,<north>,<east>`), with
+the conditions of `app/core/geo.py` (ADR 0046).
 """
 
 from dataclasses import dataclass, field
@@ -30,10 +35,12 @@ from typing import TYPE_CHECKING
 
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call, string
 from appgen.bindings.shared.views import definition_display
+from appgen.dsl.geo import MAX_DISTANCE
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.ui.fields import TEXT_TYPES
 from appgen.dsl.ui.views import (
     ApiViewBase,
+    AreaFilter,
     BoardView,
     BooleanFilter,
     CalendarView,
@@ -41,9 +48,10 @@ from appgen.dsl.ui.views import (
     DateRangeFilter,
     DetailTab,
     DetailView,
+    Filter,
+    NearFilter,
     QueryViewBase,
     SearchFilter,
-    SelectFilter,
     TableView,
     View,
 )
@@ -186,7 +194,8 @@ class PyParam:
     type: str
     """The Python type of the value, without None, for example `list[TaskStatus]`."""
     kind: str
-    """`eq` (equality), `in` (select), `from` and `to` (date range), or `search`."""
+    """`eq` (equality), `in` (select), `from` and `to` (date range), `search`, `near` and
+    `distance` (the point and the distance of a `near` filter), or `area` (ADR 0046)."""
     path: PyPath
     """The path of the value. For the search, the first of its paths."""
     ids: list[str] = field(default_factory=list[str])
@@ -200,6 +209,12 @@ class PyParam:
     """For the search: a test of a field of a related record, or None."""
     full_text: bool = False
     """For the search: True for the full-text search of Postgres (`x-fastapi-search`)."""
+    default: str = "None"
+    """The default value as Python code. A parameter with a default does not take None."""
+    rules: list[str] = field(default_factory=list[str])
+    """More arguments of `Field`, for example `gt=0`."""
+    distance: str | None = None
+    """For `near`: the attribute of the parameter of the distance."""
 
     @property
     def rank_field(self) -> PyField | None:
@@ -230,19 +245,23 @@ class PyParam:
 
     def declaration(self) -> str:
         """Return the declaration of the parameter in the query model."""
-        type_ = self.type + " | None"
+        type_ = self.type + (" | None" if self.default == "None" else "")
         args = [f'alias="{self.name}"'] if self.attr != self.name else []
+        args += self.rules
         if self.description:
             args.append(f"description={_string(self.description)}")
         if not args:
-            return f"{self.attr}: {type_} = None"
-        return call(f"{self.attr}: {type_} = ", "Field", ["default=None", *args])
+            return f"{self.attr}: {type_} = {self.default}"
+        return call(f"{self.attr}: {type_} = ", "Field", [f"default={self.default}", *args])
 
     def where_lines(self) -> list[str]:
         """Return the statements that add the condition of the parameter to `statement`."""
         value = f"query.{self.attr}"
         if self.kind == "search":
             return self._search_lines(value)
+        if self.kind == "distance":
+            # The condition of the `near` parameter uses the distance.
+            return []
         path = self.path
         match self.kind:
             case "in":
@@ -254,6 +273,13 @@ class PyParam:
                 condition = path.criterion(f"{path.column} < day_start({value}, 1)")
             case "to":
                 condition = path.criterion(f"{path.column} <= {value}")
+            case "near":
+                lat, lng = (f"{path.column}_{end}" for end in ("lat", "lng"))
+                inner = Call("near", (lat, lng, value, f"query.{self.distance}"))
+                condition = path.criterion(inner)
+            case "area":
+                lat, lng = (f"{path.column}_{end}" for end in ("lat", "lng"))
+                condition = path.criterion(Call("in_area", (lat, lng, value)))
             case _:
                 condition = path.criterion(f"{path.column} == {value}")
         test = f"if {value}:" if self.is_list else f"if {value} is not None:"
@@ -518,16 +544,16 @@ class _Builder:
             )
         self.params[param.name] = param
 
-    def filter(
-        self, filter_: SearchFilter | SelectFilter | BooleanFilter | DateRangeFilter
-    ) -> None:
+    def filter(self, filter_: Filter) -> None:
         if isinstance(filter_, SearchFilter):
             for path in filter_.fields:
                 self.search.setdefault(path, self.resolve(path))
             self.search_ids.append(filter_.id)
             return
         path = self.resolve(filter_.field)
-        if isinstance(filter_, DateRangeFilter):
+        if isinstance(filter_, NearFilter | AreaFilter):
+            self.geo(path, filter_)
+        elif isinstance(filter_, DateRangeFilter):
             self.date_range(path, filter_.id)
         elif isinstance(filter_, BooleanFilter):
             self.value(path, "eq", "bool", filter_.id)
@@ -557,6 +583,39 @@ class _Builder:
             description = f"The {word} day of `{path.path}`."
             param = PyParam(f"{name}_{end}", f"{attr}_{end}", "dt.date", end, path)
             param.ids, param.description, param.test = [element_id], description, _test(path)
+            self.add(param)
+
+    def geo(self, path: PyPath, filter_: NearFilter | AreaFilter) -> None:
+        """Add the parameters of a `near` or an `area` filter of a point field (ADR 0046).
+
+        The first `near` filter of a path gives the default distance.
+        """
+        name, attr = _names(path)
+        if isinstance(filter_, NearFilter):
+            near = PyParam(f"{name}_near", f"{attr}_near", "PointText", "near", path)
+            near.description = (
+                f"A point `<lat>,<lng>`: the records whose `{path.path}` is at most "
+                f"`{name}_distance` kilometers from it."
+            )
+            near.distance = f"{attr}_distance"
+            distance = PyParam(f"{name}_distance", f"{attr}_distance", "float", "distance", path)
+            distance.description = f"The largest distance from `{name}_near`, in kilometers."
+            distance.default = repr(float(filter_.distance))
+            distance.rules = ["gt=0", f"le={MAX_DISTANCE:g}"]
+            wanted = [near, distance]
+        else:
+            area = PyParam(f"{name}_area", f"{attr}_area", "BoxText", "area", path)
+            area.description = (
+                f"A box `<south>,<west>,<north>,<east>` in degrees: the records whose "
+                f"`{path.path}` is in it. A west greater than the east crosses the antimeridian."
+            )
+            wanted = [area]
+        for param in wanted:
+            existing = self.params.get(param.name)
+            if existing is not None and existing.kind == param.kind:
+                existing.ids.append(filter_.id)
+                continue
+            param.ids = [filter_.id]
             self.add(param)
 
     def board(self, view: BoardView) -> None:

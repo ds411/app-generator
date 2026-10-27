@@ -19,6 +19,7 @@ from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules, uses_me
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.geo import reject_point_fields
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -299,6 +300,7 @@ def deploy_targets(definition: AppDefinition) -> tuple[str, ...]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the template values of the Next.js binding for a definition."""
+    reject_point_fields(definition, "nextjs")
     plan = ui_plan(definition)
     pages = {
         name: page_info(name, page, plan.pages[name].layout)

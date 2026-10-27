@@ -41,7 +41,9 @@ migration in the FastAPI app (see [Database changes](#database-changes)).
 column `<field>_translations`, and the records keep their values in the
 default language. A new `file` or `image` field needs the section
 `storage` too: `storage: { kind: local }` for a folder of the server, or
-`kind: s3` for an S3-compatible service.
+`kind: s3` for an S3-compatible service. A new `point` field adds two
+columns, `<field>_lat` and `<field>_lng`, and an index of the two. Only
+the FastAPI binding generates point fields now.
 
 ## Rename an element
 

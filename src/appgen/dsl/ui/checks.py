@@ -62,6 +62,7 @@ from appgen.dsl.ui.views import (
     ApiTableView,
     ApiView,
     ApiViewBase,
+    AreaFilter,
     BadgeRef,
     BadgeSet,
     BoardView,
@@ -74,6 +75,7 @@ from appgen.dsl.ui.views import (
     DetailView,
     Filter,
     ListViewBase,
+    NearFilter,
     Pagination,
     QueryCalendarView,
     QueryCardsView,
@@ -1211,8 +1213,8 @@ def check_record_filter(
         target = yield from _resolve(definition, element, "filter", entity, path)
         if target is None:
             continue
-        if target.type in FILE_TYPES:
-            yield _no_file(element, "filter", "A filter", target)
+        if target.type in _NO_VALUE_TYPES:
+            yield _no_value(element, "filter", "A filter", target)
             continue
         conditions: dict[str, object] = (
             cast(dict[str, object], condition) if isinstance(condition, dict) else {"eq": condition}
@@ -1482,9 +1484,14 @@ def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> It
             types = frozenset({"boolean"})
         case DateRangeFilter():
             types = DATE_TYPES
+        case NearFilter() | AreaFilter():
+            types = frozenset({"point"})
     target = yield from _resolve(definition, filter_, "field", entity, filter_.field)
     if target is not None:
         yield from _check_suits(filter_, "field", f"A {filter_.kind} filter", target, types)
+    if isinstance(filter_, NearFilter | AreaFilter):
+        # A geo filter has no default (ADR 0046).
+        return
     defaults = filter_.default if isinstance(filter_.default, list) else [filter_.default]
     if ME in defaults:
         yield from check_me(definition, filter_, "default", target)
@@ -1494,18 +1501,25 @@ def _check_sort(
     definition: AppDefinition, element: Element, entity: str, path: str
 ) -> Iterator[Diagnostic]:
     target = yield from _resolve(definition, element, "field", entity, path)
-    if target is not None and target.type in FILE_TYPES:
-        yield _no_file(element, "field", "A sort", target)
+    if target is not None and target.type in _NO_VALUE_TYPES:
+        yield _no_value(element, "field", "A sort", target)
 
 
-def _no_file(element: Element, key: str, what: str, target: FieldTarget) -> Diagnostic:
+_NO_VALUE_TYPES = FILE_TYPES | {"point"}
+"""The field types that a sort and a filter of a widget or of a job cannot use."""
+
+
+def _no_value(element: Element, key: str, what: str, target: FieldTarget) -> Diagnostic:
+    point = target.type == "point"
     return _error(
         "unsuitable-field",
         f"{what} cannot use the field '{target.entity}.{target.name}' ({target.type}): it holds "
-        "a file.",
+        + ("a place, with a latitude and a longitude." if point else "a file."),
         element,
         at=key,
-        hint="Use another field.",
+        hint="Use a filter of the kind 'near' or 'area' in a list view."
+        if point and what == "A filter"
+        else "Use another field.",
     )
 
 

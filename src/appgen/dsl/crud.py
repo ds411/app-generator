@@ -22,7 +22,7 @@ type CrudForm = Literal["create", "update"]
 CRUD_OPERATIONS: tuple[str, ...] = CrudOperation.__value__.__args__
 _NAME_PATTERN = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _SINGLE_KINDS = ("many_to_one", "one_to_one")
-_COLUMN_SKIP = ("text", "json")
+_COLUMN_SKIP = ("text", "json", "point")
 
 
 class Crud(BaseModel):

@@ -38,6 +38,7 @@ from pydantic import ConfigDict, PrivateAttr, StringConstraints
 
 from appgen.dsl.diagnostics import DefinitionError, Diagnostic, Location
 from appgen.dsl.element import Element, Text
+from appgen.dsl.geo import point_value
 from appgen.dsl.source import DataPath, SourceMap, read_yaml
 from appgen.dsl.storage import SeedFile
 
@@ -178,6 +179,8 @@ def normal_value(field: Field, value: object) -> Any:
             if not text.strip():
                 raise ValueError("expected the path of a file, for example 'files/logo.png'")
             return text
+        case "point":
+            return point_value(value)
 
 
 def format_datetime(moment: datetime.datetime) -> str:
@@ -575,7 +578,7 @@ def _cell_value(cell: str, member: tuple[str, str] | None) -> object:
                 return cast(object, json.loads(text))
             except ValueError:
                 raise ValueError("expected JSON text") from None
-        case "date" | "datetime" | "uuid" | "enum" | "file" | "image":
+        case "date" | "datetime" | "uuid" | "enum" | "file" | "image" | "point":
             return text
         case _:
             return cell

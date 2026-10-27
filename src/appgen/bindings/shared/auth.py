@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from appgen.dsl.auth import has_me
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.ui.dashboards import CustomWidget
-from appgen.dsl.ui.views import ListViewBase
+from appgen.dsl.ui.views import AreaFilter, ListViewBase, NearFilter
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel
 
@@ -162,6 +162,8 @@ def uses_me(definition: AppDefinition) -> bool:
             for view in ui.views.values()
             if isinstance(view, ListViewBase)
             for f in view.filters.values()
+            # A geo filter has no default (ADR 0046).
+            if not isinstance(f, NearFilter | AreaFilter)
         ]
         values += [form.defaults for form in ui.forms.values()]
         values += [

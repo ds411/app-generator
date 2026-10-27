@@ -321,6 +321,9 @@ def column_builder(
         case "file" | "image":
             # A file field keeps the key, the name, the size, and the type of its file (ADR 0027).
             code, imports = f'jsonb("{column}").$type<StoredFile>()', ("jsonb",)
+        case "point":
+            # `reject_point_fields` stops the binding first (ADR 0046).
+            raise GenerationError(f"The binding 'nextjs' does not generate the point '{name}'.")
     if spec.required:
         code += ".notNull()"
     if spec.unique:

@@ -50,6 +50,7 @@ from appgen.dsl.expressions import (
     expression_totals,
     parse_expression,
 )
+from appgen.dsl.geo import point_columns, point_value
 from appgen.dsl.jobs import OFFSET_UNITS, Job, parse_offset
 from appgen.dsl.loader import load_definition
 from appgen.dsl.model import (
@@ -223,6 +224,15 @@ def check_references(definition: AppDefinition) -> Iterator[Diagnostic]:
     for entity in entities.values():
         if entity.display_field is not None and entity.display_field not in entity.fields:
             yield _missing(entity, "display_field", "field", entity.display_field, entity.fields)
+        elif entity.display_field is not None and entity.fields[entity.display_field].is_point:
+            yield _error(
+                "unsuitable-field",
+                f"The display field is the label of a record: it cannot be the point field "
+                f"'{entity.display_field}'.",
+                entity,
+                at="display_field",
+                hint="Use a field of a text, for example 'name'.",
+            )
         for relation in entity.relations.values():
             if relation.target not in entities:
                 yield _missing(relation, "target", "entity", relation.target, entities)
@@ -447,6 +457,8 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
             if field.is_file:
                 yield from _check_file_field(definition, field)
+            if field.is_point:
+                yield from _check_point_field(entity_name, entity, field)
             if field.sequence is not None:
                 yield from _check_sequence(field, field.sequence)
     for operation in definition.operations.values():
@@ -464,14 +476,48 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                     yield _error(
                         "invalid-option", f"'{key}' is only for entity fields.", param, at=key
                     )
-            if param.is_file:
+            if param.is_file or param.is_point:
                 yield _error(
                     "invalid-option",
                     f"The type '{param.type}' is only for entity fields.",
                     param,
                     at="type",
-                    hint="Give the entity a file field, and let the operation read it.",
+                    hint=(
+                        "Give the entity a file field, and let the operation read it."
+                        if param.is_file
+                        else "Use two 'decimal' params, for example 'lat' and 'lng'."
+                    ),
                 )
+
+
+def _check_point_field(entity_name: str, entity: Entity, field: Field) -> Iterator[Diagnostic]:
+    """A point is not unique, and its two columns do not have the names of other members."""
+    if field.unique:
+        yield _error(
+            "invalid-option",
+            "A 'point' field cannot be unique: two records can be at one place.",
+            field,
+            at="unique",
+            hint="Remove 'unique'.",
+        )
+    if field.computed is not None:
+        yield _error(
+            "invalid-option",
+            "A 'point' field cannot be computed.",
+            field,
+            at="computed",
+            hint="Remove 'computed', and store the point.",
+        )
+    name = _name(field)
+    for column in point_columns(name):
+        if column in entity.fields or column in entity.relations:
+            yield _error(
+                "duplicate-name",
+                f"The point field '{name}' keeps its values in the columns '{name}_lat' and "
+                f"'{name}_lng', but '{entity_name}.{column}' has the name of one of them.",
+                field,
+                hint=f"Rename '{column}' or '{name}'.",
+            )
 
 
 def _check_currency_field(
@@ -1017,8 +1063,8 @@ def _rule_field(rule: Element, key: str, name: str, stored: dict[str, Field]) ->
     found = stored.get(name)
     if found is None:
         return _missing(rule, key, "field", name, stored)
-    if found.is_file:
-        return _file_in_rule(rule, key, name, found)
+    if found.is_file or found.is_point:
+        return _not_in_rule(rule, key, name, found)
     return found
 
 
@@ -1030,14 +1076,15 @@ def _rule_members(
     for name in names:
         if name not in stored and name not in singles:
             yield _missing(rule, key, "field or relation", name, [*stored, *singles])
-        elif name in stored and stored[name].is_file:
-            yield _file_in_rule(rule, key, name, stored[name])
+        elif name in stored and (stored[name].is_file or stored[name].is_point):
+            yield _not_in_rule(rule, key, name, stored[name])
 
 
-def _file_in_rule(rule: Element, key: str, name: str, field: Field) -> Diagnostic:
+def _not_in_rule(rule: Element, key: str, name: str, field: Field) -> Diagnostic:
+    kind = "point" if field.is_point else "file"
     return _error(
         "unsuitable-field",
-        f"A rule cannot use the file field '{name}' (type '{field.type}').",
+        f"A rule cannot use the {kind} field '{name}' (type '{field.type}').",
         rule,
         at=key,
         hint="A rule compares values. Use another field.",
@@ -1479,28 +1526,32 @@ def _check_notification_text(notification: Notification, entity: Entity) -> Iter
 def _check_notification_member(
     notification: Notification, entity: Entity, key: str, name: str
 ) -> Iterator[Diagnostic]:
-    """A name of `fields` or of the text is a stored field, except a file, or a `many_to_one`."""
+    """A name of `fields` or of the text is a stored field, except a file or a point, or a
+    `many_to_one`."""
     field = entity.fields.get(name)
     relation = entity.relations.get(name)
     what = "value in braces" if key == "text" else "field or relation"
     if field is None and relation is None:
-        choices = [n for n, f in entity.stored_fields.items() if not f.is_file]
+        choices = [n for n, f in entity.stored_fields.items() if not f.is_file and not f.is_point]
         choices += [n for n, r in entity.relations.items() if r.kind == "many_to_one"]
         yield _missing(notification, key, what, name, choices)
-    elif (field is not None and (field.computed is not None or field.is_file)) or (
-        relation is not None and relation.kind != "many_to_one"
-    ):
+    elif (
+        field is not None and (field.computed is not None or field.is_file or field.is_point)
+    ) or (relation is not None and relation.kind != "many_to_one"):
         kind = (
             f"the '{relation.kind}' relation"
             if relation is not None
             else "the computed field"
             if field is not None and field.computed is not None
+            else "the point field"
+            if field is not None and field.is_point
             else "the file field"
         )
         yield _error(
             "unsuitable-field",
             f"The {what} '{name}' is {kind} '{notification.entity}.{name}'. A notification uses "
-            "the stored fields, except the files, and the 'many_to_one' relations.",
+            "the stored fields, except the files and the points, and the 'many_to_one' "
+            "relations.",
             notification,
             at=key,
         )
@@ -1705,10 +1756,10 @@ def _check_sign_up(
                 sign_up,
                 at="fields",
             )
-        elif found.type == "json":
+        elif found.type in ("json", "point"):
             yield _error(
                 "unsuitable-field",
-                f"The sign-up form has no widget for the 'json' field '{name}'.",
+                f"The sign-up form has no widget for the '{found.type}' field '{name}'.",
                 sign_up,
                 at="fields",
             )
@@ -3394,9 +3445,11 @@ def _fits(field: Field, value: object) -> bool:
             return True
         case "file" | "image":
             return False
+        case "point":
+            return _parses(point_value, value)
 
 
-def _parses(parse: Callable[[str], object], value: str) -> bool:
+def _parses[T](parse: Callable[[T], object], value: T) -> bool:
     try:
         parse(value)
     except ValueError:
