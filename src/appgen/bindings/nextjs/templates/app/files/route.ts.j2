@@ -39,7 +39,7 @@ export async function GET(
     await requireUser();
 {% endif %}
 {% if owned %}
-    const scope = await recordScope({{ ts_value(name) }}, "read");
+    const scope = await recordScope({{ ts_value(name) }}, "read"{% if memberships and operation and record_rules[name].scope is not none %}, {{ ts_value(operation) }}{% endif %});
     return await fileResponse(key ? await {{ var }}Repository.storedFile(id, key, scope) : null);
 {% else %}
     return await fileResponse(key ? await {{ var }}Repository.storedFile(id, key) : null);

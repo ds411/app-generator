@@ -142,7 +142,8 @@ class PyJob:
     clients: list[PyJobClient] = field(default_factory=list["PyJobClient"])
     """The clients of the APIs that the operation calls."""
     builtin: bool = False
-    """True for the built-in job `stat_snapshots` (ADR 0042): its own module has the logic."""
+    """True for the built-in jobs `stat_snapshots` (ADR 0042) and `notice_emails` (ADR 0044):
+    their own modules have the logic."""
 
     @property
     def module(self) -> str:

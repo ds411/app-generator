@@ -52,6 +52,12 @@ class Notification(Element):
     The name is a stored field, or a `many_to_one` relation (the display
     value of its record).
     """
+    email: bool = False
+    """`true`: each receiver also gets the notice by email (ADR 0044).
+
+    It needs `auth.delivery: smtp`. A user can turn off the emails of the
+    notification on the page `/notice-settings`.
+    """
     description: Text | None = None
 
     def values(self) -> list[str]:

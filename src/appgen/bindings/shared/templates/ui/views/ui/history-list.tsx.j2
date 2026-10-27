@@ -83,7 +83,11 @@ export function HistoryList<T extends EntityRecord>({ history, id, fields, recor
     subscribe,
     { keep: true },
   );
-{% if definition.access %}
+{% if memberships %}
+  // The role, or a membership in the scope of the record (ADR 0048).
+  const { canCallOn } = useAccess(); {{ trace(memberships.element_id) }}
+  const canRestore = restore !== undefined && canCallOn(restore, [id]);
+{% elif definition.access %}
   const { canCall } = useAccess(); {{ trace(definition.access.id) }}
   const canRestore = restore !== undefined && canCall(restore);
 {% else %}

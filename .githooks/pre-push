@@ -6,8 +6,11 @@
 # Run all checks:            APPGEN_CHECK_ALL=1 git push
 # Skip the hook:             git push --no-verify
 #
-# To add a part, add a check_<part> function and call it in the
-# "Parts" section with the path patterns of the part.
+# The app checks (scripts/check-<app>.sh) run only the sections that can
+# give another result than on the base commit (scripts/check_plan.py).
+# To add a section, add it to SECTIONS in scripts/check_plan.py. To add
+# another part, add a check_<part> function and call it in the "Parts"
+# section with the path patterns of the part.
 
 set -uf
 
@@ -18,6 +21,8 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
 fi
 
 changed=""
+# The base commits of the pushed refs.
+bases=""
 check_all="${APPGEN_CHECK_ALL:-0}"
 failed=0
 
@@ -49,6 +54,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         check_all=1
         continue
     fi
+    bases="$bases $base"
     changed="$changed
 $(git diff --name-only "$base" "$local_sha")"
 done
@@ -78,7 +84,9 @@ check_python() {
     run uv run --locked ruff check
     run uv run --locked ruff format --check
     run uv run --locked pyright
-    run uv run --locked pytest
+    # One test process for each CPU (pytest-xdist). A process without
+    # tests takes tests from a busy process.
+    run uv run --locked pytest -n "${APPGEN_TEST_WORKERS:-auto}" --dist worksteal
 }
 
 # Check the traces of the output of the test binding (the golden
@@ -88,20 +96,70 @@ check_traces() {
     run uv run --locked appgen check tests/fixtures/project-tracker.yaml tests/golden/fastapi
 }
 
+# All app checks, in the order of the start: the longest first.
+ALL_APPS="auth-ui nextjs fastapi react-api translations react"
 # The app checks to run, for example " fastapi react". Each app has a
-# check script scripts/check-<app>.sh: it generates the project tracker
-# with the binding of the app, and builds, tests, and checks the output.
+# check script scripts/check-<app>.sh: it generates the fixtures with the
+# binding of the app, and builds, tests, and checks the output.
 apps=""
+# The file of the hashes of the selected sections (scripts/check_plan.py).
+state=""
+# The file of the passed sections of the app checks that failed after them.
+APPGEN_CHECK_PASSED=""
 
-# Run the app checks at the same time. The apps use different ports,
-# image tags, and container names. Each output line of a check starts
-# with the name of its app. APPGEN_CHECK_SERIAL=1 runs one check after
-# the other, without the prefix.
+# Select the sections of the app checks: the sections that the push
+# changes, without the sections that passed before on this machine with
+# the same files. The check scripts run only the sections in
+# APPGEN_CHECK_SECTIONS. With APPGEN_CHECK_ALL=1, select all sections.
+select_sections() {
+    state=$(mktemp "${TMPDIR:-/tmp}/appgen-sections.XXXXXX")
+    APPGEN_CHECK_PASSED=$(mktemp "${TMPDIR:-/tmp}/appgen-passed.XXXXXX")
+    export APPGEN_CHECK_PASSED
+    set --
+    if [ "$check_all" = 1 ]; then
+        set -- --all
+    else
+        for base in $bases; do
+            set -- "$@" --base "$base"
+        done
+    fi
+    echo "pre-push: uv run --locked scripts/check_plan.py select $*"
+    if ! sections=$(uv run --locked scripts/check_plan.py select --state "$state" "$@"); then
+        echo "pre-push: the selection of the sections failed, so run all app checks."
+        rm -f "$state" "$APPGEN_CHECK_PASSED"
+        state=""
+        APPGEN_CHECK_PASSED=""
+        apps=" $ALL_APPS"
+        return 0
+    fi
+    # One line, with a space between the sections.
+    # shellcheck disable=SC2086
+    APPGEN_CHECK_SECTIONS=$(echo $sections)
+    export APPGEN_CHECK_SECTIONS
+    for app in $ALL_APPS; do
+        case " $APPGEN_CHECK_SECTIONS" in *" $app:"*) apps="$apps $app" ;; esac
+    done
+}
+
+# The app checks that passed.
+passed_apps=""
+
+# Run the app checks, at most APPGEN_CHECK_JOBS at the same time (default
+# 2). More checks at the same time make the CPUs too busy for the UI
+# tests. The apps use different ports, image tags, and container names.
+# Each output line of a check starts with the name of its app.
+# APPGEN_CHECK_SERIAL=1 runs one check after the other, without the
+# prefix.
 run_apps() {
     [ -n "$apps" ] || return 0
     if [ "${APPGEN_CHECK_SERIAL:-0}" = 1 ]; then
         for app in $apps; do
-            run scripts/check-"$app".sh
+            echo "pre-push: scripts/check-$app.sh"
+            if scripts/check-"$app".sh; then
+                passed_apps="$passed_apps $app"
+            else
+                failed=1
+            fi
         done
         return 0
     fi
@@ -110,110 +168,75 @@ run_apps() {
         scripts/sandbox-setup.sh
     fi
     status_dir=$(mktemp -d "${TMPDIR:-/tmp}/appgen-pre-push.XXXXXX")
+    # A pipe with one line for each free job slot: a check takes a line
+    # before it starts, and gives it back at the end.
+    mkfifo "$status_dir/slots"
+    exec 3<>"$status_dir/slots"
+    jobs=${APPGEN_CHECK_JOBS:-2}
+    [ "$jobs" -gt 0 ] || jobs=1
+    slot=0
+    while [ "$slot" -lt "$jobs" ]; do
+        echo >&3
+        slot=$((slot + 1))
+    done
     for app in $apps; do
+        read -r _ <&3
         echo "pre-push: scripts/check-$app.sh (in parallel)"
         (
+            start=$(date +%s)
             {
-                scripts/check-"$app".sh 2>&1
+                scripts/check-"$app".sh 3>&- 2>&1
                 echo $? >"$status_dir/$app"
             } | while IFS= read -r line; do
                 printf '[%s] %s\n' "$app" "$line"
             done
+            echo $(($(date +%s) - start)) >"$status_dir/$app.time"
+            echo >&3
         ) &
     done
     wait
+    exec 3>&-
     for app in $apps; do
+        time=$(cat "$status_dir/$app.time" 2>/dev/null) || time="?"
         if [ "$(cat "$status_dir/$app" 2>/dev/null)" = 0 ]; then
-            echo "pre-push: scripts/check-$app.sh passed"
+            echo "pre-push: scripts/check-$app.sh passed in $time s"
+            passed_apps="$passed_apps $app"
         else
-            echo "pre-push: scripts/check-$app.sh failed (see the lines that start with [$app])"
+            echo "pre-push: scripts/check-$app.sh failed in $time s (see the lines that start with [$app])"
             failed=1
         fi
     done
     rm -rf "$status_dir"
 }
 
+# Record the passed sections: the sections of the passed app checks, and
+# the sections that passed before a check failed. The next push skips
+# them if their files and their apps do not change.
+record_sections() {
+    [ -n "$state" ] || return 0
+    # shellcheck disable=SC2086
+    uv run --locked scripts/check_plan.py record --state "$state" \
+        --sections "$APPGEN_CHECK_PASSED" $passed_apps ||
+        echo "pre-push: the record of the passed sections failed."
+    rm -f "$state" "$APPGEN_CHECK_PASSED"
+}
+
 # Parts
+# Select the sections of the app checks first, so that the output shows
+# them at the start. The app checks test the generator, the bindings,
+# the examples, the fixtures, the check scripts, and the UI tests.
+if changes 'src/*' 'examples/*' 'tests/fixtures/*' 'scripts/*' 'ui-tests/*' \
+    'pyproject.toml' 'uv.lock' '.python-version'; then
+    select_sections
+fi
+
 if changes '*.py' 'src/*' 'tests/*' 'schema/*' 'examples/*' 'docs/*' '*.md' 'pyproject.toml' 'uv.lock' '.python-version' '.githooks/*'; then
     check_python
     check_traces
 fi
 
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/fastapi/*' \
-    'src/appgen/bindings/shared/*' \
-    'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-fastapi.sh' \
-    'scripts/check_schema_change.py' 'scripts/mock_oidc.py' 'scripts/check_provider_sign_in.py' \
-    'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' \
-    'tests/fixtures/provider-sign-in.yaml' 'tests/fixtures/account-security.yaml' \
-    'tests/fixtures/seed-data*' 'tests/fixtures/webhooks*' 'scripts/webhook_sender.py' \
-    'tests/fixtures/jobs.yaml' 'tests/fixtures/files*' \
-    'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
-    'tests/fixtures/api-connections*' 'scripts/api_connection_test.py' \
-    'tests/fixtures/invoices.yaml' 'tests/fixtures/listings*' 'tests/fixtures/courses*' \
-    'tests/fixtures/places.yaml' 'tests/fixtures/record-rules.yaml' 'scripts/check_live_events.py' \
-    'scripts/smoke_test.py' 'scripts/mock_api.py' 'scripts/api_calls.py' 'scripts/sandbox.env' \
-    'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps fastapi"
-fi
-
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/nextjs/*' 'src/appgen/bindings/shared/*' \
-    'examples/project-tracker/*' 'examples/room-booking/*' 'scripts/check-nextjs.sh' \
-    'scripts/check_shared_rate_limit.py' 'scripts/check_deploy_files.py' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'tests/fixtures/seed-data*' 'scripts/seed_test.py' \
-    'tests/fixtures/webhooks*' 'scripts/webhook_sender.py' 'scripts/webhook_test.py' \
-    'tests/fixtures/jobs.yaml' 'tests/fixtures/jobs-extensions/*' 'scripts/jobs_test.py' \
-    'tests/fixtures/inbound-email*' 'scripts/inbound_email_test.py' \
-    'tests/fixtures/files*' 'scripts/files_test.py' \
-    'tests/fixtures/events.yaml' 'tests/fixtures/events-extensions/*' 'scripts/events_test.py' \
-    'tests/fixtures/record-rules.yaml' 'scripts/live_test.py' 'scripts/live_test.ts' \
-    'tests/fixtures/invoices.yaml' 'scripts/sequence_test.py' \
-    'tests/fixtures/listings*' 'scripts/queries_test.py' \
-    'scripts/mock_api.py' 'scripts/api_calls.py' \
-    'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps nextjs"
-fi
-
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/trace/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/shared/*' \
-    'examples/project-tracker/*' 'scripts/check-react.sh' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'tests/fixtures/seed-data*' 'scripts/mock_api.py' 'scripts/api_calls.py' \
-    'tests/fixtures/invoices.yaml' 'scripts/sequence_test.py' 'tests/fixtures/listings*' \
-    'scripts/sandbox.env' 'scripts/sandbox-setup.sh' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps react"
-fi
-
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/fastapi/*' \
-    'src/appgen/bindings/shared/*' 'examples/project-tracker/*' 'scripts/check-react-api.sh' \
-    'scripts/api_client_test.py' 'scripts/mock_api.py' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps react-api"
-fi
-
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/nextjs/*' \
-    'src/appgen/bindings/shared/*' 'examples/project-tracker/*' 'scripts/check-translations.sh' \
-    'scripts/translation_test.py' 'scripts/untranslated_text.mjs' 'scripts/smoke_test.py' 'ui-tests/*' \
-    'scripts/mock_api.py' 'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps translations"
-fi
-
-if changes 'src/appgen/cli.py' 'src/appgen/__init__.py' 'src/appgen/__main__.py' 'src/appgen/dsl/*' \
-    'src/appgen/gen/*' 'src/appgen/bindings/react/*' 'src/appgen/bindings/nextjs/*' \
-    'src/appgen/bindings/fastapi/*' 'src/appgen/bindings/shared/*' 'examples/room-booking/*' \
-    'scripts/check-auth-ui.sh' 'scripts/auth_ui_test.py' 'scripts/mock_oidc.py' 'scripts/mock_smtp.py' \
-    'scripts/smoke_test.py' 'ui-tests/*' \
-    'tests/fixtures/api-connections*' 'scripts/connection_ui_test.py' 'scripts/mock_api.py' \
-    'tests/fixtures/listings*' 'scripts/listings_ui_test.py' \
-    'tests/fixtures/courses*' 'scripts/sessions_ui_test.py' \
-    'tests/fixtures/places.yaml' 'scripts/places_ui_test.py' \
-    'scripts/sandbox.env' 'pyproject.toml' 'uv.lock' '.githooks/*'; then
-    apps="$apps auth-ui"
-fi
-
 run_apps
+record_sections
 
 if [ "$failed" -ne 0 ]; then
     echo "pre-push: a check failed. Fix it, or push with --no-verify to skip the hook."

@@ -333,6 +333,23 @@ BINDING = Binding(
             path="app/api/jobs/stat_snapshots/route.ts",
             when="nextjs.snapshots",
         ),
+        # The emails of the notices (ADR 0044): the built-in job and its route, and the page of
+        # the settings.
+        Output(
+            template="src/app/jobs/notice-emails.ts.j2",
+            path="src/app/jobs/notice-emails.ts",
+            when="nextjs.notice_emails",
+        ),
+        Output(
+            template="app/api/jobs/notice-emails-route.ts.j2",
+            path="app/api/jobs/notice_emails/route.ts",
+            when="nextjs.notice_emails",
+        ),
+        Output(
+            template="app/notice-settings/page.tsx.j2",
+            path="app/notice-settings/page.tsx",
+            when="nextjs.notice_emails",
+        ),
         Output(template="env.example.j2", path=".env.example"),
         Output(template="src/shared/db/index.ts.j2", path="src/shared/db/index.ts"),
         Output(template="src/shared/db/client.ts.j2", path="src/shared/db/client.ts"),
@@ -688,6 +705,7 @@ BINDING = Binding(
         | {"translations", "language"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "password_reset", "provider", "access", "role", "record_rule"}
+        | {"memberships", "membership_role"}
         | {"email_verification", "second_factor"}
         | {"confirm", "on_success", "ui", "defaults", "states", "state", "loading_state"}
         | {"api", "api_operation"}

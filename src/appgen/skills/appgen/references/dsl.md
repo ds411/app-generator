@@ -1522,11 +1522,13 @@ notifications:
     transition: confirm
     receivers: [organizer]
     text: The booking {title} is confirmed.
+    email: true
   booking_cancelled:
     entity: Booking
     transition: cancel
     receivers: [organizer]
     text: The booking {title} is cancelled.
+    email: true
 ```
 
 | Key           | Required | Content                                                         |
@@ -1537,7 +1539,8 @@ notifications:
 | `transition`  | No       | A transition of a workflow of the entity: `<transition>`, or `<workflow>.<transition>` when two workflows of the entity have a transition of the same name. |
 | `receivers`   | Yes      | The users that get the notices: paths of relations to the user entity. |
 | `text`        | Yes      | The text of a notice. A name in braces is a value of the record. |
-| `description` | No       | Text.                                                           |
+| `email`       | No       | `true`: the receivers also get each notice by email (see [Emails of the notices](#emails-of-the-notices)). The default is `false`. |
+| `description` | No       | Text. The page of the settings of the emails shows it.          |
 
 - A notification has `event` or `transition`, not both. A notification
   `changed` gives the notices when an update gives one of `fields` a
@@ -1575,6 +1578,31 @@ notifications:
   marks it read, and opens the detail page of its record: the first
   page with a detail view of the entity and one parameter in its path.
   "Mark all read" marks all notices of the user read.
+
+### Emails of the notices
+
+A notification with `email: true` also sends each notice to the email
+address of the receiver ([ADR 0044](https://github.com/ds411/app-generator/blob/main/docs/adr/0044-notice-emails.md)). It
+needs `auth.delivery: smtp` (see [auth](#auth)): the apps send the
+emails with the SMTP server of the settings `SMTP_*`.
+
+- The notice waits for its email in the table `notices`. The built-in
+  job `notice_emails` runs each minute (see [jobs](#jobs)), and sends
+  the emails of the oldest 100 notices that wait. A job of the
+  definition with the name `notice_emails` is an error.
+- The subject is the title of the app and the text of the notice. The
+  email has the text, the link to the detail page of the record, and
+  the link to the page of the settings. The emails have the default
+  language of the app. The links start with `FRONT_END_URL` (FastAPI)
+  or `PUBLIC_URL` (Next.js).
+- The page `/notice-settings` has a switch for each notification with
+  `email: true`, with the name of the notification in words and the
+  `description`. A user turns off the emails of a notification there.
+  The notices stay in the bell. The bell has a link to the page. The
+  FastAPI app has `GET /notices/settings` and
+  `PUT /notices/settings/{notification}` (`{"email": false}`).
+- The React app with mock data keeps the choices in the browser tab,
+  and sends no emails. The mentions give no emails.
 
 ### Mentions
 
@@ -2909,7 +2937,8 @@ auth:
   `/reset-password` with a password reset, `/second-factor` with a
   second factor, a path under `/auth/` with providers, or
   `/connections` and a path under `/connections/` with an API with the
-  authorization code flow: they are the pages of the front ends.
+  authorization code flow, or `/notice-settings` with a notification
+  with `email: true`: they are the pages of the front ends.
 
 The FastAPI app has `POST /auth/sign-in` (a bearer token), `GET
 /auth/me`, and `PUT /auth/password`, and `python -m app.cli
@@ -3218,10 +3247,17 @@ operation that no role of the user gives. A list gives the records of
 these scopes. A read, a change, or a delete of a record in another
 scope of the user gives 403, and of a record out of all scopes of the
 user gives 404. A create or a change that puts a record out of these
-scopes gives 403, and the record does not change. The front ends do not
-apply the memberships yet: the trace check of the Next.js app reports
-them as gaps, and the trace check of the React app as uncovered
-elements.
+scopes gives 403, and the record does not change.
+
+The front ends apply the memberships too. The server actions of the
+Next.js app use only the records of the scopes, with the same errors. The
+React app shows the records that the FastAPI app gives, and with mock
+data the mock store applies the memberships in the browser, as a
+demonstration. An action of an operation that only a membership gives
+shows on a record in a scope whose role gives the operation, and not on
+the other records: the UI asks the server for the operations of the
+memberships of the user on the records of the page. An action of a
+create or a list shows if a membership in some scope gives it.
 
 ## translations
 
@@ -3459,7 +3495,12 @@ use in the app does not show.
   `Custom range`, `Pick the days`, `{change} from the previous period`.
 - The bell of the notices (see [notifications](#notifications)):
   `Notices`, `Notices: {count} unread`, `Mark all read`,
-  `No notices yet.`.
+  `No notices yet.`, `Email settings`.
+- The page of the emails of the notices (see
+  [Emails of the notices](#emails-of-the-notices)): `Notice emails`,
+  `Choose the notices that also come to you by email. The bell shows all notices.`,
+  `The change did not succeed.`, and the text of the email
+  `Turn off these emails on the page of the settings:`.
 - The mentions (see [Mentions](#mentions)): `Users` (the list of the
   suggestions), and the text of the notice
   `You are mentioned in {record}.`.
@@ -3496,6 +3537,7 @@ use in the app does not show.
   `Another record has the same value, and the value must be unique.`,
   `Sign in to do this.`, `Your role may not do this operation.`,
   `Your role may not give a record these values.`,
+  `Your role in the scope of the record may not do this operation.`,
   `The sign-in failed.`, `The user name or the password is not correct.`,
   `The browser does not keep the session.`,
   `A user with this user name exists.`.
@@ -3641,7 +3683,9 @@ to translate one. The rules and the workflows give their own messages.
   that is not valid `The link is not valid, or has ended.`.
 - The change log: `The record has no history entry with the ID {id}.`,
   `Only the entry of a change has old values to restore.`.
-- The notices: `You have no notice with the ID {id}.`.
+- The notices: `You have no notice with the ID {id}.`,
+  `The notification {notification} has no emails.`, and the text of the
+  email `Turn off these emails on the page of the settings:`.
 
 ## Extension keys
 

@@ -95,6 +95,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Type check            | `uv run pyright`                                           |
 | Test                  | `uv run pytest`                                            |
 | Run all hook checks   | `APPGEN_CHECK_ALL=1 .githooks/pre-push < /dev/null`        |
+| Show the changed check sections | `uv run scripts/check_plan.py select --base origin/main` |
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
 | Update the skill DSL reference | `uv run scripts/update_skill_references.py` |
@@ -278,20 +279,23 @@ The check scripts reuse caches, so a second run is faster:
 - `pnpm install` on the host uses the shared pnpm store of the user
   (`pnpm store path`), and uv uses its shared cache.
 
-Times of the check scripts in a cloud session (4 CPUs). The first run
-starts with no Docker build cache, no pnpm store, and no uv cache. The
-second run follows with no change.
+Times of the pre-push hook in a cloud session (4 CPUs), with warm
+caches:
 
-| Script                     | First run | Second run |
-| -------------------------- | --------- | ---------- |
-| `scripts/check-fastapi.sh` | 85 s      | 46 s       |
-| `scripts/check-nextjs.sh`  | 159 s     | 89 s       |
-| `scripts/check-react.sh`   | 63 s      | 53 s       |
-| All three                  | 307 s     | 188 s      |
+| Push                                                | Time      |
+| --------------------------------------------------- | --------- |
+| The Python checks (pytest on 4 CPUs)                | 6 min     |
+| The selection of the sections, after a change of `src/appgen/` | 15 to 60 s |
+| All 51 sections (`APPGEN_CHECK_ALL=1`), two checks at a time | 44 min |
+| The same, before the selection (six checks at a time, pytest on one CPU) | 45 min |
 
-The pre-push hook runs the three check scripts at the same time. With
-warm caches, `APPGEN_CHECK_ALL=1` (the Python checks and the three app
-checks) takes about 160 s.
+With all sections, the longest checks take about 20 minutes each:
+`scripts/check-auth-ui.sh` 20 min, `scripts/check-nextjs.sh` 19 min,
+`scripts/check-fastapi.sh` 19 min, `scripts/check-react.sh` 6 min,
+`scripts/check-translations.sh` 3 min, and `scripts/check-react-api.sh`
+2 min. A push runs only the sections that it changes (see
+[CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook)). The 5 merges before
+the selection would have run 4 to 37 of the 51 sections.
 
 ## Bindings
 

@@ -36,6 +36,10 @@ router.include_router(history.router)
 {{ trace(e.share.id) }}
 router.include_router(share.router)
 {% endif %}
+{% if e.scope_path is not none %}
+{{ trace(py.memberships.id) }}
+router.include_router(permissions.router)
+{% endif %}
 {% if e.presence %}
 {% for id in e.presence.ids %}
 {{ trace(id) }}

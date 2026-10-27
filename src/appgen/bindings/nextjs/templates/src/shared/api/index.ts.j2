@@ -27,9 +27,15 @@ export type {
 {% endif %}
   ListQuery,
   ListResult,
+{% if memberships %}
+  MemberPermissions,
+{% endif %}
 {% if has_notices(definition) %}
   Notice,
   NoticeApi,
+{% endif %}
+{% if has_notice_emails(definition) %}
+  NoticeSetting,
 {% endif %}
 {% if has_available(definition) %}
   OwnerRange,

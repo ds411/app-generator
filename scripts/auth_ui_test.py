@@ -32,7 +32,12 @@ test proves it for the room booking example (`examples/room-booking`):
    a user turns it on, signs out, and signs in with a code that the test
    computes from the key on the page. Next.js signs in through the
    mock provider of scripts/mock_oidc.py. React with mock data signs in
-   a mock user at once.
+   a mock user at once. The receiver of a change finds the notice in the
+   bell (ADR 0041), and a user that a text mentions finds one too (ADR
+   0043). The receiver turns off the emails of a notification on the
+   page /notice-settings. In the Next.js app, the test first calls the
+   route of the job `notice_emails` (`JOBS_SECRET`), and finds the email
+   of the notice in the file of the mock SMTP server (ADR 0044).
 4. For React and Next.js, generate tests/fixtures/record-rules.yaml too,
    and run only the tests of the record rules (ADR 0025): a member sees
    the records of the teams of the member through an owner path, with a
@@ -87,6 +92,7 @@ from appgen.bindings.nextjs.db import build_tables
 from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.shared.auth import record_rules
 from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.notices import email_notifications
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.access import ALL, RecordRule
@@ -110,6 +116,8 @@ SMTP_PORT = 2440
 """The port of the mock SMTP server, for the emails of the Next.js app."""
 MAILBOX = "messages.jsonl"
 """The file in the app folder that gets each email of the mock SMTP server as a JSON line."""
+JOBS_SECRET = "auth-ui-test-jobs-secret"
+"""The secret of the routes of the jobs of the Next.js app (ADR 0029)."""
 PROVIDER_TEST = "signs in with the provider"
 """The part of the name of the UI test of the sign-in with a provider, for `react-api`."""
 RULES_DEFINITION = Path("tests/fixtures/record-rules.yaml")
@@ -318,7 +326,7 @@ def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any]
         (u for u in users if Permissions(definition, u.get(access.role_field)).operation(ALL)),
         None,
     )
-    for notification in definition.notifications.values():
+    for name, notification in definition.notifications.items():
         parts = notification.transition_parts()
         page = next(
             (
@@ -369,6 +377,7 @@ def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any]
             related = next((r for r in data[target] if r["id"] == record.get(name)), {})
             values[name] = str(related.get(display) or "")
         return {
+            "notification": name,
             "actor": actor[auth.username_field],
             "receiver": user[auth.username_field],
             "path": page.path.replace("{id}", str(record["id"])),
@@ -377,6 +386,35 @@ def expected_notice(definition: AppDefinition, used: set[str]) -> dict[str, Any]
             "text": notification.text.format_map(values),
         }
     return None
+
+
+def expected_notice_emails(
+    binding: str, definition: AppDefinition, app: Path, notice: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Return the values of the test of the emails of the notices (ADR 0044), or None.
+
+    After the test of the notices, the receiver opens the page
+    /notice-settings with the link of the bell, finds a switch for each
+    notification with emails, and turns off the first one. In the Next.js
+    app, the test first calls the route of the job `notice_emails`, and
+    finds the email of the notice in the file of the mock SMTP server. The
+    React app with mock data sends no emails.
+    """
+    auth = definition.auth
+    emails = email_notifications(definition)
+    if auth is None or notice is None or not emails:
+        return None
+    address = definition.address_field()
+    assert address is not None
+    users = mock_data(definition)[auth.user_entity]
+    receiver = next(u for u in users if u[auth.username_field] == notice["receiver"])
+    sent = binding == "nextjs" and any(n.name == notice["notification"] for n in emails)
+    return {
+        "labels": [n.label for n in emails],
+        "mailbox": str(app / MAILBOX) if sent else None,
+        "to": receiver[address],
+        "secret": JOBS_SECRET,
+    }
 
 
 def expected_mention(definition: AppDefinition, used: set[str]) -> dict[str, Any] | None:
@@ -704,6 +742,7 @@ def expected_auth(binding: str, definition: AppDefinition, app: Path) -> dict[st
         "recordRules": record_checks,
         "providers": expected_providers(binding, definition),
         "notice": notice,
+        "noticeEmails": expected_notice_emails(binding, definition, app, notice),
         "mention": mention,
     }
 
@@ -747,6 +786,8 @@ def started(binding: str, app: Path) -> Generator[None]:
             "SMTP_PORT": str(SMTP_PORT),
             "SMTP_TLS": "none",
             "SMTP_FROM": "no-reply@example.com",
+            # The test calls the route of the job of the emails of the notices.
+            "JOBS_SECRET": JOBS_SECRET,
             **provider_env(load_definition(DEFINITION)),
         }
         command = ["pnpm", "--silent", "start"]

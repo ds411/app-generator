@@ -14,7 +14,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from appgen.bindings.shared import TEMPLATE_DIR
-from appgen.bindings.shared.notices import has_notices
+from appgen.bindings.shared.notices import has_notice_emails, has_notices
 from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.ui.common import Action
 from appgen.dsl.ui.dashboards import ChartWidget, ListWidget, StatWidget
@@ -177,6 +177,9 @@ def used_components(
     if definition.auth is not None and any(page.share for page in definition.pages.values()):
         # The dialog of the secret links, and the shared page (ADR 0049).
         names.update(("dialog", "input"))
+    if has_notice_emails(definition):
+        # The page of the emails of the notices (ADR 0044).
+        names.add("switch")
     return with_dependencies(names)
 
 

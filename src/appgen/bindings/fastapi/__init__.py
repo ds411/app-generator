@@ -268,6 +268,13 @@ BINDING = Binding(
             for_each="entity",
             when="py.entity(name).share",
         ),
+        # The operations of the memberships on the records, for the front end (ADR 0048).
+        Output(
+            template="app/features/slice/permissions.py.j2",
+            path=_SLICE + "/permissions.py",
+            for_each="entity",
+            when="py.entity(name).scope_path is not none",
+        ),
         Output(
             template="app/features/slice/presence.py.j2",
             path=_SLICE + "/presence.py",
@@ -333,6 +340,12 @@ BINDING = Binding(
             template="app/jobs/stat_snapshots.py.j2",
             path="app/jobs/stat_snapshots.py",
             when="py.snapshots",
+        ),
+        # The emails of the notices (ADR 0044): the built-in job.
+        Output(
+            template="app/jobs/notice_emails.py.j2",
+            path="app/jobs/notice_emails.py",
+            when="py.notice_emails",
         ),
         Output(template="package.py.j2", path="tests/__init__.py"),
         Output(template="tests/payloads.py.j2", path="tests/payloads.py"),
@@ -560,6 +573,11 @@ BINDING = Binding(
             template="tests/jobs/test_stat_snapshots.py.j2",
             path="tests/jobs/test_stat_snapshots.py",
             when="py.snapshots",
+        ),
+        Output(
+            template="tests/jobs/test_notice_emails.py.j2",
+            path="tests/jobs/test_notice_emails.py",
+            when="py.notice_emails",
         ),
         Output(
             template="tests/test_storage.py.j2", path="tests/test_storage.py", when="py.storage"

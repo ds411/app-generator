@@ -20,6 +20,7 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
+from appgen.bindings.shared.memberships import member_plan
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.notices import has_notices
 from appgen.bindings.shared.presence import presence_plans
@@ -178,6 +179,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "record_rules": record_rules(definition),
+        # The roles of the users in the records of a scope (ADR 0048), or None.
+        "memberships": member_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": share_plans(definition),
         # The pages with `presence` by name: the other users on the records (ADR 0052). The

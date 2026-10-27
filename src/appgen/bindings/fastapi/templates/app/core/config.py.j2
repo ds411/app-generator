@@ -1,7 +1,7 @@
 {{ trace_header("app") }}
 """The settings of the app, from environment variables or a `.env` file."""
 
-{% if py.message_elements %}
+{% if py.message_elements or py.notice_emails %}
 from typing import Literal
 
 {% endif %}
@@ -73,9 +73,11 @@ class Settings(BaseSettings):
     email_verify_url: str = "http://localhost:5173/verify-email"
     """The page of the front end that confirms an email address. The link adds `?token=...`."""
 {% endif %}
-{% if py.message_elements %}
+{% if py.message_elements or py.notice_emails %}
     environment: Literal["development", "production"] = "production"
-{% if py.smtp %}
+{% if py.smtp and not py.message_elements %}
+    """`development` for a local run: without `SMTP_HOST`, the app writes the emails to the log."""
+{% elif py.smtp %}
     """`development` for a local run: without `SMTP_HOST`, the app writes the links to the log."""
 {% else %}
     """`development` for a local run: the stub of the delivery writes the links to the log."""
@@ -95,6 +97,11 @@ class Settings(BaseSettings):
     smtp_tls: Literal["starttls", "tls", "none"] = "starttls"
     """`starttls`: the connection changes to TLS. `tls`: TLS from the start. `none`: no
     TLS, only for a local test server."""
+{% endif %}
+{% if py.notice_emails %}
+    front_end_url: str = "http://localhost:5173"
+    """The URL of the front end for the browsers. The links of the emails of the notices
+    start with it (ADR 0044)."""
 {% endif %}
 {% for api in py_apis.values() %}
     {{ trace(api.id) }}

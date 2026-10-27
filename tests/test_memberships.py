@@ -1,14 +1,17 @@
 """The roles of the users in the records of a scope (ADR 0048): the DSL, the checks, and the app."""
 
+import re
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
-from appgen.bindings import fastapi
+from appgen.bindings import fastapi, nextjs, react
 from appgen.dsl import load_definition, load_definition_text, validate_definition
 from appgen.dsl.access import scope_entities
+from appgen.gen import Binding
 from appgen.gen.generator import generate
+from appgen.gen.render import GenerationError
 
 ROOT = Path(__file__).parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "courses.yaml"
@@ -86,9 +89,9 @@ def codes(text: str) -> list[str]:
     return [code for code, _, _ in diagnostics(text)]
 
 
-def files_of(text: str) -> dict[str, str]:
+def files_of(text: str, binding: Binding = fastapi.BINDING) -> dict[str, str]:
     definition = load_definition_text(text, "app.yaml")
-    return {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    return {f.path: f.content for f in generate(definition, binding).files}
 
 
 def test_the_memberships_are_valid() -> None:
@@ -207,12 +210,133 @@ def test_the_fastapi_app_gives_the_operations_of_the_roles_in_their_scopes() -> 
         assert f"async def test_a_role_of_a_membership_gives_{name}_in_its_scope(" in tests
 
 
+def test_the_fastapi_app_gives_the_permissions_of_the_memberships() -> None:
+    files = files_of(BASE)
+    lessons = files["app/features/lessons/permissions.py"]
+    assert '"/permissions/lessons",' in lessons
+    assert 'operation_id="read_lesson_member_permissions",' in lessons
+    assert (
+        '    "create_lesson",\n    "list_lessons",\n    "read_lesson",\n    "update_lesson",'
+        in lessons
+    )
+    assert (
+        "statement = select(Lesson.id).where(Lesson.id.in_(wanted), in_scopes(scopes))" in lessons
+    )
+    assert "router.include_router(permissions.router)" in files["app/features/lessons/router.py"]
+    assert "class MemberPermissions(BaseModel):" in files["app/core/access.py"]
+    assert "app/features/users/permissions.py" not in files
+    assert '"/permissions/lessons",' in files["tests/test_memberships.py"]
+
+
+# An entity with the path of the permissions, and an operation with the ID of one of them.
+NAME_CLASHES = [
+    (
+        BASE.replace("  Note:\n", "  Note:\n    x-fastapi-path: /permissions\n"),
+        "The entity 'Note' has the path '/permissions' of the permissions of the memberships.",
+    ),
+    (
+        BASE + "operations:\n  read_lesson_member_permissions: { kind: read, entity: Lesson }\n",
+        "The endpoint of the permissions of 'Lesson' has the operation ID",
+    ),
+]
+
+
+@pytest.mark.parametrize(("text", "message"), NAME_CLASHES)
+def test_the_permissions_of_the_fastapi_app_have_their_own_names(text: str, message: str) -> None:
+    with pytest.raises(GenerationError, match=re.escape(message)):
+        files_of(text)
+
+
+def test_the_nextjs_app_applies_the_memberships() -> None:
+    files = files_of(BASE, nextjs.BINDING)
+    access = files["src/shared/auth/access.ts"]
+    assert "export async function membershipsOf(userId: string): Promise<Membership[]> {" in access
+    assert "scopesOf(await membershipsOf(userId), operation).length === 0" in access
+    assert "export async function memberPermissions(" in access
+    repository = files["src/entities/note/api/note-repository.ts"]
+    assert "inScopes: (scopes) =>" in repository
+    actions = files["src/entities/lesson/api/lesson-actions.ts"]
+    assert 'await recordScope("Lesson", "change", "update_lesson")' in actions
+    assert "export async function getLessonPermissionsAction(ids: string[])" in actions
+    api = files["src/entities/lesson/api/lesson-api.ts"]
+    assert (
+        "export async function lessonPermissions(ids: string[]): Promise<MemberPermissions> {"
+        in api
+    )
+    assert "lessonPermissions," in files["src/entities/lesson/index.ts"]
+    assert not [path for path in files if path.startswith("src/gaps/access.memberships")]
+
+
+def without_memberships(text: str) -> str:
+    """Return the text of the course hub without its memberships."""
+    return text[: text.index("  # A role in a course")] + text[text.index("\nseed:") :]
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING])
+def test_the_ui_shows_the_actions_of_the_memberships_on_their_records(binding: Binding) -> None:
+    files = files_of(BASE, binding)
+    permissions = files["src/shared/lib/permissions.ts"]
+    assert "export const MEMBER_OPERATIONS: Readonly<Record<string, string>> = {" in permissions
+    assert (
+        'export const SCOPE_ENTITIES: readonly string[] = ["Course", "Lesson", "Note"];'
+        in permissions
+    )
+    member_access = files["src/shared/lib/member-access.ts"]
+    assert "export function memberGives(user: string | null, operation: string" in member_access
+    providers = files["src/app/providers/member-permissions.ts"]
+    assert 'import { lessonApi, lessonPermissions } from "@/entities/lesson";' in providers
+    assert 'import { enrollmentApi } from "@/entities/enrollment";' in providers
+    assert "for (const api of [courseApi, enrollmentApi, lessonApi, noteApi]) {" in providers
+    assert 'import "./member-permissions";' in files["src/app/providers/index.tsx"]
+    # The actions of the course hub.
+    actions = files_of(FIXTURE.read_text(), binding)["src/shared/ui/actions.tsx"]
+    assert "canCallOn(action.operation, idsOf(records))" in actions
+    assert "actions.filter((action) => allowed(action, [record]))" in actions
+
+
+def test_the_react_mock_store_applies_the_memberships() -> None:
+    files = files_of(BASE, react.BINDING)
+    auth = files["src/shared/auth/index.ts"]
+    assert 'return recordsOf("Enrollment").flatMap((record) => {' in auth
+    assert "values.userId === userId ? [{ scope: String(values.courseId)" in auth
+    store = files["src/shared/api/mock-store.ts"]
+    assert "export class ScopeError extends Error {" in store
+    assert "async permissions(ids: string[]): Promise<MemberPermissions> {" in store
+    api = files["src/entities/note/api/note-api.ts"]
+    assert 'scopeOf: (action, operation) => recordScope("Note", action, operation),' in api
+    assert '{ key: "lessonId", target: "Lesson" },' in api
+    assert "return noteApi.permissions(ids);" in api
+
+
+def test_the_react_app_asks_the_fastapi_app_for_the_permissions() -> None:
+    text = BASE.replace(
+        "app: { name: school, title: School }",
+        "app: { name: school, title: School, x-react-data: api }",
+    )
+    files = files_of(text, react.BINDING)
+    store = files["src/shared/api/http-store.ts"]
+    assert (
+        'return (await apiRequest("GET", `/permissions${this.path}${query}`)) as MemberPermissions;'
+        in store
+    )
+    auth = files["src/shared/auth/index.ts"]
+    assert "recordsOf" not in auth
+    # The browser does not know the memberships: the API checks the member operations.
+    assert "&& MEMBER_OPERATIONS[operation] === undefined) {" in auth
+
+
 def test_an_app_without_memberships_has_no_member_code() -> None:
     text = BASE[: BASE.index("  memberships:")]
     files = files_of(text)
     assert "tests/test_memberships.py" not in files
     assert "MEMBER_ROLES" not in files["app/core/access.py"]
     assert not [path for path, content in files.items() if "in_scopes" in content]
+    assert not [path for path in files if path.endswith("/permissions.py")]
+    for binding in (nextjs.BINDING, react.BINDING):
+        ui = files_of(without_memberships(FIXTURE.read_text()), binding)
+        assert "src/shared/lib/member-access.ts" not in ui
+        assert "src/app/providers/member-permissions.ts" not in ui
+        assert "canCallOn" not in ui["src/shared/ui/actions.tsx"]
 
 
 def test_the_course_hub_has_teachers_and_students() -> None:

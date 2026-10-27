@@ -10,7 +10,7 @@ import { notices } from "@/shared/api/notices";
 {% if i18n %}
 import { getLocale } from "@/shared/lib/i18n";
 {% endif %}
-import { useNavigate, usePathname } from "@/shared/lib/router";
+import { {{ "Link, " if has_notice_emails(definition) }}useNavigate, usePathname } from "@/shared/lib/router";
 import { useResource } from "@/shared/lib/use-resource";
 import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
@@ -32,7 +32,8 @@ function timeText(at: string): string {
  * the signed-in user, and the newest notices. A click on a notice marks it
  * read and opens the detail page of its record. The bell loads the
  * notices again when the page or the notices change, and when it opens.
- * It shows after the first load.
+ * It shows after the first load.{% if has_notice_emails(definition) %} A link opens the page of the emails of
+ * the notices (ADR 0044).{% endif %}
  */
 export function NoticeBell() {
   const [open, setOpen] = useState(false);
@@ -126,6 +127,13 @@ export function NoticeBell() {
             ))}
           </ul>
         )}
+{% if has_notice_emails(definition) %}
+        <div className="border-t px-4 py-2">
+          <Link href="/notice-settings" className="text-sm font-medium underline underline-offset-4" onClick={() => setOpen(false)}>
+            {{ jsx_text("Email settings") }}
+          </Link>
+        </div>
+{% endif %}
       </PopoverContent>
     </Popover>
   );

@@ -1,2 +1,5 @@
 {{ trace_header(*notice_ids(definition)) }}
 export { NoticeBell } from "./ui/notice-bell";
+{% if has_notice_emails(definition) %}
+export { NoticeSettingsPage } from "./ui/notice-settings-page";
+{% endif %}

@@ -1,0 +1,129 @@
+{% set e = py.notice_emails %}
+{% set u = py.entity(definition.auth.user_entity) %}
+{{ trace_header(*e.ids) }}
+"""The tests of the built-in job `notice_emails` (ADR 0044), with a fixed clock.
+
+The tests replace the SMTP client with a function that keeps the
+emails, and check the emails of the notices that wait, the settings of
+the users, and an error of the SMTP server.
+"""
+
+{% set ns = namespace(lines=["import datetime as dt", "from email.message import EmailMessage", "from uuid import uuid4", "import pytest", "from sqlalchemy import select", "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker", "from app.core import mail", "from app.core.config import Settings", "from app.core.notifications import Notice, NoticeSetting, add_notices", "from app.jobs import notice_emails", py.from_import("tests.factories", ["make_" ~ u.snake])]) %}
+{{ py.imports(ns.lines) }}
+
+pytestmark = pytest.mark.anyio
+
+WINDOW = dt.timedelta(hours=1)
+TIME = dt.datetime(2026, 6, 15, 12, 0, tzinfo=dt.UTC)
+"""The time of the first run of the tests."""
+NAME = {{ py.string(e.names[0]) }}
+"""The notification of the notices of the tests: it has emails."""
+
+
+@pytest.fixture
+def smtp(monkeypatch: pytest.MonkeyPatch) -> list[EmailMessage]:
+    """Keep the emails of the job, instead of a connection to the SMTP server."""
+    sent: list[EmailMessage] = []
+
+    def keep(_settings: Settings, email: EmailMessage) -> None:
+        sent.append(email)
+
+    monkeypatch.setattr(mail, "send_email", keep)
+    return sent
+
+
+@pytest.fixture
+def smtp_settings(settings: Settings) -> Settings:
+    """The settings of a worker with an SMTP server."""
+    return settings.model_copy(
+        update={
+            "smtp_host": "smtp.example.com",
+            "smtp_from": "no-reply@example.com",
+            "front_end_url": "https://app.example.com",
+        }
+    )
+
+
+async def waiting(session: AsyncSession) -> list[bool]:
+    """Return the `email` mark of each notice, the oldest first."""
+    statement = select(Notice.email).order_by(Notice.at, Notice.id)
+    session.expire_all()
+    return list(await session.scalars(statement))
+
+
+async def test_a_run_sends_the_email_of_each_notice_that_waits_one_time(
+    sessions: async_sessionmaker[AsyncSession],
+    smtp_settings: Settings,
+    session: AsyncSession,
+    smtp: list[EmailMessage],
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    add_notices(session, NAME, "Entity", uuid4(), [user.id], {})
+    await session.commit()
+
+    assert await notice_emails.run(sessions, smtp_settings, TIME, WINDOW) == 1
+    # The next run sends no email again.
+    later = TIME + dt.timedelta(minutes=1)
+    assert await notice_emails.run(sessions, smtp_settings, later, WINDOW) == 1
+
+    [email] = smtp
+    assert email["To"] == user.{{ e.address }}
+    assert email["From"] == "no-reply@example.com"
+    assert email["Subject"].startswith({{ py.string(app.title ~ ": ") }})
+    assert "https://app.example.com/notice-settings" in email.get_content()
+    assert await waiting(session) == [False]
+
+
+async def test_a_user_that_turned_off_the_emails_gets_none(
+    sessions: async_sessionmaker[AsyncSession],
+    smtp_settings: Settings,
+    session: AsyncSession,
+    smtp: list[EmailMessage],
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    other = await make_{{ u.snake }}(session)
+    session.add(NoticeSetting(user_id=user.id, notification=NAME, email=False))
+    add_notices(session, NAME, "Entity", uuid4(), [user.id, other.id], {})
+    await session.commit()
+
+    assert await notice_emails.run(sessions, smtp_settings, TIME, WINDOW) == 1
+
+    assert [email["To"] for email in smtp] == [other.{{ e.address }}]
+    assert await waiting(session) == [False, False]
+
+
+async def test_an_error_of_the_smtp_server_keeps_the_notices_for_the_next_run(
+    sessions: async_sessionmaker[AsyncSession],
+    smtp_settings: Settings,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    add_notices(session, NAME, "Entity", uuid4(), [user.id], {})
+    add_notices(session, NAME, "Entity", uuid4(), [user.id], {})
+    await session.commit()
+
+    def fail(_settings: Settings, _email: EmailMessage) -> None:
+        raise OSError("The SMTP server is not available.")
+
+    monkeypatch.setattr(mail, "send_email", fail)
+    assert await notice_emails.run(sessions, smtp_settings, TIME, WINDOW) == 1
+
+    assert await waiting(session) == [True, True]
+
+
+async def test_without_a_host_the_development_app_writes_the_emails_to_the_log(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    add_notices(session, NAME, "Entity", uuid4(), [user.id], {})
+    await session.commit()
+    development = settings.model_copy(update={"smtp_host": "", "environment": "development"})
+
+    assert await notice_emails.run(sessions, development, TIME, WINDOW) == 1
+
+    assert str(user.{{ e.address }}) in caplog.text
+    assert await waiting(session) == [False]

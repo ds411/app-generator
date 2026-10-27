@@ -495,8 +495,10 @@ notifications:
     transition: confirm
     receivers: [organizer]
     text: The booking {title} is confirmed.
+    email: true
   booking_cancelled:
     entity: Booking
     transition: cancel
     receivers: [organizer]
     text: The booking {title} is cancelled.
+    email: true

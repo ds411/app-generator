@@ -232,16 +232,48 @@ git config core.hooksPath .githooks
   changes, and stops the push if a check fails. For the Python part,
   the checks are `ruff check`, `ruff format --check`, `pyright`,
   `pytest`, and `appgen check` on the golden output of the bindings
-  (`tests/golden/`). The trace check fails on an invalid trace. A
+  (`tests/golden/`). `pytest` runs one process for each CPU
+  (pytest-xdist). `APPGEN_TEST_WORKERS=<n>` sets the number of
+  processes. The trace check fails on an invalid trace. A
   change to a Markdown file also runs these checks, because
   `tests/test_docs.py` checks the docs.
-- The hook runs the app checks below (`scripts/check-<app>.sh`) at the
-  same time, after the Python checks. Each output line of an app check
-  starts with the name of the app, for example `[nextjs]`. At the end,
-  the hook tells which app checks passed and which failed. To run them
-  one after the other, push with `APPGEN_CHECK_SERIAL=1 git push`.
-- When a push changes the generator core, the FastAPI binding, or the
-  shared binding code, the hook also runs `scripts/check-fastapi.sh`. The script generates the
+- The app checks below (`scripts/check-<app>.sh`) have sections. A
+  section generates one fixture with one binding or a few, and checks
+  the output, for example `nextjs:listings`. The hook runs only the
+  sections that can give another result than on the base commit, where
+  all checks passed before the merge. `scripts/check_plan.py` generates
+  the apps of each section in memory, in the working tree and in the
+  base commit, and compares them. It also compares the files that the
+  section runs: its part of the check script without the comments, its
+  test scripts and the scripts that they import, and for UI tests
+  `ui-tests/` with the approved screenshots of its bindings. A change
+  to `uv.lock`, `pyproject.toml`, `.python-version`,
+  `scripts/sandbox.env`, or `scripts/sandbox-setup.sh` selects all
+  sections. At the start, the hook shows each selected section and the
+  reason, in the lines that start with `check-plan:`.
+- The hook also skips a section that passed before on the same machine
+  with the same files and the same generated apps
+  (`~/.cache/appgen/checks/passed`, or the folder in
+  `APPGEN_CHECK_CACHE`). A section passed when its check passed, or
+  when the next section of its check started. So after a fix, the next
+  push runs only the sections that the fix changes and the sections that
+  did not pass.
+- The selection does not compare the environment (Docker images,
+  Chromium, packages of the registry), and it does not see a change of
+  the generator that changes only what a test script expects, without
+  a change of the generated apps. To run all sections, push with
+  `APPGEN_CHECK_ALL=1 git push`. A check script that you run by hand
+  runs all its sections.
+- The hook runs two app checks at the same time, after the Python
+  checks: the checks with the longest time start first. Each output line
+  of an app check starts with the name of the app, for example
+  `[nextjs]`. At the end, the hook tells which app checks passed and
+  which failed, and the time of each. `APPGEN_CHECK_JOBS=<n>` runs `n`
+  checks at the same time. With more checks at the same time, the UI
+  tests can fail because the CPUs are too busy. To run the checks one
+  after the other, push with `APPGEN_CHECK_SERIAL=1 git push`.
+- The hook runs the selected sections of `scripts/check-fastapi.sh`.
+  The script generates the
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
   the output. It also starts two processes of the app with Redis, and
@@ -273,8 +305,7 @@ git config core.hooksPath .githooks
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
-- When a push changes the generator core, the Next.js binding, or the
-  shared binding code, the hook also runs `scripts/check-nextjs.sh`.
+- The hook runs the selected sections of `scripts/check-nextjs.sh`.
   The script generates the project tracker with the Next.js binding,
   and runs `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. Like the FastAPI check, it starts two
@@ -294,8 +325,7 @@ git config core.hooksPath .githooks
   live updates of each user and the users on a task page with PGlite,
   and with two brokers and one Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
   with `scripts/check-nextjs.sh [output folder]`.
-- When a push changes the generator core, the React binding, or the
-  shared binding code, the hook also runs `scripts/check-react.sh`. The
+- The hook runs the selected sections of `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs
   `pnpm install`, lint, type check, build, `docker build`, and
   `appgen check` on the output. Then it generates
@@ -307,9 +337,8 @@ git config core.hooksPath .githooks
   editors). Last, it does the same for `tests/fixtures/listings.yaml`
   (the queries, ADR 0045). It needs pnpm and Docker. Run it by hand with
   `scripts/check-react.sh [output folder]`.
-- When a push changes the generator core, a front-end binding, or the
-  shared binding code, the hook also runs
-  `scripts/check-translations.sh`. The script generates the project
+- The hook runs the selected sections of
+  `scripts/check-translations.sh` (one for each front end). The script generates the project
   tracker with a test language that changes each text, and checks that
   the React and the Next.js apps show no text of the default language
   (`scripts/translation_test.py`). It needs pnpm, but not Docker. A
@@ -321,9 +350,8 @@ git config core.hooksPath .githooks
   `ui-tests/approved/<binding>/rtl/<page>.png`, in the light mode. A
   template that uses a class of a side (for example `ml-2` in place of
   `ms-2`) fails a test of `tests/test_bindings_shared_sides.py`.
-- When a push changes the generator core, a front-end binding, the
-  FastAPI binding, the shared binding code, or the room booking example,
-  the hook also runs `scripts/check-auth-ui.sh`. The script builds the room booking example
+- The hook runs the selected sections of `scripts/check-auth-ui.sh`
+  (one for each test script and each binding). The script builds the room booking example
   with React and Next.js, signs in as a user of each role, and checks
   the menus, the pages, and the actions of the role. It also signs up
   a new user, resets a password (Next.js), checks that a user of a
@@ -390,11 +418,16 @@ git config core.hooksPath .githooks
   fonts can give small differences.
 - The hook checks the working tree. Push from a clean working tree, so
   that the hook checks the pushed code.
-- To run all checks, push with `APPGEN_CHECK_ALL=1 git push`.
+- To run all checks and all sections, push with
+  `APPGEN_CHECK_ALL=1 git push`. Do this after a change of the
+  environment, for example another Docker image or another Chromium.
 - Do not skip the hook with `git push --no-verify` for a pull request
   that is ready for review.
-- When you add a part (for example a binding), add its checks and its
-  path patterns to the hook.
+- When you add a section to a check script
+  (`if section <check>:<part>; then` ... `fi`), add it to `SECTIONS` in
+  `scripts/check_plan.py`. `tests/test_check_plan.py` checks that they
+  agree. When you add a part (for example a binding), add its checks to
+  the hook.
 - Claude Code sessions enable the hook with a SessionStart hook in
   `.claude/settings.json`. See [Cloud sessions](#cloud-sessions).
 

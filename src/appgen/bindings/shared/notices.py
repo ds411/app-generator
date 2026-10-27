@@ -15,6 +15,12 @@ A `text` field with `mentions: true` (ADR 0043) gives a notice to each
 user that a new or a changed text mentions for the first time, with the
 built-in notification `@mention`. A mention in the text is
 `@[<display value>](<ID of the user>)`.
+
+A notification with `email: true` (ADR 0044) also sends each notice by
+email: the built-in job `notice_emails` of the Next.js and the FastAPI
+apps sends the notices that wait. The page `/notice-settings` of the
+front ends turns off the emails of each such notification for the
+signed-in user.
 """
 
 import json
@@ -26,7 +32,7 @@ from appgen.dsl.model import AppDefinition
 from appgen.dsl.notifications import Notification
 from appgen.dsl.ui.views import DetailView
 from appgen.gen.binding import Output
-from appgen.gen.naming import camel
+from appgen.gen.naming import camel, words
 
 _PARAM = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 
@@ -37,6 +43,12 @@ MENTION_TEXT = "You are mentioned in {record}."
 _UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 MENTION_PATTERN = rf"@\[([^\[\]\n]+)\]\(({_UUID})\)"
 """A mention in a text: the display value of the user, and its ID."""
+NOTICE_EMAILS_JOB = "notice_emails"
+"""The name of the built-in job that sends the emails of the notices (ADR 0044)."""
+NOTICE_EMAILS_SCHEDULE = "* * * * *"
+"""The schedule of the job in UTC: each minute."""
+NOTICE_EMAILS_BATCH = 100
+"""The highest count of emails of one run of the job: the oldest notices that wait."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +112,18 @@ class MentionPlan:
     """The key of the stored display field of the entity, or None: the value is the ID."""
 
 
+@dataclass(frozen=True, slots=True)
+class EmailNotification:
+    """A notification with `email: true` (ADR 0044): a switch of the page of the settings."""
+
+    name: str
+    id: str
+    """The element ID of the notification, for the traces."""
+    label: str
+    """The name in words, for example `Booking confirmed`."""
+    description: str | None
+
+
 def has_notices(definition: AppDefinition) -> bool:
     """Return True if the app shows notices: it has notifications or mentions, and a sign-in."""
     return (
@@ -112,6 +136,28 @@ def has_mentions(definition: AppDefinition) -> bool:
     return definition.auth is not None and any(
         f.mentions for e in definition.entities.values() for f in e.fields.values()
     )
+
+
+def email_notifications(definition: AppDefinition) -> list[EmailNotification]:
+    """Return the notifications with `email: true`, in source order (ADR 0044)."""
+    if not has_notices(definition):
+        return []
+    return [
+        EmailNotification(name, n.id, _words(name), n.description)
+        for name, n in definition.notifications.items()
+        if n.email
+    ]
+
+
+def has_notice_emails(definition: AppDefinition) -> bool:
+    """Return True if a notification sends its notices by email too (ADR 0044)."""
+    return bool(email_notifications(definition))
+
+
+def _words(name: str) -> str:
+    """Return a name in words with a capital first letter: `booking_moved` is `Booking moved`."""
+    text = " ".join(words(name))
+    return text[:1].upper() + text[1:]
 
 
 def mention_plans(definition: AppDefinition, entity: str | None = None) -> list[MentionPlan]:
@@ -146,7 +192,7 @@ def mention_link(definition: AppDefinition) -> tuple[str, str] | None:
 
 def notice_rules() -> tuple[Output, ...]:
     """Return the output rules of the bell of the notices, for the top bars and the bare layout,
-    and of the mentions (ADR 0043)."""
+    of the page of the settings of the emails (ADR 0044), and of the mentions (ADR 0043)."""
     return (
         *(
             Output(
@@ -159,6 +205,11 @@ def notice_rules() -> tuple[Output, ...]:
                 ("notice-texts.ts", "model/notice-texts.ts"),
                 ("notice-bell.tsx", "ui/notice-bell.tsx"),
             )
+        ),
+        Output(
+            template="ui/features/notices/notice-settings-page.tsx.j2",
+            path="src/features/notices/ui/notice-settings-page.tsx",
+            when="has_notice_emails(definition)",
         ),
         Output(
             template="ui/features/notices/mentions.ts.j2",

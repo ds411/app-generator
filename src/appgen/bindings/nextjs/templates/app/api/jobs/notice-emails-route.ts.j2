@@ -1,0 +1,15 @@
+{{ trace_header(*nextjs.notice_emails.ids) }}
+import { {{ nextjs.notice_emails.job.function }} } from "@/app/jobs/notice-emails";
+import { handleJob } from "@/shared/lib/jobs";
+
+// Each call runs the job, so the build does not render the route.
+export const dynamic = "force-dynamic";
+
+/**
+ * Run the built-in job `notice_emails` (ADR 0044): the emails of the
+ * notices. A scheduler calls the route each minute with the secret
+ * JOBS_SECRET, for example a CronJob of `deploy/` (README.md, section Jobs).
+ */
+export async function POST(request: Request) {
+  return handleJob(request, "notice_emails", {{ nextjs.notice_emails.job.function }});
+}

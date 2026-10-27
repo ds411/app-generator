@@ -19,6 +19,7 @@ hide the owner and the fields that a condition of the rule sets.
 
 from dataclasses import dataclass
 
+from appgen.dsl.access import scope_entities
 from appgen.dsl.auth import has_me
 from appgen.dsl.model import AppDefinition
 from appgen.dsl.ui.dashboards import CustomWidget
@@ -85,14 +86,21 @@ class PathStep:
 
 @dataclass(frozen=True, slots=True)
 class EntityRules:
-    """The record rules of the roles on one entity (ADR 0018, ADR 0025)."""
+    """The record rules of the roles on one entity (ADR 0018, ADR 0025), and its scope path.
+
+    An entity of the scope of the memberships (ADR 0048) has rules too: a
+    membership gives its operations on the records of its scopes only.
+    """
 
     path: tuple[PathStep, ...]
     """The steps of the owner path to the user entity, or no steps without an owner."""
     fixed: tuple[str, ...]
     """The fields that a condition with one value can set, sorted: a form hides them."""
     element_ids: tuple[str, ...]
-    """The element IDs of the rules."""
+    """The element IDs of the rules, and of the memberships for an entity of the scope."""
+    scope: tuple[PathStep, ...] | None = None
+    """The steps of the path to the scope entity of the memberships, no steps for the scope
+    entity, or None for an entity out of the scope."""
 
     @property
     def direct(self) -> bool:
@@ -104,10 +112,13 @@ def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
     """Return the record rules of the roles by entity, for the entities that a rule names.
 
     All rules of an entity with an owner use the same owner (the validator
-    checks it), so each entity has one path.
+    checks it), so each entity has one path. The entities of the scope of
+    the memberships (ADR 0048) have their scope path.
     """
     if definition.access is None:
         return {}
+    scoped = scope_entities(definition)
+    memberships = definition.access.memberships
     owners: dict[str, str] = {}
     fixed: dict[str, set[str]] = {}
     ids: dict[str, list[str]] = {}
@@ -118,10 +129,16 @@ def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
             single = {name for name, values in rule.conditions().items() if len(values) == 1}
             fixed.setdefault(entity, set()).update(single)
             ids.setdefault(entity, []).append(rule.id)
+    if memberships is not None:
+        for entity in scoped:
+            ids.setdefault(entity, []).append(memberships.id)
+            fixed.setdefault(entity, set())
     found: dict[str, EntityRules] = {}
     for entity in ids:
         steps = path_steps(definition, entity, owners[entity]) if entity in owners else ()
-        found[entity] = EntityRules(steps, tuple(sorted(fixed[entity])), tuple(ids[entity]))
+        path = scoped.get(entity)
+        scope = None if path is None else path_steps(definition, entity, path) if path else ()
+        found[entity] = EntityRules(steps, tuple(sorted(fixed[entity])), tuple(ids[entity]), scope)
     return found
 
 
@@ -257,6 +274,17 @@ def auth_rules() -> tuple[Output, ...]:
             template="ui/lib/permissions.ts.j2",
             path="src/shared/lib/permissions.ts",
             when="definition.access",
+        ),
+        # The operations of the memberships on the records, for the actions of the UI (ADR 0048).
+        Output(
+            template="ui/lib/member-access.ts.j2",
+            path="src/shared/lib/member-access.ts",
+            when="memberships",
+        ),
+        Output(
+            template="src/app/providers/member-permissions.ts.j2",
+            path="src/app/providers/member-permissions.ts",
+            when="memberships",
         ),
     )
 

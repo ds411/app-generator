@@ -181,8 +181,13 @@ def api_text() -> str:
 
 
 def hook_text() -> str:
-    """Return the room booking example with the delivery hook, not the delivery by SMTP."""
-    return EXAMPLE.read_text().replace("  delivery: smtp\n", "")
+    """Return the room booking example with the delivery hook, not the delivery by SMTP.
+
+    The emails of the notices need the delivery by SMTP, so the
+    notifications have no emails.
+    """
+    text = EXAMPLE.read_text().replace("  delivery: smtp\n", "")
+    return text.replace("    email: true\n", "")
 
 
 def test_the_nextjs_app_has_the_verification_page_with_the_token_rules_of_the_api() -> None:

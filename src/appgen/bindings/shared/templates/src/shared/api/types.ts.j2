@@ -130,6 +130,20 @@ export type SharedRecord<T extends EntityRecord, R = EntityRecord> = {
 };
 
 {% endif %}
+{% if memberships %}
+/**
+ * The operations that the memberships of the signed-in user give on the
+ * records of an entity of the scope (ADR 0048), without the operations of
+ * the role of the user.
+ */
+export type MemberPermissions = {
+  /** The operations that a membership gives on some records of the entity. */
+  operations: readonly string[];
+  /** The operations that a membership gives on each record, by ID. */
+  records: Readonly<Record<string, readonly string[]>>;
+};
+
+{% endif %}
 {% if presences %}
 /** A signed-in user on the page of a record (ADR 0052). */
 export type PresentUser = { id: string; name: string; typing: boolean };
@@ -175,7 +189,23 @@ export interface NoticeApi {
   readAll(): Promise<void>;
   /** Call the listener after a change of the notices. Return the function that stops it. */
   subscribe(listener: () => void): () => void;
+{% if has_notice_emails(definition) %}
+  /** Return the settings of the emails of the signed-in user: each notification with emails (ADR 0044). */
+  settings(): Promise<NoticeSetting[]>;
+  /** Turn the emails of a notification on or off for the signed-in user. */
+  setEmail(notification: string, email: boolean): Promise<void>;
+{% endif %}
 }
+{% if has_notice_emails(definition) %}
+
+/** The emails of the notices of a notification for the signed-in user (ADR 0044). */
+export type NoticeSetting = {
+  /** The name of the notification in the app definition. */
+  notification: string;
+  /** False: the notices of the notification come only in the bell. */
+  email: boolean;
+};
+{% endif %}
 
 {% endif %}
 {% if has_points(definition) %}

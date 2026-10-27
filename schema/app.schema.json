@@ -5230,6 +5230,11 @@
         "text": {
           "$ref": "#/$defs/Text"
         },
+        "email": {
+          "default": false,
+          "title": "Email",
+          "type": "boolean"
+        },
         "description": {
           "anyOf": [
             {

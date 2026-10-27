@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
-from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
+from appgen.bindings.nextjs.db import belongs_to, build_tables, in_scopes, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.live import live_entities
-from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
+from appgen.bindings.nextjs.notices import check_notice_table, ts_notice_emails, ts_notify
 from appgen.bindings.nextjs.ranges import repository_ranges
 from appgen.bindings.nextjs.snapshots import ts_snapshots
 from appgen.bindings.nextjs.totals import repository_totals
@@ -25,7 +25,13 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
-from appgen.bindings.shared.notices import has_notices, mention_plans, notice_plans
+from appgen.bindings.shared.memberships import member_plan
+from appgen.bindings.shared.notices import (
+    has_notice_emails,
+    has_notices,
+    mention_plans,
+    notice_plans,
+)
 from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
@@ -267,15 +273,19 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 
 def uses_smtp(definition: AppDefinition) -> bool:
-    """Return True if the app sends the messages of the sign-in by SMTP (`auth.delivery: smtp`).
+    """Return True if the app sends emails by SMTP (`auth.delivery: smtp`).
 
-    The app has these messages with a password reset or a verification of the email address.
+    The app has the messages of the sign-in with a password reset or a
+    verification of the email address, and the emails of the notices with
+    a notification with `email: true` (ADR 0044).
     """
     auth = definition.auth
     if auth is None or auth.delivery != "smtp":
         return False
-    return auth.password_reset is not None or (
-        auth.sign_up is not None and auth.sign_up.verify_email is not None
+    return (
+        auth.password_reset is not None
+        or (auth.sign_up is not None and auth.sign_up.verify_email is not None)
+        or has_notice_emails(definition)
     )
 
 
@@ -325,11 +335,15 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     rules = record_rules(definition)
     jobs = ts_jobs(definition, by_entity)
     if has_notices(definition):
-        check_notice_table(by_entity)
+        check_notice_table(by_entity, has_notice_emails(definition))
     snapshots = ts_snapshots(definition, by_entity)
     if snapshots is not None:
         # The built-in job of the snapshots (ADR 0042) runs as the jobs of the definition.
         jobs[snapshots.job.name] = snapshots.job
+    notice_emails = ts_notice_emails(definition)
+    if notice_emails is not None:
+        # The built-in job of the emails of the notices (ADR 0044) runs as the jobs too.
+        jobs[notice_emails.job.name] = notice_emails.job
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     totals = repository_totals(definition, by_entity)
@@ -345,6 +359,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The roles of the users in the records of a scope (ADR 0048), or None.
+        "memberships": member_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": shares,
         # The pages with `presence` by name: the other users on the records (ADR 0052).
@@ -382,6 +398,12 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 entity: belongs_to(r.path, by_entity, 4)
                 for entity, r in rules.items()
                 if r.path and not r.direct
+            },
+            # The conditions of the scope paths of the memberships (ADR 0048).
+            "scope_conditions": {
+                entity: in_scopes(entity, r.scope, by_entity, 4)
+                for entity, r in rules.items()
+                if r.scope is not None
             },
             "seed": seed,
             "seed_files": any(table.files for table in seed),
@@ -428,6 +450,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # The live entities (ADR 0051): the repositories note their changes, and the route
             # `/api/live` sends them as events.
             "live": live_entities(definition, by_entity),
+            # The emails of the notices (ADR 0044): the built-in job that sends them.
+            "notice_emails": notice_emails,
             "frame_headers": frame_headers(definition),
             # The public pages with metadata: `sitemap.xml` and `robots.txt`.
             "sitemap": sitemap_pages(definition),

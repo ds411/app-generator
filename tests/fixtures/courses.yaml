@@ -136,9 +136,10 @@ pages:
       new_lesson: { kind: form, form: new_lesson, label: New lesson, icon: plus }
   # An admin shares a lesson with a guest: a secret link opens it
   # without a sign-in (ADR 0049). A member may not change a lesson, so
-  # a member sees no button "Share". The page shows the other users on
-  # the lesson, and a note when one of them types in the form "Edit"
-  # (ADR 0052).
+  # a member sees no button "Share", unless the member teaches the course
+  # of the lesson: a teacher edits and shares the lessons of the course
+  # (ADR 0048). The page shows the other users on the lesson, and a note
+  # when one of them types in the form "Edit" (ADR 0052).
   lesson_detail:
     path: "/lessons/{id}"
     title: Lesson
@@ -147,7 +148,7 @@ pages:
     share: true
     presence: true
     actions:
-      edit: { kind: form, form: edit_lesson, label: Edit, icon: pencil, variant: outline }
+      edit_lesson: { kind: form, form: edit_lesson, label: Edit, icon: pencil, variant: outline }
   submissions:
     path: /submissions
     title: Submissions

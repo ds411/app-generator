@@ -18,8 +18,9 @@
 # (scripts/sessions_ui_test.py, M36). Last, open the map of the places of
 # tests/fixtures/places.yaml with a local tile server, and move it
 # (scripts/places_ui_test.py, ADR 0046).
-# The pre-push hook runs this script when a push changes the generator
-# or a front-end binding. Run it by hand from the repository root:
+# The pre-push hook runs only the sections of this script that a push
+# changes (scripts/check_plan.py). Run it by hand from the repository
+# root, to run all sections:
 #
 #   scripts/check-auth-ui.sh [binding ...]
 #
@@ -28,14 +29,43 @@
 
 set -eu
 
+# Run a section only if the pre-push hook selected it: APPGEN_CHECK_SECTIONS
+# lists the selected sections (scripts/check_plan.py). Without the
+# variable, run all sections.
+section() {
+    case " ${APPGEN_CHECK_SECTIONS-$1} " in
+    *" $1 "*) return 0 ;;
+    esac
+    echo "check-auth-ui: skip $1 (no change)"
+    return 1
+}
+
+# Run a test script for a part of the check. Without bindings in the
+# arguments of the check, test the bindings of the selected sections
+# "auth-ui:<part>:<binding>".
+run_test() {
+    part=$1
+    script=$2
+    shift 2
+    if [ $# -eq 0 ]; then
+        for binding in react nextjs react-api; do
+            if section "auth-ui:$part:$binding"; then
+                set -- "$@" "$binding"
+            fi
+        done
+        [ $# -gt 0 ] || return 0
+    fi
+    uv run --locked "scripts/$script" "$@"
+}
+
 # In a cloud session, use the settings of the sandbox (uv and the proxy).
 if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     # shellcheck source=scripts/sandbox.env
     . scripts/sandbox.env
 fi
 
-uv run --locked scripts/auth_ui_test.py "$@"
-uv run --locked scripts/connection_ui_test.py "$@"
-uv run --locked scripts/listings_ui_test.py "$@"
-uv run --locked scripts/sessions_ui_test.py "$@"
-uv run --locked scripts/places_ui_test.py "$@"
+run_test room-booking auth_ui_test.py "$@"
+run_test connections connection_ui_test.py "$@"
+run_test listings listings_ui_test.py "$@"
+run_test courses sessions_ui_test.py "$@"
+run_test places places_ui_test.py "$@"
