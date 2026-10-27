@@ -73,6 +73,9 @@ services:
       {{ name | upper }}_ISSUER: ${{ "{" }}{{ name | upper }}_ISSUER:-{{ p.issuer }}{{ "}" }}
       {{ p.client_id_env }}: ${{ "{" }}{{ p.client_id_env }}:-{{ "}" }}
       {{ p.client_secret_env }}: ${{ "{" }}{{ p.client_secret_env }}:-{{ "}" }}
+{% if p.sign_out %}
+      {{ name | upper }}_SIGN_OUT_URL: ${{ "{" }}{{ name | upper }}_SIGN_OUT_URL:-{{ p.sign_out.endpoint or "" }}{{ "}" }}
+{% endif %}
 {% endfor %}
 {% endif %}
 {% if definition.storage %}

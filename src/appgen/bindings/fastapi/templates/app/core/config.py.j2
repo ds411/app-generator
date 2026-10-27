@@ -189,5 +189,10 @@ class Settings(BaseSettings):
     """The client ID of the app at the provider `{{ p.name }}` (`{{ p.client_id_env }}`)."""
     {{ p.name }}_client_secret: str = Field(default="", validation_alias="{{ p.client_secret_env }}")
     """The client secret of the app at the provider `{{ p.name }}` (`{{ p.client_secret_env }}`)."""
+{% if p.sign_out_id %}
+    {{ p.name }}_sign_out_url: str = {{ p.sign_out_endpoint | tojson }}
+    """The logout URL of the provider `{{ p.name }}` (`{{ p.name | upper }}_SIGN_OUT_URL`). Empty: the
+    `end_session_endpoint` of its discovery document."""
+{% endif %}
 {% endfor %}
 {% endif %}

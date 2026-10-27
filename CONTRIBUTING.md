@@ -292,7 +292,8 @@ git config core.hooksPath .githooks
   Cognito with Entra ID as its SAML provider), checks it in the same
   way, and signs in through the mock user pool of `scripts/mock_oidc.py`:
   one user with a group of each role of `roles` in turn, and then
-  without a group.
+  without a group. The sign-out route sends the browser to the logout
+  endpoint of the mock provider (`sign_out`).
   Then it generates `tests/fixtures/account-security.yaml` (the verification of
   the email address, and the second factor), and runs Ruff, pyright,
   the generated tests, and `appgen check` on it. Then it generates
@@ -373,7 +374,8 @@ git config core.hooksPath .githooks
   rules with conditions and owner paths. It builds
   `tests/fixtures/cognito-sign-in.yaml` with Next.js and react-api, and
   signs in through the mock user pool of Amazon Cognito, as one user
-  with the groups of each role in turn. The binding `react-api` is the React app
+  with the groups of each role in turn, and signs out through its logout
+  endpoint. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
   in through the flow of the FastAPI app. Then it builds
   `tests/fixtures/api-connections.yaml` with React, Next.js, and

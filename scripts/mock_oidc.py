@@ -7,7 +7,10 @@ authorization request, or else `mock.user@example.com`. The ID tokens
 have the claims `sub`, `email`, `email_verified`, and `name`, and an RS256
 signature with a key that the provider makes when it starts. The
 parameter `groups` of the authorization request (a mock parameter, `a,b`)
-gives the groups of the user: the claim `groups`, a list.
+gives the groups of the user: the claim `groups`, a list. Its discovery
+document has an `end_session_endpoint` (`/logout`), which takes
+`client_id` and `post_logout_redirect_uri` (OpenID Connect RP-Initiated
+Logout), and sends the browser to that URL.
 
 The provider checks the client ID and the client secret (the basic
 scheme or the form), the redirect URI, the one-time code, and the PKCE
@@ -27,6 +30,9 @@ because no attribute of the SAML provider gives it, and the claims
 groups of the parameter `groups` are in the claim `custom:groups`, as the
 text `[a, b]`: a SAML attribute with more than one value (the groups of
 Entra ID) arrives in this form in a custom attribute of the user pool.
+As a real user pool, its discovery document has no `end_session_endpoint`:
+its logout endpoint `/logout` on the domain takes `client_id` and
+`logout_uri`. Both logout endpoints keep each request in `logouts`.
 
 Run it from the repository root:
 
@@ -139,6 +145,14 @@ def issuer_of(port: int, authorize_params: dict[str, str]) -> str:
     return f"{base}/{COGNITO_POOL}" if "identity_provider" in authorize_params else base
 
 
+def sign_out_url_of(port: int, authorize_params: dict[str, str]) -> str:
+    """Return the mock logout URL for a provider of a definition: the logout endpoint on the
+    domain of the user pool, or the `end_session_endpoint` of the plain provider."""
+    if "identity_provider" in authorize_params:
+        return f"http://localhost:{port}/logout"
+    return f"http://127.0.0.1:{port}/logout"
+
+
 @dataclass
 class MockProvider:
     """The state of the mock provider: the key, the client, and the open codes.
@@ -157,6 +171,8 @@ class MockProvider:
     endpoints: str | None = None
     cognito: MockProvider | None = None
     """The mock user pool on the same server, for the plain provider."""
+    logouts: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+    """The query of each request to the logout endpoint."""
 
     @property
     def authorization_endpoint(self) -> str:
@@ -173,7 +189,9 @@ class MockProvider:
         return f"{self.issuer}/.well-known/jwks.json" if self.endpoints else f"{self.issuer}/jwks"
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        # A user pool has no end_session_endpoint in its discovery document.
+        logout = {} if self.endpoints else {"end_session_endpoint": f"{self.issuer}/logout"}
+        return logout | {
             "issuer": self.issuer,
             "authorization_endpoint": self.authorization_endpoint,
             "token_endpoint": self.token_endpoint,
@@ -212,6 +230,18 @@ class MockProvider:
         answer = {"code": code} | ({"state": query["state"]} if "state" in query else {})
         separator = "&" if "?" in redirect_uri else "?"
         return 302, f"{redirect_uri}{separator}{urlencode(answer)}"
+
+    def logout(self, query: dict[str, str]) -> tuple[int, dict[str, Any] | str]:
+        """End the session of the user, and send the browser to the page after the sign-out."""
+        name = "logout_uri" if self.endpoints else "post_logout_redirect_uri"
+        if query.get("client_id") != self.client_id:
+            return 400, {"error": "unauthorized_client"}
+        target = query.get(name, "")
+        if not target.startswith(("http://", "https://")):
+            return 400, {"error": "invalid_request", "error_description": f"No {name}."}
+        with self.lock:
+            self.logouts.append(query)
+        return 302, target
 
     def token(self, form: dict[str, str], authorization: str | None) -> tuple[int, dict[str, Any]]:
         """Change a code for an ID token."""
@@ -327,6 +357,9 @@ def _handler(plain: MockProvider) -> type[BaseHTTPRequestHandler]:
                 self._answer(200, {"keys": [provider.key.jwk("mock-key")]})
             elif path in ("/authorize", "/oauth2/authorize"):
                 self._answer(*provider.authorize(query))
+            elif path == "/logout":
+                # The logout endpoint of the user pool takes `logout_uri`.
+                self._answer(*(pool if "logout_uri" in query else plain).logout(query))
             else:
                 self._answer(404, {"error": "not_found"})
 

@@ -133,6 +133,8 @@ export type ExpectedAuth = {
     name: string;
     title: string;
     signIns: { loginHint?: string; groups?: string[]; menu: string[] }[];
+    /** With `sign_out`: the logout URL of the mock provider, the client ID, and the parameter of the page after the sign-out. */
+    signOut: { url: string; clientId: string; returnParam: string } | null;
   }[];
   /**
    * The notices (ADR 0041): a user with all operations changes the state

@@ -588,7 +588,7 @@ BINDING = Binding(
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
-        | {"provider_roles"}
+        | {"provider_roles", "provider_sign_out"}
         | {"access", "role", "record_rule", "memberships", "membership_role"}
         | {"api", "api_operation"}
         | {"webhook"}

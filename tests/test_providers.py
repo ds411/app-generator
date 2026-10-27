@@ -421,3 +421,89 @@ def test_the_react_app_with_mock_data_signs_in_a_user_of_the_first_role() -> Non
     auth = files["src/shared/auth/index.ts"]
     assert "  // @trace auth.providers.company.roles\n" in auth
     assert f'  company: "{admin["id"]}", // @trace auth.providers.company\n' in auth
+
+
+def test_the_sign_out_at_the_provider_is_off_by_default_and_has_two_forms() -> None:
+    definition = load_definition_text(BASE, "app.yaml")
+    assert definition.auth is not None
+    assert definition.auth.providers["company"].sign_out is None
+
+    definition = load_definition_text(with_provider("      sign_out: true\n"), "app.yaml")
+    assert definition.auth is not None
+    sign_out = definition.auth.providers["company"].sign_out
+    assert sign_out is not None
+    assert (sign_out.endpoint, sign_out.return_param) == (None, "post_logout_redirect_uri")
+    assert codes(with_provider("      sign_out: true\n")) == []
+
+    lines = "      sign_out: { endpoint: https://pool.test/logout, return_param: client_id }\n"
+    assert codes(with_provider(lines)) == [("reserved-name", "auth.providers.company.sign_out")]
+    with pytest.raises(DefinitionError, match="does not match the pattern"):
+        load_definition_text(
+            with_provider("      sign_out: { endpoint: http://pool.test/logout }\n"), "app.yaml"
+        )
+
+
+def test_the_fastapi_app_sends_the_browser_to_the_logout_endpoint_of_cognito() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), fastapi.BINDING).files}
+    providers = files["app/core/providers.py"]
+
+    assert "            # @trace auth.providers.company.sign_out\n" in providers
+    assert "            sign_out_url=settings.company_sign_out_url,\n" in providers
+    assert '            sign_out_return_param="logout_uri",\n' in providers
+    assert '    "/{name}/sign-out",\n' in providers
+    assert "    end_session_endpoint: str | None = None\n" in providers
+    config = files["app/core/config.py"]
+    endpoint = "https://staff-portal.auth.eu-west-1.amazoncognito.com/logout"
+    assert f'    company_sign_out_url: str = "{endpoint}"\n' in config
+    assert f"COMPANY_SIGN_OUT_URL={endpoint}\n" in files[".env.example"]
+    tests = files["tests/test_providers.py"]
+    assert (
+        "async def test_the_sign_out_sends_the_browser_to_the_logout_url_of_the_provider(" in tests
+    )
+    assert f'    assert location.startswith("{endpoint}?")\n' in tests
+    assert '    assert query["logout_uri"] == [page]\n' in tests
+
+
+def test_the_nextjs_app_keeps_the_provider_in_the_session_for_the_sign_out() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), nextjs.BINDING).files}
+
+    session = files["src/shared/auth/session.ts"]
+    assert "export async function startSession(userId: string, provider?: string)" in session
+    assert "export async function sessionProvider(): Promise<string | null> {" in session
+    callback = files["app/auth/providers/[name]/callback/route.ts"]
+    assert "request.nextUrl.searchParams), name);" in callback
+    providers = files["src/shared/auth/providers.ts"]
+    assert (
+        "      signOut: { url: process.env.COMPANY_SIGN_OUT_URL || "
+        '"https://staff-portal.auth.eu-west-1.amazoncognito.com/logout", '
+        'returnParam: "logout_uri" },\n'
+    ) in providers
+    assert "export async function providerSignOutUrl(name: string)" in providers
+    actions = files["src/shared/auth/actions.ts"]
+    assert "export async function signOutAction(): Promise<string | null> {" in actions
+    button = files["src/features/sign-out/ui/sign-out-button.tsx"]
+    assert "window.location.assign(logoutUrl);" in button
+
+
+def test_the_react_app_with_the_api_opens_the_sign_out_route_of_the_fastapi_app() -> None:
+    text = COGNITO.read_text().replace("\napp:\n", "\napp:\n  x-react-data: api\n", 1)
+    definition = load_definition_text(text, str(COGNITO))
+    files = {f.path: f.content for f in generate(definition, react.BINDING).files}
+
+    auth = files["src/shared/auth/index.ts"]
+    assert '  "company", // @trace auth.providers.company.sign_out\n' in auth
+    assert "export async function signOut(): Promise<string | null> {" in auth
+    assert "/sign-out?return_to=${encodeURIComponent(returnTo)}" in auth
+    assert "&provider=${encodeURIComponent(name)}" in auth
+    route = files["src/app/auth/require-auth.tsx"]
+    assert 'new URLSearchParams(window.location.search).get("provider")' in route
+
+
+def test_an_app_without_the_sign_out_at_a_provider_signs_out_as_before() -> None:
+    for binding in (fastapi.BINDING, nextjs.BINDING, react.BINDING):
+        files = {f.path: f.content for f in generate(load_definition(EXAMPLE), binding).files}
+        assert all(
+            "sign_out" not in content and "signOutUrl" not in content
+            for path, content in files.items()
+            if "auth" in path or "provider" in path
+        )

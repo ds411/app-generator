@@ -141,6 +141,21 @@ class ProviderRoles(Element):
     """A group of the claim to a role of `access`, in the order of the check."""
 
 
+class ProviderSignOut(Element):
+    """The end of the session of the user at the provider, at the sign-out of the app.
+
+    The app sends the browser to the logout URL of the provider with the
+    client ID and the URL of the sign-in page of the app. The provider ends
+    its session, and sends the browser back to the sign-in page.
+    """
+
+    endpoint: Annotated[str, pydantic.StringConstraints(pattern=r"^https://\S+$")] | None = None
+    """The logout URL, for example `https://<domain>/logout` of a user pool of Amazon Cognito.
+    Default: the `end_session_endpoint` of the discovery document."""
+    return_param: ParamName = "post_logout_redirect_uri"
+    """The parameter with the URL of the page after the sign-out. Cognito uses `logout_uri`."""
+
+
 class Provider(Element):
     """An OpenID Connect provider for the sign-in (ADR 0020).
 
@@ -178,6 +193,12 @@ class Provider(Element):
     """Accept the email address of an ID token also when `email_verified` is missing or false.
     Only for a provider that gives only the addresses of the company, for example a user pool
     of Amazon Cognito with a single-tenant Entra ID as its SAML identity provider."""
+    sign_out: Annotated[ProviderSignOut | None, BeforeValidator(flag_input)] = pydantic.Field(
+        default=None, json_schema_extra=flag_schema
+    )
+    """`true`: the sign-out of the app also ends the session at the provider, with the
+    `end_session_endpoint` of the discovery document. The mapping form sets another logout URL.
+    Without it, the sign-out ends only the session of the app."""
 
 
 class Auth(Element):

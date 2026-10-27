@@ -4,6 +4,7 @@
 {% set var = auth.user_entity | camel %}
 {% set role_key = definition.access.role_field | camel if definition.access else none %}
 {% set grouped = (auth.providers.values() | selectattr("roles") | list) if role_key else [] %}
+{% set signs_out = auth.providers.values() | selectattr("sign_out") | list %}
 {% set role_column = (table.columns | selectattr("element_id", "eq", definition.entities[auth.user_entity].fields[definition.access.role_field].id) | first) if grouped else none %}
 {% set codes = '"provider" | "unknown-user"' + (' | "no-role"' if grouped else "") %}
 {% set creates = auth.providers.values() | selectattr("create_users") | list %}
@@ -66,6 +67,10 @@ type Provider = {
   authorizeParams: Record<string, string>;
   /** Accept an email address that the ID token does not mark as verified. */
   trustEmail: boolean;
+{% if signs_out %}
+  /** The logout URL (empty: the `end_session_endpoint` of the discovery document), and its parameter of the page after the sign-out. */
+  signOut?: { url: string; returnParam: string };
+{% endif %}
 {% if grouped %}
   /** The role of a new user. With `roles`: the role of a user whose groups have no role. */
   defaultRole?: Role;
@@ -110,6 +115,10 @@ function providerOf(name: ProviderName): Provider {
       claims: { {%- for field, claim in p.claims.items() %} {{ field | camel }}: {{ claim | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.claims }}},
       authorizeParams: { {%- for key, value in p.authorize_params.items() %} {{ key | tojson }}: {{ value | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.authorize_params }}},
       trustEmail: {{ "true" if p.trust_email else "false" }},
+{% if p.sign_out %}
+      {{ trace(p.sign_out.id) }}
+      signOut: { url: process.env.{{ name | upper }}_SIGN_OUT_URL || {{ (p.sign_out.endpoint or "") | tojson }}, returnParam: {{ p.sign_out.return_param | tojson }} },
+{% endif %}
 {% if role_key and p.default_role and (p.create_users or p.roles) %}
       defaultRole: {{ p.default_role | tojson }},
 {% endif %}
@@ -194,6 +203,9 @@ const metadataSchema = z.object({
   authorization_endpoint: z.url(),
   token_endpoint: z.url(),
   jwks_uri: z.url(),
+{% if signs_out %}
+  end_session_endpoint: z.url().optional(),
+{% endif %}
 });
 type Metadata = z.infer<typeof metadataSchema>;
 
@@ -438,3 +450,25 @@ export async function finishProviderSignIn(name: ProviderName, flow: Flow, query
   const idToken = await exchange(provider, metadata, code, callbackUrl(name), flow.verifier);
   return userOf(provider, await checkIdToken(provider, metadata, idToken, flow.nonce));
 }
+{% if signs_out %}
+
+/**
+ * Return the logout URL of a provider with `sign_out`, with the client ID
+ * and the sign-in page of the app as the page after the sign-out, else
+ * null. The provider ends the session of the user there.
+ */
+export async function providerSignOutUrl(name: string): Promise<string | null> {
+  if (!isProviderName(name)) return null;
+  const provider = providerOf(name);
+  if (provider.signOut === undefined) return null;
+  const endpoint = provider.signOut.url || (await discover(provider)).end_session_endpoint;
+  if (!endpoint) {
+    console.warn(`The provider ${name} has no logout URL. Set its sign-out URL.`);
+    return null;
+  }
+  const url = new URL(endpoint);
+  url.searchParams.set("client_id", provider.clientId);
+  url.searchParams.set(provider.signOut.returnParam, `${publicUrl()}${SIGN_IN_PATH}`);
+  return url.toString();
+}
+{% endif %}

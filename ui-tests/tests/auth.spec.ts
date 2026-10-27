@@ -273,7 +273,7 @@ for (const rule of auth?.recordRules ?? []) {
 for (const provider of auth?.providers ?? []) {
   test(`a user signs in with the provider ${provider.name}, and sees the menu of its role`, async ({ browser, baseURL }, testInfo) => {
     test.skip(testInfo.project.name !== "light", "The sign-in does not depend on the color mode.");
-    for (const { loginHint, groups = [], menu } of provider.signIns) {
+    for (const [index, { loginHint, groups = [], menu }] of provider.signIns.entries()) {
       // Each sign-in starts without a session, in a new context of the browser.
       const context = await browser.newContext({ baseURL });
       const page = await context.newPage();
@@ -296,6 +296,16 @@ for (const provider of auth?.providers ?? []) {
       await page.waitForURL((url) => url.origin === app && url.pathname === "/");
       await page.waitForLoadState("networkidle");
       expect(await menuLabels(page), `${loginHint ?? "the mock user"} with the groups [${groups.join(", ")}]`).toEqual(menu);
+      if (index === provider.signIns.length - 1 && provider.signOut) {
+        // The sign-out also ends the session at the provider: the browser goes through its logout URL.
+        const { url, clientId, returnParam } = provider.signOut;
+        const logout = page.waitForRequest((request) => request.url().startsWith(`${url}?`));
+        await page.getByRole("button", { name: "Sign out", exact: true }).click();
+        const query = new URL((await logout).url()).searchParams;
+        expect(query.get("client_id")).toBe(clientId);
+        expect(query.get(returnParam)).toBe(`${app}/sign-in`);
+        await page.waitForURL((url) => url.origin === app && url.pathname === "/sign-in");
+      }
       await context.close();
     }
   });

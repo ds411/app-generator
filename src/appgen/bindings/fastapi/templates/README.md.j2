@@ -478,6 +478,14 @@ the token of each request, also on a public endpoint. Without a token,
   Register `<PUBLIC_URL>/auth/providers/<name>/callback` as the
   redirect URI of the app at the provider. Set the issuer, the client
   ID, and the client secret of each provider (see `.env.example`).
+{% set signs_out = py.providers | selectattr("sign_out_id") | list %}
+{% if signs_out %}
+- `GET /auth/providers/<name>/sign-out?return_to=<page>` sends the
+  browser to the logout URL of a provider ({% for p in signs_out %}`{{ p.name }}`{{ ", " if not loop.last }}{% endfor %}), which ends the
+  session of the user there and sends the browser back to the page. The
+  front end deletes the token first. Register the page as a sign-out URL
+  of the app at the provider. `<NAME>_SIGN_OUT_URL` sets the logout URL.
+{% endif %}
 {% endif %}
 {% set sf = definition.auth.second_factor if password else none %}
 {% if sf %}

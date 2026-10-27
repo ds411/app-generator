@@ -27,6 +27,7 @@ The generated apps speak only OpenID Connect
 - [Step 4: the settings of the apps](#step-4-the-settings-of-the-apps)
 - [The verified email address](#the-verified-email-address)
 - [Roles from the groups of Entra ID](#roles-from-the-groups-of-entra-id)
+- [The sign-out](#the-sign-out)
 - [Limits](#limits)
 - [Checks without a user pool](#checks-without-a-user-pool)
 
@@ -53,6 +54,9 @@ auth:
         map:
           0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
           5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
+      sign_out:
+        endpoint: https://<user pool domain>/logout
+        return_param: logout_uri
 ```
 
 - `issuer` is the issuer of the user pool:
@@ -67,6 +71,8 @@ auth:
   [The verified email address](#the-verified-email-address).
 - `roles` gives the role of the user from the groups of Entra ID at each
   sign-in. See [Roles from the groups of Entra ID](#roles-from-the-groups-of-entra-id).
+- `sign_out` ends the session at the user pool at the sign-out of the
+  app. See [The sign-out](#the-sign-out).
 - `tests/fixtures/cognito-sign-in.yaml` is a complete definition.
 
 ## Step 1: the user pool and its domain
@@ -117,7 +123,10 @@ Make an app client in the user pool:
    - The Next.js app: `<PUBLIC_URL>/auth/providers/company/callback`.
    - The FastAPI app (also for the React app with
      `x-react-data: api`): `<PUBLIC_URL of the FastAPI app>/auth/providers/company/callback`.
-5. Copy the client ID and the client secret.
+5. With `sign_out`, add the sign-out URL of each front end: the sign-in
+   page, `<PUBLIC_URL>/sign-in` of the Next.js app, or
+   `<URL of the React app>/sign-in`.
+6. Copy the client ID and the client secret.
 
 ## Step 4: the settings of the apps
 
@@ -196,14 +205,36 @@ The groups of the user pool itself are in the claim `cognito:groups`.
 Use `claim: "cognito:groups"` to give the roles from these groups in
 place of the groups of Entra ID.
 
+## The sign-out
+
+Without `sign_out`, the sign-out of the app ends only the session of
+the app. The session at the user pool stays, so the next click on the
+button signs in the same user without a password. On a shared computer,
+the next person could then sign in as the last user.
+
+With `sign_out`, the sign-out button also sends the browser to the
+logout endpoint of the user pool,
+`https://<user pool domain>/logout?client_id=<client ID>&logout_uri=<sign-in page>`.
+The user pool ends its session, and sends the browser back to the
+sign-in page of the app. The discovery document of a user pool has no
+`end_session_endpoint`, so the definition gives the logout endpoint
+(`endpoint`) and the name of its parameter (`return_param: logout_uri`).
+The setting `COMPANY_SIGN_OUT_URL` changes the endpoint, for example for
+a test pool. The `logout_uri` must be a sign-out URL of the app client
+(step 3).
+
+The logout endpoint ends only the session of the user pool, not the
+session at Entra ID. The next sign-in goes through Entra ID again, and
+Entra ID can sign in the user at once. SAML single logout is not in the
+apps.
+
 ## Limits
 
 - A sign-in that starts at Entra ID (for example from the My Apps
   portal) does not work: it comes to the app without the `state` of the
   flow, and the app refuses it.
-- The sign-out of the app ends only the session of the app. The session
-  at the user pool stays, so the next sign-in can go through without a
-  password.
+- The sign-out ends the session of the user pool with `sign_out`, but
+  not the session at Entra ID. See [The sign-out](#the-sign-out).
 
 ## Checks without a user pool
 
@@ -218,4 +249,6 @@ authorization request gives the groups of the user, in the claim
 (the FastAPI app) and `scripts/auth_ui_test.py` (the Next.js app, and the
 React app with the FastAPI app) sign in to
 `tests/fixtures/cognito-sign-in.yaml` through it: one user with a group
-of each role in turn, and then without a group.
+of each role in turn, and then without a group. Then the user signs out
+through the logout endpoint of the mock user pool, which checks the
+client ID and `logout_uri`.

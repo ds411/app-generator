@@ -3,6 +3,7 @@
 {% set sign_up = definition.auth.sign_up %}
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set sf = definition.auth.second_factor %}
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {% set required = sf.required_roles if sf and definition.access else [] %}
 {# The change log (ADR 0040) and the notices (ADR 0041) name a user with the display field, else with the user name. #}
 {% set history_users = (has_history(definition) or has_notices(definition)) and not react.api %}
@@ -25,6 +26,16 @@ import { {{ "MEMBER_OPERATIONS, " if memberships }}roleMayCall, roleMayOpenPage 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 {% if role_key %}
 const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
+{% endif %}
+{% if signs_out %}
+/** The key of the provider of the session, after a sign-in with a provider. */
+const PROVIDER_KEY = {{ (app.name ~ "-provider") | tojson }};
+/** The providers whose session ends at the sign-out of the app (`sign_out`). */
+const SIGN_OUT_PROVIDERS = new Set([
+{% for name, p in definition.auth.providers.items() if p.sign_out %}
+  {{ name | tojson }}, {{ trace(p.sign_out.id) }}
+{% endfor %}
+]);
 {% endif %}
 {% else %}
 {% if definition.auth.password %}
@@ -287,12 +298,26 @@ export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: strin
 
 {% endif %}
 {% if react.api %}
+{% if signs_out %}
+/** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user, and the provider of the sign-in. */
+export async function startSession(token: string, provider: string | null = null): Promise<void> {
+  setAccessToken(token);
+  try {
+    const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
+    window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
+    if (provider === null) {
+      window.sessionStorage.removeItem(PROVIDER_KEY);
+    } else {
+      window.sessionStorage.setItem(PROVIDER_KEY, provider);
+    }
+{% else %}
 /** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
 export async function startSession(token: string): Promise<void> {
   setAccessToken(token);
   try {
     const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
     window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
+{% endif %}
 {% if role_key %}
     window.sessionStorage.setItem(ROLE_KEY, String(user[{{ definition.access.role_field | tojson }}] ?? ""));
 {% endif %}
@@ -351,7 +376,11 @@ export async function signIn(username: string, password: string): Promise<SignIn
  * Then the app opens the page `next`. Return null, or the message of the error.
  */
 export async function signInWithProvider(name: string, next: string): Promise<string | null> {
+{% if signs_out %}
+  const returnTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}&provider=${encodeURIComponent(name)}`;
+{% else %}
   const returnTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+{% endif %}
   window.location.assign(`${API_URL}/auth/providers/${encodeURIComponent(name)}/start?return_to=${encodeURIComponent(returnTo)}`);
   return null;
 }
@@ -361,7 +390,11 @@ export async function signInWithProvider(name: string, next: string): Promise<st
  * the error, in the fragment of the URL of `/auth/callback`. Return true
  * if the session starts.
  */
+{% if signs_out %}
+export async function finishProviderSignIn(fragment: string, provider: string | null = null): Promise<boolean> {
+{% else %}
 export async function finishProviderSignIn(fragment: string): Promise<boolean> {
+{% endif %}
   const values = new URLSearchParams(fragment.replace(/^#/, ""));
   const token = values.get("access_token");
   if (token === null) {
@@ -369,7 +402,7 @@ export async function finishProviderSignIn(fragment: string): Promise<boolean> {
     return false;
   }
   try {
-    await startSession(token);
+    await startSession(token{{ ", provider" if signs_out }});
   } catch (error) {
     console.error(error);
     return false;
@@ -492,6 +525,31 @@ export async function disableSecondFactor(code: string): Promise<string | null> 
 }
 {% endif %}
 
+{% if signs_out %}
+/**
+ * Sign out: delete the token. After a sign-in with a provider with
+ * `sign_out`, return the sign-out route of the FastAPI app, which sends
+ * the browser to the logout URL of the provider and back to the sign-in
+ * page. Else return null.
+ */
+export async function signOut(): Promise<string | null> {
+  setAccessToken(null);
+  let provider: string | null = null;
+  try {
+    provider = window.sessionStorage.getItem(PROVIDER_KEY);
+    window.sessionStorage.removeItem(STORAGE_KEY);
+{% if role_key %}
+    window.sessionStorage.removeItem(ROLE_KEY);
+{% endif %}
+    window.sessionStorage.removeItem(PROVIDER_KEY);
+  } catch {
+    // No storage: no session to delete.
+  }
+  if (provider === null || !SIGN_OUT_PROVIDERS.has(provider)) return null;
+  const returnTo = `${window.location.origin}/sign-in`;
+  return `${API_URL}/auth/providers/${encodeURIComponent(provider)}/sign-out?return_to=${encodeURIComponent(returnTo)}`;
+}
+{% else %}
 /** Sign out. */
 export async function signOut(): Promise<void> {
   setAccessToken(null);
@@ -504,6 +562,7 @@ export async function signOut(): Promise<void> {
     // No storage: no session to delete.
   }
 }
+{% endif %}
 {% else %}
 {% if definition.auth.password %}
 /** The result of a sign-in: the user is signed in, or an error with its message.{% if sf %} `second-factor`: the user signs in with a code (ADR 0024).{% endif %} */
@@ -757,6 +816,20 @@ export async function disableSecondFactor(code: string): Promise<string | null> 
 }
 {% endif %}
 
+{% if signs_out %}
+/** Sign out. With mock data, the sign-in with a provider has no session at the provider: return null. */
+export async function signOut(): Promise<string | null> {
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // No storage: no session to delete.
+  }
+{% for p in signs_out %}
+  {{ trace(p.sign_out.id) }}
+{% endfor %}
+  return null;
+}
+{% else %}
 /** Sign out. */
 export async function signOut(): Promise<void> {
   try {
@@ -765,6 +838,7 @@ export async function signOut(): Promise<void> {
     // No storage: no session to delete.
   }
 }
+{% endif %}
 {% endif %}
 {% if auth_pages.connections %}
 

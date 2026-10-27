@@ -237,6 +237,15 @@ authorization code flow with PKCE. Register the redirect URI
 {% for name, p in definition.auth.providers.items() %}
 | `{{ name }}` | `{{ name | upper }}_ISSUER` (default `{{ p.issuer }}`) | `{{ p.client_id_env }}` | `{{ p.client_secret_env }}` |
 {% endfor %}
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
+{% if signs_out %}
+
+The sign-out after a sign-in with {% for name, p in definition.auth.providers.items() if p.sign_out %}`{{ name }}`{{ ", " if not loop.last }}{% endfor %} also
+ends the session at the provider: the browser goes to the logout URL of
+the provider, and comes back to `<PUBLIC_URL>/sign-in`. Register this
+URL as a sign-out URL at the provider. `<NAME>_SIGN_OUT_URL` sets the
+logout URL.
+{% endif %}
 {% endif %}
 {% if definition.auth.sign_up %}
 New users make an account on `/sign-up`.

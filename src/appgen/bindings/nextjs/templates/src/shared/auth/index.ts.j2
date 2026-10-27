@@ -49,10 +49,17 @@ export async function signInWithProvider(name: string, next: string): Promise<st
 }
 {% endif %}
 
+{% if definition.auth.providers.values() | selectattr("sign_out") | list %}
+/** Sign out. Return the logout URL of the provider of the session, or null. */
+export async function signOut(): Promise<string | null> {
+  return signOutAction();
+}
+{% else %}
 /** Sign out. */
 export async function signOut(): Promise<void> {
   await signOutAction();
 }
+{% endif %}
 {% if definition.auth.password_reset %}
 
 /** Ask for a reset link: the app sends it to the user. Return null, or the message of the error. */
