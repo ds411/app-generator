@@ -12,7 +12,7 @@ import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
 {% if react_names %}
 import { {{ react_names | unique | sort | join(", ") }} } from "react";
 {% endif %}
-{% if shape == "board" %}
+{% if shape == "board" or plan.order %}
 import { toast } from "sonner";
 {% endif %}
 
@@ -37,6 +37,9 @@ import { compute } from "@/shared/lib/compute";
 {% endif %}
 {% if plan.needs("formatValue") %}
 import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if plan.order %}
+import { orderChanges, placeItem, writeOrder } from "@/shared/lib/order";
 {% endif %}
 {% if plan.needs("pageHref") %}
 import { pageHref } from "@/shared/lib/pages";
@@ -283,7 +286,10 @@ function filterOptions({{ lookups_param(options_code) }}: Lookups): Record<strin
 {% macro sort_function(plan) -%}
 {% if plan.server %}
 
-{% if plan.view.sort %}
+{% if plan.order %}
+/** The sort of the view: the order field {{ plan.order.field }} (ADR 0039). */
+const VIEW_SORT: string[] = {{ js(plan.server.sort) }};
+{% elif plan.view.sort %}
 {% if plan.server.sort %}
 /** The sort of the view: {{ plan.view.sort.field }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
 {% else %}
@@ -293,6 +299,12 @@ const VIEW_SORT: string[] = {{ js(plan.server.sort) }}; {{ trace(plan.view.sort.
 {% else %}
 const VIEW_SORT: string[] = [];
 {% endif %}
+{% elif plan.order %}
+
+/** Sort the records by the order field {{ plan.order.field }} (ADR 0039): a record without a value comes last. */
+function sortRecords(rows: {{ plan.type }}[], {{ lookups_param(plan.sort.sort_expr) }}: Lookups): {{ plan.type }}[] {
+  return sortBy(rows, (row) => {{ plan.sort.sort_expr }});
+}
 {% elif plan.sort %}
 
 /** Sort the records as the view defines: {{ plan.sort.path }}, {{ "descending" if plan.sort_desc else "ascending" }}. */

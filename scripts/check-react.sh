@@ -7,7 +7,8 @@
 # generates tests/fixtures/seed-data.yaml, and runs lint, type check, and
 # appgen check on it. Then it generates tests/fixtures/invoices.yaml (the
 # small DSL additions of M33), and runs lint, type check, appgen check,
-# and the sequence test of the mock store (scripts/sequence_test.py) on it.
+# the sequence test of the mock store (scripts/sequence_test.py), and the
+# UI test of the manual order (scripts/order_ui_test.py) on it.
 # Then it does lint, type check, and appgen check for
 # tests/fixtures/totals.yaml (the totals of the relations, ADR 0034, and
 # the lines editors, ADR 0035). Last, it does the same for
@@ -130,6 +131,9 @@ uv run --locked appgen check "$invoices_definition" "$invoices_out"
 
 step "sequence test"
 uv run --locked scripts/sequence_test.py --app "$invoices_out" --binding react
+
+step "manual order UI test"
+uv run --locked scripts/order_ui_test.py --app "$invoices_out" --binding react
 
 step "generate $totals_definition in $totals_out"
 uv run --locked appgen generate "$totals_definition" -b react -o "$totals_out" >/dev/null

@@ -1,0 +1,64 @@
+{{ trace_header("app") }}
+// The manual order of the tables and the boards (ADR 0039): a move gives
+// the moved record a value of its order field between the values of its
+// neighbors, or gives all records of the list new values.
+{% raw %}
+
+/** The step between the values of the records after a renumber, and after the last record. */
+const STEP = 1024;
+
+/** A record of a list in a manual order: its ID, and the value of its order field. */
+export type OrderItem = { id: string; value: number | null | undefined };
+
+/** A new value of the order field of a record. */
+export type OrderChange = { id: string; value: number };
+
+/**
+ * Return a list with a record at the place of another record. A record
+ * that moves down goes after the other record, and a record that moves up,
+ * or that comes from another list, goes before it. Without the other
+ * record, the record goes to the end.
+ */
+export function placeItem<T extends { id: string }>(list: readonly T[], item: T, overId: string | null): T[] {
+  const from = list.findIndex((other) => other.id === item.id);
+  const rest = list.filter((other) => other.id !== item.id);
+  const over = rest.findIndex((other) => other.id === overId);
+  if (overId === null || over === -1) return [...rest, item];
+  const after = from !== -1 && from <= over;
+  return [...rest.slice(0, over + Number(after)), item, ...rest.slice(over + Number(after))];
+}
+
+/**
+ * Return the changes of the order field that keep a list in its order after
+ * a move. The moved record gets the middle value between its neighbors: the
+ * lower neighbor of the first record is 0, and the last record gets the
+ * value of the record before it plus a step. When no integer is free, or a
+ * neighbor has no value, the records get new values: one step, two steps,
+ * and so on. The changes have the moved record, and the records whose value
+ * changes.
+ */
+export function orderChanges(list: readonly OrderItem[], id: string): OrderChange[] {
+  const index = list.findIndex((item) => item.id === id);
+  const before = index > 0 ? list[index - 1] : undefined;
+  const after = list[index + 1];
+  const low = before === undefined ? 0 : before.value;
+  if (low !== null && low !== undefined) {
+    if (after === undefined) return [{ id, value: low + STEP }];
+    const high = after.value;
+    if (high !== null && high !== undefined && high - low >= 2) {
+      return [{ id, value: Math.floor((low + high) / 2) }];
+    }
+  }
+  return list.flatMap((item, position) => {
+    const value = (position + 1) * STEP;
+    return item.id === id || item.value !== value ? [{ id: item.id, value }] : [];
+  });
+}
+
+/** Write the changes one at a time, in their order, and stop at the first error. */
+export async function writeOrder(changes: readonly OrderChange[], write: (change: OrderChange) => Promise<unknown>): Promise<void> {
+  for (const change of changes) {
+    await write(change);
+  }
+}
+{% endraw %}

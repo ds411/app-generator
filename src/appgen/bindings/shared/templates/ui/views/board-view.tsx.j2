@@ -6,7 +6,8 @@
 "use client";
 
 {% set ui_lines = ['import { Badge } from "@/shared/ui/badge";'] + (['import { Button } from "@/shared/ui/button";'] if plan.server and not plan.filters else []) + [m.card_imports(plan, true), 'import { DropdownMenuItem, DropdownMenuLabel' ~ (', DropdownMenuSeparator' if plan.row_actions else '') ~ ' } from "@/shared/ui/dropdown-menu";', 'import { ScrollArea, ScrollBar } from "@/shared/ui/scroll-area";', 'import { cn } from "@/shared/lib/utils";'] %}
-{% set check_move = definition.access is not none and plan.move_operation is not none %}
+{% set move_ops = [plan.move_operation, plan.order.operation if plan.order else none] | select | unique | list %}
+{% set check_move = definition.access is not none and move_ops %}
 {% if check_move %}{% set ui_lines = ui_lines + ['import { useAccess } from "@/shared/lib/access";'] %}{% endif %}
 {{ m.imports(plan, "board", lucide=["TriangleAlertIcon"], react=["type CSSProperties", "type ReactNode"], ui=ui_lines) }}
 
@@ -96,15 +97,24 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
 {% endif %}
   const [dragged, setDragged] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
-{% if check_move %}
-  // A role that may not call {{ js(plan.move_operation) }} cannot move the cards.
-  const canMove = useAccess().canCall({{ js(plan.move_operation) }}); {{ trace(definition.access.id) }}
+{% if plan.order %}
+  // The card that a dragged card goes before or after (ADR 0039).
+  const [overCard, setOverCard] = useState<string | null>(null);
+{% endif %}
+{% if check_move and move_ops | length > 1 %}
+  // A role that may not call {% for op in move_ops %}{{ js(op) }}{{ " and " if not loop.last }}{% endfor %} cannot move the cards.
+  const access = useAccess(); {{ trace(definition.access.id) }}
+  const canMove = {% for op in move_ops %}{{ " && " if not loop.first }}access.canCall({{ js(op) }}){% endfor %};
+{% elif check_move %}
+  // A role that may not call {{ js(move_ops[0]) }} cannot move the cards.
+  const canMove = useAccess().canCall({{ js(move_ops[0]) }}); {{ trace(definition.access.id) }}
 {% endif %}
 
 {{ m.states(plan, "board") }}
 
 {% if plan.server %}
-  const { columns, lookups } = resource.data;
+{% set server_lookups = (m.card_uses_lookups(plan) | trim) or (m.action_lookups(plan) | trim) %}
+  const { columns{{ ", lookups" if server_lookups }} } = resource.data;
   const rows = columns.flatMap((column) => column.items);
   const total = columns.reduce((sum, column) => sum + column.total, 0);
 {{ m.action_lookups(plan) -}}
@@ -115,6 +125,34 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
   const rows = sortRecords(all, lookups);
 {% endif %}
 
+{% if plan.order %}
+  // A move of a card (ADR 0039): to its column, before or after another card, or to the end of the
+  // column. The cards of the column get new values of the order field, one update for each card.
+  const move = async (record: {{ plan.type }}, value: string, overId: string | null = null) => {
+    try {
+      if ({{ ui_views.value(plan.entity, view.group_by, row="record").expr }} !== value) await moveRecord(record, value);
+{% if plan.server %}
+      // The cards that the column does not show yet too: a renumber gives new values to all of them.
+      const list = await {{ plan.var }}Api.all({ ...params, {{ js(plan.server.group) }}: value }, VIEW_SORT);
+{% else %}
+      const list = rows.filter((row) => {{ group.expr }} === value);
+{% endif %}
+      const order = placeItem(list, record, overId).map((row) => ({ id: row.id, value: row.{{ plan.order.key }} }));
+      await writeOrder(orderChanges(order, record.id), (change) => {{ plan.var }}Api.update(change.id, { {{ plan.order.key }}: change.value }));
+    } catch (error) {
+      toast.error(error instanceof Error ? {{ tr("error.message") }} : {{ tr(js("The card did not move.")) }});
+    }
+    resource.reload();
+  };
+
+  const drop = (value: string, overId: string | null = null) => {
+    const record = rows.find((row) => row.id === dragged);
+    setDragged(null);
+    setTarget(null);
+    setOverCard(null);
+    if (record && record.id !== overId) void move(record, value, overId);
+  };
+{% else %}
   const move = async (record: {{ plan.type }}, value: string) => {
     if ({{ ui_views.value(plan.entity, view.group_by, row="record").expr }} === value) return;
     try {
@@ -131,6 +169,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
     setTarget(null);
     if (record) void move(record, value);
   };
+{% endif %}
 
   return (
     <div className="space-y-4">
@@ -196,15 +235,40 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
                       <div
                         key={row.id}
                         draggable{{ "={canMove}" if check_move }}
+{% if plan.order %}
+                        className={cn(
+                          "cursor-grab rounded-lg active:cursor-grabbing",
+                          dragged === row.id && "opacity-50",
+                          overCard === row.id && dragged !== row.id && "ring-2 ring-primary",
+                        )}
+{% else %}
                         className={cn("cursor-grab active:cursor-grabbing", dragged === row.id && "opacity-50")}
+{% endif %}
                         onDragStart={(event) => {
                           event.dataTransfer.setData("text/plain", row.id);
                           event.dataTransfer.effectAllowed = "move";
                           setDragged(row.id);
                         }}
+{% if plan.order %}
+                        onDragOver={(event) => {
+                          if (dragged === null) return;
+                          event.preventDefault();
+                          setOverCard(row.id);
+                        }}
+                        onDragLeave={() => setOverCard((value) => (value === row.id ? null : value))}
+                        onDrop={(event) => {
+                          // The card goes before or after this card, not to the end of the column.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          drop(column.value, row.id);
+                        }}
+{% endif %}
                         onDragEnd={() => {
                           setDragged(null);
                           setTarget(null);
+{% if plan.order %}
+                          setOverCard(null);
+{% endif %}
                         }}
                       >
                         <RecordCard

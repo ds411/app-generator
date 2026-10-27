@@ -6,7 +6,9 @@
 # line cards show the next page at their end (`pagination.mode: scroll`).
 # The charts of the dashboard group the dates by day, week, and year
 # (`interval`). The dashboard has a period, and the widgets with a period
-# field show the invoices of its days (`period`, `period_field`).
+# field show the invoices of its days (`period`, `period_field`). The
+# invoices page and the page of an invoice have metadata (`meta`). The
+# steps table and the steps board have a manual order (`order_field`).
 # scripts/check-nextjs.sh, scripts/check-react.sh, and
 # scripts/check-fastapi.sh generate and check the apps of this
 # definition, and scripts/sequence_test.py creates invoices in the
@@ -65,7 +67,22 @@ entities:
     relations:
       invoice: { kind: many_to_one, target: Invoice, required: true, inverse: lines }
 
+  Step:
+    display_field: title
+    crud: { forms: [create] }
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      stage: { type: enum, values: [todo, doing, done], default: todo }
+      rank: { type: integer, min: 0 }
+
 seed:
+  Step:
+    records:
+      draft: { title: Draft the offer, rank: 1024 }
+      check: { title: Check the prices, rank: 2048 }
+      send: { title: Send the offer, rank: 3072 }
+      call: { title: Call the customer, stage: doing, rank: 4096 }
+      archive: { title: Archive the files, stage: doing }
   Customer:
     records:
       acme: { name: Acme Corporation }
@@ -85,6 +102,19 @@ ui:
       columns: { number: {}, issued_on: {}, total: {}, customer: {} }
       sort: { field: number, direction: desc }
       pagination: { mode: scroll, page_size: 4 }
+    step_table:
+      kind: table
+      entity: Step
+      title: Steps
+      columns: { title: {}, stage: {}, rank: {} }
+      order_field: rank
+    step_board:
+      kind: board
+      entity: Step
+      title: Step board
+      group_by: stage
+      card: { title: title, fields: [rank] }
+      order_field: rank
     line_cards:
       kind: cards
       entity: Line
@@ -157,3 +187,5 @@ pages:
   lines: { path: /lines, title: Lines, content: { view: line_table } }
   invoice_feed: { path: /feed, title: Invoice feed, content: { view: invoice_feed } }
   line_cards: { path: /line-cards, title: Line cards, content: { view: line_cards } }
+  steps: { path: /steps, title: Steps, content: { view: step_table } }
+  step_board: { path: /steps/board, title: Step board, content: { view: step_board } }

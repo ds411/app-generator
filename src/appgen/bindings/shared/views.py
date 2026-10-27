@@ -247,6 +247,18 @@ class CardPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class OrderPlan:
+    """The manual order of a table or a board (ADR 0039)."""
+
+    field: str
+    """The order field, for example `rank`."""
+    key: str
+    """The key of the order field in a record, for example `rank`."""
+    operation: str | None
+    """The update operation that writes the order field, for the check of the role."""
+
+
+@dataclass(frozen=True, slots=True)
 class BoardColumnPlan:
     """A column of a board: one value of the group field."""
 
@@ -387,6 +399,8 @@ class ViewPlan:
     """The TypeScript that moves `record` to the column `value` of a board."""
     move_operation: str | None = None
     """The update operation that the move of a board calls, for the check of the role."""
+    order: OrderPlan | None = None
+    """The manual order of a table or a board (`order_field`), or None."""
     calendar: CalendarPlan | None = None
     forms: list[FormRef] = field(default_factory=lambda: list[FormRef]())
     """The forms that the actions of the view open in a dialog or a sheet."""
@@ -760,8 +774,8 @@ class ViewContext:
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
         `date_range`, `select`, `multi_select`), the value components
         (`badge`, `avatar`, `formatted`), the charts (`chart`, and
-        `dates` for a chart of dates), and the period of a dashboard
-        (`period`).
+        `dates` for a chart of dates), the period of a dashboard
+        (`period`), and the manual order of a table or a board (`order`).
         """
         found: set[str] = set()
         values = {"badge", "avatar", "formatted", "file"}
@@ -770,6 +784,8 @@ class ViewContext:
             found.add(kind)
             if plan.scroll:
                 found |= {"scroll", "scroll_pages"} if plan.server else {"scroll"}
+            if plan.order is not None:
+                found.add("order")
             found |= plan.uses & values
             for f in plan.filters:
                 if f.source:
@@ -1052,7 +1068,16 @@ class ViewContext:
             )
             plan.page_sizes = sorted(set(pagination.page_sizes if pagination else []))
             plan.scroll = pagination is not None and pagination.mode == "scroll"
-        if isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
+        if isinstance(view, TableView | BoardView) and view.order_field is not None:
+            # A manual order (ADR 0039): the view sorts by the order field.
+            plan.sort = self.value(view.entity, view.order_field)
+            paths.append(view.order_field)
+            plan.order = OrderPlan(
+                view.order_field,
+                camel(view.order_field),
+                kind_operations(definition, view.entity).get("update"),
+            )
+        elif isinstance(view, TableView | CardsView | BoardView) and view.sort is not None:
             plan.sort = self.value(view.entity, view.sort.field)
             plan.sort_desc = view.sort.direction == "desc"
             paths.append(view.sort.field)
@@ -1114,7 +1139,9 @@ class ViewContext:
                 # The group field has the only parameter of the board.
                 wanted = names[:1] or [view.group_by]
                 server.group = wanted[0]
-                if view.sort is not None and view.sort.field in endpoint.sort_keys:
+                if view.order_field is not None and view.order_field in endpoint.sort_keys:
+                    server.sort.append(view.order_field)
+                elif view.sort is not None and view.sort.field in endpoint.sort_keys:
                     server.sort.append(
                         ("-" if view.sort.direction == "desc" else "") + view.sort.field
                     )
@@ -1161,7 +1188,10 @@ class ViewContext:
             # The words of all search filters must be in the record.
             value = items[0] if len(items) == 1 else "[" + ", ".join(items) + '].join(" ")'
             server.params.append(ServerParam(name, value, ts_key(name)))
-        if view.sort is not None and view.sort.field in endpoint.sort_keys:
+        order_field = view.order_field if isinstance(view, TableView) else None
+        if order_field is not None and order_field in endpoint.sort_keys:
+            server.sort.append(order_field)
+        elif view.sort is not None and view.sort.field in endpoint.sort_keys:
             server.sort.append(("-" if view.sort.direction == "desc" else "") + view.sort.field)
         if isinstance(view, TableView):
             for name, column in view.columns.items():
@@ -1821,6 +1851,7 @@ def view_rules() -> tuple[Output, ...]:
                     "src/shared/lib/use-scroll-pages.ts",
                     "'scroll_pages' in ui_views.features",
                 ),
+                ("lib/order.ts.j2", "src/shared/lib/order.ts", "'order' in ui_views.features"),
                 (
                     "ui/calendar-grid.tsx.j2",
                     "src/shared/ui/calendar-grid.tsx",

@@ -421,6 +421,7 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
                     at="bulk_actions",
                     hint="Add 'selection: true' to the view.",
                 )
+            yield from _check_order_field(definition, entity, view)
         case CardsView():
             for filter_ in view.filters.values():
                 yield from _check_filter(definition, entity, filter_)
@@ -428,6 +429,7 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
                 yield from _check_card(definition, entity, view.card)
         case BoardView():
             yield from _check_board(definition, entity, view)
+            yield from _check_order_field(definition, entity, view)
         case CalendarView():
             yield from _check_calendar(definition, entity, view)
         case DetailView():
@@ -937,6 +939,67 @@ def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Ite
     for value, column in view.columns.items():
         if value not in target.enum_values:
             yield _missing(column, None, "enum value", value, target.enum_values)
+
+
+def _check_order_field(
+    definition: AppDefinition, entity: str, view: TableView | BoardView
+) -> Iterator[Diagnostic]:
+    """The order field is an integer field that the update operation writes (ADR 0039)."""
+    name = view.order_field
+    if name is None:
+        return
+    if view.sort is not None:
+        yield _error(
+            "invalid-option",
+            "A view with 'order_field' sorts by its order field, and takes no 'sort'.",
+            view,
+            at="sort",
+            hint="Remove 'sort', or remove 'order_field'.",
+        )
+    f = definition.entities[entity].fields.get(name)
+    if f is None:
+        yield _missing(view, "order_field", "field", name, definition.entities[entity].fields)
+        return
+    if f.type != "integer":
+        yield _error(
+            "unsuitable-field",
+            f"An order field must be an integer field, but '{name}' has the type '{f.type}'.",
+            view,
+            at="order_field",
+        )
+        return
+    # The apps give values from 1 up, and change the values of many records one at a time.
+    keys = [
+        key
+        for key, bad in (
+            ("unique", f.unique),
+            ("max", f.max is not None),
+            ("min", f.min is not None and f.min > 1),
+            ("computed", f.computed is not None),
+            ("sequence", f.sequence is not None),
+        )
+        if bad
+    ]
+    if keys:
+        yield _error(
+            "unsuitable-field",
+            f"The order field '{name}' must have no {', '.join(repr(k) for k in keys)}: the "
+            "apps give it the values from 1 up, and change the values of many records one "
+            "at a time.",
+            view,
+            at="order_field",
+            hint="Use an integer field without 'unique', 'max', 'computed', and 'sequence', "
+            "and with a 'min' of 1 or less.",
+        )
+    if not any(o.entity == entity and o.kind == "update" for o in definition.operations.values()):
+        yield _error(
+            "invalid-option",
+            f"An order field needs an update operation of '{entity}': a move writes the field "
+            "with it.",
+            view,
+            at="order_field",
+            hint=f"Add 'update' to the 'crud' of '{entity}', or add an update operation.",
+        )
 
 
 def _check_column(
