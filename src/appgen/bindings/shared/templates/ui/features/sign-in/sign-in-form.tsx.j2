@@ -2,6 +2,7 @@
 {% set f = u.fields[definition.auth.username_field] %}
 {% set password = definition.auth.password %}
 {% set providers = definition.auth.providers %}
+{% set grouped = definition.access and (providers.values() | selectattr("roles") | list) %}
 {% set card = "form onSubmit={submit}" if password else "div" %}
 {% set verify = auth_pages.verify_email %}
 {% set sf = auth_pages.second_factor %}
@@ -22,6 +23,9 @@ import { Link } from "@/shared/lib/router";
 /** Return the message of a failed sign-in with a provider: the code in `?error=` of the page. */
 function providerError(code: string | undefined): string | null {
   if (code === undefined) return null;
+{% if grouped %}
+  if (code === "no-role") return {{ tr(js("Your groups at the provider give you no role in this app. Ask an administrator.")) }};
+{% endif %}
   return code === "unknown-user" ? {{ tr(js("No user has this user name. Ask an administrator.")) }} : {{ tr(js("The sign-in with the provider failed.")) }};
 }
 {% endif %}

@@ -1,15 +1,24 @@
 {% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
 {{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{% set basic = ts_connections | selectattr("user_basic") | list %}
 {# The alias keeps the column type apart from the helper text() of the fixed texts. #}
 import { bigint, pgTable, text as textColumn, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
 
 import { {{ table.const }} } from "./{{ table.module }}";
 
+{% if basic %}
+/**
+ * The tokens or the credentials of the users for the APIs that the app
+ * calls in their name (ADR 0033), encrypted with a key from AUTH_SECRET.
+ * The FastAPI app has the same table.
+ */
+{% else %}
 /**
  * The tokens of the users for the APIs with the authorization code flow
  * (ADR 0033), encrypted with a key from AUTH_SECRET. The FastAPI app has
  * the same table.
  */
+{% endif %}
 export const apiConnectionsTable = pgTable(
   "api_connections",
   {
@@ -19,6 +28,9 @@ export const apiConnectionsTable = pgTable(
       .references(() => {{ table.const }}.id, { onDelete: "cascade" }),
     /** The name of the API in the definition. */
     api: varchar("api", { length: 100 }).notNull(),
+{% if basic %}
+    /** The access token, or the password of HTTP Basic. */
+{% endif %}
     accessToken: textColumn("access_token").notNull(),
     /** The refresh token, or null if the authorization server gave none. */
     refreshToken: textColumn("refresh_token"),
@@ -26,6 +38,12 @@ export const apiConnectionsTable = pgTable(
     expiresAt: bigint("expires_at", { mode: "number" }),
     /** The scopes that the user allowed, with spaces between. */
     scope: textColumn("scope").notNull(),
+{% if basic %}
+    /** HTTP Basic: the user name, or null for a token. */
+    username: varchar("username", { length: 320 }),
+    /** HTTP Basic: the time at which the API did not accept the credentials, or null. */
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+{% endif %}
     connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("uq_api_connections_user_id_api").on(t.userId, t.api)],

@@ -47,6 +47,21 @@ def has_me(value: object) -> bool:
 
 type Claim = Annotated[str, pydantic.StringConstraints(pattern=r"^[^\s\"\\]+$")]
 """The name of a claim of an ID token, or of a scope, for example `email`."""
+type ParamName = Annotated[str, pydantic.StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")]
+"""The name of a parameter of the authorization request, for example `identity_provider`."""
+FLOW_PARAMS = frozenset(
+    {
+        "client_id",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "redirect_uri",
+        "response_type",
+        "scope",
+        "state",
+    }
+)
+"""The parameters of the authorization request that the flow sets (ADR 0020)."""
 
 
 def flag_input(value: object) -> object:
@@ -135,6 +150,36 @@ class Guests(Element):
     """The time after which a guest token ends. Then the guest cannot use its records."""
 
 
+class ProviderRoles(Element):
+    """The roles of the users from a claim of a provider, for example the groups of Entra ID.
+
+    At each sign-in, the app sets the role of the user to the first role of
+    `map` whose group is in the claim. Without a match, the user gets the
+    `default_role` of the provider, or the app refuses the sign-in.
+    """
+
+    claim: Claim
+    """The claim with the groups of the user, for example `groups` or `custom:groups`. Its value
+    is a list, or a text in the form `[a, b]`, `a,b`, or `a`."""
+    map: Annotated[dict[Text, MemberName], pydantic.Field(min_length=1)]
+    """A group of the claim to a role of `access`, in the order of the check."""
+
+
+class ProviderSignOut(Element):
+    """The end of the session of the user at the provider, at the sign-out of the app.
+
+    The app sends the browser to the logout URL of the provider with the
+    client ID and the URL of the sign-in page of the app. The provider ends
+    its session, and sends the browser back to the sign-in page.
+    """
+
+    endpoint: Annotated[str, pydantic.StringConstraints(pattern=r"^https://\S+$")] | None = None
+    """The logout URL, for example `https://<domain>/logout` of a user pool of Amazon Cognito.
+    Default: the `end_session_endpoint` of the discovery document."""
+    return_param: ParamName = "post_logout_redirect_uri"
+    """The parameter with the URL of the page after the sign-out. Cognito uses `logout_uri`."""
+
+
 class Provider(Element):
     """An OpenID Connect provider for the sign-in (ADR 0020).
 
@@ -159,9 +204,25 @@ class Provider(Element):
     create_users: bool = False
     """Make a new user at the first sign-in of an unknown user name. Else the app refuses it."""
     default_role: MemberName | None = None
-    """With `create_users` and `access`: the role of a new user."""
+    """With `create_users` and `access`: the role of a new user. With `roles`: the role of a user
+    whose groups have no role."""
     claims: dict[MemberName, Claim] = pydantic.Field(default_factory=dict[str, str])
     """With `create_users`: the fields of a new user from claims, for example `name: name`."""
+    roles: ProviderRoles | None = None
+    """With `access`: the role of the user at each sign-in, from the groups in a claim."""
+    authorize_params: dict[ParamName, Text] = pydantic.Field(default_factory=dict[str, str])
+    """Fixed parameters of the authorization request, for example `identity_provider: EntraID`:
+    a user pool of Amazon Cognito then sends the user at once to that identity provider."""
+    trust_email: bool = False
+    """Accept the email address of an ID token also when `email_verified` is missing or false.
+    Only for a provider that gives only the addresses of the company, for example a user pool
+    of Amazon Cognito with a single-tenant Entra ID as its SAML identity provider."""
+    sign_out: Annotated[ProviderSignOut | None, BeforeValidator(flag_input)] = pydantic.Field(
+        default=None, json_schema_extra=flag_schema
+    )
+    """`true`: the sign-out of the app also ends the session at the provider, with the
+    `end_session_endpoint` of the discovery document. The mapping form sets another logout URL.
+    Without it, the sign-out ends only the session of the app."""
 
 
 class Auth(Element):
@@ -189,11 +250,13 @@ class Auth(Element):
     """The sign-up of new users. Without it, only an administrator makes users."""
     password_reset: PasswordReset | None = None
     """The reset of a forgotten password with a link in a message. Off by default."""
-    delivery: Literal["extension", "smtp"] = "extension"
+    delivery: Literal["extension", "smtp", "ses"] = "extension"
     """The delivery of the messages of the password reset and of the email verification.
 
     `extension`: the extension file of the app sends them (ADR 0017). `smtp`:
-    the apps send them with the SMTP server of the settings `SMTP_*`.
+    the apps send them with the SMTP server of the settings `SMTP_*`. `ses`:
+    the apps send them with the API of Amazon SES and the AWS credentials of
+    the environment, from the sender `SES_FROM`.
     """
     password: bool = True
     """The sign-in with a user name and a password. `false`: only the sign-in with `providers`."""

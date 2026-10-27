@@ -15,6 +15,10 @@ so on), and an operation of the API needs a token that the server gave
 and did not revoke (`MockApi.revoke`, or `POST /_revoke`), else it gets
 the status 401.
 
+An operation of an API with HTTP Basic needs the header `Authorization`
+with the user name `USERNAME` and the password `SECRET` (the Base64 of
+their UTF-8 bytes, RFC 7617), else it gets the status 401.
+
 An API with the authorization code flow (ADR 0033) also gets the page of
 its authorization URL. The page allows the access at once: it sends the
 browser back to the `redirect_uri` with a code and the `state`. The token
@@ -63,6 +67,11 @@ SECRET = "check-secret"
 """The API key, the bearer token, or the client secret of each API with security."""
 CLIENT_ID = "check-client"
 """The client ID of each API with OAuth 2.0."""
+USERNAME = "prüfer@example.com"
+"""The user name of each API with HTTP Basic. It is not ASCII, so that the check proves the UTF-8
+encoding of the clients (RFC 7617)."""
+BASIC_AUTHORIZATION = "Basic " + base64.b64encode(f"{USERNAME}:{SECRET}".encode()).decode()
+"""The header `Authorization` that an operation of an API with HTTP Basic needs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +90,8 @@ class Route:
     """The content type of the answer."""
     secured: bool = False
     """True: the operation needs a token of the token endpoint of its API."""
+    basic: bool = False
+    """True: the operation needs `BASIC_AUTHORIZATION`."""
 
 
 def routes(definition: AppDefinition) -> list[Route]:
@@ -88,6 +99,7 @@ def routes(definition: AppDefinition) -> list[Route]:
     found: list[Route] = []
     for name, api in definition.apis.items():
         secured = name in token_paths(definition)
+        basic = name in basic_apis(definition)
         for operation in api.spec.operations:
             parts = re.split(r"(\{[^}]+\})", operation.path)
             regex = "".join("[^/]+" if p.startswith("{") else re.escape(p) for p in parts)
@@ -106,6 +118,7 @@ def routes(definition: AppDefinition) -> list[Route]:
                     answer=operation.answer if operation.result is not None else "json",
                     media=media,
                     secured=secured,
+                    basic=basic,
                 )
             )
     return found
@@ -126,6 +139,19 @@ def token_paths(definition: AppDefinition) -> dict[str, str]:
         url = code.token_url if api.user_flow and code is not None else scheme.token_url
         if (url or "")[:1] == "/":
             found[name] = url or ""
+    return found
+
+
+def basic_apis(definition: AppDefinition) -> set[str]:
+    """Return the names of the APIs with HTTP Basic."""
+    found: set[str] = set()
+    for name, api in definition.apis.items():
+        document = api.openapi
+        if api.security is None or document is None:
+            continue
+        scheme = document.security_schemes.get(api.security.scheme)
+        if scheme is not None and scheme.type == "http" and scheme.scheme == "basic":
+            found.add(name)
     return found
 
 
@@ -199,13 +225,14 @@ class MockApi:
         }
 
     def credentials(self) -> dict[str, str]:
-        """Return the environment variables of the credentials of the APIs: `SECRET` and
-        `CLIENT_ID`."""
+        """Return the environment variables of the credentials of the APIs: `SECRET`,
+        `CLIENT_ID`, and `USERNAME`."""
+        values = {"client_id_env": CLIENT_ID, "username_env": USERNAME}
         found: dict[str, str] = {}
         for api in self.definition.apis.values():
             if api.security is not None:
                 for key, env in api.security.variables:
-                    found[env] = CLIENT_ID if key == "client_id_env" else SECRET
+                    found[env] = values.get(key, SECRET)
         return found
 
     def issue(self) -> str:
@@ -391,6 +418,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, {"detail": f"The mock has no operation for {self.command} {url.path}."})
         elif route.secured and not mock.accepts(self.headers.get("Authorization")):
             self._send(401, {"message": "The access token is missing or not valid."})
+        elif route.basic and self.headers.get("Authorization") != BASIC_AUTHORIZATION:
+            self._send(401, {"message": "The user name or the password is not correct."})
         elif route.answer == "text":
             self._send_bytes(route.status, str(route.example).encode(), route.media)
         elif route.answer == "binary":

@@ -1,5 +1,5 @@
 {{ trace_header(*(py_apis.values() | map(attribute="id"))) }}
-{% set oauth = "oauth2" in py_api_features or "user" in py_api_features %}
+{% set oauth = "oauth2" in py_api_features or py_apis.values() | selectattr("credential", "equalto", "user") | list %}
 """The mock answers of the third-party APIs: the examples of their OpenAPI documents.
 
 The tests call the clients with `httpx.MockTransport`, without the network.

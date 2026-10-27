@@ -6,6 +6,12 @@
 {% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
+{% set grouped = p.roles_claim and role %}
+{% if grouped %}
+{% set first_group, first_role = p.role_map[0] %}
+{% set last_group, last_role = p.role_map[-1] %}
+{% set other = p.role_map | rejectattr(1, "eq", first_role) | first %}
+{% endif %}
 """The tests of the sign-in with a provider, with a fake provider in the same process.
 
 The fake provider has the discovery document, the token endpoint, and
@@ -37,7 +43,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import Credential, hash_password
 {% endif %}
 from app.core.config import Settings
+{% if grouped %}
+from app.core.errors import ProblemError
+from app.core.providers import Provider, provider_client, role_of
+{% else %}
 from app.core.providers import provider_client
+{% endif %}
 from app.main import create_app
 {{ py.from_import("tests.factories", ["make_" ~ u.snake] + ([u.snake ~ "_input"] if p.create_users else [])) }}
 from tests.problems import assert_problem
@@ -49,6 +60,20 @@ CLIENT_ID = "test-client"
 CLIENT_SECRET = "test-client-secret"
 FRONT_END = "http://front-end.test"
 CALLBACK = "/auth/providers/{{ p.name }}/callback"
+{% if grouped %}
+GROUPS_CLAIM = {{ p.roles_claim | tojson }}
+"""The claim with the groups of the user."""
+FIRST_GROUP = {{ first_group | tojson }}
+"""A group of the role `{{ first_role }}`, the first role of the groups of the provider."""
+LAST_GROUP = {{ last_group | tojson }}
+"""A group of the role `{{ last_role }}`, the last role of the groups of the provider."""
+{% if other %}
+OTHER_GROUP = {{ other[0] | tojson }}
+"""A group of the role `{{ other[1] }}`."""
+{% endif %}
+GROUPS: dict[str, Any] = {GROUPS_CLAIM: [FIRST_GROUP]}
+"""The groups of a user at the provider, unless a test gives others: the role `{{ first_role }}`."""
+{% endif %}
 
 
 def _rsa_key() -> rsa.RSAPrivateKey:
@@ -88,6 +113,9 @@ class FakeProvider:
                     "authorization_endpoint": f"{ISSUER}/authorize",
                     "token_endpoint": f"{ISSUER}/token",
                     "jwks_uri": f"{ISSUER}/jwks",
+{% if p.sign_out_id and not p.sign_out_endpoint %}
+                    "end_session_endpoint": f"{ISSUER}/logout",
+{% endif %}
                 },
             )
         if request.url.path == "/jwks":
@@ -172,7 +200,11 @@ async def _sign_in(
     return_to: str | None = None,
 ) -> httpx.Response:
     """Do the steps of the browser, and return the response of the callback."""
+{% if grouped %}
+    callback = provider.sign_in(await _start(browser, return_to), GROUPS | claims)
+{% else %}
     callback = provider.sign_in(await _start(browser, return_to), claims)
+{% endif %}
     return await browser.get(callback)
 
 
@@ -233,7 +265,9 @@ async def test_a_first_sign_in_with_the_provider_{{ p.name }}_makes_a_user(
 {% for f, claim in p.claims %}
     assert me["{{ f.name }}"] == data["{{ f.name }}"]
 {% endfor %}
-{% if role and p.default_role %}
+{% if grouped %}
+    assert me["{{ role.name }}"] == "{{ first_role }}"
+{% elif role and p.default_role %}
     assert me["{{ role.name }}"] == "{{ p.default_role }}"
 {% endif %}
 {% else %}
@@ -245,6 +279,136 @@ async def test_an_unknown_user_cannot_sign_in_with_the_provider_{{ p.name }}(
     response = await _sign_in(browser, provider, {"{{ p.username_claim }}": "nobody@example.com"})
 
     assert_problem(response, 403)
+{% endif %}
+{% if p.authorize_params %}
+
+
+async def test_the_start_sends_the_fixed_parameters_of_the_provider_{{ p.name }}(
+    browser: AsyncClient,
+) -> None:
+    query = parse_qs(urlsplit(await _start(browser)).query)
+
+{% for key, value in p.authorize_params %}
+    assert query[{{ key | tojson }}] == [{{ value | tojson }}]
+{% endfor %}
+    assert query["response_type"] == ["code"]
+{% endif %}
+{% if grouped %}
+
+
+async def test_the_provider_{{ p.name }}_gives_the_first_role_whose_group_is_in_the_list(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims: dict[str, Any] = {"{{ p.username_claim }}": user.{{ username.attr }}}
+    claims[GROUPS_CLAIM] = ["another-group", LAST_GROUP, FIRST_GROUP]
+
+    response = await _sign_in(browser, provider, claims)
+
+    assert response.status_code == 200, response.text
+    me = await _me(browser, response.json()["access_token"])
+    assert me["{{ role.name }}"] == "{{ first_role }}"
+
+
+@pytest.mark.parametrize(
+    "groups",
+    [
+        f"[another-group, {LAST_GROUP}]",
+        f'["another-group", "{LAST_GROUP}"]',
+        f"another-group,{LAST_GROUP}",
+        LAST_GROUP,
+    ],
+    ids=["brackets", "json", "commas", "one"],
+)
+async def test_the_provider_{{ p.name }}_reads_the_groups_from_a_text(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider, groups: str
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims = {"{{ p.username_claim }}": user.{{ username.attr }}, GROUPS_CLAIM: groups}
+
+    response = await _sign_in(browser, provider, claims)
+
+    assert response.status_code == 200, response.text
+    me = await _me(browser, response.json()["access_token"])
+    assert me["{{ role.name }}"] == "{{ last_role }}"
+
+
+async def test_a_user_without_a_group_of_a_role_{{ "gets_the_default_role" if p.default_role else "cannot_sign_in" }}(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims = {"{{ p.username_claim }}": user.{{ username.attr }}, GROUPS_CLAIM: ["another-group"]}
+
+    response = await _sign_in(browser, provider, claims)
+
+{% if p.default_role %}
+    assert response.status_code == 200, response.text
+    me = await _me(browser, response.json()["access_token"])
+    assert me["{{ role.name }}"] == "{{ p.default_role }}"
+{% else %}
+    assert_problem(response, 403)
+{% endif %}
+
+
+@pytest.mark.parametrize("default_role", [None, "{{ first_role }}"], ids=["none", "default"])
+async def test_the_role_of_groups_without_a_role_is_the_default_role_or_403(
+    default_role: str | None,
+) -> None:
+    provider = Provider(
+        name="{{ p.name }}",
+        issuer=ISSUER,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        scope="openid",
+        username_claim="{{ p.username_claim }}",
+        default_role=default_role,
+        roles_claim=GROUPS_CLAIM,
+        role_map=((FIRST_GROUP, "{{ first_role }}"),),
+    )
+    claims = {GROUPS_CLAIM: ["another-group"]}
+
+    if default_role is None:
+        with pytest.raises(ProblemError) as error:
+            role_of(provider, claims)
+        assert error.value.status == 403
+    else:
+        assert role_of(provider, claims) == default_role
+{% if other %}
+
+
+async def test_a_new_group_at_the_provider_changes_the_role_at_the_next_sign_in(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims: dict[str, Any] = {"{{ p.username_claim }}": user.{{ username.attr }}}
+    claims[GROUPS_CLAIM] = [FIRST_GROUP]
+    first = await _sign_in(browser, provider, claims)
+    assert (await _me(browser, first.json()["access_token"]))["{{ role.name }}"] == "{{ first_role }}"
+
+    claims[GROUPS_CLAIM] = [OTHER_GROUP]
+    response = await _sign_in(browser, provider, claims)
+
+    assert response.status_code == 200, response.text
+    me = await _me(browser, response.json()["access_token"])
+    assert me["{{ role.name }}"] == "{{ other[1] }}"
+{% endif %}
+{% endif %}
+{% if p.trust_email %}
+
+
+@pytest.mark.parametrize("verified", [None, False, "false"], ids=["missing", "false", "text"])
+async def test_the_provider_{{ p.name }}_trusts_an_email_address_that_is_not_verified(
+    browser: AsyncClient, session: AsyncSession, provider: FakeProvider, verified: object
+) -> None:
+    user = await make_{{ u.snake }}(session)
+    claims: dict[str, Any] = {"{{ p.username_claim }}": user.{{ username.attr }}}
+    if verified is not None:
+        claims["email_verified"] = verified
+
+    response = await _sign_in(browser, provider, claims)
+
+    assert response.status_code == 200, response.text
+    assert (await _me(browser, response.json()["access_token"]))["id"] == str(user.id)
 {% endif %}
 
 
@@ -282,6 +446,36 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
     )
 
     assert_problem(response, 422)
+{% if p.sign_out_id %}
+
+
+async def test_the_sign_out_sends_the_browser_to_the_logout_url_of_the_provider(
+    browser: AsyncClient,
+) -> None:
+    page = f"{FRONT_END}/sign-in"
+    params = {"return_to": page}
+
+    response = await browser.get("/auth/providers/{{ p.name }}/sign-out", params=params)
+
+    assert response.status_code == 303, response.text
+    location = response.headers["location"]
+{% if p.sign_out_endpoint %}
+    assert location.startswith({{ (p.sign_out_endpoint ~ "?") | tojson }})
+{% else %}
+    assert location.startswith(f"{ISSUER}/logout?")
+{% endif %}
+    query = parse_qs(urlsplit(location).query)
+    assert query["client_id"] == [CLIENT_ID]
+    assert query[{{ p.sign_out_return_param | tojson }}] == [page]
+
+
+async def test_the_sign_out_refuses_a_return_to_of_another_origin(browser: AsyncClient) -> None:
+    params = {"return_to": "https://another.test/sign-in"}
+
+    response = await browser.get("/auth/providers/{{ p.name }}/sign-out", params=params)
+
+    assert_problem(response, 422)
+{% endif %}
 
 
 @pytest.mark.parametrize(
@@ -291,7 +485,7 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
         {"aud": "another-client"},
         {"exp": int(time.time()) - 3600},
         {"nonce": "another-nonce"},
-{% if p.username_claim == "email" %}
+{% if p.username_claim == "email" and not p.trust_email %}
         {"email_verified": False},
 {% endif %}
     ],
@@ -300,7 +494,7 @@ async def test_a_return_to_of_another_origin_gives_422(browser: AsyncClient) -> 
         "audience",
         "end",
         "nonce",
-{% if p.username_claim == "email" %}
+{% if p.username_claim == "email" and not p.trust_email %}
         "unverified-email",
 {% endif %}
     ],

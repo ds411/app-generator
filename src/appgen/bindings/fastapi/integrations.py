@@ -8,6 +8,7 @@ source lines of these files. The lines are in the format of the Ruff
 formatter.
 """
 
+import base64
 import json
 import keyword
 import re
@@ -62,6 +63,9 @@ _PART_KEYWORDS = (
 USER_TOKEN = "user-token"
 """The access token of a user in the generated tests of the clients of the authorization code
 flow."""
+TEST_USERNAME = "zoë@example.com"
+"""The user name of HTTP Basic in the generated tests. It is not ASCII, so that the tests check
+the UTF-8 encoding (RFC 7617)."""
 _FILE_SAMPLE = {"name": "example.txt", "content": EXAMPLE_TEXT}
 """The sample of a file of a multipart form, as `ApiFile` validates it."""
 
@@ -299,8 +303,13 @@ class PyApiMethod:
         for location, keyword_ in _PART_KEYWORDS:
             found = [p for p in self.parameters if p.location == location]
             if found:
-                items = ", ".join(f"{json.dumps(p.name)}: {p.attr}" for p in found)
-                args.append(f"{keyword_}={{{items}}}")
+                items = [f"{json.dumps(p.name)}: {p.attr}" for p in found]
+                arg = f"{keyword_}={{{', '.join(items)}}}"
+                # An argument of the call is on a line with the indent 12, and a comma.
+                if 12 + len(arg) + 1 > LINE_LENGTH:
+                    inner = "".join(f"{' ' * 16}{item},\n" for item in items)
+                    arg = f"{keyword_}={{\n{inner}{' ' * 12}}}"
+                args.append(arg)
         if self.json_body:
             dump = f'{self.body_adapter}.dump_python(body, mode="json", by_alias=True)'
             if not self.body_required:
@@ -328,6 +337,14 @@ class PyApiMethod:
         if self.body_sample is not None:
             lines.append(self.body_sample.line("body", indent))
         return lines
+
+    @property
+    def test_header(self) -> str:
+        """The first line of the test of the method, in the format of the Ruff formatter."""
+        line = f"async def test_{self.name}_sends_the_request_and_reads_the_answer() -> None:"
+        if len(line) <= LINE_LENGTH:
+            return line
+        return line.removesuffix(" None:") + " (\n    None\n):"
 
     def test_call(self, prefix: str = "", indent: int = 8) -> str:
         """Return a call of the method with the variables of `sample_lines`, for the tests."""
@@ -419,8 +436,9 @@ class PyApi:
     secret_setting: str | None
     secret_env: str | None
     credential: str | None
-    """`header`, `query`, `bearer`, `oauth2` (the client credentials flow), or `user` (the
-    authorization code flow: the token of a user, ADR 0033)."""
+    """`header`, `query`, `bearer`, `basic` (HTTP Basic), `oauth2` (the client credentials
+    flow), `user` (the authorization code flow: the token of a user, ADR 0033), or `user_basic`
+    (HTTP Basic with the user name and the password of a user, ADR 0033)."""
     credential_name: str | None
     """The name of the header or the query parameter of an API key."""
     models: list[PyApiModel] = field(default_factory=list[PyApiModel])
@@ -432,6 +450,9 @@ class PyApi:
     client_id_setting: str | None = None
     """OAuth 2.0: the attribute of the settings with the client ID."""
     client_id_env: str | None = None
+    username_setting: str | None = None
+    """HTTP Basic: the attribute of the settings with the user name."""
+    username_env: str | None = None
     token_url: str = ""
     """OAuth 2.0: the token URL of the flow. A path is under the base URL."""
     scopes: tuple[str, ...] = ()
@@ -440,11 +461,26 @@ class PyApi:
     """The authorization code flow: the page where the user allows the access."""
     refresh_url: str = ""
     """The authorization code flow: the URL that gives a new access token for a refresh token."""
+    check_method: str = ""
+    """`per_user`: the HTTP method of the operation that checks new credentials, or empty."""
+    check_path: str = ""
+    """`per_user`: the path of the operation that checks new credentials."""
 
     @property
     def user(self) -> bool:
-        """True for the authorization code flow: the client sends the token of a user."""
-        return self.credential == "user"
+        """True if the client sends the credentials of a user: the token of the authorization
+        code flow, or the HTTP Basic credentials of `per_user`."""
+        return self.credential in ("user", "user_basic")
+
+    @property
+    def user_basic(self) -> bool:
+        """True for HTTP Basic with the user name and the password of each user."""
+        return self.credential == "user_basic"
+
+    @property
+    def token_source(self) -> str:
+        """The class of the credentials of a user: `UserToken` or `UserCredentials`."""
+        return "UserCredentials" if self.user_basic else "UserToken"
 
     @property
     def client_for(self) -> str:
@@ -460,11 +496,18 @@ class PyApi:
     def dependency(self) -> str:
         return f"get_{self.module}_client"
 
+    def connect_call(self) -> str:
+        """Return the statement of the route of `per_user` that keeps the credentials of a user."""
+        args = ["request", "session", "client", json.dumps(self.connection_name), "user.id", "data"]
+        return call("return await ", "connect_with_credentials", args)
+
     def settings_args(self) -> list[str]:
         """Return the arguments of the client from the settings: the URL and the credentials."""
         args = [f"settings.{self.url_setting}"]
         if self.client_id_setting:
             args.append(f"settings.{self.client_id_setting}")
+        if self.username_setting:
+            args.append(f"settings.{self.username_setting}")
         if self.secret_setting:
             args.append(f"settings.{self.secret_setting}")
         return args
@@ -483,7 +526,14 @@ class PyApi:
 
     @property
     def secret_arg(self) -> str:
-        return {"bearer": "token", "oauth2": "client_secret"}.get(self.credential or "", "api_key")
+        names = {"bearer": "token", "basic": "password", "oauth2": "client_secret"}
+        return names.get(self.credential or "", "api_key")
+
+    @property
+    def secret_envs(self) -> list[str]:
+        """The environment variables of the credentials: the user name of HTTP Basic, and the
+        secret."""
+        return [env for env in (self.username_env, self.secret_env) if env]
 
     @property
     def model_names(self) -> list[str]:
@@ -522,6 +572,8 @@ class PyApi:
             http.add("ApiFile")
         if self.credential == "oauth2":
             http.add("client_credentials")
+        if self.credential == "basic":
+            http.add("basic_authorization")
         lines = [
             "from collections.abc import AsyncIterator",
             "from typing import Annotated",
@@ -535,7 +587,7 @@ class PyApi:
                 "from uuid import UUID",
                 "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker",
                 "from app.core.auth import CurrentUser",
-                "from app.core.connections import UserToken, require_connection",
+                f"from app.core.connections import {self.token_source}, require_connection",
                 "from app.core.db import SessionDep",
             ]
         lines.append(from_import("app.integrations.http", http))
@@ -642,6 +694,8 @@ class PyApi:
             return [*args, f"token=StaticToken({json.dumps(USER_TOKEN)})"]
         if self.credential == "oauth2":
             args.append('"client"')
+        if self.credential == "basic":
+            args.append(json.dumps(TEST_USERNAME, ensure_ascii=False))
         if self.credential:
             args.append('"secret"')
         return args
@@ -673,6 +727,17 @@ class PyApi:
         return lines
 
     @property
+    def test_username(self) -> str:
+        """The user name of HTTP Basic in the tests."""
+        return TEST_USERNAME
+
+    @property
+    def test_basic_header(self) -> str:
+        """The header `Authorization` of HTTP Basic that the tests expect (RFC 7617)."""
+        credentials = f"{TEST_USERNAME}:secret".encode()
+        return "Basic " + base64.b64encode(credentials).decode()
+
+    @property
     def token_pattern(self) -> str:
         """A regular expression of the path of the token URL, for the mock transport."""
         if self.token_url.startswith("/"):
@@ -688,12 +753,15 @@ class PyApi:
 
 
 def py_features(apis: dict[str, PyApi]) -> frozenset[str]:
-    """Return what the HTTP client of the app needs for these APIs: `oauth2` (the client
-    credentials flow), `user` (the authorization code flow), `files`."""
+    """Return what the HTTP client of the app needs for these APIs: `basic` (HTTP Basic),
+    `oauth2` (the client credentials flow), `user` (the credentials of a user), `user_basic`
+    (the HTTP Basic credentials of a user), `files`."""
     found: set[str] = set()
     for api in apis.values():
-        if api.credential in ("oauth2", "user"):
+        if api.credential in ("basic", "oauth2", "user"):
             found.add(api.credential)
+        if api.credential == "user_basic":
+            found.update(("user", "user_basic"))
         if "ApiFile" in api.client_types or any(
             "ApiFile" in f.type for m in api.models for f in m.fields or []
         ):
@@ -730,7 +798,8 @@ def mocks_imports(apis: dict[str, PyApi]) -> list[str]:
 
 
 def python_connections(apis: dict[str, PyApi]) -> list[PyApi]:
-    """Return the APIs with the authorization code flow: the users connect their accounts."""
+    """Return the APIs with the authorization code flow or `per_user`: the users connect their
+    accounts."""
     return [api for api in apis.values() if api.user]
 
 
@@ -744,13 +813,17 @@ def _api(name: str, api: Api) -> PyApi:
     )
     credential: str | None = None
     if scheme is not None:
-        credential = {"http": "bearer", "oauth2": "oauth2"}.get(scheme.type, scheme.location)
+        http = "basic" if scheme.scheme == "basic" else "bearer"
+        credential = {"http": http, "oauth2": "oauth2"}.get(scheme.type, scheme.location)
     code = scheme.authorization_code if scheme is not None and api.user_flow else None
     if code is not None:
         credential = "user"
+    elif api.user_basic:
+        credential = "user_basic"
     security = api.security
     secret_env = security.secret_env if security else None
     client_id_env = security.client_id_env if security else None
+    username_env = security.username_env if security else None
     module = snake(name)
     py = PyApi(
         name=name,
@@ -768,6 +841,8 @@ def _api(name: str, api: Api) -> PyApi:
         credential_name=scheme.parameter if scheme is not None else None,
         client_id_setting=client_id_env.lower() if client_id_env else None,
         client_id_env=client_id_env,
+        username_setting=username_env.lower() if username_env else None,
+        username_env=username_env,
         token_url=(scheme.token_url or "") if scheme is not None else "",
         scopes=tuple(security.scopes) if security else (),
     )
@@ -775,6 +850,9 @@ def _api(name: str, api: Api) -> PyApi:
         py.token_url = code.token_url
         py.authorization_url = code.authorization_url
         py.refresh_url = code.refresh_url or code.token_url
+    check = api.check_operation
+    if check is not None:
+        py.check_method, py.check_path = check.method.upper(), check.path
     types = _Types(spec.schemas)
     for named in spec.schemas:
         py.models.append(types.model(named))

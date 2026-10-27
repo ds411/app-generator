@@ -35,9 +35,9 @@
 {% if api.client_id_env %}
       {{ api.client_id_env }}: ${{ "{" }}{{ api.client_id_env }}:-{{ "}" }}
 {% endif %}
-{% if api.secret_env %}
-      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
-{% endif %}
+{% for env in api.secret_envs %}
+      {{ env }}: ${{ "{" }}{{ env }}:-{{ "}" }}
+{% endfor %}
 {% endfor %}
 {% endmacro %}
 # Start Postgres, run the migrations, and start the API on port 8000 with

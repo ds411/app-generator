@@ -1,3 +1,4 @@
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {{ trace_header(definition.auth.id) }}
 "use client";
 
@@ -11,14 +12,32 @@ import { Link, useNavigate } from "@/shared/lib/router";
 import { useNavigate } from "@/shared/lib/router";
 {% endif %}
 
-{% if guests %}
+{% if guests and signs_out %}
+/**
+ * A button that signs the user out and opens the sign-in page. After a
+ * sign-in with a provider with `sign_out`, the browser goes through the
+ * logout URL of the provider, which sends it back to the sign-in page. A
+ * guest (ADR 0050) gets a link to the sign-in page instead: at the sign-in
+ * and at the sign-up, the records of the guest move to the user.
+ */
+{% elif guests %}
 /**
  * A button that signs the user out and opens the sign-in page. A guest
  * (ADR 0050) gets a link to the sign-in page instead: at the sign-in and at
  * the sign-up, the records of the guest move to the user.
  */
+{% elif signs_out %}
+/**
+ * A button that signs the user out and opens the sign-in page. After a
+ * sign-in with a provider with `sign_out`, the browser goes through the
+ * logout URL of the provider, which sends it back to the sign-in page.
+ */
+{% else %}
+/** A button that signs the user out and opens the sign-in page. */
+{% endif %}
 export function SignOutButton() {
   const navigate = useNavigate();
+{% if guests %}
   const { signedIn } = useAccess(); {{ trace(guests.element_id) }}
   if (!signedIn) {
     return (
@@ -32,21 +51,25 @@ export function SignOutButton() {
       </Link>
     );
   }
-  return (
-{% else %}
-/** A button that signs the user out and opens the sign-in page. */
-export function SignOutButton() {
-  const navigate = useNavigate();
-  return (
 {% endif %}
+  return (
     <button
       type="button"
       aria-label={{ jsx_attr("Sign out") }}
       title={{ jsx_attr("Sign out") }}
       className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       onClick={async () => {
+{% if signs_out %}
+        const logoutUrl = await signOut();
+        if (logoutUrl === null) {
+          navigate("/sign-in");
+        } else {
+          window.location.assign(logoutUrl);
+        }
+{% else %}
         await signOut();
         navigate("/sign-in");
+{% endif %}
       }}
     >
       <LogOutIcon className="size-4" />

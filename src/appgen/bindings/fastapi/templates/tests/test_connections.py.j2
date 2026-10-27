@@ -1,6 +1,6 @@
-{{ trace_header(*(py_connections | map(attribute="id"))) }}
+{{ trace_header(*(py_code_flows | map(attribute="id"))) }}
 {% set u = py.entity(definition.auth.user_entity) %}
-{% set api = py_connections[0] %}
+{% set api = py_code_flows[0] %}
 {% set path = "/auth/connections/" ~ api.connection_name %}
 """The tests of the connections of the users to the APIs (ADR 0033).
 
@@ -73,7 +73,7 @@ def settings(migrated_url: str) -> Settings:
         auth_secret="test-secret",
         cors_origins=[FRONT_END],
         public_url=API_URL,
-{% for c in py_connections %}
+{% for c in py_code_flows %}
         {{ c.url_setting }}={{ c.test_url | tojson }},
         {{ c.client_id_setting }}="client",
         {{ c.secret_setting }}="secret",

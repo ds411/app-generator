@@ -100,3 +100,7 @@ SMTP_PACKAGES: dict[str, str] = {"nodemailer": "10.1.0"}
 
 `nodemailer` has its own TypeScript types.
 """
+
+SES_PACKAGES: dict[str, str] = {"@aws-sdk/client-sesv2": "3.1148.0"}
+"""The packages of the delivery of the messages with Amazon SES (`auth.delivery: ses`, ADR 0017),
+in the version of `S3_PACKAGES`."""

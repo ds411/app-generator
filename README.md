@@ -56,6 +56,7 @@ and change it. The docs:
 | [docs/dsl.md](docs/dsl.md)           | The reference of the app definition, with examples.  |
 | [docs/traces.md](docs/traces.md)     | The trace format, generation gaps, and the checker reports. |
 | [docs/bindings.md](docs/bindings.md) | How to write a binding.                              |
+| [docs/cognito-entra-id.md](docs/cognito-entra-id.md) | The sign-in with Amazon Cognito and Entra ID over SAML. |
 | [docs/evaluation.md](docs/evaluation.md) | The evaluation of the proof of concept, and the next steps. |
 | [docs/evaluation-skills.md](docs/evaluation-skills.md) | The evaluation of the agent skill with agent tasks. |
 | [docs/adr/](docs/adr/)               | The architecture decision records.                   |
@@ -267,7 +268,10 @@ with React, Next.js, and React with the FastAPI app. The UI test
 `ui-tests/tests/connections.spec.ts` signs up, connects an account of
 the calendar API at the mock OAuth server, syncs a calendar, and
 disconnects the account. The script checks that the app sent the code
-and the token to the mock server. The pre-push hook runs it with
+and the token to the mock server. It does the same with
+`tests/fixtures/jira-accounts.yaml`: the user gives a Jira email
+address and an API token in the form of the page, first with a wrong
+token. The pre-push hook runs it with
 `scripts/check-auth-ui.sh`.
 
 The check scripts reuse caches, so a second run is faster:
@@ -664,9 +668,12 @@ A webhook with `format: email` reads the inbound emails of Mailgun,
 Postmark, or SendGrid. Each third-party API has a typed client. With the
 authorization code flow of OAuth 2.0, a user connects an account of the
 service, and the client sends the token of the user ([ADR
-0033](docs/adr/0033-api-connections.md)). The Next.js app has the same
-flow, and the front ends show the page `/connections`, where a user
-connects and disconnects the accounts.
+0033](docs/adr/0033-api-connections.md)). With HTTP Basic and
+`per_user`, for example Jira with an email address and an API token,
+each user gives their own credentials, and the server checks them
+before it keeps them. The Next.js app has the same
+connections, and the front ends show the page `/connections`, where a
+user connects and disconnects the accounts.
 Each operation has generated API tests that run against Postgres in a
 container, or against SQLite. Errors use the problem details format (RFC 9457). An Alembic
 migration creates the schema in Postgres. `uv run python -m app.cli

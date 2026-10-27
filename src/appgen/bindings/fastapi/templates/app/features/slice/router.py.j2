@@ -40,3 +40,9 @@ router.include_router(share.router)
 {{ trace(py.memberships.id) }}
 router.include_router(permissions.router)
 {% endif %}
+{% if e.presence %}
+{% for id in e.presence.ids %}
+{{ trace(id) }}
+{% endfor %}
+router.include_router(presence.router)
+{% endif %}

@@ -24,6 +24,7 @@ from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.memberships import member_plan
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.notices import has_notices
+from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import entity_totals, total_keys
@@ -185,6 +186,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "guests": guest_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": share_plans(definition),
+        # The pages with `presence` by name: the other users on the records (ADR 0052). The
+        # React app with mock data has no server, so it shows no users.
+        "presences": presence_plans(definition) if api else {},
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
         "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.

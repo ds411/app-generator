@@ -1,7 +1,8 @@
 """Run the server code of the live updates of a Next.js app, and check the events (ADR 0051).
 
 The app of tests/fixtures/record-rules.yaml has a live entity (Task) with
-record rules for the reads (ADR 0025). This test runs its server code
+record rules for the reads (ADR 0025), and a task page that shows the
+other users on the task (ADR 0052). This test runs its server code
 with tsx and PGlite (in memory), without Next.js: the stubs of
 scripts/files_test.py replace `next/headers` (a cookie jar) and the
 other modules of Next.js. The test (scripts/live_test.ts):
@@ -16,11 +17,15 @@ other modules of Next.js. The test (scripts/live_test.ts):
    all tasks, a member the open tasks of the projects of the teams of
    the member, and the reviewer the done tasks. A client that leaves
    gets no more events.
-4. Starts Redis in Docker, and checks two brokers with one Redis, as two
+4. Calls the server actions of the task page as two users: each user
+   gets the other user and the typing, a user that may not read the
+   task gets an error, and the broker forgets a user without a call.
+5. Starts Redis in Docker, and checks two brokers with one Redis, as two
    replicas: each change of one broker goes to the subscriptions of both
-   in less than 2 s. A broker without Redis at its URL logs one warning,
-   and gives its changes to its own subscriptions.
-5. Ends the streams, as the server does at SIGTERM: the open streams end,
+   in less than 2 s, and each broker knows the users on a record of both.
+   A broker without Redis at its URL logs one warning, and gives its
+   changes to its own subscriptions.
+6. Ends the streams, as the server does at SIGTERM: the open streams end,
    and a new stream ends after its `open` event.
 
 Run it from the repository root, after `pnpm install` in the app:

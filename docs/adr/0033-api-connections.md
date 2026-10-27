@@ -34,6 +34,10 @@ one token of the app for all requests.
 - The sign-in with a provider ([ADR 0020](0020-providers.md)) is also an
   authorization code flow, but its result is a session of the app, not
   a token for an API.
+- Some APIs take HTTP Basic with the credentials of a person, not
+  OAuth 2.0 (#487). Jira Cloud takes the email address of an Atlassian
+  account and an API token of this account. An issue that the app makes
+  with the token of an agent has this agent as the reporter.
 
 ## Decision
 
@@ -95,6 +99,41 @@ one token of the app for all requests.
   the definition cannot have the path `/connections`, or a path under
   `/connections/`, when an API has the flow.
 
+### HTTP Basic with the credentials of each user (#487)
+
+- `apis.<api>.security` takes `per_user: true` with an HTTP Basic
+  scheme, and then no `username_env` and no `env`. The optional `check`
+  names an operation of the API without required values. The rules of
+  `auth`, the public operations, and the jobs are the same as for the
+  flow.
+- The same table keeps the credentials: the user name in the new column
+  `username`, and the password in the column of the access token, with
+  the same encryption and associated data. The new column `rejected_at`
+  marks credentials that the API did not accept. The table has the
+  columns only when an API has `per_user`.
+- `POST /auth/connections/<api>` takes `username` and `password` for
+  such an API. With `check`, the server calls the operation with the
+  credentials first, and keeps them only after a success: an answer with
+  the status 401 or 403 gives 422, and another failure gives 502. The
+  list of the connections gives the kind (`oauth` or `basic`), the user
+  name, and `rejected`, never the password.
+- The token source `UserCredentials` gives the Base64 of
+  `<user name>:<password>`, and the client sends `Basic` in place of
+  `Bearer`. After an answer with the status 401, the source marks the
+  connection as rejected and raises the error of a missing connection
+  (409). The source does not delete the connection: the page shows the
+  user name and asks for new credentials. New credentials clear the
+  mark.
+- The Next.js app has the same column, the same source, and the server
+  action `connectWithCredentialsAction`. It has no routes of the flow
+  for these APIs.
+- The page `/connections` shows a form with the user name and the
+  password (`autocomplete="off"` for the password, as it is a token of
+  another service) for each such API. An app with both kinds of APIs
+  shows both kinds of items. The React app with mock data keeps only the
+  user name in `sessionStorage`.
+- An app with only such APIs needs no `PUBLIC_URL`.
+
 ## Consequences
 
 - An app can call an API in the name of each user, also in a job.
@@ -119,3 +158,9 @@ one token of the app for all requests.
   request.
 - The app does not revoke the tokens at the service when a user
   deletes a connection: OpenAPI has no field for the revocation URL.
+- With `per_user`, the server keeps a password of another service. The
+  encryption and the associated data are the same as for the tokens, and
+  no answer contains the password. The user can revoke the API token at
+  the service at any time.
+- Without `check`, the app keeps credentials that can be wrong. The
+  first call with them marks the connection as rejected.

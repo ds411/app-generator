@@ -3,6 +3,7 @@
 {% set sign_up = definition.auth.sign_up %}
 {% set verify = sign_up.verify_email if sign_up else none %}
 {% set sf = definition.auth.second_factor %}
+{% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {% set required = sf.required_roles if sf and definition.access else [] %}
 {# The change log (ADR 0040) and the notices (ADR 0041) name a user with the display field, else with the user name. #}
 {% set history_users = (has_history(definition) or has_notices(definition)) and not react.api %}
@@ -36,6 +37,16 @@ import { {{ "MEMBER_OPERATIONS, " if memberships }}{{ "roleMayOpenPage, visitorM
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
 {% if role_key %}
 const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
+{% endif %}
+{% if signs_out %}
+/** The key of the provider of the session, after a sign-in with a provider. */
+const PROVIDER_KEY = {{ (app.name ~ "-provider") | tojson }};
+/** The providers whose session ends at the sign-out of the app (`sign_out`). */
+const SIGN_OUT_PROVIDERS = new Set([
+{% for name, p in definition.auth.providers.items() if p.sign_out %}
+  {{ name | tojson }}, {{ trace(p.sign_out.id) }}
+{% endfor %}
+]);
 {% endif %}
 {% else %}
 {% if definition.auth.password %}
@@ -351,7 +362,14 @@ export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: strin
 
 {% endif %}
 {% if react.api %}
-{% if guests %}
+{% if signs_out and guests %}
+/**
+ * Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user, and the provider of the sign-in.
+ * The records of the guest token move to the user (ADR 0050).
+ */
+{% elif signs_out %}
+/** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user, and the provider of the sign-in. */
+{% elif guests %}
 /**
  * Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user.
  * The records of the guest token move to the user (ADR 0050).
@@ -359,11 +377,24 @@ export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: strin
 {% else %}
 /** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
 {% endif %}
+{% if signs_out %}
+export async function startSession(token: string, provider: string | null = null): Promise<void> {
+  setAccessToken(token);
+  try {
+    const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
+    window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
+    if (provider === null) {
+      window.sessionStorage.removeItem(PROVIDER_KEY);
+    } else {
+      window.sessionStorage.setItem(PROVIDER_KEY, provider);
+    }
+{% else %}
 export async function startSession(token: string): Promise<void> {
   setAccessToken(token);
   try {
     const user = (await apiRequest("GET", "/auth/me")) as Record<string, unknown>;
     window.sessionStorage.setItem(STORAGE_KEY, String(user.id));
+{% endif %}
 {% if role_key %}
     window.sessionStorage.setItem(ROLE_KEY, String(user[{{ definition.access.role_field | tojson }}] ?? ""));
 {% endif %}
@@ -449,7 +480,11 @@ export async function signIn(username: string, password: string): Promise<SignIn
  * Then the app opens the page `next`. Return null, or the message of the error.
  */
 export async function signInWithProvider(name: string, next: string): Promise<string | null> {
+{% if signs_out %}
+  const returnTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}&provider=${encodeURIComponent(name)}`;
+{% else %}
   const returnTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+{% endif %}
   window.location.assign(`${API_URL}/auth/providers/${encodeURIComponent(name)}/start?return_to=${encodeURIComponent(returnTo)}`);
   return null;
 }
@@ -459,7 +494,11 @@ export async function signInWithProvider(name: string, next: string): Promise<st
  * the error, in the fragment of the URL of `/auth/callback`. Return true
  * if the session starts.
  */
+{% if signs_out %}
+export async function finishProviderSignIn(fragment: string, provider: string | null = null): Promise<boolean> {
+{% else %}
 export async function finishProviderSignIn(fragment: string): Promise<boolean> {
+{% endif %}
   const values = new URLSearchParams(fragment.replace(/^#/, ""));
   const token = values.get("access_token");
   if (token === null) {
@@ -467,7 +506,7 @@ export async function finishProviderSignIn(fragment: string): Promise<boolean> {
     return false;
   }
   try {
-    await startSession(token);
+    await startSession(token{{ ", provider" if signs_out }});
   } catch (error) {
     console.error(error);
     return false;
@@ -590,6 +629,31 @@ export async function disableSecondFactor(code: string): Promise<string | null> 
 }
 {% endif %}
 
+{% if signs_out %}
+/**
+ * Sign out: delete the token. After a sign-in with a provider with
+ * `sign_out`, return the sign-out route of the FastAPI app, which sends
+ * the browser to the logout URL of the provider and back to the sign-in
+ * page. Else return null.
+ */
+export async function signOut(): Promise<string | null> {
+  setAccessToken(null);
+  let provider: string | null = null;
+  try {
+    provider = window.sessionStorage.getItem(PROVIDER_KEY);
+    window.sessionStorage.removeItem(STORAGE_KEY);
+{% if role_key %}
+    window.sessionStorage.removeItem(ROLE_KEY);
+{% endif %}
+    window.sessionStorage.removeItem(PROVIDER_KEY);
+  } catch {
+    // No storage: no session to delete.
+  }
+  if (provider === null || !SIGN_OUT_PROVIDERS.has(provider)) return null;
+  const returnTo = `${window.location.origin}/sign-in`;
+  return `${API_URL}/auth/providers/${encodeURIComponent(provider)}/sign-out?return_to=${encodeURIComponent(returnTo)}`;
+}
+{% else %}
 /** Sign out. */
 export async function signOut(): Promise<void> {
   setAccessToken(null);
@@ -602,6 +666,7 @@ export async function signOut(): Promise<void> {
     // No storage: no session to delete.
   }
 }
+{% endif %}
 {% else %}
 {% if definition.auth.password %}
 /** The result of a sign-in: the user is signed in, or an error with its message.{% if sf %} `second-factor`: the user signs in with a code (ADR 0024).{% endif %} */
@@ -650,9 +715,15 @@ export async function signIn(username: string, password: string): Promise<SignIn
 /** The mock user of each provider: a sign-in with the provider signs in this user. */
 const PROVIDER_USERS: Record<string, string> = {
 {% for name, p in definition.auth.providers.items() %}
-{% set role_users = (mock_users | selectattr(role_key, "eq", p.default_role) | list) if role_key and p.create_users and p.default_role else [] %}
+{% set grouped_role = (p.roles.map.values() | first) if role_key and p.roles else none %}
+{% set wanted_role = grouped_role or (p.default_role if role_key and p.create_users else none) %}
+{% set role_users = (mock_users | selectattr(role_key, "eq", wanted_role) | list) if wanted_role else [] %}
 {% set user = (role_users or mock_users) | first %}
 {% if user %}
+{% if grouped_role %}
+  // With `roles`: a user of the first role, because the mock data has no groups.
+  {{ trace(p.roles.id) }}
+{% endif %}
   {{ name }}: {{ user.id | tojson }}, {{ trace(p.id) }}
 {% endif %}
 {% endfor %}
@@ -857,6 +928,20 @@ export async function disableSecondFactor(code: string): Promise<string | null> 
 }
 {% endif %}
 
+{% if signs_out %}
+/** Sign out. With mock data, the sign-in with a provider has no session at the provider: return null. */
+export async function signOut(): Promise<string | null> {
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // No storage: no session to delete.
+  }
+{% for p in signs_out %}
+  {{ trace(p.sign_out.id) }}
+{% endfor %}
+  return null;
+}
+{% else %}
 /** Sign out. */
 export async function signOut(): Promise<void> {
   try {
@@ -866,7 +951,182 @@ export async function signOut(): Promise<void> {
   }
 }
 {% endif %}
+{% endif %}
 {% if auth_pages.connections %}
+{% set basic_users = ts_connections | selectattr("user_basic") | list %}
+{% set code_flows = ts_connections | rejectattr("user_basic") | list %}
+{% if basic_users %}
+
+/** An API that the users connect, and the connection of the signed-in user (ADR 0033). */
+export type Connection = {
+  /** The name of the API in the paths of the connections. */
+  api: string;
+  title: string;
+  /** `oauth`: the authorization code flow. `basic`: the user name and the password of the user. */
+  kind: "oauth" | "basic";
+  connected: boolean;
+  /** HTTP Basic: the user name of the connection, or null. */
+  username: string | null;
+  /** HTTP Basic: true if the API did not accept the credentials. The user gives new ones. */
+  rejected: boolean;
+  /** The time of the connection, as an ISO 8601 text, or null. */
+  connectedAt: string | null;
+};
+{% if react.api %}
+
+/** A connection in the answer of the FastAPI app. */
+type ConnectionRead = {
+  api: string;
+  title: string;
+  kind: "oauth" | "basic";
+  connected: boolean;
+  username?: string | null;
+  rejected?: boolean;
+  connected_at?: string | null;
+};
+
+/** List the APIs that the users connect, with the connections of the signed-in user (`GET /auth/connections`). */
+export async function listConnections(): Promise<Connection[]> {
+  const rows = (await apiRequest("GET", "/auth/connections")) as ConnectionRead[];
+  return rows.map((row) => ({
+    api: row.api,
+    title: row.title,
+    kind: row.kind,
+    connected: row.connected,
+    username: row.username ?? null,
+    rejected: row.rejected ?? false,
+    connectedAt: row.connected_at ?? null,
+  }));
+}
+{% if code_flows %}
+
+/**
+ * Connect an account of an API (`POST /auth/connections/<api>`): the
+ * browser goes to the authorization server, and the FastAPI app sends it
+ * back to the page of the connections. Return null, or the message of the
+ * error.
+ */
+export async function connectAccount(api: string): Promise<string | null> {
+  try {
+    const link = (await apiRequest("POST", `/auth/connections/${encodeURIComponent(api)}`, {
+      return_to: `${window.location.origin}/connections`,
+    })) as { authorization_url: string };
+    window.location.assign(link.authorization_url);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+}
+{% endif %}
+
+/**
+ * Connect an account of an API with HTTP Basic (`POST /auth/connections/<api>`):
+ * the FastAPI app checks and keeps the credentials. Return null, or the
+ * message of the error.
+ */
+export async function connectWithCredentials(api: string, username: string, password: string): Promise<string | null> {
+  try {
+    await apiRequest("POST", `/auth/connections/${encodeURIComponent(api)}`, { username, password });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+}
+
+/** Delete the connection of the signed-in user to an API (`DELETE /auth/connections/<api>`). Return null, or the message of the error. */
+export async function disconnectAccount(api: string): Promise<string | null> {
+  try {
+    await apiRequest("DELETE", `/auth/connections/${encodeURIComponent(api)}`);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : {{ tr(js("The request failed.")) }};
+  }
+}
+{% else %}
+
+// The connections of the mock users (ADR 0033) are a demonstration: a
+// connection starts at once, without an authorization server or a check
+// of the credentials, and stays in the browser tab. The browser keeps no
+// password. An app with a back end keeps the tokens and the credentials on
+// the server.
+const CONNECTIONS_KEY = {{ (app.name ~ "-connections") | tojson }};
+
+/** The APIs that the users connect: the name in the paths, the title, and the kind. */
+function connectionApis(): { api: string; title: string; kind: "oauth" | "basic" }[] {
+  return [
+{% for api in ts_connections %}
+    { api: {{ api.connection_name | tojson }}, title: {{ tr(js(api.title)) }}, kind: {{ ("basic" if api.user_basic else "oauth") | tojson }} }, {{ trace(api.id) }}
+{% endfor %}
+  ];
+}
+
+/** A connection of a mock user: the time, and the user name of HTTP Basic. */
+type MockConnection = { at: string; username: string | null };
+
+/** The connections of each user, by user and API. */
+function mockConnections(): Record<string, Record<string, MockConnection>> {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(CONNECTIONS_KEY) ?? "{}") as Record<string, Record<string, MockConnection>>;
+  } catch {
+    return {};
+  }
+}
+
+/** Keep the connections of a user. Return null, or the message of the error. */
+function saveConnections(userId: string, connections: Record<string, MockConnection>): string | null {
+  try {
+    window.sessionStorage.setItem(CONNECTIONS_KEY, JSON.stringify({ ...mockConnections(), [userId]: connections }));
+    return null;
+  } catch {
+    return {{ tr(js("The browser does not keep the session.")) }};
+  }
+}
+
+/** List the APIs that the users connect, with the connections of the signed-in user. */
+export async function listConnections(): Promise<Connection[]> {
+  const userId = currentUserId();
+  if (userId === null) throw new Error({{ tr(js("Sign in to do this.")) }});
+  const own = mockConnections()[userId] ?? {};
+  return connectionApis().map(({ api, title, kind }) => ({
+    api,
+    title,
+    kind,
+    connected: api in own,
+    username: own[api]?.username ?? null,
+    rejected: false,
+    connectedAt: own[api]?.at ?? null,
+  }));
+}
+{% if code_flows %}
+
+/** Connect an account of an API at once, and show it on the page of the connections. Return null, or the message of the error. */
+export async function connectAccount(api: string): Promise<string | null> {
+  const userId = currentUserId();
+  if (userId === null) return {{ tr(js("Sign in to do this.")) }};
+  const message = saveConnections(userId, { ...mockConnections()[userId], [api]: { at: new Date().toISOString(), username: null } });
+  if (message === null) window.location.hash = new URLSearchParams({ connected: api }).toString();
+  return message;
+}
+{% endif %}
+
+/** Connect an account of an API with HTTP Basic at once: the browser keeps only the user name. Return null, or the message of the error. */
+export async function connectWithCredentials(api: string, username: string, password: string): Promise<string | null> {
+  const userId = currentUserId();
+  if (userId === null) return {{ tr(js("Sign in to do this.")) }};
+  if (!username || !password) return {{ tr(js("The connection failed.")) }};
+  return saveConnections(userId, { ...mockConnections()[userId], [api]: { at: new Date().toISOString(), username } });
+}
+
+/** Delete the connection of the signed-in user to an API. Return null, or the message of the error. */
+export async function disconnectAccount(api: string): Promise<string | null> {
+  const userId = currentUserId();
+  if (userId === null) return {{ tr(js("Sign in to do this.")) }};
+  const own = { ...mockConnections()[userId] };
+  delete own[api];
+  return saveConnections(userId, own);
+}
+{% endif %}
+{% else %}
 
 /** An API with the authorization code flow, and the connection of the signed-in user (ADR 0033). */
 export type Connection = {
@@ -975,5 +1235,6 @@ export async function disconnectAccount(api: string): Promise<string | null> {
   delete own[api];
   return saveConnections(userId, own);
 }
+{% endif %}
 {% endif %}
 {% endif %}
