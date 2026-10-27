@@ -6,7 +6,14 @@
 {{ api.description }}
 
 {% endif %}
-{% if api.user %}
+{% if api.user_basic %}
+The client sends the user name and the password of a user with HTTP Basic
+(`per_user`, ADR 0033): the user connects an account of the API first
+(`/auth/connections/{{ api.connection_name }}`). An endpoint gets a client with the
+credentials of the signed-in user as a dependency (`{{ api.dependency_type }}`). Other
+code, for example a job, creates one with `{{ api.client_for }}(...)` and closes
+it after use (`async with`).
+{% elif api.user %}
 The client sends the access token of a user (the authorization code flow,
 ADR 0033): the user connects an account of the API first
 (`/auth/connections/{{ api.connection_name }}`). An endpoint gets a client with the token of
@@ -44,6 +51,9 @@ class {{ api.client }}(ApiClient):
     """The client of the API `{{ api.name }}`, with one method for each operation that the app uses."""
 
     api = {{ api.name | tojson }}
+{% if api.user_basic %}
+    scheme = "Basic"
+{% endif %}
 
     def __init__(
         self,
@@ -102,22 +112,39 @@ class {{ api.client }}(ApiClient):
 def {{ api.client_for }}(
     settings: Settings, sessions: async_sessionmaker[AsyncSession], user_id: UUID | None
 ) -> {{ api.client }}:
+{% if api.user_basic %}
+    """Return a client that sends the user name and the password of a user.
+
+    A request raises NotConnectedError (409) if the user is None, has no
+    connection to the API, or the API did not accept the credentials.
+    """
+{% else %}
     """Return a client that sends the access token of a user.
 
     A request raises NotConnectedError (409) if the user is None, or has no
     connection to the API.
     """
-    token = UserToken(settings, {{ api.name | tojson }}, sessions, user_id)
+{% endif %}
+    token = {{ api.token_source }}(settings, {{ api.name | tojson }}, sessions, user_id)
     return {{ api.client }}(settings.{{ api.url_setting }}, token=token)
 
 
 async def {{ api.dependency }}(
     request: Request, user: CurrentUser, session: SessionDep
 ) -> AsyncIterator[{{ api.client }}]:
+{% if api.user_basic %}
+    """Give an endpoint a client with the credentials of the signed-in user (a FastAPI
+    dependency).
+
+    Give 409 if the user has no connection to the API, or the API did not accept the
+    credentials.
+    """
+{% else %}
     """Give an endpoint a client with the token of the signed-in user (a FastAPI dependency).
 
     Give 409 if the user has no connection to the API.
     """
+{% endif %}
     await require_connection(session, {{ api.name | tojson }}, user.id)
     client = {{ api.client_for }}(request.app.state.settings, request.app.state.sessions, user.id)
     async with client:

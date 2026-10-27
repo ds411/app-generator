@@ -342,7 +342,7 @@ def ts_jobs(definition: AppDefinition, tables: dict[str, Table]) -> dict[str, Ts
                 result.user_apis = [
                     api
                     for api in definition.operations[job.operation].apis
-                    if definition.apis[api].user_flow
+                    if definition.apis[api].per_user
                 ]
             builder = FilterBuilder(definition, tables, job.id, result.filter)
             conditions = [builder.filter(job.entity, path, c) for path, c in job.filter.items()]

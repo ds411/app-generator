@@ -351,6 +351,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     return {
         "ts_apis": apis,
         "ts_connections": ts_connections(apis),
+        "ts_code_flows": [api for api in ts_connections(apis) if not api.user_basic],
         "ts_webhooks": ts_webhooks(definition),
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",

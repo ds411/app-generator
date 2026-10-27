@@ -1,9 +1,21 @@
 {{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{% set basic_users = ts_connections | selectattr("user_basic") | list %}
+{% set code_flows = ts_connections | rejectattr("user_basic") | list %}
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
 
-import { type Connection, connectAccount, disconnectAccount, listConnections } from "@/shared/auth";
+import {
+  type Connection,
+{% if code_flows %}
+  connectAccount,
+{% endif %}
+{% if basic_users %}
+  connectWithCredentials,
+{% endif %}
+  disconnectAccount,
+  listConnections,
+} from "@/shared/auth";
 import { Link } from "@/shared/lib/router";
 import { useResource } from "@/shared/lib/use-resource";
 
@@ -24,6 +36,82 @@ function clearHash(): void {
   }
 }
 
+{% if basic_users %}
+/** The form of the user name and the password of an account of an API with HTTP Basic. */
+function CredentialsForm({
+  connection,
+  disabled,
+  onSubmit,
+}: {
+  connection: Connection;
+  disabled: boolean;
+  onSubmit: (username: string, password: string) => void;
+}) {
+  const id = `connection-${connection.api}`;
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        onSubmit(String(data.get("username") ?? ""), String(data.get("password") ?? ""));
+      }}
+    >
+      <label htmlFor={`${id}-username`} className="text-sm font-medium">
+        {{ jsx_text("User name") }}
+      </label>
+      <input
+        id={`${id}-username`}
+        name="username"
+        type="text"
+        autoComplete="username"
+        required
+        maxLength={320}
+        defaultValue={connection.username ?? ""}
+        className="h-9 rounded-md border bg-background px-3 text-sm"
+      />
+      <label htmlFor={`${id}-password`} className="text-sm font-medium">
+        {{ jsx_text("Password or API token") }}
+      </label>
+      <input
+        id={`${id}-password`}
+        name="password"
+        type="password"
+        autoComplete="off"
+        required
+        maxLength={2000}
+        className="h-9 rounded-md border bg-background px-3 text-sm"
+      />
+      <button
+        type="submit"
+        disabled={disabled}
+        className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {{ jsx_text("Connect") }}
+      </button>
+    </form>
+  );
+}
+
+{% endif %}
+{% if basic_users and code_flows %}
+/**
+ * The page of the connections of the signed-in user (ADR 0033): an account
+ * of each API that the app calls in the name of the user. For an API with
+ * the authorization code flow, the user connects an account at the
+ * authorization server of the API. For an API with HTTP Basic, the user
+ * gives a user name and a password, and the server checks them. A
+ * disconnect deletes the tokens or the credentials of the user.
+ */
+{% elif basic_users %}
+/**
+ * The page of the connections of the signed-in user (ADR 0033): an account
+ * of each API with HTTP Basic that the app calls in the name of the user.
+ * The user gives a user name and a password, for example the email address
+ * and an API token, and the server checks them. A disconnect deletes the
+ * credentials of the user.
+ */
+{% else %}
 /**
  * The page of the connections of the signed-in user (ADR 0033): an account
  * of each API with the authorization code flow. The user connects an
@@ -31,15 +119,48 @@ function clearHash(): void {
  * API in the name of the user. A disconnect deletes the tokens of the
  * user.
  */
+{% endif %}
 export function ConnectionsPage() {
   const connections = useResource("connections", listConnections);
   const hash = useSyncExternalStore(subscribeHash, currentHash, () => "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+{% if basic_users %}
+  /** The API of a connection with credentials that the server kept now. */
+  const [kept, setKept] = useState<string | null>(null);
+{% endif %}
   const result = new URLSearchParams(hash.slice(1));
+{% if basic_users %}
+  const connected = result.get("connected") ?? kept;
+{% else %}
   const connected = result.get("connected");
+{% endif %}
   const failed = error ?? result.get("error");
 
+{% if basic_users %}
+  /** Connect or disconnect an account, show the new state, and return true if the change is done. */
+  async function change(connection: Connection, call: (api: string) => Promise<string | null>): Promise<boolean> {
+    clearHash();
+    setError(null);
+    setKept(null);
+    setPending(connection.api);
+{% if code_flows %}
+    // A connection can send the browser to the authorization server.
+{% endif %}
+    const message = await call(connection.api);
+    setPending(null);
+    setError(message);
+    if (message === null) connections.reload();
+    return message === null;
+  }
+
+  /** Give the credentials of an account to the server, and show the new state. */
+  async function keep(connection: Connection, username: string, password: string) {
+    if (await change(connection, (api) => connectWithCredentials(api, username, password))) {
+      setKept(connection.api);
+    }
+  }
+{% else %}
   /** Connect or disconnect an account, and show the new state. */
   async function change(connection: Connection, call: (api: string) => Promise<string | null>) {
     clearHash();
@@ -51,6 +172,7 @@ export function ConnectionsPage() {
     setError(message);
     if (message === null) connections.reload();
   }
+{% endif %}
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
@@ -77,6 +199,83 @@ export function ConnectionsPage() {
         )}
         {connections.status === "success" && (
           <ul className="flex flex-col divide-y rounded-md border">
+{% if basic_users %}
+            {connections.data.map((connection) =>
+{% if code_flows %}
+              connection.kind === "basic" ? (
+{% else %}
+              (
+{% endif %}
+                <li key={connection.api} className="flex flex-col gap-3 p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium">{connection.title}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {connection.connected
+                          ? {{ js_format("Connected as {username}", username='connection.username ?? ""') }}
+                          : {{ tr(js("Not connected")) }}}
+                      </span>
+                    </div>
+                    {connection.connected && (
+                      <button
+                        type="button"
+                        disabled={pending !== null}
+                        onClick={() => change(connection, disconnectAccount)}
+                        className="h-9 shrink-0 rounded-md border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
+                      >
+                        {{ jsx_text("Disconnect") }}
+                      </button>
+                    )}
+                  </div>
+                  {connection.rejected && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {{ jsx_text("The API did not accept the credentials. Enter new credentials.") }}
+                    </p>
+                  )}
+                  {(!connection.connected || connection.rejected) && (
+                    <CredentialsForm
+                      connection={connection}
+                      disabled={pending !== null}
+                      onSubmit={(username, password) => keep(connection, username, password)}
+                    />
+                  )}
+                </li>
+{% if code_flows %}
+              ) : (
+                <li key={connection.api} className="flex items-center justify-between gap-4 p-3">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="text-sm font-medium">{connection.title}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {connection.connected ? {{ tr(js("Connected")) }} : {{ tr(js("Not connected")) }}}
+                    </span>
+                  </div>
+                  {connection.connected ? (
+                    <button
+                      type="button"
+                      disabled={pending !== null}
+                      onClick={() => change(connection, disconnectAccount)}
+                      className="h-9 shrink-0 rounded-md border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
+                    >
+                      {{ jsx_text("Disconnect") }}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={pending !== null}
+                      onClick={() => change(connection, connectAccount)}
+                      className="h-9 shrink-0 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                      {{ jsx_text("Connect") }}
+                    </button>
+                  )}
+                </li>
+              ),
+            )}
+{% else %}
+              ),
+            )}
+{% endif %}
+{% else %}
             {connections.data.map((connection) => (
               <li key={connection.api} className="flex items-center justify-between gap-4 p-3">
                 <div className="flex min-w-0 flex-col">
@@ -106,6 +305,7 @@ export function ConnectionsPage() {
                 )}
               </li>
             ))}
+{% endif %}
           </ul>
         )}
         <Link href="/" className="text-sm font-medium underline underline-offset-4">

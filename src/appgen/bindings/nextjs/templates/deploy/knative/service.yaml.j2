@@ -58,7 +58,7 @@ spec:
             - name: JOBS_WINDOW_MINUTES
               value: "60"
 {% endif %}
-{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition)) %}
+{% if definition.auth and (definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_code_flows or has_notice_emails(definition)) %}
             # The URL of the app for the browsers.
             - name: PUBLIC_URL
               value: https://app.example.com

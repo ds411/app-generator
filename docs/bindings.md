@@ -496,6 +496,19 @@ the layout. `scripts/connection_ui_test.py` connects, syncs, and
 disconnects an account on this page with React, Next.js, and React with
 the FastAPI app.
 
+An API with HTTP Basic and `per_user: true` (#487) uses the same table,
+the same extension files, and the same page. The client gets the
+credentials of the user from the token source `UserCredentials`, and
+sends them with `Basic`. The user gives the user name and the password
+in a form on the page, and the server checks them with the operation
+of `check` before it keeps them. After an answer with the status 401,
+the connection is rejected: the request raises `NotConnectedError`
+(409), and the page asks for new credentials. The fixture
+`tests/fixtures/jira-accounts.yaml` has hand-written logic in
+`tests/fixtures/jira-accounts/extensions/` that files an issue in Jira
+in the name of the user, and `scripts/connection_ui_test.py` connects
+an account with a wrong password first, then with the right one.
+
 ### Schema changes of the FastAPI app
 
 The FastAPI app creates the first migration

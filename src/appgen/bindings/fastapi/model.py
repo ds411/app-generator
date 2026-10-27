@@ -4328,6 +4328,7 @@ def binding_context(definition: AppDefinition) -> dict[str, Any]:
         "py_api_mocks_imports": mocks_imports(apis),
         "py_api_features": py_features(apis),
         "py_connections": python_connections(apis),
+        "py_code_flows": [api for api in python_connections(apis) if not api.user_basic],
         "i18n": plan,
         "i18n_test": language_test(plan) if plan is not None else None,
     }

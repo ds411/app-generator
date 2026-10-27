@@ -79,7 +79,7 @@
             - name: STORAGE_LINK_SECONDS
               value: "3600"
 {% endif %}
-{% if py_connections and not py.providers %}
+{% if py_code_flows and not py.providers %}
             # The URL of the API for the browsers: the authorization servers of the APIs send the users back to it.
             - name: PUBLIC_URL
               value: https://api.example.com

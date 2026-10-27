@@ -148,7 +148,7 @@ export async function requirePageUser(path: string, params: Record<string, strin
     redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(next)}`);
   }
 }
-{% if definition.auth.password_reset or definition.auth.providers or verify or ts_connections or has_notice_emails(definition) %}
+{% if definition.auth.password_reset or definition.auth.providers or verify or ts_code_flows or has_notice_emails(definition) %}
 
 /** Return the URL of the app for the browsers: PUBLIC_URL, or the local URL in development. */
 export function publicUrl(): string {

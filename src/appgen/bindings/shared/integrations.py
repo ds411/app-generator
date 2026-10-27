@@ -248,7 +248,8 @@ class TsApi:
     secret."""
     credential: str | None
     """`header`, `query`, `bearer`, `basic` (HTTP Basic), `oauth2` (the client credentials
-    flow), or `user` (the authorization code flow: the token of a user, ADR 0033)."""
+    flow), `user` (the authorization code flow: the token of a user, ADR 0033), or `user_basic`
+    (HTTP Basic with the user name and the password of a user, ADR 0033)."""
     credential_name: str | None
     types: list[TsType] = field(default_factory=list[TsType])
     methods: list[TsMethod] = field(default_factory=list[TsMethod])
@@ -268,11 +269,26 @@ class TsApi:
     """The authorization code flow: the page where the user allows the access."""
     refresh_url: str = ""
     """The authorization code flow: the URL that gives a new access token for a refresh token."""
+    check_method: str = ""
+    """`per_user`: the HTTP method of the operation that checks new credentials, or empty."""
+    check_path: str = ""
+    """`per_user`: the path of the operation that checks new credentials."""
 
     @property
     def user(self) -> bool:
-        """True for the authorization code flow: the client sends the token of a user."""
-        return self.credential == "user"
+        """True if the client sends the credentials of a user: the token of the authorization
+        code flow, or the HTTP Basic credentials of `per_user`."""
+        return self.credential in ("user", "user_basic")
+
+    @property
+    def user_basic(self) -> bool:
+        """True for HTTP Basic with the user name and the password of each user."""
+        return self.credential == "user_basic"
+
+    @property
+    def token_source(self) -> str:
+        """The class of the credentials of a user: `UserToken` or `UserCredentials`."""
+        return "UserCredentials" if self.user_basic else "UserToken"
 
     @property
     def connection_name(self) -> str:
@@ -298,14 +314,17 @@ class TsApi:
 
     @property
     def browser(self) -> bool:
-        """True if a browser can call the API: it has no secret and no cookie parameter."""
-        return self.secret_env is None and self.cookie_method is None
+        """True if a browser can call the API: it has no secret, no credentials of a user, and
+        no cookie parameter."""
+        return self.secret_env is None and not self.user and self.cookie_method is None
 
     @property
     def server_reason(self) -> str:
         """Why only a server can call the API, as the end of a sentence."""
         if self.secret_env is not None:
             return f"has a secret (`{self.secret_env}`), and a browser app cannot keep a secret"
+        if self.user_basic:
+            return "sends the password of each user, and a browser app cannot keep a secret"
         method = self.cookie_method
         if method is None:
             return ""
@@ -360,11 +379,14 @@ class TsApi:
 
 def ts_features(apis: Mapping[str, TsApi]) -> frozenset[str]:
     """Return what the HTTP client of the apps needs for the methods of these APIs: `form`,
-    `multipart`, `text`, `binary`, `cookie`, `basic`, `oauth2`, and `user`."""
+    `multipart`, `text`, `binary`, `cookie`, `basic`, `oauth2`, `user` (the credentials of a
+    user), and `user_basic` (the HTTP Basic credentials of a user)."""
     found: set[str] = set()
     for api in apis.values():
         if api.credential in ("basic", "oauth2", "user"):
             found.add(api.credential)
+        if api.credential == "user_basic":
+            found.update(("user", "user_basic"))
         for m in api.methods:
             if m.body_type is not None and m.body_kind != "json":
                 found.add(m.body_kind)
@@ -376,8 +398,8 @@ def ts_features(apis: Mapping[str, TsApi]) -> frozenset[str]:
 
 
 def ts_connections(apis: Mapping[str, TsApi]) -> list[TsApi]:
-    """Return the APIs with the authorization code flow (ADR 0033): a user connects an account
-    of each one."""
+    """Return the APIs with the authorization code flow or `per_user` (ADR 0033): a user
+    connects an account of each one."""
     return [api for api in apis.values() if api.user]
 
 
@@ -401,6 +423,8 @@ def _api(name: str, api: Api) -> TsApi:
     code = scheme.authorization_code if scheme is not None and api.user_flow else None
     if code is not None:
         credential = "user"
+    elif api.user_basic:
+        credential = "user_basic"
     security = api.security
     folder = kebab(name)
     ts = TsApi(
@@ -428,6 +452,9 @@ def _api(name: str, api: Api) -> TsApi:
         ts.token_url = code.token_url
         ts.authorization_url = code.authorization_url
         ts.refresh_url = code.refresh_url or code.token_url
+    check = api.check_operation
+    if check is not None:
+        ts.check_method, ts.check_path = check.method.upper(), check.path
     taken = {s.name for s in spec.schemas}
     ts.types = ts_types(spec.schemas)
     methods: set[str] = set()

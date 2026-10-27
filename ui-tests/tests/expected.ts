@@ -195,8 +195,14 @@ export type ExpectedAuth = {
 
 /** The connections of a user to the APIs, for scripts/connection_ui_test.py (ADR 0033). */
 export type ExpectedConnections = {
-  /** The APIs with the authorization code flow: the name in the paths, and the title. */
-  apis: { api: string; title: string }[];
+  /**
+   * The APIs that the app calls in the name of a user: the name in the paths, the title, and
+   * the kind (`oauth` for the authorization code flow, `basic` for the credentials of each user).
+   * `rejected` is the message of the check of wrong credentials, or null without a check.
+   */
+  apis: { api: string; title: string; kind: "oauth" | "basic"; rejected: string | null }[];
+  /** The credentials of an API with `basic` that the mock server accepts, and a wrong password. */
+  credentials: { username: string; password: string; wrong: string };
   /** The inputs of the sign-up of a new user, by ID: `{n}` in a value is a new number. */
   signUp: { id: string; value: string }[];
   password: string;

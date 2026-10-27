@@ -95,6 +95,9 @@ async def test_each_request_sends_the_credential() -> None:
     assert requests[0].headers["Authorization"] == {{ api.test_basic_header | tojson }}
 {% elif oauth %}
     assert requests[0].headers["Authorization"] == "Bearer mock-token-1"
+{% elif api.user_basic %}
+    # The client sends the credentials of the user (the value of the token source).
+    assert requests[0].headers["Authorization"] == "Basic user-token"
 {% elif api.user %}
     # The client sends the access token of the user.
     assert requests[0].headers["Authorization"] == "Bearer user-token"

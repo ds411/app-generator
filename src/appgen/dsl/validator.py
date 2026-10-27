@@ -1762,7 +1762,7 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
         reserved[VERIFY_EMAIL_PATH] = "email verification"
     if auth.second_factor is not None:
         reserved[SECOND_FACTOR_PATH] = "second factor"
-    connections = any(api.user_flow for api in definition.apis.values())
+    connections = any(api.per_user for api in definition.apis.values())
     if connections:
         reserved[CONNECTIONS_PATH] = "connections"
     if any(n.email for n in definition.notifications.values()):
@@ -2518,7 +2518,7 @@ def check_apis(definition: AppDefinition) -> Iterator[Diagnostic]:
             )
         else:
             yield from _check_security_keys(api, security, scheme)
-            if api.user_flow:
+            if api.per_user:
                 yield from _check_user_flow(definition, api)
     for operation in definition.operations.values():
         if len(set(operation.apis)) != len(operation.apis):
@@ -3548,11 +3548,14 @@ def _check_security_keys(
     api: Api, security: ApiSecurity, scheme: SecurityScheme
 ) -> Iterator[Diagnostic]:
     """The security has the keys of its scheme: `env`, the keys of HTTP Basic, or the keys of
-    OAuth 2.0."""
+    OAuth 2.0. With `per_user`, HTTP Basic has no variables (ADR 0033)."""
     oauth = scheme.type == "oauth2"
+    basic = scheme.type == "http" and scheme.scheme == "basic"
     if oauth:
         needed, kind = ("client_id_env", "client_secret_env"), "OAuth 2.0"
-    elif scheme.type == "http" and scheme.scheme == "basic":
+    elif basic and security.per_user:
+        needed, kind = (), "HTTP Basic with the credentials of each user"
+    elif basic:
         needed, kind = ("username_env", "env"), "HTTP Basic"
     else:
         needed, kind = ("env",), "an API key or a bearer token"
@@ -3564,8 +3567,22 @@ def _check_security_keys(
                 api,
                 at="security",
             )
-    keys = ("username_env", "env", "client_id_env", "client_secret_env", "scopes", "flow")
-    allowed = (*needed, "scopes", "flow") if oauth else needed
+    keys = (
+        "username_env",
+        "env",
+        "client_id_env",
+        "client_secret_env",
+        "scopes",
+        "flow",
+        "per_user",
+        "check",
+    )
+    if oauth:
+        allowed = (*needed, "scopes", "flow")
+    elif basic:
+        allowed = (*needed, "per_user", "check") if security.per_user else (*needed, "per_user")
+    else:
+        allowed = needed
     for key in (key for key in keys if key not in allowed):
         if getattr(security, key):
             yield _error(
@@ -3573,8 +3590,12 @@ def _check_security_keys(
                 f"The key '{key}' does not suit the scheme '{scheme.name}' ({kind}).",
                 api,
                 at="security",
-                hint=f"Use {', '.join(repr(k) for k in needed)}.",
+                hint=f"Use {', '.join(repr(k) for k in needed)}."
+                if needed
+                else "Each user gives the user name and the password on the page '/connections'.",
             )
+    if basic and security.per_user:
+        yield from _check_account_check(api, security)
     if not oauth:
         return
     code = scheme.authorization_code
@@ -3606,19 +3627,53 @@ def _check_security_keys(
             )
 
 
+def _check_account_check(api: Api, security: ApiSecurity) -> Iterator[Diagnostic]:
+    """The check of the credentials of a user is an operation of the API without required
+    parameters and without a required body (ADR 0033)."""
+    if security.check is None:
+        return
+    if security.check not in api.operations:
+        yield _error(
+            "unknown-reference",
+            f"The check '{security.check}' is not an operation in 'operations' of the API.",
+            api,
+            at="security",
+            hint=_did_you_mean(security.check, list(api.operations))
+            or f"Add '{security.check}' to 'operations'.",
+        )
+        return
+    operation = api.check_operation
+    if operation is None:
+        return
+    required = [p.name for p in operation.parameters if p.required]
+    if required or operation.body_required:
+        what = f"the required parameter '{required[0]}'" if required else "a required body"
+        yield _error(
+            "unsuitable-operation",
+            f"The check '{security.check}' has {what}, but the app calls it without values.",
+            api,
+            at="security",
+            hint="Use an operation without required values, for example the operation that "
+            "gives the current user.",
+        )
+
+
 def _check_user_flow(definition: AppDefinition, api: Api) -> Iterator[Diagnostic]:
-    """An API with the authorization code flow has a signed-in user (ADR 0033): the app has
-    `auth`, no public operation calls the API, and a job that calls it names the user."""
+    """An API that the app calls in the name of a user (the authorization code flow, or
+    `per_user`) has a signed-in user (ADR 0033): the app has `auth`, no public operation calls
+    the API, and a job that calls it names the user."""
     name = api.id.rpartition(".")[2]
     auth = definition.auth
     if auth is None:
+        how = "The authorization code flow" if api.user_flow else "'per_user'"
+        other = "use the client credentials flow" if api.user_flow else "remove 'per_user'"
         yield _error(
             "unsuitable-security",
-            "The authorization code flow calls the API in the name of a user, so the app needs "
-            "the sign-in of the users ('auth').",
+            f"{how} calls the API in the name of a user, so the app needs the sign-in of the "
+            "users ('auth').",
             api,
             at="security",
-            hint="Add the section 'auth', or use the client credentials flow.",
+            hint=f"Add the section 'auth', or {other}.",
         )
         return
     for op_name, operation in definition.operations.items():

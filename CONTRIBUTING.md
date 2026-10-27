@@ -309,7 +309,9 @@ git config core.hooksPath .githooks
   fields and the filters `near` and `area`, ADR 0046), and runs the
   same checks on them. For `tests/fixtures/jira.yaml` (an API with HTTP
   Basic), it also calls the mock Jira API from the app
-  (`scripts/api_calls.py`). It needs Docker.
+  (`scripts/api_calls.py`). It also checks
+  `tests/fixtures/jira-accounts.yaml` (the credentials of each user)
+  with its hand-written logic. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
@@ -382,6 +384,9 @@ git config core.hooksPath .githooks
   react-api, connects an account of the calendar API at the mock OAuth
   server of `scripts/mock_api.py`, syncs a calendar, and disconnects
   the account on the page `/connections` (`scripts/connection_ui_test.py`).
+  The same script builds `tests/fixtures/jira-accounts.yaml`, connects
+  a Jira account with a wrong password and then with the right one,
+  files an issue, and disconnects the account.
   Then it builds `tests/fixtures/listings.yaml` with React, Next.js, and
   react-api, and checks the views of its queries: a table that pages the
   rows of its filters, a card list of a path parameter, a calendar, and

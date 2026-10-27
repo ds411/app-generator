@@ -1,4 +1,6 @@
-{{ trace_header(*(ts_connections | map(attribute="id"))) }}
+{{ trace_header(*(ts_code_flows | map(attribute="id"))) }}
+{# With `per_user` APIs too, the names of the flows have a type of their own. #}
+{% set is_flow = "isFlowName" if ts_code_flows | length != ts_connections | length else "isConnectionName" %}
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
@@ -9,7 +11,7 @@ import {
   connectionFlowPath,
   connectionsPage,
   finishConnection,
-  isConnectionName,
+  {{ is_flow }},
   readConnectionFlow,
 } from "@/shared/auth/connections";
 import { sessionUserId } from "@/shared/auth/session";
@@ -25,7 +27,7 @@ import { inRequestLanguage } from "@/shared/lib/i18n-server";
  */
 export async function GET(request: NextRequest, { params }: RouteContext<"/connections/[api]/callback">) {
   const { api } = await params;
-  if (!isConnectionName(api)) notFound();
+  if (!{{ is_flow }}(api)) notFound();
   const store = await cookies();
   const flow = readConnectionFlow(api, store.get(connectionFlowCookie(api))?.value ?? "");
   store.delete({ name: connectionFlowCookie(api), path: connectionFlowPath(api) });

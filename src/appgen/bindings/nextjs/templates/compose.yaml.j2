@@ -56,7 +56,7 @@ services:
 {% if definition.auth.password %}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
 {% endif %}
-{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_connections or has_notice_emails(definition) %}
+{% if definition.auth.password_reset or definition.auth.providers or (definition.auth.sign_up and definition.auth.sign_up.verify_email) or ts_code_flows or has_notice_emails(definition) %}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
 {% endif %}
 {% if nextjs.smtp %}
