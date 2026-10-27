@@ -34,6 +34,10 @@ before you start it. Two more files help in all tasks:
 - [references/diagnostics.md](references/diagnostics.md): the cause and
   the fix of each diagnostic code of `appgen validate` and `appgen check`.
 
+To make a whole app from a short prompt, with defaults for the binding,
+the sign-in, and the other options, use the skill `appgen-quickstart`.
+It picks the defaults, and then uses this skill.
+
 ## Run appgen
 
 - An installed appgen: `appgen <command>`.
@@ -73,13 +77,14 @@ More options:
 
 ## Install the skill
 
-`appgen skills` copies this skill into the folders that agents read, at
-the version of the installed appgen:
+`appgen skills` copies the skills of appgen (this skill and
+`appgen-quickstart`) into the folders that agents read, at the version
+of the installed appgen:
 
 | Command                            | Use                                                              |
 | ---------------------------------- | ---------------------------------------------------------------- |
-| `appgen skills install`            | Write the skill to `./.agents/skills/` and `./.claude/skills/`.  |
-| `appgen skills list --format json` | Show each target and scope with the installed version and the status (`up to date`, `out of date`, `changed`, or `not installed`). |
+| `appgen skills install`            | Write the skills to `./.agents/skills/` and `./.claude/skills/`. |
+| `appgen skills list --format json` | Show each skill, target, and scope with the installed version and the status (`up to date`, `out of date`, `changed`, or `not installed`). |
 | `appgen skills uninstall`          | Remove the files that appgen installed.                          |
 
 The options of `install` and `uninstall`:

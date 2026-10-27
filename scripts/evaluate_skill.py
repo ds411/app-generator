@@ -1,13 +1,16 @@
-"""Prepare, run, and score the agent tasks of the evaluation of the skill.
+"""Prepare, run, and score the agent tasks of the evaluation of the skills.
 
-`docs/evaluation-skills.md` gives the results. The prompt of each task is
-in `docs/evaluation/skill-tasks/<task>.md`. A run uses one folder:
+`docs/evaluation-skills.md` gives the results. The prompts of each task
+are in `docs/evaluation/skill-tasks/<task>.md`: a line `---` separates
+the prompts of a task with more than one prompt. A run uses one folder:
 
 - `work/`: the folder of the agent. It has the definition and the app
-  that the task starts from, and nothing else.
-- `home/`: an empty home folder with the installed skill
-  (`appgen skills install --scope user`), so that the appgen skill is the
-  only skill of the agent.
+  that the task starts from, and nothing else. The tasks of the
+  quick-start skill start from a folder without a definition, with only
+  the files that their prompts name.
+- `home/`: an empty home folder with the installed skills
+  (`appgen skills install --scope user`), so that the skills of appgen
+  are the only skills of the agent.
 - `task.json`, `log.jsonl` (the session), `run.json`, and `score.json`:
   the files of the evaluation, outside the folder of the agent.
 
@@ -18,21 +21,25 @@ Commands, from the root of the repository:
     uv run scripts/evaluate_skill.py score <folder> [--no-app-tests]
     uv run scripts/evaluate_skill.py report <folder>...
 
-`prepare` makes the folder and prints the prompt. `run` starts Claude Code
-in print mode in `work/`, with `home/` as the home folder, and writes
+`prepare` makes the folder and prints the prompts. `run` starts Claude
+Code in print mode in `work/`, with `home/` as the home folder, and writes
 `log.jsonl` and `run.json` (the turns, the time, the cost, and the number
-of `appgen validate` runs). The agent runs the `appgen` of its PATH:
+of `appgen validate` runs). It sends each further prompt of the task in
+the same session (`--resume`). The agent runs the `appgen` of its PATH:
 install the appgen of the checkout first, with `uv tool install --force .`.
 The run keeps the package caches of uv and pnpm of the real home folder.
 The runs cost money, so no test and no hook runs `run`.
 
 `score` writes `score.json`: the definition is valid, `appgen check`
 reports no invalid traces, the expected gaps are closed, a new
-`appgen generate` into a copy of the app writes no file (no generated
+`appgen generate` into a copy of each app writes no file (no generated
 file has manual edits, and the app is generated from the last
-definition), the tests of the app pass, and the checks of the task pass
-(for example, the renamed entity exists). `--no-app-tests`
-skips the tests of the app. `report` prints a Markdown table of runs.
+definition), the tests of each app pass, the defaults agree with the
+task, and the checks of the task pass (for example, the renamed entity
+exists). The defaults of a task of the quick-start skill are the
+bindings in their folders, the keys of the definition, and the rows of
+the record of the defaults at the top of `app.yaml`. `--no-app-tests`
+skips the tests of the apps. `report` prints a Markdown table of runs.
 """
 
 import argparse
@@ -66,11 +73,19 @@ CHECK_TITLES = {
     "gaps_closed": "Gaps closed",
     "no_manual_edits": "No manual edits",
     "app_tests": "App tests",
+    "defaults": "Defaults",
     "task": "Task checks",
 }
 """The checks of score.json, with their titles in the report."""
 KEEP_VARIABLES = {"CLAUDE_SESSION_INGRESS_TOKEN_FILE"}
 """The variables of a Claude Code cloud session that a run needs."""
+RECORD_START = "# appgen-quickstart defaults:"
+"""The first line of the record of the defaults at the top of `app.yaml` (ADR 0053)."""
+RECORD_LINE = re.compile(r'# - (?P<row>[a-z_]+): (?P<choice>.+)\. Prompt: "(?P<words>[^"]+)"')
+"""A line of the record: the row of the table of defaults, the choice, and the words."""
+MANUAL_TRACE = re.compile(r"@trace:manual\s+([A-Za-z_][\w.-]*)")
+SKIP_FOLDERS = {"node_modules", ".venv", ".next", "dist", ".appgen", "__pycache__", ".git"}
+"""The folders of an app that hold no hand-written code."""
 
 type Definition = dict[str, Any]
 
@@ -127,6 +142,9 @@ async def cancel_booking(
     return record
 '''
 """The hand-written logic of `cancel_booking` before the task `change-definition`."""
+
+JIRA_DOCUMENT = ROOT / "tests" / "fixtures" / "jira" / "jira.openapi.json"
+"""The trimmed OpenAPI document of the Jira Cloud platform REST API."""
 
 ROOMS_CSV = """\
 Room,Floor,Seats,Rate per hour (EUR),Equipment
@@ -262,25 +280,96 @@ def check_seed_csv(work: Path, definition: Definition) -> list[str]:
     return problems
 
 
+def manual_traces(app: Path) -> dict[str, list[str]]:
+    """Return the elements of the `@trace:manual` traces of an app, with their files."""
+    found: dict[str, list[str]] = {}
+    if not app.is_dir():
+        return found
+    for path in sorted(app.rglob("*")):
+        relative = path.relative_to(app)
+        if not path.is_file() or SKIP_FOLDERS & set(relative.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError, OSError:
+            continue
+        for element in MANUAL_TRACE.findall(text):
+            found.setdefault(element, []).append(relative.as_posix())
+    return found
+
+
+def check_quickstart(work: Path, definition: Definition) -> list[str]:
+    return []
+
+
+def check_change_bindings(work: Path, definition: Definition) -> list[str]:
+    """The hand-written code of the first prompt (the app `nextjs`) stays, also in the new apps.
+
+    The first prompt gives the logic of a custom operation, so the first
+    app has hand-written code. The second prompt changes the bindings:
+    the folder of the first app stays, and the new apps have the logic
+    of each element again (ADR 0053).
+    """
+    first = manual_traces(work / "nextjs")
+    if not (work / "nextjs").is_dir():
+        return ["the folder of the first app (nextjs) is gone"]
+    if not first:
+        return ["the first app (nextjs) has no hand-written code"]
+    new = {**manual_traces(work / "react"), **manual_traces(work / "fastapi")}
+    return [
+        f"the new apps have no hand-written code of {element} (nextjs: {', '.join(files)})"
+        for element, files in sorted(first.items())
+        if element not in new
+    ]
+
+
+@dataclass(frozen=True)
+class Defaults:
+    """The expected defaults of a task of the quick-start skill (ADR 0053)."""
+
+    apps: dict[str, str]
+    """The binding of each app folder."""
+    keys: tuple[str, ...] = ()
+    """The keys of the definition: `<path>` (it exists), `<path>: <value>`, or `!<path>` (it
+    does not exist). `<>` in a path is any name, for example `auth.providers.<>.issuer`."""
+    rows: tuple[str, ...] = ()
+    """The rows of the record of the defaults, for example `binding` and `auth`."""
+    kept: tuple[str, ...] = ()
+    """More app folders that stay from an earlier prompt, and that the score skips."""
+
+
 @dataclass(frozen=True)
 class Task:
     """An agent task of the evaluation."""
 
     name: str
-    binding: str
+    binding: str | None
+    """The binding of the app `app/`, or None for a task of the quick-start skill."""
     example: str | None
     """The example that the work folder starts with, or None for an empty folder."""
     gaps: tuple[str, ...]
     """The gaps that must be closed at the end, or ALL_GAPS."""
     check: Callable[[Path, Definition], list[str]]
     """The checks of the task: the problems of the work folder and of the definition."""
-    files: dict[str, str] = field(default_factory=dict[str, str])
-    """More files of the work folder before the run, by path. The app has its folder `app/`."""
+    files: dict[str, str | Path] = field(default_factory=dict[str, str | Path])
+    """More files of the work folder before the run, by path: a text, or a file of the repository
+    to copy. The app has its folder `app/`."""
+    defaults: Defaults | None = None
+    """The expected defaults of a task of the quick-start skill."""
 
     @property
-    def prompt(self) -> str:
+    def prompts(self) -> list[str]:
         text = (TASKS / f"{self.name}.md").read_text(encoding="utf-8")
-        return " ".join(text.split())
+        parts = re.split(r"^---$", text, flags=re.MULTILINE)
+        return [" ".join(part.split()) for part in parts if part.strip()]
+
+    @property
+    def apps(self) -> dict[str, str]:
+        """Return the binding of each app folder that the score checks."""
+        if self.defaults is not None:
+            return self.defaults.apps
+        assert self.binding is not None
+        return {APP: self.binding}
 
 
 TASK_LIST = [
@@ -301,6 +390,62 @@ TASK_LIST = [
         check_fill_gaps,
     ),
     Task("seed-csv", "react", "room-booking", (), check_seed_csv, {"rooms.csv": ROOMS_CSV}),
+    Task(
+        "quickstart-tool-library",
+        None,
+        None,
+        (),
+        check_quickstart,
+        defaults=Defaults(
+            {"nextjs": "nextjs"},
+            keys=("auth.user_entity", "!auth.providers", "!auth.password"),
+            rows=("binding", "app", "auth"),
+        ),
+    ),
+    Task(
+        "quickstart-mobile-api",
+        None,
+        None,
+        (),
+        check_quickstart,
+        defaults=Defaults({"fastapi": "fastapi"}, keys=("auth.user_entity",), rows=("binding",)),
+    ),
+    Task(
+        "quickstart-company-jira",
+        None,
+        None,
+        (),
+        check_quickstart,
+        {"jira.openapi.json": JIRA_DOCUMENT},
+        Defaults(
+            {"nextjs": "nextjs"},
+            keys=(
+                "auth.password: false",
+                "!auth.sign_up",
+                "auth.providers.<>.issuer: "
+                "https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Hd7Qm2xYz",
+                "auth.providers.<>.authorize_params.identity_provider: EntraID",
+                "auth.providers.<>.trust_email: true",
+                "auth.providers.<>.create_users: true",
+                "apis.<>.document: jira.openapi.json",
+                "apis.<>.security.username_env",
+            ),
+            rows=("binding", "auth", "providers", "password", "apis"),
+        ),
+    ),
+    Task(
+        "quickstart-change-bindings",
+        None,
+        None,
+        (),
+        check_change_bindings,
+        defaults=Defaults(
+            {"react": "react", "fastapi": "fastapi"},
+            keys=("app.x-react-data: api",),
+            rows=("binding",),
+            kept=("nextjs",),
+        ),
+    ),
 ]
 TASK_BY_NAME = {task.name: task for task in TASK_LIST}
 
@@ -327,8 +472,8 @@ def write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def prepare(task: Task, folder: Path) -> str:
-    """Make the folder of a run, and return the prompt of the task."""
+def prepare(task: Task, folder: Path) -> list[str]:
+    """Make the folder of a run, and return the prompts of the task."""
     if folder.exists() and any(folder.iterdir()):
         raise SystemExit(f"error: {folder} is not empty.")
     work = folder / "work"
@@ -336,6 +481,7 @@ def prepare(task: Task, folder: Path) -> str:
     work.mkdir(parents=True)
     home.mkdir()
     if task.example:
+        assert task.binding is not None
         source = EXAMPLES / task.example
         # The definition and the files that it reads, without the hand-written code.
         shutil.copytree(
@@ -344,9 +490,12 @@ def prepare(task: Task, folder: Path) -> str:
         result = appgen("generate", work / "app.yaml", "-b", task.binding, "-o", work / APP)
         if result.returncode != 0:
             raise SystemExit(f"error: appgen generate failed:\n{result.stderr}")
-    for path, text in task.files.items():
+    for path, source in task.files.items():
         (work / path).parent.mkdir(parents=True, exist_ok=True)
-        (work / path).write_text(text, encoding="utf-8")
+        if isinstance(source, Path):
+            shutil.copyfile(source, work / path)
+        else:
+            (work / path).write_text(source, encoding="utf-8")
     env = {**os.environ, "HOME": str(home)}
     result = subprocess.run(
         [sys.executable, "-m", "appgen", "skills", "install", "--scope", "user"],
@@ -363,13 +512,14 @@ def prepare(task: Task, folder: Path) -> str:
         {
             "task": task.name,
             "binding": task.binding,
-            "prompt": task.prompt,
+            "apps": task.apps,
+            "prompts": task.prompts,
             "appgen": appgen_version(),
             "commit": git_commit(),
             "prepared": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         },
     )
-    return task.prompt
+    return task.prompts
 
 
 def task_of(folder: Path) -> Task:
@@ -397,51 +547,84 @@ def run(folder: Path, model: str, claude: str, timeout: int) -> dict[str, Any]:
         if store.returncode == 0:
             env.setdefault("npm_config_store_dir", store.stdout.strip())
     env["HOME"] = str(folder / "home")
-    command = [
-        claude,
-        "-p",
-        task.prompt,
-        "--model",
-        model,
-        "--permission-mode",
-        "bypassPermissions",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-    ]
     started = datetime.datetime.now(datetime.UTC)
-    with (folder / "log.jsonl").open("w", encoding="utf-8") as log:
-        result = subprocess.run(
-            command,
-            cwd=folder / "work",
-            env=env,
-            stdout=log,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    summary = session_summary(folder / "log.jsonl")
+    log_file = folder / "log.jsonl"
+    log_file.write_text("", encoding="utf-8")
+    exit_code = 0
+    stderr = ""
+    for prompt in task.prompts:
+        # Each further prompt continues the session of the first prompt.
+        session = session_id(log_file)
+        command = [
+            claude,
+            "-p",
+            prompt,
+            *(["--resume", session] if session else []),
+            "--model",
+            model,
+            "--permission-mode",
+            "bypassPermissions",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        with log_file.open("a", encoding="utf-8") as log:
+            result = subprocess.run(
+                command,
+                cwd=folder / "work",
+                env=env,
+                stdout=log,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        exit_code = result.returncode
+        stderr += result.stderr
+        if exit_code != 0:
+            break
+    summary = session_summary(log_file)
     summary.update(
         {
             "model": model,
             "started": started.isoformat(timespec="seconds"),
-            "exit_code": result.returncode,
-            "stderr": result.stderr[-2000:],
+            "exit_code": exit_code,
+            "stderr": stderr[-2000:],
         }
     )
     write_json(folder / "run.json", summary)
     return summary
 
 
-def session_summary(log: Path) -> dict[str, Any]:
-    """Read the turns, the time, the cost, and the commands of a session log."""
-    summary: dict[str, Any] = {"validate_runs": 0, "commands": []}
-    for line in log.read_text(encoding="utf-8").splitlines():
+def log_messages(log: Path) -> list[dict[str, Any]]:
+    """Return the JSON messages of a session log."""
+    messages: list[dict[str, Any]] = []
+    for line in log.read_text(encoding="utf-8").splitlines() if log.is_file() else []:
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(message, dict):
+            messages.append(cast(dict[str, Any], message))
+    return messages
+
+
+def session_id(log: Path) -> str | None:
+    """Return the ID of the last session of a log, or None for an empty log."""
+    ids = [str(m["session_id"]) for m in log_messages(log) if m.get("session_id")]
+    return ids[-1] if ids else None
+
+
+def session_summary(log: Path) -> dict[str, Any]:
+    """Read the turns, the time, the cost, and the commands of a session log.
+
+    A log of a task with more than one prompt has a result for each
+    prompt. The summary adds their turns, times, and costs. After
+    `--resume`, `total_cost_usd` includes the cost of the earlier
+    prompts, so the cost of a result is its `model_usage_since_last_result`.
+    """
+    summary: dict[str, Any] = {"validate_runs": 0, "commands": [], "results": []}
+    for message in log_messages(log):
         if message.get("type") == "system" and message.get("subtype") == "init":
             summary["session_model"] = message.get("model")
         if message.get("type") == "assistant":
@@ -451,12 +634,20 @@ def session_summary(log: Path) -> dict[str, Any]:
                     summary["commands"].append(command)
                     summary["validate_runs"] += len(re.findall(r"\bappgen validate\b", command))
         if message.get("type") == "result":
+            summary["results"].append(message.get("result"))
+            usage = _mapping(message.get("model_usage_since_last_result"))
+            cost = (
+                sum(_mapping(model).get("costUSD") or 0 for model in usage.values())
+                if usage
+                else message.get("total_cost_usd") or 0
+            )
             summary.update(
                 {
-                    "turns": message.get("num_turns"),
-                    "duration_s": round((message.get("duration_ms") or 0) / 1000),
-                    "cost_usd": message.get("total_cost_usd"),
-                    "is_error": message.get("is_error"),
+                    "turns": (summary.get("turns") or 0) + (message.get("num_turns") or 0),
+                    "duration_s": (summary.get("duration_s") or 0)
+                    + round((message.get("duration_ms") or 0) / 1000),
+                    "cost_usd": (summary.get("cost_usd") or 0) + cost,
+                    "is_error": bool(summary.get("is_error") or message.get("is_error")),
                     "result": message.get("result"),
                 }
             )
@@ -491,9 +682,12 @@ def score(folder: Path, run_app_tests: bool) -> dict[str, Any]:
     task = task_of(folder)
     work = folder / "work"
     definition_file = work / "app.yaml"
-    app = work / APP
+    apps = task.apps
     problems: list[str] = []
     checks: dict[str, bool | None] = {}
+
+    def where(name: str) -> str:
+        return f"{name}: " if len(apps) > 1 else ""
 
     validation = (
         appgen_json("validate", definition_file, "-f", "json")
@@ -504,54 +698,80 @@ def score(folder: Path, run_app_tests: bool) -> dict[str, Any]:
     if not checks["valid"]:
         problems.append("the definition is missing or not valid")
 
-    report = appgen_json("check", definition_file, app, "-f", "json") if app.is_dir() else None
-    checks["no_invalid_traces"] = bool(report and not report["invalid"])
-    if report is None:
-        problems.append("appgen check did not run: no app, or a definition that is not valid")
-    elif report["invalid"]:
-        problems.append(f"appgen check reports {len(report['invalid'])} invalid traces")
-    open_gaps = (
-        sorted({g["id"] for g in [*report["gaps"], *report["gaps_to_close"]]}) if report else []
+    checks["no_invalid_traces"] = True
+    open_gaps: set[str] = set()
+    reports = 0
+    for name in apps:
+        app = work / name
+        report = appgen_json("check", definition_file, app, "-f", "json") if app.is_dir() else None
+        if report is None:
+            checks["no_invalid_traces"] = False
+            problems.append(
+                f"{where(name)}appgen check did not run: no app, or a definition that is not valid"
+            )
+            continue
+        reports += 1
+        if report["invalid"]:
+            checks["no_invalid_traces"] = False
+            problems.append(
+                f"{where(name)}appgen check reports {len(report['invalid'])} invalid traces"
+            )
+        open_gaps |= {g["id"] for g in [*report["gaps"], *report["gaps_to_close"]]}
+    expected = (
+        sorted(open_gaps) if task.gaps == ALL_GAPS else [g for g in task.gaps if g in open_gaps]
     )
-    expected = open_gaps if task.gaps == ALL_GAPS else [g for g in task.gaps if g in open_gaps]
-    checks["gaps_closed"] = report is not None and not expected
+    checks["gaps_closed"] = reports == len(apps) and not expected
     if expected:
         problems.append(f"open gaps: {', '.join(expected)}")
 
-    copy = folder / "regenerated"
-    shutil.rmtree(copy, ignore_errors=True)
-    written = None
-    if app.is_dir() and checks["valid"]:
-        shutil.copytree(app, copy)
-        result = appgen("generate", definition_file, "-b", task.binding, "-o", copy)
-        match = re.search(r"^Files written: (\d+)", result.stdout, re.MULTILINE)
-        written = int(match.group(1)) if match else None
-        checks["no_manual_edits"] = result.returncode == 0 and written == 0
-        if result.returncode != 0:
-            problems.append(f"appgen generate stops: {result.stderr.strip()[-500:]}")
-        elif written != 0:
-            problems.append(
-                f"a new appgen generate writes {written} files: the app is not generated "
-                "from the last definition"
-            )
+    written: int | None = None
+    checks["no_manual_edits"] = bool(checks["valid"])
+    for name, binding in apps.items():
+        app = work / name
+        if not (app.is_dir() and checks["valid"]):
+            checks["no_manual_edits"] = False
+            continue
+        copy = folder / "regenerated"
+        shutil.rmtree(copy, ignore_errors=True)
+        shutil.copytree(app, copy, ignore=shutil.ignore_patterns(*SKIP_FOLDERS - {".appgen"}))
+        result = appgen("generate", definition_file, "-b", binding, "-o", copy)
         shutil.rmtree(copy)
-    else:
-        checks["no_manual_edits"] = False
+        match = re.search(r"^Files written: (\d+)", result.stdout, re.MULTILINE)
+        count = int(match.group(1)) if match else None
+        written = None if count is None else (written or 0) + count
+        if result.returncode != 0:
+            checks["no_manual_edits"] = False
+            problems.append(f"{where(name)}appgen generate stops: {result.stderr.strip()[-500:]}")
+        elif count != 0:
+            checks["no_manual_edits"] = False
+            problems.append(
+                f"{where(name)}a new appgen generate writes {count} files: the app is not "
+                "generated from the last definition"
+            )
 
-    if run_app_tests and app.is_dir():
-        passed, output = app_tests(task.binding, app, folder)
-        checks["app_tests"] = passed
-        if not passed:
-            problems.append(output)
-    else:
-        checks["app_tests"] = None
+    checks["app_tests"] = None
+    if run_app_tests:
+        checks["app_tests"] = True
+        for name, binding in apps.items():
+            if not (work / name).is_dir():
+                checks["app_tests"] = False
+                continue
+            passed, output = app_tests(binding, work / name, folder)
+            if not passed:
+                checks["app_tests"] = False
+                problems.append(f"{where(name)}{output}")
 
+    text = definition_file.read_text(encoding="utf-8") if definition_file.is_file() else ""
     data: object = None
-    if definition_file.is_file():
-        try:
-            data = yaml.safe_load(definition_file.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
-            data = None
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        data = None
+    checks["defaults"] = None
+    if task.defaults is not None:
+        default_problems = defaults_problems(work, task.defaults, text, _mapping(data))
+        checks["defaults"] = not default_problems
+        problems += default_problems
     task_problems = task.check(work, _mapping(data))
     checks["task"] = not task_problems
     problems += task_problems
@@ -560,15 +780,86 @@ def score(folder: Path, run_app_tests: bool) -> dict[str, Any]:
         "version": 1,
         "task": task.name,
         "binding": task.binding,
+        "apps": apps,
         "passed": all(value is not False for value in checks.values()),
         "checks": checks,
         "problems": problems,
-        "open_gaps": open_gaps,
+        "open_gaps": sorted(open_gaps),
         "files_written_by_a_new_run": written,
         "scored": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
     }
     write_json(folder / "score.json", result)
     return result
+
+
+def record_rows(text: str) -> tuple[list[str], list[str]]:
+    """Return the rows of the record of the defaults at the top of a definition, and the problems.
+
+    The record starts with RECORD_START, and has a line in the format of
+    RECORD_LINE for each default (the skill appgen-quickstart).
+    """
+    lines = text.splitlines()
+    if RECORD_START not in lines:
+        return [], [f"app.yaml has no record of the defaults: no line '{RECORD_START}'"]
+    rows: list[str] = []
+    problems: list[str] = []
+    for line in lines[lines.index(RECORD_START) + 1 :]:
+        if not line.startswith("# - "):
+            break
+        match = RECORD_LINE.fullmatch(line.rstrip())
+        if match is None:
+            problems.append(f"a line of the record does not have the format of the skill: {line}")
+        else:
+            rows.append(match.group("row"))
+    return rows, problems
+
+
+def _values(data: object, path: list[str]) -> list[object]:
+    """Return the values at a path of keys. `<>` is any key of a mapping."""
+    if not path:
+        return [data]
+    mapping = _mapping(data)
+    head, rest = path[0], path[1:]
+    keys = list(mapping) if head == "<>" else [head] if head in mapping else []
+    return [value for key in keys for value in _values(mapping[key], rest)]
+
+
+def key_problem(data: Definition, spec: str) -> str | None:
+    """Check a key of the expected defaults: `<path>`, `<path>: <value>`, or `!<path>`."""
+    path, separator, text = spec.removeprefix("!").partition(": ")
+    values = _values(data, path.split("."))
+    if spec.startswith("!"):
+        return f"the definition has {path}" if values else None
+    if not values:
+        return f"the definition has no {path}"
+    expected: object = yaml.safe_load(text)
+    if separator and expected not in values:
+        return f"the definition has {path}: {', '.join(map(str, values))}, not {text}"
+    return None
+
+
+def defaults_problems(work: Path, defaults: Defaults, text: str, data: Definition) -> list[str]:
+    """Compare the bindings, the definition, and the record with the expected defaults."""
+    problems: list[str] = []
+    for name, binding in defaults.apps.items():
+        found = read_json(work / name / ".appgen" / "manifest.json").get("binding")
+        if found != binding:
+            problems.append(f"the folder {name} has no app of the binding {binding}")
+    others = sorted(
+        manifest.parent.parent.relative_to(work).as_posix()
+        for manifest in work.glob("**/.appgen/manifest.json")
+        if not SKIP_FOLDERS & set(manifest.parent.parent.relative_to(work).parts)
+    )
+    for name in others:
+        if name not in defaults.apps and name not in defaults.kept:
+            problems.append(f"the folder {name} has an app that the task does not expect")
+    problems += [p for spec in defaults.keys if (p := key_problem(data, spec))]
+    rows, record_problems = record_rows(text)
+    problems += record_problems
+    missing = [row for row in defaults.rows if row not in rows]
+    if missing:
+        problems.append(f"the record of the defaults has no row {', '.join(missing)}")
+    return problems
 
 
 def report(folders: list[Path]) -> str:
@@ -628,7 +919,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "prepare":
-        print(prepare(TASK_BY_NAME[args.task], args.folder))
+        print("\n".join(prepare(TASK_BY_NAME[args.task], args.folder)))
     elif args.command == "run":
         summary = run(args.folder, args.model, args.claude, args.timeout)
         print(json.dumps({k: v for k, v in summary.items() if k != "commands"}, indent=2))

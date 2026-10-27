@@ -15,11 +15,12 @@ from typer.testing import CliRunner
 
 from appgen import __version__
 from appgen.cli import app
-from appgen.skills import install, skill_files
+from appgen.skills import install, skill_files, skill_names
 from appgen.skills.install import RECORD_FILE, Scope, SkillsError, Target, skills_folder
 
 runner = CliRunner()
-SKILL_FILES = skill_files("appgen")
+SKILLS = skill_names()
+SCOPES = ("project", "user", "system")
 
 
 @dataclass(frozen=True)
@@ -29,8 +30,8 @@ class Places:
     project: Path
 
     def folder(self, target: str, scope: str) -> Path:
-        """Return the folder of the skill appgen for a target and a scope on Linux."""
-        parent = {
+        """Return the skills folder of a target and a scope on Linux."""
+        return {
             ("claude", "project"): self.project / ".claude/skills",
             ("claude", "user"): self.home / ".claude/skills",
             ("claude", "system"): self.root / "etc/claude-code/.claude/skills",
@@ -38,7 +39,10 @@ class Places:
             ("agents", "user"): self.home / ".agents/skills",
             ("agents", "system"): self.root / "etc/codex/skills",
         }[target, scope]
-        return parent / "appgen"
+
+    def skill(self, target: str, scope: str, name: str = "appgen") -> Path:
+        """Return the folder of a skill for a target and a scope on Linux."""
+        return self.folder(target, scope) / name
 
 
 @pytest.fixture
@@ -68,16 +72,20 @@ def snapshot(folder: Path) -> dict[str, tuple[bytes, int]]:
 
 
 def assert_installed(folder: Path) -> None:
-    files = {p: c for p, (c, _) in snapshot(folder).items()}
-    assert set(files) == {*SKILL_FILES, RECORD_FILE}
-    for path, content in SKILL_FILES.items():
-        assert files[path] == content
-        assert b"\r\n" not in files[path]
-    record = json.loads(files[RECORD_FILE])
-    assert record["version"] == 1
-    assert record["appgen"] == __version__
-    assert set(record["files"]) == set(SKILL_FILES)
-    assert all(digest.startswith("sha256:") for digest in record["files"].values())
+    """Check that a skills folder has each skill of the package, with its record."""
+    assert sorted(p.name for p in folder.iterdir()) == SKILLS
+    for skill in SKILLS:
+        expected = skill_files(skill)
+        files = {p: c for p, (c, _) in snapshot(folder / skill).items()}
+        assert set(files) == {*expected, RECORD_FILE}
+        for path, content in expected.items():
+            assert files[path] == content
+            assert b"\r\n" not in files[path]
+        record = json.loads(files[RECORD_FILE])
+        assert record["version"] == 1
+        assert record["appgen"] == __version__
+        assert set(record["files"]) == set(expected)
+        assert all(digest.startswith("sha256:") for digest in record["files"].values())
 
 
 @pytest.mark.parametrize("scope", ["project", "user", "system"])
@@ -90,7 +98,8 @@ def test_install_writes_the_skill_for_each_target_and_scope_once(
     assert code == 0, output
     folder = places.folder(target, scope)
     assert_installed(folder)
-    assert f"Installed the skill of appgen {__version__} into {folder}:" in output
+    for skill in SKILLS:
+        assert f"Installed the skill of appgen {__version__} into {folder / skill}:" in output
     assert "  created: SKILL.md\n" in output
     # Only the folder of the target and the scope gets the skill.
     others = [places.folder(t, s) for t in ("claude", "agents") for s in ("project", "user")]
@@ -100,7 +109,9 @@ def test_install_writes_the_skill_for_each_target_and_scope_once(
     code, output = skills("install", "--target", target, "--scope", scope)
 
     assert code == 0
-    assert output == f"{folder}: the skill 'appgen' is up to date ({__version__}).\n"
+    assert output == "".join(
+        f"{folder / s}: the skill '{s}' is up to date ({__version__}).\n" for s in SKILLS
+    )
     assert snapshot(folder) == before
 
 
@@ -111,6 +122,7 @@ def test_install_without_options_writes_both_project_folders(places: Places) -> 
     assert_installed(places.folder("agents", "project"))
     assert_installed(places.folder("claude", "project"))
     assert output.index(".agents/skills/appgen") < output.index(".claude/skills/appgen")
+    assert output.index("skills/appgen:") < output.index("skills/appgen-quickstart:")
     assert not (places.home / ".claude").exists()
 
 
@@ -121,8 +133,8 @@ def test_install_takes_more_targets_and_a_project_folder(places: Places, tmp_pat
     code, output = skills("install", "-t", "claude", "-t", "agents", "--project-dir", other)
 
     assert code == 0, output
-    assert_installed(other / ".claude/skills/appgen")
-    assert_installed(other / ".agents/skills/appgen")
+    assert_installed(other / ".claude/skills")
+    assert_installed(other / ".agents/skills")
     assert not (places.project / ".claude").exists()
 
 
@@ -130,7 +142,7 @@ def test_install_writes_to_another_skills_folder_with_path(places: Places, tmp_p
     code, output = skills("install", "--path", tmp_path / "custom")
 
     assert code == 0, output
-    assert_installed(tmp_path / "custom" / "appgen")
+    assert_installed(tmp_path / "custom")
 
     code, output = skills("install", "--path", tmp_path / "custom", "--scope", "user")
 
@@ -139,7 +151,7 @@ def test_install_writes_to_another_skills_folder_with_path(places: Places, tmp_p
 
 
 def test_an_install_of_another_version_updates_the_files(places: Places) -> None:
-    folder = places.folder("claude", "project")
+    folder = places.skill("claude", "project")
     skills("install", "-t", "claude")
     # Make the copy look like the copy of an older version: another text
     # of SKILL.md, a file that the new version does not have, and the
@@ -160,12 +172,12 @@ def test_an_install_of_another_version_updates_the_files(places: Places) -> None
     assert code == 0, output
     assert "  updated: SKILL.md\n" in output
     assert "  deleted: references/old.md\n" in output
-    assert_installed(folder)
+    assert_installed(places.folder("claude", "project"))
 
 
 def test_install_does_not_overwrite_a_changed_file_without_force(places: Places) -> None:
     skills("install", "-t", "claude")
-    changed = places.folder("claude", "project") / "references" / "dsl.md"
+    changed = places.skill("claude", "project") / "references" / "dsl.md"
     changed.write_text("My notes.\n")
 
     code, output = skills("install")
@@ -186,7 +198,7 @@ def test_install_does_not_overwrite_a_changed_file_without_force(places: Places)
 
 
 def test_install_does_not_overwrite_a_file_that_appgen_did_not_install(places: Places) -> None:
-    folder = places.folder("claude", "project")
+    folder = places.skill("claude", "project")
     folder.mkdir(parents=True)
     (folder / "SKILL.md").write_text("Another skill.\n")
 
@@ -217,24 +229,32 @@ def test_dry_run_shows_the_changes_and_writes_no_file(places: Places) -> None:
 def test_list_shows_each_target_and_scope_with_the_status(places: Places) -> None:
     skills("install", "-t", "claude")
     skills("install", "-t", "agents", "-s", "user")
-    (places.folder("agents", "user") / "SKILL.md").write_text("Changed.\n")
+    (places.skill("agents", "user") / "SKILL.md").write_text("Changed.\n")
 
     code, output = skills("list", "--format", "json")
 
     assert code == 0, output
     report = json.loads(output)
     assert report["appgen"] == __version__
-    found = {(r["target"], r["scope"]): (r["installed"], r["status"]) for r in report["skills"]}
-    assert found == {
-        ("claude", "project"): (__version__, "up to date"),
-        ("claude", "user"): (None, "not installed"),
-        ("claude", "system"): (None, "not installed"),
-        ("agents", "project"): (None, "not installed"),
-        ("agents", "user"): (__version__, "changed"),
-        ("agents", "system"): (None, "not installed"),
+    found = {
+        (r["skill"], r["target"], r["scope"]): (r["installed"], r["status"])
+        for r in report["skills"]
     }
-    folders = {(r["target"], r["scope"]): r["folder"] for r in report["skills"]}
-    assert folders["agents", "system"] == str(places.folder("agents", "system"))
+    assert len(found) == len(report["skills"]) == 6 * len(SKILLS)
+    for skill in SKILLS:
+        # The person changed only a file of the skill appgen.
+        changed = "changed" if skill == "appgen" else "up to date"
+        assert {(t, s): found[skill, t, s] for t in ("claude", "agents") for s in SCOPES} == {
+            ("claude", "project"): (__version__, "up to date"),
+            ("claude", "user"): (None, "not installed"),
+            ("claude", "system"): (None, "not installed"),
+            ("agents", "project"): (None, "not installed"),
+            ("agents", "user"): (__version__, changed),
+            ("agents", "system"): (None, "not installed"),
+        }
+    folders = {(r["skill"], r["target"], r["scope"]): r["folder"] for r in report["skills"]}
+    for skill in SKILLS:
+        assert folders[skill, "agents", "system"] == str(places.skill("agents", "system", skill))
 
     code, output = skills("list")
 
@@ -242,7 +262,8 @@ def test_list_shows_each_target_and_scope_with_the_status(places: Places) -> Non
     lines = output.splitlines()
     assert lines[0].split() == ["skill", "target", "scope", "installed", "status", "folder"]
     assert lines[1].split()[:5] == ["appgen", "claude", "project", __version__, "up"]
-    assert len(lines) == 7
+    assert lines[2].split()[:5] == ["appgen-quickstart", "claude", "project", __version__, "up"]
+    assert len(lines) == 1 + 6 * len(SKILLS)
 
 
 def test_list_shows_the_folder_of_path(places: Places, tmp_path: Path) -> None:
@@ -251,14 +272,14 @@ def test_list_shows_the_folder_of_path(places: Places, tmp_path: Path) -> None:
     code, output = skills("list", "--path", tmp_path / "custom", "-f", "json")
 
     assert code == 0, output
-    (row,) = [r for r in json.loads(output)["skills"] if r["scope"] == "path"]
-    assert row["target"] is None
-    assert row["status"] == "up to date"
+    rows = [r for r in json.loads(output)["skills"] if r["scope"] == "path"]
+    assert [r["skill"] for r in rows] == SKILLS
+    assert all(r["target"] is None and r["status"] == "up to date" for r in rows)
 
 
 def test_uninstall_removes_only_the_files_that_appgen_installed(places: Places) -> None:
     skills("install")
-    folder = places.folder("claude", "project")
+    folder = places.skill("claude", "project")
     (folder / "my-notes.md").write_text("Mine.\n")
 
     code, output = skills("uninstall", "-t", "claude")
@@ -266,19 +287,25 @@ def test_uninstall_removes_only_the_files_that_appgen_installed(places: Places) 
     assert code == 0, output
     assert "  deleted: SKILL.md\n" in output
     assert [p.relative_to(folder).as_posix() for p in folder.rglob("*")] == ["my-notes.md"]
+    assert not places.skill("claude", "project", "appgen-quickstart").exists()
     assert_installed(places.folder("agents", "project"))
 
     code, output = skills("uninstall", "-t", "agents")
 
     assert code == 0, output
-    assert not places.folder("agents", "project").exists()
+    for skill in SKILLS:
+        assert f"Removed the skill from {places.skill('agents', 'project', skill)}:" in output
+    assert list(places.folder("agents", "project").iterdir()) == []
     code, output = skills("uninstall", "-t", "agents")
-    assert output == f"{places.folder('agents', 'project')}: the skill 'appgen' is not installed.\n"
+    assert output == "".join(
+        f"{places.skill('agents', 'project', skill)}: the skill '{skill}' is not installed.\n"
+        for skill in SKILLS
+    )
 
 
 def test_uninstall_keeps_a_changed_file_without_force(places: Places) -> None:
     skills("install", "-t", "claude")
-    changed = places.folder("claude", "project") / "SKILL.md"
+    changed = places.skill("claude", "project") / "SKILL.md"
     changed.write_text("Changed.\n")
 
     code, output = skills("uninstall", "-t", "claude")

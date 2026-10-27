@@ -1,15 +1,19 @@
-# Evaluation of the agent skill
+# Evaluation of the agent skills
 
 This report records the tasks that agents did with only the installed
-skill of appgen. It shows if the text of the skill
+skills of appgen. It shows if the text of the skill `appgen`
 (`src/appgen/skills/appgen/`) gives an agent enough context to write,
-change, and fill an app definition, and it lists the problems that the
-runs showed and the fix of each problem.
+change, and fill an app definition, and if the quick-start skill
+(`src/appgen/skills/appgen-quickstart/`) makes the same app from the
+same prompts. It lists the problems that the runs showed and the fix of
+each problem.
 
 The first part records the manual runs of three tasks (#260, milestone
 M15). The second part records three runs of each task with two models,
 and a fourth task, with the script `scripts/evaluate_skill.py` (#319,
 milestone M22): see [Repeated runs with the script](#repeated-runs-with-the-script).
+The third part records the tasks of the quick-start skill (#489,
+milestone M39): see [Runs of the quick-start skill](#runs-of-the-quick-start-skill).
 
 ## Contents
 
@@ -21,6 +25,7 @@ milestone M22): see [Repeated runs with the script](#repeated-runs-with-the-scri
 - [Problems and fixes](#problems-and-fixes)
 - [Runs after the fixes](#runs-after-the-fixes)
 - [Repeated runs with the script](#repeated-runs-with-the-script)
+- [Runs of the quick-start skill](#runs-of-the-quick-start-skill)
 - [Limits](#limits)
 
 ## Summary
@@ -467,12 +472,175 @@ the reference:
 
 No run needed a second `appgen validate`.
 
+## Runs of the quick-start skill
+
+The quick-start skill `appgen-quickstart` (ADR 0053) makes an app from
+one or more prompts without questions. Its table gives the defaults that
+the prompts do not name, for example the binding `nextjs` for a web app.
+The tasks of this part check that an agent with the installed skills
+picks the defaults of the table, records them at the top of `app.yaml`,
+and makes a working app.
+
+### Method of the quick-start tasks
+
+- The work folder is empty, or has only the files that the prompts
+  name, and the home folder has both skills
+  (`appgen skills install --scope user`). The prompts are in
+  [evaluation/skill-tasks/](evaluation/skill-tasks/), in the files that
+  start with `quickstart-`. They name no key of the DSL.
+- A task with more than one prompt sends each further prompt in the same
+  session: `run` starts `claude -p` again with `--resume` and the ID of
+  the session. After `--resume`, the result of Claude Code gives the
+  total cost of the session, so the script adds only the cost since the
+  last result (`model_usage_since_last_result`).
+- The score checks each expected app folder: `appgen check`, a new
+  `appgen generate` into a copy, and the tests of the app. The check
+  `Defaults` compares the work folder with the expected defaults of the
+  task:
+  - the binding of each app folder (in `.appgen/manifest.json`), and no
+    other app folder;
+  - the keys of the definition, for example `auth.user_entity` or
+    `app.x-react-data: api`, and the keys that must not exist, for
+    example `auth.providers`;
+  - the record of the defaults: the line `# appgen-quickstart defaults:`,
+    a line in the format of the skill for each default, and the expected
+    rows, for example `binding` and `auth`.
+- `tests/test_evaluate_skill.py` prepares and scores each task before
+  and after a solution that the test writes, checks the defaults score
+  with wrong defaults, and runs a fake `claude` command for a task with
+  two prompts.
+
+| Task | Prompts | Expected defaults |
+| ---- | ------- | ----------------- |
+| `quickstart-tool-library` | "Make an app for our neighborhood tool library. Members lend their tools to each other, and borrow a tool for a few days." | `nextjs` in `nextjs/`, a sign-in with a password and no provider, and the rows `binding`, `app`, and `auth`. |
+| `quickstart-mobile-api` | "We are building a mobile app for a running club. Make the REST API behind it: ..." | Only `fastapi` in `fastapi/`, a sign-in, and the row `binding`. |
+| `quickstart-company-jira` | "Make an internal IT help desk for our company. The staff sign in with their work Microsoft account: our Entra ID is connected to the Amazon Cognito user pool eu-west-1_Hd7Qm2xYz in eu-west-1, and its identity provider there has the name EntraID. Nobody needs another password for the help desk. ... The OpenAPI document of Jira is jira.openapi.json in this folder, and the app calls Jira with the email address and an API token of our Jira bot account." The work folder has the trimmed Jira document of `tests/fixtures/jira/`. | `nextjs` in `nextjs/`, no password and no sign-up, a provider with the issuer of the user pool, `authorize_params.identity_provider: EntraID`, `trust_email: true`, and `create_users: true`, the API `jira.openapi.json` with HTTP Basic (`username_env`), and the rows `binding`, `auth`, `providers`, `password`, and `apis`. |
+| `quickstart-change-bindings` | First "Make an app for a small bike repair shop. ... A mechanic marks a repair as picked up, and that sets the pickup date to today.", then "Make the front end React with a Python API." | `react` in `react/` and `fastapi` in `fastapi/`, `app.x-react-data: api`, and the row `binding`. The folder `nextjs/` of the first prompt stays with its hand-written code, and the new apps have hand-written code for each element of it. |
+
+The runs were on 2026-10-27, with appgen 0.1.0 (installed as a tool from
+the branch of #489), Claude Code 2.1.311, and the model
+`claude-sonnet-5-5` only: the runs cost money, and the maintainer chose
+one model for this part. The work folders and the logs of the runs are
+not in the repository. The task `quickstart-company-jira` needs the keys
+of #483 and #486, so it ran later, with the fixes of the first runs
+(see [The company sign-in and Jira](#the-company-sign-in-and-jira)).
+
+### Results of the first runs
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Defaults | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | -------- | ----------- | ------ |
+| change-bindings-claude-sonnet-5-5-1 | quickstart-change-bindings | claude-sonnet-5-5 | 20 | 135 | 0.33 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| change-bindings-claude-sonnet-5-5-2 | quickstart-change-bindings | claude-sonnet-5-5 | 21 | 150 | 0.31 | 2 | yes | yes | yes | yes | yes | no | yes | no |
+| change-bindings-claude-sonnet-5-5-3 | quickstart-change-bindings | claude-sonnet-5-5 | 23 | 189 | 0.34 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| mobile-api-claude-sonnet-5-5-1 | quickstart-mobile-api | claude-sonnet-5-5 | 17 | 131 | 0.24 | 2 | yes | yes | yes | yes | yes | no | yes | no |
+| mobile-api-claude-sonnet-5-5-2 | quickstart-mobile-api | claude-sonnet-5-5 | 12 | 97 | 0.20 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| mobile-api-claude-sonnet-5-5-3 | quickstart-mobile-api | claude-sonnet-5-5 | 12 | 316 | 0.17 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-1 | quickstart-tool-library | claude-sonnet-5-5 | 9 | 66 | 0.18 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-2 | quickstart-tool-library | claude-sonnet-5-5 | 13 | 80 | 0.22 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-3 | quickstart-tool-library | claude-sonnet-5-5 | 10 | 77 | 0.23 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+
+7 of 9 runs passed. In each run, the agent loaded `appgen-quickstart`
+first, asked no question, and made the expected bindings in the
+expected folders. Then it used the skill `appgen`: of the 18 runs of
+this part, 7 loaded it with the Skill tool, and 11 read its files
+(`../appgen/SKILL.md` and `references/new-definition.md`) as the
+quick-start skill tells for other agents. Each definition was valid,
+`appgen check` reported no invalid traces, no agent edited a generated
+file, and the tests of each app passed. In each run of
+`quickstart-change-bindings`, the folder `nextjs/` kept the
+hand-written logic of the pickup (the custom operation `mark_picked_up`,
+or `mark_repair_picked_up` in one run), and the FastAPI app had the same
+logic again in Python. The React app with `x-react-data: api` calls the
+operation of the FastAPI app, so it has no gap of its own.
+
+The two failed runs failed only the check `Defaults`, because of the
+record (problems 10 and 11). The runs also showed where the agents still
+guessed (problem 12).
+
+### Problems and fixes of the quick-start runs
+
+| # | Problem | Runs | Fix |
+| - | ------- | ---- | --- |
+| 10 | The agent wrote a note after the words of the prompt: `... Prompt: "Make the REST API behind it" (only an API for a mobile app)`. | `quickstart-mobile-api` 1 | The skill gives the rules of a line of the record: the line ends with the closing quote, and a note goes into the summary. |
+| 11 | The agent wrote a line for a default that it did not choose: `# - no auth: the prompt names no sign-in or roles; ...`. | `quickstart-change-bindings` 2 | The skill says that a row without its signal gets no line, for example no line `no auth`. |
+| 12 | The roles were a guess. Without roles in the prompts, 5 of 6 runs of the tool library and the running club added `access` with invented roles, and 1 run did not. In the bike shop, 1 of 3 runs made no sign-in, because the row `auth` named customers as a signal, and the customers of the shop are only records. | all tasks | The row `auth` names the people who use the app as the signal, and says that people who are only records are no signal. The row `access` always comes with `auth`: the roles of the prompts, or else `admin` and one role for the other users. |
+
+### Runs after the fixes
+
+The fixes 10 to 12 were installed into new home folders, and each task
+ran three more times.
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Defaults | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | -------- | ----------- | ------ |
+| change-bindings-claude-sonnet-5-5-fixed-1 | quickstart-change-bindings | claude-sonnet-5-5 | 22 | 173 | 0.34 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| change-bindings-claude-sonnet-5-5-fixed-2 | quickstart-change-bindings | claude-sonnet-5-5 | 21 | 190 | 0.30 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| change-bindings-claude-sonnet-5-5-fixed-3 | quickstart-change-bindings | claude-sonnet-5-5 | 24 | 204 | 0.39 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| mobile-api-claude-sonnet-5-5-fixed-1 | quickstart-mobile-api | claude-sonnet-5-5 | 12 | 66 | 0.21 | 2 | yes | yes | yes | yes | yes | yes | yes | yes |
+| mobile-api-claude-sonnet-5-5-fixed-2 | quickstart-mobile-api | claude-sonnet-5-5 | 14 | 101 | 0.23 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| mobile-api-claude-sonnet-5-5-fixed-3 | quickstart-mobile-api | claude-sonnet-5-5 | 16 | 99 | 0.24 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-fixed-1 | quickstart-tool-library | claude-sonnet-5-5 | 12 | 69 | 0.19 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-fixed-2 | quickstart-tool-library | claude-sonnet-5-5 | 10 | 106 | 0.22 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+| tool-library-claude-sonnet-5-5-fixed-3 | quickstart-tool-library | claude-sonnet-5-5 | 14 | 102 | 0.25 | 1 | yes | yes | yes | yes | yes | yes | yes | yes |
+
+All 9 runs passed. Each record had the format of the skill. Each run
+made a sign-in and the roles `admin` and one role for the other users
+(`member`, or `mechanic` in the bike shop). The other defaults still
+differ between runs of the same prompt, because their signals are a
+matter of judgment: the record rules (`records`) in 2 of 3 runs of the
+tool library and in 3 of 3 runs of the running club, a workflow of the
+loans in 3 of 3 runs of the tool library, and seed records in 1 run of
+the tool library, which the prompt did not ask for. The expected
+defaults of the tasks do not include these rows.
+
+### The company sign-in and Jira
+
+The task `quickstart-company-jira` ran after #483 and #486 were on
+main, with the fixes 10 to 12 and two new parts of the skill: the keys
+of a user pool of Amazon Cognito with an identity provider
+(`authorize_params` and `trust_email`), and HTTP Basic for an API
+(`username_env`, or `per_user` for the own account of each user). The
+skill also tells the agent to leave out `roles` and `sign_out` when the
+prompts do not give the IDs of the groups or the domain of the user
+pool, and to name them in the summary.
+
+| Run | Task | Model | Turns | Time (s) | Cost (USD) | `validate` runs | Valid | No invalid traces | Gaps closed | No manual edits | App tests | Defaults | Task checks | Passed |
+| --- | ---- | ----- | ----: | -------: | ---------: | --------------: | ----- | ----------------- | ----------- | --------------- | --------- | -------- | ----------- | ------ |
+| company-jira-claude-sonnet-5-5-1 | quickstart-company-jira | claude-sonnet-5-5 | 16 | 141 | 0.31 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| company-jira-claude-sonnet-5-5-2 | quickstart-company-jira | claude-sonnet-5-5 | 15 | 130 | 0.29 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+| company-jira-claude-sonnet-5-5-3 | quickstart-company-jira | claude-sonnet-5-5 | 18 | 132 | 0.31 | 3 | yes | yes | yes | yes | yes | yes | yes | yes |
+
+All 3 runs passed, and the three definitions agree in each expected
+default:
+
+- Each agent loaded both skills with the Skill tool, asked no question,
+  and made `nextjs` in `nextjs/`. The provider had the issuer of the
+  user pool, `authorize_params: { identity_provider: EntraID }`,
+  `trust_email: true`, `create_users: true`, and `default_role: staff`,
+  and `auth.password` was `false`.
+- Each agent called Jira with HTTP Basic (`JIRA_EMAIL` and
+  `JIRA_API_TOKEN`), selected only the search operation, and showed the
+  open issues of the project IT in a view of API data with the JQL
+  `project = IT AND statusCategory != Done ORDER BY created DESC`. The
+  app needs no hand-written code for it.
+- No agent added `roles` or `sign_out`. Each summary told that the
+  sign-out ends only the session of the app until the user gives the
+  domain of the user pool, and two summaries told that the roles from
+  the groups of Entra ID need the IDs of the groups.
+- Each run made the roles `it_team` and `staff`, the record rules (a
+  member of the staff sees only the own tickets), and a workflow of the
+  status of a ticket. The task does not expect these rows.
+
+The three runs cost 0.91 USD.
+
 ## Limits
 
 - In the first part, task 1 ran once, task 2 three times, and task 3
   two times, with one model. The repeated runs ran each task three
-  times with two models. Other models, or more runs, can make other
-  mistakes.
+  times with two models. The runs of the quick-start skill used one
+  model. Other models, or more runs, can make other mistakes.
+- The score of the quick-start tasks checks the defaults that the table
+  of the skill fixes. It does not check the entities, the fields, or the
+  pages that the agent chose.
 - The repeated runs used SQLite for the FastAPI tests, because the
   machine had no Docker. A migration that works on SQLite can fail on
   Postgres.

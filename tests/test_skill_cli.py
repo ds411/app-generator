@@ -1,7 +1,9 @@
-"""The agent skill agrees with the CLI, and its files are in the wheel (ADR 0015).
+"""The agent skills agree with the CLI, and their files are in the wheel (ADR 0015, ADR 0053).
 
-The skill names each command and each option of the CLI, and no other.
-A new command or option fails these tests until the skill describes it.
+The skill `appgen` names each command and each option of the CLI, and no
+other. A new command or option fails these tests until the skill
+describes it. The quick-start skill names only commands and options of
+the CLI too, and links only to its own files and to the skill `appgen`.
 """
 
 import json
@@ -18,8 +20,10 @@ import pytest
 import typer.core
 from skill_support import (
     MADE_FROM_DOCS,
+    QUICKSTART,
     ROOT,
     SKILL,
+    SKILLS,
     Command,
     cli_commands,
     code_texts,
@@ -108,8 +112,9 @@ def _read_invocation(
         found.commands.add(path)
 
 
-def test_the_skill_names_only_commands_and_options_of_the_cli() -> None:
-    assert usage(skill_docs()).errors == []
+@pytest.mark.parametrize("skill", [SKILL, QUICKSTART], ids=lambda p: p.name)
+def test_the_skill_names_only_commands_and_options_of_the_cli(skill: Path) -> None:
+    assert usage(skill_docs(skill)).errors == []
 
 
 def test_the_skill_names_each_command_and_option_of_the_cli() -> None:
@@ -153,11 +158,12 @@ def test_the_usage_check_reads_code_blocks_and_skips_prose() -> None:
     assert found.options == {(("check",), "-f")}
 
 
-def test_the_front_matter_follows_the_agent_skills_format() -> None:
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+@pytest.mark.parametrize("skill", [SKILL, QUICKSTART], ids=lambda p: p.name)
+def test_the_front_matter_follows_the_agent_skills_format(skill: Path) -> None:
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
     data = front_matter(text)
 
-    assert data["name"] == SKILL.name
+    assert data["name"] == skill.name
     assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", data["name"])
     assert len(data["name"]) <= 64
     assert isinstance(data["description"], str)
@@ -180,26 +186,37 @@ def test_the_description_names_the_five_tasks() -> None:
         assert words in description
 
 
-@pytest.mark.parametrize("name", sorted(skill_docs()))
-def test_the_links_of_the_skill_stay_in_the_skill(name: str) -> None:
+@pytest.mark.parametrize(
+    ("skill", "name"),
+    [(skill, name) for skill in (SKILL, QUICKSTART) for name in sorted(skill_docs(skill))],
+    ids=lambda v: v.name if isinstance(v, Path) else v,
+)
+def test_the_links_of_the_skill_stay_in_the_skill(skill: Path, name: str) -> None:
     # The installed skill has only its own files, so a link to a file of
-    # the repository does not work there.
-    path = SKILL / name
+    # the repository does not work there. The quick-start skill also
+    # links to the skill appgen: `appgen skills install` installs both
+    # into the same skills folder.
+    allowed = [skill] if skill == SKILL else [skill, SKILL]
+    path = skill / name
     for target in _LINK.findall(path.read_text(encoding="utf-8")):
         if target.startswith(("http://", "https://", "mailto:")):
             continue
         resolved = (path.parent / target).resolve()
-        assert resolved.is_relative_to(SKILL), f"{name}: {target} is outside the skill"
-        assert resolved.exists(), f"{name}: {target}"
+        assert any(resolved.is_relative_to(a) for a in allowed), (
+            f"{skill.name}/{name}: {target} is outside the skill"
+        )
+        assert resolved.exists(), f"{skill.name}/{name}: {target}"
 
 
-def test_the_package_gives_the_files_of_the_skill() -> None:
-    files = skill_files("appgen")
-
-    assert skill_names() == ["appgen"]
-    expected = sorted(p.relative_to(SKILL).as_posix() for p in SKILL.rglob("*") if p.is_file())
-    assert list(files) == expected
-    assert files["SKILL.md"] == (SKILL / "SKILL.md").read_bytes()
+def test_the_package_gives_the_files_of_each_skill() -> None:
+    assert skill_names() == ["appgen", "appgen-quickstart"]
+    assert skill_names() == sorted(p.parent.name for p in SKILLS.glob("*/SKILL.md"))
+    for name in skill_names():
+        folder = SKILLS / name
+        files = skill_files(name)
+        expected = [p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()]
+        assert list(files) == sorted(expected)
+        assert files["SKILL.md"] == (folder / "SKILL.md").read_bytes()
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv builds the wheel")
@@ -211,13 +228,15 @@ def test_the_wheel_contains_the_skill_and_the_package_finds_it(tmp_path: Path) -
     )
     (wheel,) = tmp_path.glob("appgen-*.whl")
     names = zipfile.ZipFile(wheel).namelist()
-    for path in skill_files("appgen"):
-        assert f"appgen/skills/appgen/{path}" in names
+    for skill in skill_names():
+        for path in skill_files(skill):
+            assert f"appgen/skills/{skill}/{path}" in names
 
     # Import appgen from the wheel, as an installed package does.
     code = (
         "import json, appgen.skills as s; "
-        "print(json.dumps({'module': s.__file__, 'files': sorted(s.skill_files('appgen'))}))"
+        "print(json.dumps({'module': s.__file__, 'skills': s.skill_names(), "
+        "'files': sorted(s.skill_files('appgen-quickstart'))}))"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
@@ -229,4 +248,5 @@ def test_the_wheel_contains_the_skill_and_the_package_finds_it(tmp_path: Path) -
     )
     found = json.loads(result.stdout)
     assert found["module"].startswith(str(wheel))
-    assert found["files"] == sorted(skill_files("appgen"))
+    assert found["skills"] == skill_names()
+    assert found["files"] == sorted(skill_files("appgen-quickstart"))

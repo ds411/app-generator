@@ -68,5 +68,5 @@ Co-Authored-By: <name> <email>
 - [ ] Generated output is deterministic: a second run gives no diff.
 - [ ] The trace check reports no invalid traces.
 - [ ] The docs (README, CONTRIBUTING, ADRs) agree with the change.
-- [ ] The skill agrees with the change (`src/appgen/skills/appgen/`).
+- [ ] The skills agree with the change (`src/appgen/skills/appgen/` and `src/appgen/skills/appgen-quickstart/`).
 - [ ] The PR contains no links to claude.ai.

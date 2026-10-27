@@ -100,7 +100,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | Update golden files   | `APPGEN_UPDATE_GOLDEN=1 uv run pytest`                     |
 | Update the schema     | `uv run appgen schema --out schema/app.schema.json`        |
 | Update the skill DSL reference | `uv run scripts/update_skill_references.py` |
-| Install the agent skill | `uv run appgen skills install` |
+| Install the agent skills | `uv run appgen skills install` |
 | Smoke test the apps   | `uv run scripts/smoke_test.py [nextjs] [fastapi] [react]`  |
 | UI tests (front ends) | `uv run scripts/smoke_test.py nextjs react --ui`           |
 | Test language check   | `uv run scripts/translation_test.py [react] [nextjs]`      |
@@ -117,7 +117,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#pre-push-hook) for the details.
 | `src/appgen/gen/`      | The generator core: the binding contract and the rendering. |
 | `src/appgen/bindings/` | The bindings. `minimal` is the test binding of the core, `nextjs` writes a Next.js 16 app, `react` writes a React 19 app, and `fastapi` writes a FastAPI REST API. |
 | `src/appgen/trace/`    | The trace scanner and the trace checker (ADR 0004).         |
-| `src/appgen/skills/`   | The agent skill of appgen (ADR 0015).                       |
+| `src/appgen/skills/`   | The agent skills of appgen (ADR 0015, ADR 0053).            |
 | `schema/`              | The JSON Schema of the DSL, for editors.                    |
 | `tests/`               | The tests.                                                  |
 | `docs/`                | The user docs: the DSL, traces, and bindings.               |
@@ -142,23 +142,33 @@ line at the top of the file:
 
 A relative path to `schema/app.schema.json` also works.
 
-## Agent skill
+## Agent skills
 
-`src/appgen/skills/appgen/` is an agent skill in the Agent Skills
-format, for Claude Code, Codex, and other agents. It tells an agent how
-to use the CLI (validate a definition, fix the diagnostics, generate an
-app, and check its traces), how to write a new definition, how to change
-a definition, how to fill the generation gaps, and how to add seed
-records (the data that the apps start with). The skill is a part
-of the package, so each version of appgen has its own skill.
-[ADR 0015](docs/adr/0015-agent-skills.md) describes the design.
+appgen has two agent skills in the Agent Skills format, for Claude Code,
+Codex, and other agents. The skills are a part of the package, so each
+version of appgen has its own skills.
 
-Install the skill into the folders that your agents read:
+- `src/appgen/skills/appgen/` (`/appgen` in Claude Code) tells an agent
+  how to use the CLI (validate a definition, fix the diagnostics,
+  generate an app, and check its traces), how to write a new definition,
+  how to change a definition, how to fill the generation gaps, and how
+  to add seed records (the data that the apps start with).
+  [ADR 0015](docs/adr/0015-agent-skills.md) describes the design.
+- `src/appgen/skills/appgen-quickstart/` (`/appgen-quickstart` in Claude
+  Code) makes a working app from one or more prompts, without questions.
+  It picks the defaults that the prompts do not give from a table: the
+  binding (`nextjs` for a web app), the sign-in, the roles, the
+  languages, the seed records, the APIs, and more. It writes the chosen
+  defaults as comments at the top of `app.yaml`, and uses the skill
+  `appgen` for the CLI and the DSL.
+  [ADR 0053](docs/adr/0053-quick-start-skill.md) describes the design.
+
+Install the skills into the folders that your agents read:
 
 ```sh
 appgen skills install                 # ./.agents/skills/ and ./.claude/skills/
 appgen skills install --scope user    # ~/.agents/skills/ and ~/.claude/skills/
-appgen skills list                    # the installed version in each folder
+appgen skills list                    # the installed version of each skill in each folder
 appgen skills uninstall               # remove the files that appgen installed
 ```
 
@@ -183,9 +193,10 @@ and writes no file.
 
 `references/dsl.md` is a copy of `docs/dsl.md` with links to GitHub:
 after a change to `docs/dsl.md`, run
-`uv run scripts/update_skill_references.py`. Tests fail if the skill does
-not agree with the CLI, the DSL, the diagnostic codes, or the extension
-files of the bindings.
+`uv run scripts/update_skill_references.py`. Tests fail if the skill
+`appgen` does not agree with the CLI, the DSL, the diagnostic codes, or
+the extension files of the bindings, and if the table of defaults of the
+quick-start skill names a key, a value, or a binding that does not exist.
 [docs/evaluation-skills.md](docs/evaluation-skills.md) records the
 tasks that agents did with only the installed skill, and the fixes of
 the skill that they showed. `scripts/evaluate_skill.py` prepares, runs,
