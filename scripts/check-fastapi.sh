@@ -56,8 +56,9 @@
 # tests/fixtures/places.yaml (the point fields and the filters `near` and
 # `area`, ADR 0046), and check it and run its tests on Postgres and
 # SQLite.
-# The pre-push hook runs this script when a push changes the generator
-# or the FastAPI binding. Run it by hand from the repository root:
+# The pre-push hook runs only the sections of this script that a push
+# changes (scripts/check_plan.py). Run it by hand from the repository
+# root, to run all sections:
 #
 #   scripts/check-fastapi.sh [output folder]
 #
@@ -131,6 +132,26 @@ step() {
     echo "check-fastapi: $*"
 }
 
+# Run a section only if the pre-push hook selected it: APPGEN_CHECK_SECTIONS
+# lists the selected sections (scripts/check_plan.py). Without the
+# variable, run all sections. A section passed when the next one starts:
+# then the function adds it to the file APPGEN_CHECK_PASSED of the hook.
+current=""
+section() {
+    if [ -n "$current" ] && [ -n "${APPGEN_CHECK_PASSED:-}" ]; then
+        echo "$current" >>"$APPGEN_CHECK_PASSED"
+    fi
+    current=""
+    case " ${APPGEN_CHECK_SECTIONS-$1} " in
+    *" $1 "*)
+        current=$1
+        return 0
+        ;;
+    esac
+    step "skip $1 (no change)"
+    return 1
+}
+
 # In a cloud session, use the mirror images, and start Docker and pull
 # the Postgres image. Outside cloud sessions, this does nothing.
 if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
@@ -139,333 +160,367 @@ if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     scripts/sandbox-setup.sh
 fi
 
-step "generate $definition in $out"
-# The hand-written code of the example: appgen keeps an extension file
-# that exists.
-cp -R examples/project-tracker/extensions/fastapi/. "$out"/
-uv run --locked appgen generate "$definition" -b fastapi -o "$out" >/dev/null
-
-cd "$out"
-# The generated app has its own virtual environment.
+# The generated apps have their own virtual environments.
 unset VIRTUAL_ENV
 
-step "uv sync"
-uv sync --quiet
-step "ruff check"
-uv run ruff check
-step "ruff format --check"
-uv run ruff format --check
-step "pyright"
-uv run pyright
-step "pytest"
-uv run pytest -q
-step "pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
+if section fastapi:project-tracker; then
+    step "generate $definition in $out"
+    # The hand-written code of the example: appgen keeps an extension file
+    # that exists.
+    cp -R examples/project-tracker/extensions/fastapi/. "$out"/
+    uv run --locked appgen generate "$definition" -b fastapi -o "$out" >/dev/null
 
-step "docker build"
-set --
-[ -n "${UV_IMAGE:-}" ] && set -- "$@" --build-arg "UV_IMAGE=$UV_IMAGE"
-[ -n "${PYTHON_IMAGE:-}" ] && set -- "$@" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE"
-# shellcheck disable=SC2086
-docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-fastapi . >/dev/null
+    cd "$out"
 
-cd "$root"
-step "appgen check"
-uv run --locked appgen check "$definition" "$out"
+    step "uv sync"
+    uv sync --quiet
+    step "ruff check"
+    uv run ruff check
+    step "ruff format --check"
+    uv run ruff format --check
+    step "pyright"
+    uv run pyright
+    step "pytest"
+    uv run pytest -q
+    step "pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
 
-step "calls of the third-party APIs"
-uv run --locked scripts/api_calls.py fastapi "$out"
+    step "docker build"
+    set --
+    [ -n "${UV_IMAGE:-}" ] && set -- "$@" --build-arg "UV_IMAGE=$UV_IMAGE"
+    [ -n "${PYTHON_IMAGE:-}" ] && set -- "$@" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE"
+    # shellcheck disable=SC2086
+    docker build --quiet "$@" ${APPGEN_DOCKER_BUILD_ARGS:-} -t appgen-check-fastapi . >/dev/null
 
-step "smoke test"
-uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-fastapi
+    cd "$root"
+    step "appgen check"
+    uv run --locked appgen check "$definition" "$out"
 
-step "smoke test with the local database"
-uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
+    step "calls of the third-party APIs"
+    uv run --locked scripts/api_calls.py fastapi "$out"
 
-step "schema change"
-uv run --locked scripts/check_schema_change.py "$out"
+    step "smoke test"
+    uv run --locked scripts/smoke_test.py fastapi --app "$out" --image appgen-check-fastapi
 
-step "full-text search on Postgres"
-uv run --locked scripts/check_full_text_search.py "$out"
+    step "smoke test with the local database"
+    uv run --locked scripts/smoke_test.py fastapi --app "$out" --local
 
-step "shared rate limit"
-rm -rf "$out-rate-limit"
-uv run --locked scripts/check_shared_rate_limit.py fastapi "$out-rate-limit"
+    step "schema change"
+    uv run --locked scripts/check_schema_change.py "$out"
 
-step "live events"
-rm -rf "$out-live-events"
-uv run --locked scripts/check_live_events.py "$out-live-events"
+    step "full-text search on Postgres"
+    uv run --locked scripts/check_full_text_search.py "$out"
 
-step "deployment files"
-uv run --locked scripts/check_deploy_files.py fastapi
+    step "shared rate limit"
+    rm -rf "$out-rate-limit"
+    uv run --locked scripts/check_shared_rate_limit.py fastapi "$out-rate-limit"
 
-step "generate $auth_definition in $auth_out"
-rm -rf "$auth_out"
-uv run --locked appgen generate "$auth_definition" -b fastapi -o "$auth_out" >/dev/null
-uv run --locked appgen check "$auth_definition" "$auth_out"
-cd "$auth_out"
-step "room booking: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "room booking: pytest"
-uv run pytest -q
-step "room booking: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
-step "room booking: the sign-in with the mock provider"
-uv run --locked scripts/check_provider_sign_in.py "$auth_definition" "$auth_out"
+    step "live events"
+    rm -rf "$out-live-events"
+    uv run --locked scripts/check_live_events.py "$out-live-events"
 
-step "generate $provider_definition in $provider_out"
-rm -rf "$provider_out"
-uv run --locked appgen generate "$provider_definition" -b fastapi -o "$provider_out" >/dev/null
-uv run --locked appgen check "$provider_definition" "$provider_out"
-cd "$provider_out"
-step "provider sign-in: uv sync, ruff, pyright, pytest on SQLite"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
-step "provider sign-in: the sign-in with the mock provider"
-uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
-step "generate $security_definition in $security_out"
-rm -rf "$security_out"
-uv run --locked appgen generate "$security_definition" -b fastapi -o "$security_out" >/dev/null
-uv run --locked appgen check "$security_definition" "$security_out"
-cd "$security_out"
-step "account security: uv sync, ruff, pyright, pytest on SQLite"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+    step "deployment files"
+    uv run --locked scripts/check_deploy_files.py fastapi
+fi
 
-step "generate $seed_definition in $seed_out"
-rm -rf "$seed_out"
-uv run --locked appgen generate "$seed_definition" -b fastapi -o "$seed_out" >/dev/null
-uv run --locked appgen check "$seed_definition" "$seed_out"
-cd "$seed_out"
-step "seed data: uv sync, ruff, pyright, pytest on SQLite, the seed test on Postgres"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-uv run pytest -q tests/test_seed.py
-cd "$root"
+if section fastapi:room-booking; then
+    step "generate $auth_definition in $auth_out"
+    rm -rf "$auth_out"
+    uv run --locked appgen generate "$auth_definition" -b fastapi -o "$auth_out" >/dev/null
+    uv run --locked appgen check "$auth_definition" "$auth_out"
+    cd "$auth_out"
+    step "room booking: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "room booking: pytest"
+    uv run pytest -q
+    step "room booking: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "room booking: the sign-in with the mock provider"
+    uv run --locked scripts/check_provider_sign_in.py "$auth_definition" "$auth_out"
+fi
 
-step "generate $rules_definition in $rules_out"
-rm -rf "$rules_out"
-uv run --locked appgen generate "$rules_definition" -b fastapi -o "$rules_out" >/dev/null
-uv run --locked appgen check "$rules_definition" "$rules_out"
-cd "$rules_out"
-step "record rules: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "record rules: pytest"
-uv run pytest -q
-step "record rules: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:provider-sign-in; then
+    step "generate $provider_definition in $provider_out"
+    rm -rf "$provider_out"
+    uv run --locked appgen generate "$provider_definition" -b fastapi -o "$provider_out" >/dev/null
+    uv run --locked appgen check "$provider_definition" "$provider_out"
+    cd "$provider_out"
+    step "provider sign-in: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "provider sign-in: the sign-in with the mock provider"
+    uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
+fi
 
-step "generate $webhooks_definition in $webhooks_out"
-rm -rf "$webhooks_out"
-uv run --locked appgen generate "$webhooks_definition" -b fastapi -o "$webhooks_out" >/dev/null
-uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
-cd "$webhooks_out"
-step "webhooks: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "webhooks: pytest"
-uv run pytest -q
-step "webhooks: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:account-security; then
+    step "generate $security_definition in $security_out"
+    rm -rf "$security_out"
+    uv run --locked appgen generate "$security_definition" -b fastapi -o "$security_out" >/dev/null
+    uv run --locked appgen check "$security_definition" "$security_out"
+    cd "$security_out"
+    step "account security: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
-step "generate $jobs_definition in $jobs_out"
-rm -rf "$jobs_out"
-uv run --locked appgen generate "$jobs_definition" -b fastapi -o "$jobs_out" >/dev/null
-uv run --locked appgen check "$jobs_definition" "$jobs_out"
-cd "$jobs_out"
-step "jobs: uv sync, ruff, pyright, pytest on SQLite, the tests of the jobs on Postgres"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-uv run pytest -q tests/jobs
-step "jobs: one pass of the worker at a fixed time"
-DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run alembic upgrade head >/dev/null 2>&1
-DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run python -m app.worker --once --now 2026-06-15T12:00:00Z
-rm -f worker.db
-cd "$root"
+if section fastapi:seed-data; then
+    step "generate $seed_definition in $seed_out"
+    rm -rf "$seed_out"
+    uv run --locked appgen generate "$seed_definition" -b fastapi -o "$seed_out" >/dev/null
+    uv run --locked appgen check "$seed_definition" "$seed_out"
+    cd "$seed_out"
+    step "seed data: uv sync, ruff, pyright, pytest on SQLite, the seed test on Postgres"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    uv run pytest -q tests/test_seed.py
+    cd "$root"
+fi
 
-step "generate $files_definition in $files_out"
-rm -rf "$files_out"
-uv run --locked appgen generate "$files_definition" -b fastapi -o "$files_out" >/dev/null
-uv run --locked appgen check "$files_definition" "$files_out"
-cd "$files_out"
-step "files: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "files: pytest"
-uv run pytest -q
-step "files: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:record-rules; then
+    step "generate $rules_definition in $rules_out"
+    rm -rf "$rules_out"
+    uv run --locked appgen generate "$rules_definition" -b fastapi -o "$rules_out" >/dev/null
+    uv run --locked appgen check "$rules_definition" "$rules_out"
+    cd "$rules_out"
+    step "record rules: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "record rules: pytest"
+    uv run pytest -q
+    step "record rules: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
-step "generate $email_definition in $email_out"
-rm -rf "$email_out"
-mkdir -p "$email_out"
-# The hand-written logic of the fixture: appgen keeps an extension file
-# that exists.
-cp -R tests/fixtures/inbound-email/extensions/fastapi/. "$email_out"/
-uv run --locked appgen generate "$email_definition" -b fastapi -o "$email_out" >/dev/null
-uv run --locked appgen check "$email_definition" "$email_out"
-cd "$email_out"
-step "inbound email: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "inbound email: pytest"
-uv run pytest -q
-step "inbound email: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
-step "inbound email test"
-uv run --locked scripts/inbound_email_test.py fastapi "$email_definition" --app "$email_out"
+if section fastapi:webhooks; then
+    step "generate $webhooks_definition in $webhooks_out"
+    rm -rf "$webhooks_out"
+    uv run --locked appgen generate "$webhooks_definition" -b fastapi -o "$webhooks_out" >/dev/null
+    uv run --locked appgen check "$webhooks_definition" "$webhooks_out"
+    cd "$webhooks_out"
+    step "webhooks: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "webhooks: pytest"
+    uv run pytest -q
+    step "webhooks: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
-step "api connections: generate $connections_definition in $connections_out"
-rm -rf "$connections_out"
-mkdir -p "$connections_out"
-# The hand-written logic of the fixture: appgen keeps an extension file
-# that exists.
-cp -R tests/fixtures/api-connections/extensions/fastapi/. "$connections_out"/
-uv run --locked appgen generate "$connections_definition" -b fastapi -o "$connections_out" >/dev/null
-uv run --locked appgen check "$connections_definition" "$connections_out"
-cd "$connections_out"
-step "api connections: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "api connections: pytest"
-uv run pytest -q
-step "api connections: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
-step "api connection test"
-uv run --locked scripts/api_connection_test.py "$connections_definition" --app "$connections_out"
+if section fastapi:jobs; then
+    step "generate $jobs_definition in $jobs_out"
+    rm -rf "$jobs_out"
+    uv run --locked appgen generate "$jobs_definition" -b fastapi -o "$jobs_out" >/dev/null
+    uv run --locked appgen check "$jobs_definition" "$jobs_out"
+    cd "$jobs_out"
+    step "jobs: uv sync, ruff, pyright, pytest on SQLite, the tests of the jobs on Postgres"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    uv run pytest -q tests/jobs
+    step "jobs: one pass of the worker at a fixed time"
+    DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run alembic upgrade head >/dev/null 2>&1
+    DATABASE_URL=sqlite+aiosqlite:///./worker.db uv run python -m app.worker --once --now 2026-06-15T12:00:00Z
+    rm -f worker.db
+    cd "$root"
+fi
 
-step "generate $totals_definition in $totals_out"
-rm -rf "$totals_out"
-uv run --locked appgen generate "$totals_definition" -b fastapi -o "$totals_out" >/dev/null
-uv run --locked appgen check "$totals_definition" "$totals_out"
-cd "$totals_out"
-step "totals: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "totals: pytest"
-uv run pytest -q
-step "totals: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:files; then
+    step "generate $files_definition in $files_out"
+    rm -rf "$files_out"
+    uv run --locked appgen generate "$files_definition" -b fastapi -o "$files_out" >/dev/null
+    uv run --locked appgen check "$files_definition" "$files_out"
+    cd "$files_out"
+    step "files: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "files: pytest"
+    uv run pytest -q
+    step "files: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
-step "generate $invoices_definition in $invoices_out"
-rm -rf "$invoices_out"
-uv run --locked appgen generate "$invoices_definition" -b fastapi -o "$invoices_out" >/dev/null
-uv run --locked appgen check "$invoices_definition" "$invoices_out"
-cd "$invoices_out"
-step "invoices: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "invoices: pytest"
-uv run pytest -q
-step "invoices: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:inbound-email; then
+    step "generate $email_definition in $email_out"
+    rm -rf "$email_out"
+    mkdir -p "$email_out"
+    # The hand-written logic of the fixture: appgen keeps an extension file
+    # that exists.
+    cp -R tests/fixtures/inbound-email/extensions/fastapi/. "$email_out"/
+    uv run --locked appgen generate "$email_definition" -b fastapi -o "$email_out" >/dev/null
+    uv run --locked appgen check "$email_definition" "$email_out"
+    cd "$email_out"
+    step "inbound email: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "inbound email: pytest"
+    uv run pytest -q
+    step "inbound email: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "inbound email test"
+    uv run --locked scripts/inbound_email_test.py fastapi "$email_definition" --app "$email_out"
+fi
 
-step "generate $listings_definition in $listings_out"
-rm -rf "$listings_out"
-mkdir -p "$listings_out"
-# The hand-written queries of the fixture: appgen keeps an extension file
-# that exists.
-cp -R tests/fixtures/listings/extensions/fastapi/. "$listings_out"/
-uv run --locked appgen generate "$listings_definition" -b fastapi -o "$listings_out" >/dev/null
-uv run --locked appgen check "$listings_definition" "$listings_out"
-cd "$listings_out"
-step "listings: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "listings: pytest"
-uv run pytest -q
-step "listings: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:api-connections; then
+    step "api connections: generate $connections_definition in $connections_out"
+    rm -rf "$connections_out"
+    mkdir -p "$connections_out"
+    # The hand-written logic of the fixture: appgen keeps an extension file
+    # that exists.
+    cp -R tests/fixtures/api-connections/extensions/fastapi/. "$connections_out"/
+    uv run --locked appgen generate "$connections_definition" -b fastapi -o "$connections_out" >/dev/null
+    uv run --locked appgen check "$connections_definition" "$connections_out"
+    cd "$connections_out"
+    step "api connections: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "api connections: pytest"
+    uv run pytest -q
+    step "api connections: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "api connection test"
+    uv run --locked scripts/api_connection_test.py "$connections_definition" --app "$connections_out"
+fi
 
-step "generate $courses_definition in $courses_out"
-rm -rf "$courses_out"
-uv run --locked appgen generate "$courses_definition" -b fastapi -o "$courses_out" >/dev/null
-uv run --locked appgen check "$courses_definition" "$courses_out"
-cd "$courses_out"
-step "courses: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "courses: pytest"
-uv run pytest -q
-step "courses: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:totals; then
+    step "generate $totals_definition in $totals_out"
+    rm -rf "$totals_out"
+    uv run --locked appgen generate "$totals_definition" -b fastapi -o "$totals_out" >/dev/null
+    uv run --locked appgen check "$totals_definition" "$totals_out"
+    cd "$totals_out"
+    step "totals: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "totals: pytest"
+    uv run pytest -q
+    step "totals: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
-step "generate $places_definition in $places_out"
-rm -rf "$places_out"
-uv run --locked appgen generate "$places_definition" -b fastapi -o "$places_out" >/dev/null
-uv run --locked appgen check "$places_definition" "$places_out"
-cd "$places_out"
-step "places: uv sync, ruff, pyright"
-uv sync --quiet
-uv run ruff check
-uv run ruff format --check
-uv run pyright
-step "places: pytest"
-uv run pytest -q
-step "places: pytest on SQLite"
-TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
-rm -f test.db
-cd "$root"
+if section fastapi:invoices; then
+    step "generate $invoices_definition in $invoices_out"
+    rm -rf "$invoices_out"
+    uv run --locked appgen generate "$invoices_definition" -b fastapi -o "$invoices_out" >/dev/null
+    uv run --locked appgen check "$invoices_definition" "$invoices_out"
+    cd "$invoices_out"
+    step "invoices: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "invoices: pytest"
+    uv run pytest -q
+    step "invoices: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
+
+if section fastapi:listings; then
+    step "generate $listings_definition in $listings_out"
+    rm -rf "$listings_out"
+    mkdir -p "$listings_out"
+    # The hand-written queries of the fixture: appgen keeps an extension file
+    # that exists.
+    cp -R tests/fixtures/listings/extensions/fastapi/. "$listings_out"/
+    uv run --locked appgen generate "$listings_definition" -b fastapi -o "$listings_out" >/dev/null
+    uv run --locked appgen check "$listings_definition" "$listings_out"
+    cd "$listings_out"
+    step "listings: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "listings: pytest"
+    uv run pytest -q
+    step "listings: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
+
+if section fastapi:courses; then
+    step "generate $courses_definition in $courses_out"
+    rm -rf "$courses_out"
+    uv run --locked appgen generate "$courses_definition" -b fastapi -o "$courses_out" >/dev/null
+    uv run --locked appgen check "$courses_definition" "$courses_out"
+    cd "$courses_out"
+    step "courses: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "courses: pytest"
+    uv run pytest -q
+    step "courses: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
+
+if section fastapi:places; then
+    step "generate $places_definition in $places_out"
+    rm -rf "$places_out"
+    uv run --locked appgen generate "$places_definition" -b fastapi -o "$places_out" >/dev/null
+    uv run --locked appgen check "$places_definition" "$places_out"
+    cd "$places_out"
+    step "places: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "places: pytest"
+    uv run pytest -q
+    step "places: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
 
 step "passed"
