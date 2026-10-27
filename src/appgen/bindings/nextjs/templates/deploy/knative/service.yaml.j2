@@ -178,11 +178,13 @@ spec:
 {% endif %}
 {% for api in ts_apis.values() if api.secret_env %}
             {{ trace(api.id) }}
-            - name: {{ api.secret_env }}
+{% for env in api.secret_envs %}
+            - name: {{ env }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ name }}-{{ api.secret_env | lower | replace("_", "-") }}
+                  name: {{ name }}-{{ env | lower | replace("_", "-") }}
                   key: latest
+{% endfor %}
 {% endfor %}
 {% for w in ts_webhooks.values() %}
             {{ trace(w.id) }}

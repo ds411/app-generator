@@ -50,6 +50,8 @@ class {{ api.client }}(ApiClient):
         base_url: str = BASE_URL,
 {% if api.credential == "oauth2" %}
         client_id: str = "",
+{% elif api.credential == "basic" %}
+        username: str = "",
 {% endif %}
 {% if api.credential and not api.user %}
         {{ api.secret_arg }}: str = "",
@@ -63,6 +65,9 @@ class {{ api.client }}(ApiClient):
     ) -> None:
 {% if api.credential == "bearer" %}
         headers = {"Authorization": f"Bearer {token}"} if token else None
+        super().__init__(base_url, timeout=timeout, headers=headers, transport=transport)
+{% elif api.credential == "basic" %}
+        headers = {"Authorization": basic_authorization(username, password)} if password else None
         super().__init__(base_url, timeout=timeout, headers=headers, transport=transport)
 {% elif api.credential == "header" %}
         headers = {{ "{" }}{{ api.credential_name | tojson }}: api_key} if api_key else None

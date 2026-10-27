@@ -187,6 +187,7 @@ def fastapi_sections() -> Iterator[Section]:
         (fixture("api-connections", "fastapi", extensions=True),),
         ("api_connection_test.py",),
     )
+    yield Section("fastapi:jira", (fixture("jira", "fastapi"),), ("api_calls.py",))
     for name in ("totals", "invoices"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
     yield Section("fastapi:listings", (fixture("listings", "fastapi", extensions=True),))
@@ -235,6 +236,7 @@ def nextjs_sections() -> Iterator[Section]:
     yield Section(
         "nextjs:listings", (fixture("listings", "nextjs", extensions=True),), ("queries_test.py",)
     )
+    yield Section("nextjs:jira", (fixture("jira", "nextjs"),), ("api_calls.py",))
 
 
 def react_sections() -> Iterator[Section]:

@@ -364,7 +364,7 @@ of a front end show them at once (ADR 0051).
 {% set secrets = ["DATABASE_URL"] + (["RATE_LIMIT_STORE_URL"] if py.redis else [])
     + (["LIVE_EVENTS_URL"] if py.live else [])
     + (["AUTH_SECRET"] if definition.auth else [])
-    + (py_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list)
+    + (py_apis.values() | map(attribute="secret_envs") | sum(start=[]))
     + (py.providers | map(attribute="client_secret_env") | list) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
@@ -562,7 +562,7 @@ environment.
 | API | Client | Base URL | Secret |
 | --- | ------ | -------- | ------ |
 {% for api in py_apis.values() %}
-| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+| `{{ api.name }}` | `app/integrations/{{ api.module }}/client.py` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.username_env ~ "` (user name), ") if api.username_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
 {% endfor %}
 
 An endpoint gets a client as a dependency, for example

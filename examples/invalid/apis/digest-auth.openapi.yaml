@@ -1,7 +1,7 @@
-# An API with HTTP basic authentication, which the clients do not support.
+# An API with HTTP Digest authentication, which the clients do not support.
 openapi: 3.0.3
 info:
-  title: Basic API
+  title: Digest API
   version: "1"
 paths:
   /status:
@@ -15,4 +15,4 @@ paths:
               schema: { type: object, properties: { ok: { type: boolean } } }
 components:
   securitySchemes:
-    basic: { type: http, scheme: basic }
+    digest: { type: http, scheme: digest }

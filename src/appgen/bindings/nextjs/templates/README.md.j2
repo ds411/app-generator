@@ -155,7 +155,7 @@ starts the service `jobs`, which calls each route each minute.
     + (["LIVE_EVENTS_URL"] if nextjs.live else [])
     + (["AUTH_SECRET"] if definition.auth else [])
     + ((definition.auth.providers.values() | map(attribute="client_secret_env") | list) if definition.auth else [])
-    + (ts_apis.values() | selectattr("secret_env") | map(attribute="secret_env") | list) %}
+    + (ts_apis.values() | map(attribute="secret_envs") | sum(start=[])) %}
 - Knative and Google Cloud Run: `deploy/knative/service.yaml` is a
   Knative Service (0 to 10 instances, the probes, and the resource
   limits), and Cloud Run accepts the same file.{% if nextjs.jobs %} `jobs.yaml` has the
@@ -289,7 +289,7 @@ server. An answer with an error status throws `ApiError` of
 | API | Client | Base URL | Secret |
 | --- | ------ | -------- | ------ |
 {% for api in ts_apis.values() %}
-| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
+| `{{ api.name }}` | `{{ api.factory }}()` of `@/shared/api/{{ api.folder }}` | `{{ api.url_env }}` | {{ ("`" ~ api.client_id_env ~ "` (client ID), ") if api.client_id_env }}{{ ("`" ~ api.username_env ~ "` (user name), ") if api.username_env }}{{ ("`" ~ api.secret_env ~ "`") if api.secret_env else "None" }} |
 {% endfor %}
 
 `{{ (ts_apis.values() | first).factory }}()` reads the settings from the environment, for

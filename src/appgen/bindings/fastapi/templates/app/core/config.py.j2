@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     {{ api.client_id_setting }}: str = ""
     """The OAuth 2.0 client ID of the API `{{ api.name }}`: `{{ api.client_id_env }}`."""
 {% endif %}
+{% if api.username_setting %}
+    {{ api.username_setting }}: str = ""
+    """The user name of HTTP Basic of the API `{{ api.name }}`: `{{ api.username_env }}`."""
+{% endif %}
 {% if api.secret_setting %}
     {{ api.secret_setting }}: str = ""
     """The secret of the API `{{ api.name }}`: `{{ api.secret_env }}`. Keep it out of the code."""

@@ -1625,7 +1625,7 @@ apis:
 | `document`     | Required. The path of the OpenAPI document, from the folder of the definition. |
 | `base_url_env` | Required. The environment variable of the base URL. Its default value is the first server of the document. |
 | `operations`   | Required. A list of operation IDs, or a mapping from operation ID to an operation with an optional `description`. |
-| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
+| `security`     | The credential of each request: `scheme`, a security scheme of the document, and `env`, the environment variable of the API key or the token. For HTTP Basic: `username_env`, the environment variable of the user name, and `env`, the one of the password. For OAuth 2.0: `client_id_env` and `client_secret_env` in place of `env`, the optional `scopes`, and the optional `flow`: `clientCredentials` or `authorizationCode` (see below). The front-end builds make a variable with the prefix `NEXT_PUBLIC_` or `VITE_` public, so a secret cannot have it. Without `security`, the requests have no credential. |
 | `expose`       | `true`: the FastAPI app has an endpoint for each operation, which calls the API with its secret, so that a front end can use the API. The default is `false`. |
 | `title`        | The name of the API. The default is the title of the document.            |
 | `description`  | Text.                                                                     |
@@ -1636,8 +1636,8 @@ apis:
 - Each operation ID must exist in the document, and must be a valid ID
   segment (letters, digits, and `_`).
 - The clients support an API key in a header or a query parameter, a
-  bearer token, and OAuth 2.0 with the client credentials flow or the
-  authorization code flow.
+  bearer token, HTTP Basic, and OAuth 2.0 with the client credentials
+  flow or the authorization code flow.
 - They send path, query, header, and cookie parameters. A cookie
   parameter is a text, a number, or a boolean, and goes in the header
   `Cookie`.
@@ -1723,9 +1723,33 @@ apis:
     operations: [listEvents]
 ```
 
+- With HTTP Basic (a scheme with `type: http` and `scheme: basic`), the
+  client sends the header `Authorization: Basic` with the Base64 of the
+  UTF-8 bytes of `<user name>:<password>` (RFC 7617). `username_env`
+  gives the user name, and `env` the password. Both are secrets: the
+  deployment files read them from secrets, and a browser app has no
+  client for the API (use `expose: true`). Without a password, the
+  client sends no credential. For example, the Jira Cloud REST API takes
+  the email address of an Atlassian account as the user name and an API
+  token as the password, and its base URL is the URL of the site, for
+  example `https://acme.atlassian.net`.
+
+```yaml
+# not valid alone: the definition is tests/fixtures/jira.yaml.
+apis:
+  jira:
+    document: jira/jira.openapi.json
+    base_url_env: JIRA_API_URL
+    security: { scheme: basicAuth, username_env: JIRA_EMAIL, env: JIRA_API_TOKEN }
+    operations: [getIssue, searchAndReconsileIssuesUsingJql, createIssue, addComment]
+```
+
 - The client has only the selected operations and the schemas that they
   use. Each answer has an example: the example of the document, or a
-  sample from the schema.
+  sample from the schema. Some documents, for example the document of
+  Jira Cloud, give the example of a JSON answer as a string with the
+  JSON text. If the answer cannot be a string, the client reads the
+  JSON text, or uses a sample when the text is not JSON.
 - A custom operation names the APIs of its logic in `apis`. In the
   FastAPI app, its extension function then gets the clients of these
   APIs as arguments. The Next.js app has a server-only client for each

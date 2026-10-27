@@ -88,9 +88,9 @@ services:
 {% if api.client_id_env %}
       {{ api.client_id_env }}: ${{ "{" }}{{ api.client_id_env }}:-{{ "}" }}
 {% endif %}
-{% if api.secret_env %}
-      {{ api.secret_env }}: ${{ "{" }}{{ api.secret_env }}:-{{ "}" }}
-{% endif %}
+{% for env in api.secret_envs %}
+      {{ env }}: ${{ "{" }}{{ env }}:-{{ "}" }}
+{% endfor %}
 {% endfor %}
     ports:
       - "3000:3000"

@@ -21,6 +21,8 @@ import {
   tokenUrl,
   type ClientOptions,
 } from "@/shared/api/third-party";
+{% elif server and api.credential == "basic" %}
+import { basicAuthorization, HttpClient, type ClientOptions } from "@/shared/api/third-party";
 {% else %}
 import { HttpClient, {{ "mockFetch, " if mock }}type ClientOptions } from "@/shared/api/third-party";
 {% endif %}
@@ -162,6 +164,10 @@ export function {{ api.client_for }}(userId: string | null): {{ api.client }} {
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`, the client ID in `{{ api.client_id_env }}`, and the client
  * secret in `{{ api.secret_env }}`.
+{% elif server and api.username_env %}
+ * Return a client with the settings of the environment: the base URL in
+ * `{{ api.url_env }}`, the user name in `{{ api.username_env }}`, and the
+ * password in `{{ api.secret_env }}`.
 {% elif server %}
  * Return a client with the settings of the environment: the base URL in
  * `{{ api.url_env }}`{% if api.secret_env %}, and the secret in `{{ api.secret_env }}`{% endif %}.
@@ -182,6 +188,9 @@ export function {{ api.factory }}(): {{ api.client }} {
     baseUrl: process.env.{{ api.url_env }} || undefined,
 {% if oauth %}
     clientId: process.env.{{ api.client_id_env }},
+{% endif %}
+{% if api.username_env %}
+    username: process.env.{{ api.username_env }},
 {% endif %}
 {% if api.secret_env %}
     secret: process.env.{{ api.secret_env }},

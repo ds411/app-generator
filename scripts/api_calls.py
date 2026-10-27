@@ -29,10 +29,18 @@ files of the forms, the header `Accept`, the header `Cookie`, one token
 request for the three requests at the same time, and one new token after
 the status 401.
 
+With the definition tests/fixtures/jira.yaml (HTTP Basic), the driver of
+the FastAPI app or of the Next.js app calls the four operations of the
+mock Jira API with the user name and the API token of the environment,
+and one operation with a wrong API token. The script checks the answers,
+the header `Authorization` of each request (the Base64 of the UTF-8
+bytes of `<user name>:<API token>`, RFC 7617), the error 401 of the
+wrong API token, and that the error message does not contain the token.
+
 Run it from the repository root, on an app that a check script generated
 and installed:
 
-    uv run scripts/api_calls.py <binding> <app folder>
+    uv run scripts/api_calls.py <binding> <app folder> [definition]
 """
 
 import base64
@@ -44,13 +52,17 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from mock_api import CLIENT_ID, SECRET, MockApi
+from mock_api import BASIC_AUTHORIZATION, CLIENT_ID, SECRET, USERNAME, MockApi
 
 from appgen.dsl import load_definition
 from appgen.dsl.openapi import EXAMPLE_TEXT
 
 DEFINITION = Path("examples/project-tracker/app.yaml")
+JIRA = Path("tests/fixtures/jira.yaml")
 BINDINGS = ("fastapi", "nextjs", "react")
+JIRA_BINDINGS = ("fastapi", "nextjs")
+WRONG_TOKEN = "wrong-token"
+"""The wrong API token of the last request of the Jira driver."""
 FILE = {"filename": "notes.txt", "type": "text/plain", "content": "Notes of the plan"}
 TENANT = "acme corp"
 """The value of the cookie parameter `tenant`: the client percent-encodes the space."""
@@ -128,6 +140,101 @@ export async function main(): Promise<void> {
 }
 %(run)s"""
 
+JIRA_PY_DRIVER = """\
+import asyncio
+import json
+import os
+
+from app.integrations.http import ApiError
+from app.integrations.jira.client import JiraClient
+from app.integrations.jira.models import Comment, IssueUpdateDetails
+
+FIELDS = json.loads(os.environ["APPGEN_FIELDS"])
+COMMENT = json.loads(os.environ["APPGEN_COMMENT"])
+
+
+async def main() -> None:
+    env = os.environ
+    url, email = env["JIRA_API_URL"], env["JIRA_EMAIL"]
+    async with JiraClient(url, email, env["JIRA_API_TOKEN"]) as jira:
+        issue = await jira.get_issue("SUP-1")
+        search = jira.search_and_reconsile_issues_using_jql
+        found = await search(jql="project = SUP", max_results=10)
+        created = await jira.create_issue(IssueUpdateDetails.model_validate({"fields": FIELDS}))
+        comment = await jira.add_comment("SUP-1", Comment.model_validate({"body": COMMENT}))
+    refused = None
+    async with JiraClient(url, email, env["APPGEN_WRONG_TOKEN"]) as wrong:
+        try:
+            await wrong.get_issue("SUP-1")
+        except ApiError as error:
+            refused = {"status": error.status, "message": str(error)}
+    answer = {
+        "issue": issue.key,
+        "found": len(found.issues or []),
+        "created": created.key,
+        "comment": comment.id,
+        "refused": refused,
+    }
+    print(json.dumps(answer))
+
+
+asyncio.run(main())
+"""
+
+JIRA_TS_DRIVER = """\
+import { ApiError } from "@/shared/api/third-party";
+import { JiraClient, jiraClient } from "@/shared/api/jira";
+
+const fields = JSON.parse(process.env.APPGEN_FIELDS ?? "{}");
+const comment = JSON.parse(process.env.APPGEN_COMMENT ?? "{}");
+
+async function main(): Promise<void> {
+  const jira = jiraClient();
+  const issue = await jira.getIssue({ issueIdOrKey: "SUP-1" });
+  const query = { jql: "project = SUP", maxResults: 10 };
+  const found = await jira.searchAndReconsileIssuesUsingJql(query);
+  const created = await jira.createIssue({}, { fields });
+  const added = await jira.addComment({ issueIdOrKey: "SUP-1" }, { body: comment });
+  const wrong = new JiraClient({
+    baseUrl: process.env.JIRA_API_URL,
+    username: process.env.JIRA_EMAIL,
+    secret: process.env.APPGEN_WRONG_TOKEN,
+  });
+  let refused: { status: number; message: string } | null = null;
+  try {
+    await wrong.getIssue({ issueIdOrKey: "SUP-1" });
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    refused = { status: error.status, message: error.message };
+  }
+  const answer = {
+    issue: issue.key,
+    found: found.issues?.length ?? 0,
+    created: created.key,
+    comment: added.id,
+    refused,
+  };
+  console.log(JSON.stringify(answer));
+}
+
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+FIELDS = {
+    "project": {"key": "SUP"},
+    "issuetype": {"name": "Task"},
+    "summary": "The printer is offline",
+}
+"""The fields of the issue that the Jira driver makes."""
+COMMENT = {
+    "type": "doc",
+    "version": 1,
+    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Fixed."}]}],
+}
+"""The body of the comment that the Jira driver adds, in the Atlassian Document Format."""
+
 # Load the driver in the server of Vite, which resolves `@/` and gives
 # `import.meta.env`, as in the app.
 VITE_RUN = """\
@@ -155,10 +262,16 @@ def log(binding: str, message: str) -> None:
     print(f"api-calls: {binding}: {message}", flush=True)
 
 
-def write_driver(binding: str, app: Path) -> list[str]:
+def write_driver(binding: str, app: Path, jira: bool = False) -> list[str]:
     """Write the driver in the app, and return the command that runs it."""
     folder = app / ".appgen-check"
     folder.mkdir(exist_ok=True)
+    if jira and binding == "fastapi":
+        (folder / "driver.py").write_text(JIRA_PY_DRIVER)
+        return ["uv", "run", "--quiet", "python", ".appgen-check/driver.py"]
+    if jira:
+        (folder / "driver.ts").write_text(JIRA_TS_DRIVER)
+        return ["pnpm", "exec", "tsx", "--conditions=react-server", ".appgen-check/driver.ts"]
     if binding == "fastapi":
         (folder / "driver.py").write_text(PY_DRIVER)
         return ["uv", "run", "--quiet", "python", ".appgen-check/driver.py"]
@@ -183,9 +296,9 @@ def write_driver(binding: str, app: Path) -> list[str]:
     return ["node", ".appgen-check/run.mjs"]
 
 
-def run_driver(binding: str, app: Path, mock: MockApi) -> dict[str, Any]:
+def run_driver(binding: str, app: Path, mock: MockApi, jira: bool = False) -> dict[str, Any]:
     """Run the driver, and return its answer."""
-    command = write_driver(binding, app)
+    command = write_driver(binding, app, jira)
     env = {
         **os.environ,
         **mock.env(),
@@ -193,6 +306,9 @@ def run_driver(binding: str, app: Path, mock: MockApi) -> dict[str, Any]:
         "APPGEN_MOCK_URL": f"http://localhost:{mock.port}",
         "APPGEN_FILE": json.dumps(FILE),
         "APPGEN_TENANT": TENANT,
+        "APPGEN_FIELDS": json.dumps(FIELDS),
+        "APPGEN_COMMENT": json.dumps(COMMENT),
+        "APPGEN_WRONG_TOKEN": WRONG_TOKEN,
         "PYTHONPATH": str(app),
     }
     # The generated FastAPI app has its own virtual environment.
@@ -281,13 +397,56 @@ def check_finance(binding: str, mock: MockApi, answer: dict[str, Any]) -> None:
     log(binding, "getBudget sends the cookie parameter in the header Cookie")
 
 
-def api_calls(binding: str, app: Path) -> None:
-    definition = load_definition(DEFINITION)
+def example_value(mock: MockApi, operation_id: str, key: str) -> object:
+    """Return a value of the example answer of an operation, which is an object."""
+    return cast(dict[str, Any], example(mock, operation_id))[key]
+
+
+def check_jira(binding: str, mock: MockApi, answer: dict[str, Any]) -> None:
+    """Check the answers and the header `Authorization` of the calls of the mock Jira API."""
+    expect(answer["issue"], example_value(mock, "getIssue", "key"), "the key of getIssue")
+    issues = cast(list[object], example_value(mock, "searchAndReconsileIssuesUsingJql", "issues"))
+    expect(answer["found"], len(issues), "the number of issues of the JQL search")
+    expect(answer["created"], example_value(mock, "createIssue", "key"), "the key of createIssue")
+    expect(answer["comment"], example_value(mock, "addComment", "id"), "the ID of addComment")
+    log(binding, "the four operations give the examples of the document")
+
+    issue_calls = cast(list[dict[str, Any]], mock.calls("jira", "getIssue"))
+    expect(len(issue_calls), 2, "the number of getIssue requests")
+    right, wrong = issue_calls
+    calls = [right]
+    for operation_id in ("searchAndReconsileIssuesUsingJql", "createIssue", "addComment"):
+        calls.append(only_call(mock, "jira", operation_id))
+    for call in calls:
+        authorization = call["headers"].get("authorization")
+        expect(authorization, BASIC_AUTHORIZATION, f"the credential of {call['operation_id']}")
+    search = calls[1]
+    expect(search["query"], {"jql": ["project = SUP"], "maxResults": ["10"]}, "the JQL query")
+    log(binding, "each request sends HTTP Basic with the UTF-8 user name and the API token")
+
+    credentials = base64.b64encode(f"{USERNAME}:{WRONG_TOKEN}".encode()).decode()
+    expect(wrong["headers"].get("authorization"), f"Basic {credentials}", "the wrong credential")
+    refused = answer["refused"]
+    if refused is None:
+        raise ApiCallsError("the request with a wrong API token did not fail.")
+    expect(refused["status"], 401, "the status of the wrong API token")
+    for secret in (SECRET, WRONG_TOKEN):
+        if secret in refused["message"]:
+            raise ApiCallsError(f"the error message contains the API token: {refused['message']}")
+    log(binding, "a wrong API token gives ApiError 401, and the message has no token")
+
+
+def api_calls(binding: str, app: Path, path: Path = DEFINITION) -> None:
+    definition = load_definition(path)
+    jira = path == JIRA
     try:
         with MockApi(definition) as mock:
-            answer = run_driver(binding, app, mock)
-            check_documents(binding, mock, answer)
-            check_finance(binding, mock, answer)
+            answer = run_driver(binding, app, mock, jira)
+            if jira:
+                check_jira(binding, mock, answer)
+            else:
+                check_documents(binding, mock, answer)
+                check_finance(binding, mock, answer)
     finally:
         # The trace check of the app must not see the driver.
         shutil.rmtree(app / ".appgen-check", ignore_errors=True)
@@ -295,12 +454,17 @@ def api_calls(binding: str, app: Path) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.argv[1] not in BINDINGS:
-        print(f"usage: api_calls.py {{{','.join(BINDINGS)}}} <app folder>", file=sys.stderr)
+    if len(sys.argv) not in (3, 4) or sys.argv[1] not in BINDINGS:
+        usage = f"usage: api_calls.py {{{','.join(BINDINGS)}}} <app folder> [definition]"
+        print(usage, file=sys.stderr)
         return 2
     binding, app = sys.argv[1], Path(sys.argv[2]).resolve()
+    path = Path(sys.argv[3]) if len(sys.argv) == 4 else DEFINITION
+    if path not in (DEFINITION, JIRA) or (path == JIRA and binding not in JIRA_BINDINGS):
+        print(f"api-calls: {binding}: no driver for {path}", file=sys.stderr)
+        return 2
     try:
-        api_calls(binding, app)
+        api_calls(binding, app, path)
     except (ApiCallsError, KeyError) as error:
         print(f"api-calls: {binding}: failed: {error}", file=sys.stderr)
         return 1
