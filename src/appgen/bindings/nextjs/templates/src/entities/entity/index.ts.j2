@@ -12,6 +12,9 @@ export {
 {% if element.history %}
   {{ var }}History,
 {% endif %}
+{% if shares.get(name) %}
+  {{ var }}Sharing,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}

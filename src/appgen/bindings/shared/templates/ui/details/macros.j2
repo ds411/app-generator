@@ -1,0 +1,31 @@
+{# The parts of the detail views and of the shared views of a record (ADR 0049). #}
+{% macro section(s, indent) -%}
+{% filter indent(indent, true) %}
+<Card> {{ trace(s.element_id, jsx=True) }}
+{% if s.title or s.description %}
+  <CardHeader>
+{% if s.title %}
+    <CardTitle>{{ jsx_text(s.title) }}</CardTitle>
+{% endif %}
+{% if s.description %}
+    <CardDescription>{{ jsx_text(s.description) }}</CardDescription>
+{% endif %}
+  </CardHeader>
+{% endif %}
+  <CardContent>
+{% if s.gap %}
+    <{{ s.gap.name }} record={record} />
+{% else %}
+    <dl className={{ js(s.grid) }}>
+{% for field_label, jsx in s.fields %}
+      <div className="min-w-0 space-y-1">
+        <dt className="text-sm text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+        <dd className="break-words">{{ jsx }}</dd>
+      </div>
+{% endfor %}
+    </dl>
+{% endif %}
+  </CardContent>
+</Card>
+{%- endfilter %}
+{%- endmacro %}

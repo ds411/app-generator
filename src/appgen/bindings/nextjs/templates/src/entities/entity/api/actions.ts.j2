@@ -21,17 +21,24 @@ await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "
 "use server";
 
 {% set history = element.history %}
+{% set share = shares.get(name) %}
 {% if files %}
-import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, NotFoundError, ValidationError } from "@/shared/api";
+import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, NotFoundError, {{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
 {% else %}
-import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult } from "@/shared/api";
+import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
 {% endif %}
 import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
 {% if owned %}
 import { recordScope } from "@/shared/auth/access";
 {% endif %}
+{% if share %}
+import { sessionUserId } from "@/shared/auth/session";
+{% endif %}
 {% if history %}
 import { historyPage, oldValues, restorable } from "@/shared/db/history";
+{% endif %}
+{% if share %}
+import { makeShareLink, revokeShareLink, shareLinkState } from "@/shared/db/sharing";
 {% endif %}
 {% set translatable_history = history_members(name, element) | selectattr("field") | selectattr("field.translatable") | list if history else [] %}
 {% if translatable_history %}
@@ -259,6 +266,47 @@ export async function restore{{ type }}HistoryEntryAction(id: string, entryId: s
       return {{ var }}Repository.update(record.id, patch, {{ "scope, " if "update" in owned else ("null, " if record_rules else "") }}"restored");
     },
     {{ opt("update", true)[2:] }},
+  );
+}
+{% endif %}
+{% if share %}
+{% set get_record = var ~ "Repository.get(idSchema.parse(id)" ~ (", " ~ scope("update") if "update" in owned else "") ~ ")" %}
+{% set share_opts = opt("update", false)[2:] or "{}" %}
+
+{{ trace(share.page_id) }}
+/** Return the state of the secret link of a record (ADR 0049). The links need the access of the update. */
+export async function get{{ type }}ShareLinkAction(id: string): Promise<ActionResult<ShareLinkState>> {
+  return runAction(
+    async () => {
+      const record = await {{ get_record }};
+      return shareLinkState({{ ts_value(name) }}, record.id);
+    },
+    {{ share_opts }},
+  );
+}
+
+{{ trace(share.page_id) }}
+/** Make a new secret link of a record, and return its token: the old link stops (ADR 0049). */
+export async function create{{ type }}ShareLinkAction(id: string): Promise<ActionResult<ShareLinkCreated>> {
+  return runAction(
+    async () => {
+      const record = await {{ get_record }};
+      return makeShareLink({{ ts_value(name) }}, record.id, await sessionUserId());
+    },
+    {{ share_opts }},
+  );
+}
+
+{{ trace(share.page_id) }}
+/** Revoke the secret link of a record (ADR 0049): the link opens nothing after it. */
+export async function revoke{{ type }}ShareLinkAction(id: string): Promise<ActionResult<null>> {
+  return runAction(
+    async () => {
+      const record = await {{ get_record }};
+      await revokeShareLink({{ ts_value(name) }}, record.id);
+      return null;
+    },
+    {{ share_opts }},
   );
 }
 {% endif %}

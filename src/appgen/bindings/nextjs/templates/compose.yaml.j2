@@ -11,6 +11,10 @@
 #   RATE_LIMIT_PER_MINUTE=1200 RATE_LIMIT_STORE_URL=redis://redis:6379/0 \
 #     docker compose --profile redis up --build
 {% endif %}
+{% if nextjs.live %}
+# With Redis for the live events of all replicas:
+#   LIVE_EVENTS_URL=redis://redis:6379/0 docker compose --profile redis up --build
+{% endif %}
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:18-alpine}
@@ -37,6 +41,9 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
 {% if nextjs.redis %}
       RATE_LIMIT_STORE_URL: ${RATE_LIMIT_STORE_URL:-}
+{% endif %}
+{% if nextjs.live %}
+      LIVE_EVENTS_URL: ${LIVE_EVENTS_URL:-}
 {% endif %}
 {% if nextjs.jobs %}
       # The secret of the routes of the jobs (/api/jobs/<job>), and the window of a call.
@@ -117,7 +124,7 @@ services:
     depends_on:
       - app
 {% endif %}
-{% if nextjs.redis %}
+{% if nextjs.redis or nextjs.live %}
 
   redis:
     image: ${REDIS_IMAGE:-redis:8-alpine}

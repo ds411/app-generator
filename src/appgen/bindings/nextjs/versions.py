@@ -74,7 +74,8 @@ TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 """The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
 
 REDIS_PACKAGES: dict[str, str] = {"@redis/client": "6.3.0"}
-"""The packages of the rate limit in Redis (`x-nextjs-rate-limit-store: redis`, ADR 0013)."""
+"""The packages of the rate limit in Redis (`x-nextjs-rate-limit-store: redis`, ADR 0013), and
+of the live events through Redis (`LIVE_EVENTS_URL`, ADR 0051)."""
 
 PROVIDER_PACKAGES: dict[str, str] = {"jose": "6.2.12"}
 """The packages of the sign-in with providers (ADR 0020): `jose` checks the ID tokens."""

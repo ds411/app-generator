@@ -5351,6 +5351,11 @@
             }
           ],
           "default": null
+        },
+        "share": {
+          "default": false,
+          "title": "Share",
+          "type": "boolean"
         }
       },
       "required": [

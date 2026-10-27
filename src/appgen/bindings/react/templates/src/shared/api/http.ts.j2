@@ -33,7 +33,27 @@ export function setAccessToken(token: string | null): void {
   } catch {
     // No storage: the session ends with the page.
   }
+{% if react.live and definition.auth %}
+  for (const listener of tokenListeners) {
+    listener();
+  }
+{% endif %}
 }
+{% if react.live and definition.auth %}
+
+const tokenListeners = new Set<() => void>();
+
+/**
+ * Call a listener after each new token, for example the stream of the live
+ * updates (ADR 0051). Return the function that removes it.
+ */
+export function subscribeAccessToken(listener: () => void): () => void {
+  tokenListeners.add(listener);
+  return () => {
+    tokenListeners.delete(listener);
+  };
+}
+{% endif %}
 
 {% if ts_apis.values() | selectattr("exposed") | list %}
 /**

@@ -206,6 +206,22 @@ export type ExpectedSessions = {
     /** The list pages with a column of a total with `$me`: the value of each row. */
     totals: { path: string; title: string; column: string; rows: { title: string; value: string }[] }[];
   }[];
+  /**
+   * The secret link of a record (ADR 0049): a user with the update
+   * operation makes it, a user without it sees no button. A guest sees the
+   * title of the record and the display value of a related record.
+   */
+  share: {
+    admin: string;
+    member: string;
+    /** The detail page of the record, and the path of its links without the token. */
+    path: string;
+    prefix: string;
+    title: string;
+    related: string;
+    /** The text that a revoked link shows. */
+    invalid: string;
+  } | null;
 };
 
 export type Expected = {
@@ -215,6 +231,8 @@ export type Expected = {
   colors: ExpectedToken[];
   /** The font size of the body text (`typography.body`), for each mode. */
   bodyFontSize: Record<Mode, string>;
+  /** The entities whose changes the open views show at once (ADR 0051): none with mock data. */
+  live?: string[];
   /** Only for the test of the test language. */
   testLanguage?: ExpectedTestLanguage;
   /** Only for the test of the sign-in and the permissions. */

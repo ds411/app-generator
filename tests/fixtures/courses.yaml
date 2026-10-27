@@ -107,11 +107,15 @@ pages:
     content: { view: lesson_table }
     actions:
       new_lesson: { kind: form, form: new_lesson, label: New lesson, icon: plus }
+  # An admin shares a lesson with a guest: a secret link opens it
+  # without a sign-in (ADR 0049). A member may not change a lesson, so
+  # a member sees no button "Share".
   lesson_detail:
     path: "/lessons/{id}"
     title: Lesson
     entity: Lesson
     content: { view: lesson_detail }
+    share: true
   submissions:
     path: /submissions
     title: Submissions

@@ -211,6 +211,20 @@ def upgrade() -> None:
     )
     op.create_index("ix_notices_user_id", "notices", ["user_id"])
 {% endif %}
+{% if py.shares %}
+    op.create_table(
+        "share_links",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("entity", sa.String(length=63), nullable=False),
+        sa.Column("record_id", sa.Uuid(), nullable=False),
+        sa.Column("token_hash", sa.String(length=64), nullable=False),
+        sa.Column("created_by", sa.Uuid(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", name="pk_share_links"),
+        sa.UniqueConstraint("entity", "record_id", name="uq_share_links_entity"),
+        sa.UniqueConstraint("token_hash", name="uq_share_links_token_hash"),
+    )
+{% endif %}
 {% if py.jobs %}
     op.create_table(
         "job_runs",
@@ -231,6 +245,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop the join tables and the foreign keys, then the tables."""
+{% if py.shares %}
+    op.drop_table("share_links")
+{% endif %}
 {% if py.jobs %}
     op.drop_table("job_runs")
 {% endif %}

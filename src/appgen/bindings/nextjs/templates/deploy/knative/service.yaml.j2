@@ -137,6 +137,13 @@ spec:
                   name: {{ name }}-rate-limit-store-url
                   key: latest
 {% endif %}
+{% if nextjs.live %}
+            - name: LIVE_EVENTS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ name }}-live-events-url
+                  key: latest
+{% endif %}
 {% if definition.auth %}
             - name: AUTH_SECRET
               valueFrom:

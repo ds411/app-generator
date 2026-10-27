@@ -94,6 +94,34 @@ export interface HistoryApi<T extends EntityRecord> {
 }
 
 {% endif %}
+{% if shares %}
+/** The state of the secret link of a record (ADR 0049): active or not, and the time of the link. */
+export type ShareLinkState = { active: boolean; createdAt: string | null };
+
+/** A new link of a record: the token shows one time only. */
+export type ShareLinkCreated = { token: string; createdAt: string };
+
+/** The secret links of the records of an entity (ADR 0049). */
+export interface SharingApi {
+  /** Return the state of the link of a record. */
+  state(id: string): Promise<ShareLinkState>;
+  /** Make a new link of a record. The old link of the record stops. */
+  create(id: string): Promise<ShareLinkCreated>;
+  /** Revoke the link of a record. */
+  revoke(id: string): Promise<void>;
+}
+
+/**
+ * The record of a link, and the related records that its page shows, by
+ * entity. The FastAPI app gives the related records as JSON, by the JSON
+ * name of the entity: the stores of their entities read them.
+ */
+export type SharedRecord<T extends EntityRecord, R = EntityRecord> = {
+  record: T;
+  related: Readonly<Record<string, readonly R[]>>;
+};
+
+{% endif %}
 {% if has_notices(definition) %}
 /** A notice for the signed-in user: a change of a record that concerns the user (ADR 0041). */
 export type Notice = {

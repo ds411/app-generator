@@ -25,6 +25,10 @@
 # operations of tests/fixtures/events-extensions/nextjs/, and run lint,
 # type check, appgen check, and the test of the events
 # (scripts/events_test.py) on it.
+# Then generate tests/fixtures/record-rules.yaml (a live entity with
+# record rules, ADR 0051), and run lint, type check, appgen check, and
+# the test of the stream of the live updates with Redis
+# (scripts/live_test.py) on it.
 # Then generate tests/fixtures/invoices.yaml (the small DSL additions of
 # M33), and run lint, type check, appgen check, the sequence test
 # (scripts/sequence_test.py), the test of the page metadata
@@ -50,7 +54,7 @@
 # Environment variables:
 #   NODE_IMAGE                Build argument of the Docker image.
 #   POSTGRES_IMAGE            The Postgres image of the smoke test.
-#   REDIS_IMAGE               The Redis image of the shared rate limit check.
+#   REDIS_IMAGE               The Redis image of the shared rate limit and live updates checks.
 #   KUBERNETES_VERSION        The version of the Kubernetes schemas of the deployment files.
 #   APPGEN_SCHEMA_CACHE       The folder of the downloaded schemas (default ~/.cache/appgen/schemas).
 #   APPGEN_DOCKER_BUILD_ARGS  More arguments for `docker build`.
@@ -79,6 +83,9 @@ files_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-files.XXXXXX")
 # The app of the events fixture (ADR 0031), in a temporary folder.
 events_definition=tests/fixtures/events.yaml
 events_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-events.XXXXXX")
+# The app of the record rules fixture with a live entity (ADR 0051), in a temporary folder.
+live_definition=tests/fixtures/record-rules.yaml
+live_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-live.XXXXXX")
 # The app of the invoices fixture (M33), in a temporary folder.
 invoices_definition=tests/fixtures/invoices.yaml
 invoices_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-invoices.XXXXXX")
@@ -92,10 +99,10 @@ listings_out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs-listings.XXXXXX")
 if [ $# -gt 0 ]; then
     out=$1
     mkdir -p "$out"
-    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
+    trap 'rm -rf "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-nextjs.XXXXXX")
-    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
+    trap 'rm -rf "$out" "$out-rate-limit" "$seed_out" "$webhooks_out" "$email_out" "$jobs_out" "$files_out" "$events_out" "$live_out" "$invoices_out" "$totals_out" "$listings_out"' EXIT
 fi
 
 step() {
@@ -263,6 +270,23 @@ uv run --locked appgen check "$events_definition" "$events_out"
 
 step "events test"
 uv run --locked scripts/events_test.py --app "$events_out"
+
+step "generate $live_definition in $live_out"
+uv run --locked appgen generate "$live_definition" -b nextjs -o "$live_out" >/dev/null
+(
+    cd "$live_out"
+    step "pnpm install (live)"
+    pnpm install --silent
+    step "pnpm lint (live)"
+    pnpm --silent lint
+    step "pnpm typecheck (live)"
+    pnpm --silent typecheck
+)
+step "appgen check (live)"
+uv run --locked appgen check "$live_definition" "$live_out"
+
+step "live test"
+uv run --locked scripts/live_test.py --app "$live_out"
 
 step "generate $invoices_definition in $invoices_out"
 uv run --locked appgen generate "$invoices_definition" -b nextjs -o "$invoices_out" >/dev/null

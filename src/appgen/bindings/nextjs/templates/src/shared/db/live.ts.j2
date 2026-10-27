@@ -1,0 +1,608 @@
+{% set live = nextjs.live %}
+{% set scoped = live | selectattr("rules") | list %}
+{% set owned = scoped | selectattr("owner_path") | list %}
+{% set auth = definition.auth %}
+{% set access = definition.access %}
+{% set ns = namespace(tables=[]) %}
+{% for e in scoped %}
+{% set ns.tables = ns.tables + [nextjs.tables_by_entity[e.name].const] + (e.tables | list) %}
+{% endfor %}
+{% set tables = ns.tables | unique | sort %}
+{% if access and scoped %}
+{% set readers = "the role of the user may call a list or a read operation of the entity, and the record rules of the role apply (ADR 0025)" %}
+{% elif access %}
+{% set readers = "the role of the user may call a list or a read operation of the entity" %}
+{% elif auth %}
+{% set readers = "the signed-in users, and all clients for an entity with a public list or read operation" %}
+{% else %}
+{% set readers = "all clients" %}
+{% endif %}
+{{ trace_header(*(live | map(attribute="id"))) }}
+import "server-only";
+
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import { createClient } from "@redis/client";
+{% if scoped %}
+import { eq, getTableColumns } from "drizzle-orm";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+{% endif %}
+
+{% if access %}
+import { roleMayCall } from "@/shared/lib/permissions";
+
+{% endif %}
+import { afterCommit{{ ", type Database" if scoped }} } from "./client";
+{% if owned %}
+import { pathUsers, type PathStep } from "./paths";
+{% endif %}
+{% if tables %}
+import { {{ tables | join(", ") }} } from "./schema";
+{% endif %}
+
+{{ ("// The live updates of the records (ADR 0051). A create, a change, and a delete of a record of a live entity in a repository give a change after the commit of the transaction. The route `/api/live` sends the changes as server-sent events to the clients that may read the records: " ~ readers ~ ". An event has the entity and the ID of the record, but no values: a client reads the record again. With the setting LIVE_EVENTS_URL, the processes send the changes through Redis, so that each replica gets the changes of all replicas. Without it, each process sends only its own changes.") | wordwrap(72, break_long_words=False, wrapstring="\n// ") }}
+
+/** The Redis channel of the changes. */
+const CHANNEL = {{ (app.name ~ ":live") | tojson }};
+/** The events that wait for a slow client. With more, the client gets `reset`. */
+const QUEUE_SIZE = 100;
+/** The time between two pings of an open stream, in milliseconds, so that a proxy keeps it open. */
+export const PING_MS = 15_000;
+/**
+ * The time to wait for a connection of Redis, in milliseconds. Without
+ * Redis, the changes go to the clients of the process.
+ */
+const CONNECT_TIMEOUT_MS = 1_000;
+
+export type LiveAction = "created" | "changed" | "deleted";
+
+/**
+ * An event of the stream. `open`: the stream is open, and the changes from
+ * now on follow. `created`, `changed`, `deleted`: a change of a record.
+ * `reset`: the stream lost events, so read all records again.
+ */
+export type LiveEvent = { type: "open" | "reset" } | { type: LiveAction; entity: string; id: string };
+{% if scoped %}
+
+/** A value of a condition of a record rule. */
+type RuleValue = string | number | boolean;
+
+/**
+ * The record rule of a role for the reads of an entity (ADR 0025): the
+ * records of the user, or the records with some values.
+ */
+type ReadRule = { owner?: true; where?: Readonly<Record<string, readonly RuleValue[]>> };
+{% endif %}
+
+/** An entity with live updates: the operations that read its records{{ ", and the record rules of the reads" if scoped }}. */
+type LiveEntity = {
+  /** The list and the read operations: a {{ "role" if access else "user" }} that may call one of them gets the events. */
+  readers: readonly string[];
+  /** True if a list or a read operation is public: all clients get the events. */
+  public: boolean;
+{% if scoped %}
+  /** The record rules of the reads, by role. */
+  rules?: Readonly<Record<string, ReadRule>>;
+  /** The table of the records, for the values of the conditions of the rules. */
+  table?: PgTable & { id: PgColumn };
+{% if owned %}
+  /** The steps from a record to the users of the owner path of the rules. */
+  ownerPath?: readonly PathStep[];
+{% endif %}
+{% endif %}
+};
+
+const LIVE: Readonly<Record<string, LiveEntity>> = {
+{% for e in live %}
+{% if e.rules %}
+  {{ e.name | tojson }}: { {{ trace(e.id) }}
+    readers: {{ e.readers | list | tojson }},
+    public: {{ e.public | tojson }},
+    rules: {
+{% for role, rule in e.rules.items() %}
+      {{ role | tojson }}: {{ rule.entry() }},
+{% endfor %}
+    },
+    table: {{ nextjs.tables_by_entity[e.name].const }},
+{% if e.owner_path %}
+    ownerPath: [
+{% for step in e.owner_path %}
+      {{ step }},
+{% endfor %}
+    ],
+{% endif %}
+  },
+{% else %}
+  {{ e.name | tojson }}: { readers: {{ e.readers | list | tojson }}, public: {{ e.public | tojson }} }, {{ trace(e.id) }}
+{% endif %}
+{% endfor %}
+};
+{% if scoped %}
+
+/** The users that may read a record at one time, by the record rules of the roles. */
+export type Audience = {
+  /** The roles whose rule conditions the record meets. */
+  roles: string[];
+  /** The users at the end of the owner path of the record. */
+  owners: string[];
+};
+{% endif %}
+
+/** A create, a change, or a delete of a record of a live entity, after the commit. */
+export type Change = {
+  entity: string;
+  id: string;
+  action: LiveAction;
+{% if scoped %}
+  /**
+   * The audiences of the record before and after the change, or null
+   * without a record rule for the reads of the entity: all users that may
+   * read the entity see the change.
+   */
+  audiences: Audience[] | null;
+{% endif %}
+};
+
+/** A client of the stream: the entities whose events it gets{{ ", and its user" if auth }}. */
+export type Viewer = {
+  entities: ReadonlySet<string>;
+{% if auth %}
+  /** The signed-in user, or null. */
+  user: string | null;
+{% endif %}
+{% if access %}
+  /** The role of the signed-in user, or null. */
+  role: string | null;
+{% endif %}
+};
+
+/**
+ * Return the client of a stream, or the status of an error. The client
+ * gets the events of the entities of the names, by default of all live
+ * entities that it may read. A name that is not a live entity gives 400.
+ * An entity that the client may not read gives {{ "401 without a user, else 403" if access else "401" }}.
+ */
+{% if access %}
+export function liveViewer(names: string[], user: string | null, role: string | null): Viewer | 400 | 401 | 403 {
+{% elif auth %}
+export function liveViewer(names: string[], user: string | null): Viewer | 400 | 401 {
+{% else %}
+export function liveViewer(names: string[]): Viewer | 400 {
+{% endif %}
+  if (names.some((name) => !Object.hasOwn(LIVE, name))) {
+    return 400;
+  }
+  const wanted = names.length > 0 ? names : Object.keys(LIVE);
+{% if access %}
+  const readable = wanted.filter(
+    (name) =>
+      LIVE[name]?.public || (role !== null && LIVE[name]?.readers.some((operation) => roleMayCall(role, operation))),
+  );
+  if (readable.length === 0 || (names.length > 0 && readable.length !== wanted.length)) {
+    return user === null ? 401 : 403;
+  }
+  return { entities: new Set(readable), user, role };
+{% elif auth %}
+  const readable = wanted.filter((name) => LIVE[name]?.public || user !== null);
+  if (readable.length === 0 || (names.length > 0 && readable.length !== wanted.length)) {
+    return 401;
+  }
+  return { entities: new Set(readable), user };
+{% else %}
+  return { entities: new Set(wanted) };
+{% endif %}
+}
+
+/** Return true if a client may see a change: it may read the record. */
+function sees(viewer: Viewer, change: Change): boolean {
+{% if scoped %}
+  if (!viewer.entities.has(change.entity)) {
+    return false;
+  }
+  const live = LIVE[change.entity];
+  const role = viewer.role;
+  const rule = role === null ? undefined : live?.rules?.[role];
+  // A record rule does not apply to the public operations (ADR 0025).
+  if (role === null || rule === undefined || change.audiences === null || live?.public) {
+    return true;
+  }
+  return change.audiences.some(
+    (audience) =>
+      audience.roles.includes(role) &&
+      (rule.owner !== true || (viewer.user !== null && audience.owners.includes(viewer.user))),
+  );
+{% else %}
+  return viewer.entities.has(change.entity);
+{% endif %}
+}
+
+/** The events of one client: the changes that it may see, in a queue. */
+export class Subscription {
+  private readonly queue: LiveEvent[] = [];
+  private wake: (() => void) | undefined;
+  /** True if the queue was full: the client gets `reset`. */
+  private lost = false;
+  /** True if the stream ends, for example because the server stops. */
+  private ended = false;
+
+  constructor(readonly viewer: Viewer) {}
+
+  /** Add a change to the queue if the client may see it. */
+  offer(change: Change): void {
+    if (sees(this.viewer, change)) {
+      this.put({ type: change.action, entity: change.entity, id: change.id });
+    }
+  }
+
+  /** Tell the client to read all records again, for example after a loss of events. */
+  reset(): void {
+    this.put({ type: "reset" });
+  }
+
+  /** End the stream. The client opens a new one, for example at another replica. */
+  end(): void {
+    this.ended = true;
+    this.wake?.();
+  }
+
+  private put(event: LiveEvent): void {
+    if (this.queue.length < QUEUE_SIZE) {
+      this.queue.push(event);
+    } else {
+      this.lost = true;
+    }
+    this.wake?.();
+  }
+
+  /**
+   * Return the next event, null after PING_MS without an event (a ping),
+   * or undefined at the end of the stream. After a full queue, return
+   * `reset` and drop the queue.
+   */
+  async next(): Promise<LiveEvent | null | undefined> {
+    if (!this.ended && !this.lost && this.queue.length === 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, PING_MS);
+        this.wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wake = undefined;
+    }
+    if (this.ended) {
+      return undefined;
+    }
+    if (this.lost) {
+      this.lost = false;
+      this.queue.length = 0;
+      return { type: "reset" };
+    }
+    return this.queue.shift() ?? null;
+  }
+}
+
+/**
+ * Return a client of Redis. A client without the offline queue does not
+ * keep a command while it connects again: the command fails at once.
+ */
+function redisClient(url: string, offlineQueue: boolean) {
+  return createClient({
+    url,
+    disableOfflineQueue: !offlineQueue,
+    socket: {
+      connectTimeout: CONNECT_TIMEOUT_MS,
+      reconnectStrategy: (retries: number) => Math.min(100 * (retries + 1), 1_000),
+    },
+  });
+}
+
+type RedisClient = ReturnType<typeof redisClient>;
+
+/** Return the message of an error, for the log. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The changes of the process, and with Redis the changes of all replicas.
+ *
+ * Without a URL, `publish` gives the changes to the subscriptions of the
+ * process. With a URL, it sends them to the Redis channel, and a second
+ * connection gives the changes of the channel to the subscriptions, so
+ * that each replica gets the changes of all replicas. The connections
+ * start with the first change or subscription. When Redis is not
+ * available, the process logs a warning and gives its changes to its own
+ * subscriptions. When Redis is back, the subscriptions get `reset`.
+ */
+export class Broker {
+  private readonly subscriptions = new Set<Subscription>();
+  private publisher: Promise<RedisClient | undefined> | undefined;
+  private subscriber: RedisClient | undefined;
+  /** False after an error of Redis, until Redis is back: one warning for each loss. */
+  private available = true;
+  /** True when the server stops: the streams end. */
+  private ended = false;
+
+  constructor(private readonly url: string | null) {}
+
+  /** Send the changes of a transaction after its commit. */
+  publish(changes: Change[]): void {
+    if (this.url === null) {
+      this.deliver(changes);
+      return;
+    }
+    this.start();
+    for (const change of changes) {
+      void this.send(change);
+    }
+  }
+
+  /** Give changes to the subscriptions of the process. */
+  deliver(changes: Change[]): void {
+    for (const change of changes) {
+      for (const subscription of this.subscriptions) {
+        subscription.offer(change);
+      }
+    }
+  }
+
+  /** Return a new subscription of a client. */
+  subscribe(viewer: Viewer): Subscription {
+    this.start();
+    const subscription = new Subscription(viewer);
+    this.subscriptions.add(subscription);
+    if (this.ended) {
+      subscription.end();
+    }
+    return subscription;
+  }
+
+  /** Remove the subscription of a client that left. */
+  unsubscribe(subscription: Subscription): void {
+    this.subscriptions.delete(subscription);
+  }
+
+  /** End the open streams and the new ones, so that the server can stop. */
+  endStreams(): void {
+    this.ended = true;
+    for (const subscription of this.subscriptions) {
+      subscription.end();
+    }
+  }
+
+  /**
+   * Close the connections of Redis at once. A command that waits for a
+   * connection, for example the subscription to the channel, fails.
+   */
+  async close(): Promise<void> {
+    const publisher = await this.publisher;
+    this.publisher = undefined;
+    const subscriber = this.subscriber;
+    this.subscriber = undefined;
+    for (const client of [publisher, subscriber]) {
+      if (client?.isOpen) {
+        client.destroy();
+      }
+    }
+  }
+
+  /** Start the connections of Redis, if the broker has a URL and they do not run. */
+  private start(): void {
+    if (this.url === null || this.publisher !== undefined) {
+      return;
+    }
+    // A change does not wait while the client connects again: it goes to the clients of the process.
+    const publisher = redisClient(this.url, false);
+    publisher.on("error", (error: unknown) => this.failed(error));
+    this.publisher = this.connected(publisher);
+    const subscriber = redisClient(this.url, true);
+    subscriber.on("error", (error: unknown) => this.failed(error));
+    subscriber.on("ready", () => this.back());
+    this.subscriber = subscriber;
+    void subscriber.connect().catch((error: unknown) => this.failed(error));
+    void subscriber
+      .subscribe(CHANNEL, (message) => this.deliver([JSON.parse(message) as Change]))
+      .catch((error: unknown) => this.failed(error));
+  }
+
+  /** Return the client after its first connection, or after CONNECT_TIMEOUT_MS without one. */
+  private async connected(client: RedisClient): Promise<RedisClient | undefined> {
+    const connection = client.connect().then(
+      () => client,
+      (error: unknown) => {
+        this.failed(error);
+        return client;
+      },
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<RedisClient>((resolve) => {
+      timer = setTimeout(() => resolve(client), CONNECT_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([connection, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Send a change to the channel. Without Redis, give it to the subscriptions of the process. */
+  private async send(change: Change): Promise<void> {
+    try {
+      const publisher = await this.publisher;
+      if (publisher !== undefined && this.available && publisher.isReady) {
+        await publisher.publish(CHANNEL, JSON.stringify(change));
+        return;
+      }
+      this.failed(new Error("The client of Redis is not connected."));
+    } catch (error) {
+      this.failed(error);
+    }
+    this.deliver([change]);
+  }
+
+  private failed(error: unknown): void {
+    if (this.available) {
+      this.available = false;
+      console.warn(`The Redis of the live events is not available: ${messageOf(error)}`);
+    }
+  }
+
+  /** The subscriber is connected again: the subscriptions can have missed the changes of the time without Redis. */
+  private back(): void {
+    if (!this.available) {
+      this.available = true;
+      for (const subscription of this.subscriptions) {
+        subscription.reset();
+      }
+    }
+  }
+}
+
+const globalForLive = globalThis as unknown as { appgenLive?: Broker };
+
+/** Return the broker of the process. In development, it survives hot reloads. */
+export function liveBroker(): Broker {
+  globalForLive.appgenLive ??= new Broker(process.env.LIVE_EVENTS_URL || null);
+  return globalForLive.appgenLive;
+}
+{% if scoped %}
+
+/**
+ * Return who may read a record of a live entity now, as the transaction
+ * has it (ADR 0025): the roles with a rule for the reads whose conditions
+ * the record meets, and the users of the owner path, if a rule of these
+ * roles has `owner`. Return undefined without a record rule for the reads
+ * of the entity.
+ */
+export async function liveAudience(tx: Database, entity: string, id: string): Promise<Audience | undefined> {
+  const live = LIVE[entity];
+  if (live?.rules === undefined || live.table === undefined) {
+    return undefined;
+  }
+  let roles = Object.keys(live.rules);
+  const keys = [...new Set(Object.values(live.rules).flatMap((rule) => Object.keys(rule.where ?? {})))];
+  if (keys.length > 0) {
+    const columns: Record<string, PgColumn> = getTableColumns(live.table);
+    const fields = Object.fromEntries(keys.map((key) => [key, columns[key] as PgColumn]));
+    const [row] = await tx.select(fields).from(live.table).where(eq(live.table.id, id)).limit(1);
+    if (row === undefined) {
+      return { roles: [], owners: [] };
+    }
+    const values = row as Record<string, unknown>;
+    roles = roles.filter((role) =>
+      Object.entries(live.rules?.[role]?.where ?? {}).every(([key, allowed]) =>
+        allowed.includes(values[key] as RuleValue),
+      ),
+    );
+  }
+{% if owned %}
+  const owned = live.ownerPath !== undefined && roles.some((role) => live.rules?.[role]?.owner === true);
+  return { roles, owners: owned ? await pathUsers(tx, id, live.ownerPath ?? []) : [] };
+{% else %}
+  return { roles, owners: [] };
+{% endif %}
+}
+{% endif %}
+
+/** A change of a record in the open work{{ ", with the audiences before the first change and after the last" if scoped }}. */
+type Noted = {
+  entity: string;
+  id: string;
+  action: LiveAction;
+{% if scoped %}
+  /** The audience before the first change, or undefined for a new record. */
+  before: Audience | undefined;
+  /** The audience after the last change, or undefined for a deleted record. */
+  after: Audience | undefined;
+  /** True if a record rule limits the reads of the entity. */
+  limited: boolean;
+{% endif %}
+};
+
+/** The changes of the open work of `liveChanges()`. */
+const pending = new AsyncLocalStorage<Noted[]>();
+
+/**
+ * Run the work of a change in a repository, and send the changes that it
+ * notes after the commit of its transaction. In the work of another
+ * change, for example an event (ADR 0031), the changes join the changes of
+ * that work. An error of the work drops them.
+ */
+export async function liveChanges<T>(work: () => Promise<T>): Promise<T> {
+  const outer = pending.getStore();
+  const changes: Noted[] = [];
+  const result = await pending.run(changes, work);
+  if (outer !== undefined) {
+    outer.push(...changes);
+  } else if (changes.length > 0) {
+    afterCommit(() => liveBroker().publish(merged(changes)));
+  }
+  return result;
+}
+
+{% if scoped %}
+/**
+ * Note a change of a record in the work of `liveChanges()`. `before` is the
+ * audience of the record before the change (`liveAudience()`), or undefined
+ * for a new record. The audience after the change comes from the transaction.
+ */
+export async function noteChange(
+  tx: Database,
+  entity: string,
+  id: string,
+  action: LiveAction,
+  before?: Audience,
+): Promise<void> {
+  const changes = pending.getStore();
+  if (changes === undefined || !Object.hasOwn(LIVE, entity)) {
+    return;
+  }
+  const after = action === "deleted" ? undefined : await liveAudience(tx, entity, id);
+  const limited = LIVE[entity]?.rules !== undefined;
+  changes.push({ entity, id, action, before, after, limited });
+}
+{% else %}
+/** Note a change of a record in the work of `liveChanges()`. */
+export function noteChange(entity: string, id: string, action: LiveAction): void {
+  if (Object.hasOwn(LIVE, entity)) {
+    pending.getStore()?.push({ entity, id, action });
+  }
+}
+{% endif %}
+
+/**
+ * Return one change for each record: the first action, or `deleted`, or
+{% if scoped %}
+ * nothing for a record that the work adds and deletes. A change has the
+ * audiences before the first change and after the last.
+{% else %}
+ * nothing for a record that the work adds and deletes.
+{% endif %}
+ */
+function merged(changes: Noted[]): Change[] {
+  const byRecord = new Map<string, Noted>();
+  for (const change of changes) {
+    const key = `${change.entity}:${change.id}`;
+    const last = byRecord.get(key);
+    if (last === undefined) {
+      byRecord.set(key, change);
+    } else if (last.action === "created" && change.action === "deleted") {
+      // A record of the work only: the clients never saw it.
+      byRecord.delete(key);
+    } else {
+      const action = last.action === "created" ? "created" : change.action;
+      byRecord.set(key, { ...change, action{{ ", before: last.before" if scoped }} });
+    }
+  }
+{% if scoped %}
+  return [...byRecord.values()].map(({ entity, id, action, before, after, limited }) => ({
+    entity,
+    id,
+    action,
+    audiences: limited ? [before, after].filter((audience) => audience !== undefined) : null,
+  }));
+{% else %}
+  return [...byRecord.values()];
+{% endif %}
+}

@@ -45,6 +45,10 @@ that the two generated apps work together:
     the app must call the mock server with the API key, or with an
     OAuth 2.0 token and the cookie parameter, and give the example
     answer.
+11. Run the UI test of the live updates (`ui-tests/tests/live.spec.ts`,
+    ADR 0051): a task that a second browser adds, changes, and deletes
+    shows at once on the task board of the first browser, through the
+    stream of the FastAPI app.
 
 Run it from the repository root:
 
@@ -78,6 +82,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from mock_api import SECRET, MockApi
+from smoke_test import expected_ui
 
 from appgen.bindings.react.api_client import DATA_KEY, api_entities, widget_endpoints
 from appgen.bindings.shared.views import ViewContext
@@ -100,6 +105,7 @@ BOARD_PAGE = 20
 """The count of cards that a board column loads first (`PAGE_SIZE` of the board view)."""
 TODO_COUNT = BOARD_PAGE + 4
 """The tasks that the test adds to the column "To do": more than one page of the column."""
+UI_TESTS = Path("ui-tests")
 HOLIDAY_NAME = "Christmas Day"
 """A holiday of the example answers of the holidays API, which the dashboard widget shows."""
 
@@ -207,7 +213,9 @@ function check(ok, message) {
       const store = ([key, value]) => window.localStorage.setItem(key, value);
       await other.addInitScript(store, [storageKey, code]);
       other.on("response", (response) => {
-        if (!response.url().startsWith(test.api)) return;
+        // EventSource cannot send the language: the stream of the live updates has no text.
+        const stream = response.request().resourceType() === "eventsource";
+        if (!response.url().startsWith(test.api) || stream) return;
         answers += 1;
         const asked = response.request().headers()["accept-language"];
         const given = response.headers()["content-language"];
@@ -869,6 +877,26 @@ def check_apps(definition: Path, mock: MockApi) -> None:
     log("change the title of the task with the API, and restore it in its history tab")
     run("node", "-e", HISTORY_CHECK, json.dumps(history))
     check_exposed_api(mock)
+    check_live(definition)
+
+
+def check_live(definition: Path) -> None:
+    """Run the UI test of the live updates on the React app and the FastAPI app (ADR 0051)."""
+    log("change a task in a second browser: the task board of the first shows each change")
+    loaded = load_definition(definition)
+    expected_file = (UI_TESTS / "expected" / "react-api.json").resolve()
+    expected_file.parent.mkdir(exist_ok=True)
+    # The React app reads the stream of the FastAPI app: it has the live entities.
+    live = [name for name, entity in loaded.entities.items() if entity.live]
+    expected = {**expected_ui("react", loaded), "live": live}
+    expected_file.write_text(json.dumps(expected, indent=2) + "\n")
+    env = {
+        "APPGEN_BASE_URL": WEB_URL,
+        "APPGEN_UI_EXPECTED": str(expected_file),
+        "APPGEN_UI_OUTPUT": str((UI_TESTS / "test-results" / "react-api-live").resolve()),
+    }
+    command = ["pnpm", "exec", "playwright", "test", "tests/live.spec.ts", "--project", "light"]
+    run(*command, cwd=UI_TESTS, env=env)
 
 
 def check_exposed_api(mock: MockApi) -> None:

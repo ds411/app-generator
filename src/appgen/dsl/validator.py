@@ -97,6 +97,7 @@ from appgen.dsl.ui.checks import (
     check_ui_views,
 )
 from appgen.dsl.ui.fields import FieldPathError, resolve_path
+from appgen.dsl.ui.views import DetailView
 from appgen.dsl.webhooks import EMAIL_SCHEMES, Webhook
 from appgen.dsl.workflows import Transition
 
@@ -2481,11 +2482,103 @@ def _check_page_meta(
             )
 
 
+def _check_page_share(definition: AppDefinition, name: str, page: Page) -> Iterator[Diagnostic]:
+    """A page with `share` is a detail page with the path parameter `id` only, of an entity
+    with an update operation, in an app with `auth`, and not public (ADR 0049)."""
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "invalid-option",
+            "A link of a record opens it without a sign-in, so 'share' needs the section 'auth'.",
+            page,
+            at="share",
+            hint="Add the section 'auth', or remove the key 'share'.",
+        )
+        return
+    if name in auth.public_pages:
+        yield _error(
+            "invalid-option",
+            "A public page shows all records to all persons, so it does not take 'share'.",
+            page,
+            at="share",
+            hint=f"Remove '{name}' from 'auth.public_pages', or remove the key 'share'.",
+        )
+    ui = definition.ui
+    view_name = page.content.view if page.content is not None else None
+    view = ui.views.get(view_name) if ui is not None and view_name is not None else None
+    if not isinstance(view, DetailView):
+        yield _error(
+            "invalid-option",
+            "A link shares one record, so 'share' needs a page with a detail view.",
+            page,
+            at="share",
+            hint="Show a detail view on the page, or remove the key 'share'.",
+        )
+        return
+    if set(re.findall(r"\{([a-z][a-z0-9_]*)\}", page.path)) != {"id"} or not page.path.endswith(
+        "/{id}"
+    ):
+        yield _error(
+            "invalid-option",
+            "The link puts its token in the place of the ID, so the path of a page with "
+            f"'share' ends with '/{{id}}' and has no other parameter. The path is '{page.path}'.",
+            page,
+            at="path",
+            hint="Use a path such as /lessons/{id}.",
+        )
+    if not any(
+        op.entity == view.entity and op.kind == "update" for op in definition.operations.values()
+    ):
+        yield _error(
+            "invalid-option",
+            "Only a user that may change a record makes its link, so 'share' needs an update "
+            f"operation of '{view.entity}'.",
+            page,
+            at="share",
+            hint=f"Add an update operation of '{view.entity}', or remove the key 'share'.",
+        )
+
+
+def _check_shared_paths(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """An entity has one page with `share` at most, and no page has the path of a shared page."""
+    ui = definition.ui
+    entities: dict[str, str] = {}
+    for name, page in definition.pages.items():
+        view_name = page.content.view if page.content is not None else None
+        view = ui.views.get(view_name) if ui is not None and view_name is not None else None
+        if not page.share or not isinstance(view, DetailView):
+            continue
+        if view.entity in entities:
+            yield _error(
+                "duplicate-value",
+                f"The page '{entities[view.entity]}' shares the records of '{view.entity}' too. "
+                "An entity has one page with 'share' at most.",
+                page,
+                at="share",
+            )
+        entities.setdefault(view.entity, name)
+        path = page.shared_path
+        for other_name, other in definition.pages.items():
+            if other.path == path:
+                yield _error(
+                    "duplicate-value",
+                    f"The link of the page '{name}' opens the path '{path}', but the page "
+                    f"'{other_name}' has this path.",
+                    other,
+                    at="path",
+                    hint="Give the page another path.",
+                )
+
+
 def check_pages(definition: AppDefinition) -> Iterator[Diagnostic]:
     """A page with `embed` is public, has no layout, and names https origins (ADR 0032). The
-    metadata of a page reads fields of the record of a page of a record."""
+    metadata of a page reads fields of the record of a page of a record. A page with `share` is
+    a detail page (ADR 0049)."""
     auth = definition.auth
+    yield from _check_shared_paths(definition)
     for name, page in definition.pages.items():
+        if page.share:
+            yield from _check_page_share(definition, name, page)
         if page.meta is not None:
             yield from _check_page_meta(definition, name, page, page.meta)
         if page.embed is None:

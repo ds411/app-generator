@@ -1,0 +1,169 @@
+{{ trace_header(*py.share_ids) }}
+"""The secret links of the records (ADR 0049): a guest opens one record without a sign-in.
+
+A record has one link at most. The app keeps only the SHA-256 hash of
+the token of a link, so that a copy of the database gives no links: the
+token shows one time only, when a user makes the link. A new link
+replaces the old link, and a revoke deletes it. The links have no
+foreign key: the link of a deleted record opens nothing.
+"""
+
+import datetime as dt
+import hashlib
+import secrets
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel
+from sqlalchemy import String, UniqueConstraint, delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import USER_KEY, Base, Record, Timestamp, commit
+from app.core.errors import ProblemError
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+from app.core.schemas import ReadModel
+
+
+class ShareLink(Base):
+    """The link of a record: the hash of its token, the user that made it, and the time."""
+
+    __tablename__ = "share_links"
+    __table_args__ = (UniqueConstraint("entity", "record_id"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    entity: Mapped[str] = mapped_column(String(63))
+    record_id: Mapped[UUID]
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    """The SHA-256 hash of the token, as hexadecimal text."""
+    created_by: Mapped[UUID | None]
+    """The signed-in user that made the link."""
+    created_at: Mapped[dt.datetime] = mapped_column(Timestamp)
+
+
+class ShareLinkState(ReadModel):
+    """The state of the link of a record: active or not, and the time of the link."""
+
+    active: bool
+    created_at: dt.datetime | None = None
+
+
+class ShareLinkCreated(BaseModel):
+    """A new link: the token shows one time only."""
+
+    token: str
+    created_at: dt.datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedStep:
+    """The related records of one entity that a shared page shows.
+
+    Each key names the records that have the IDs (None for the shared
+    record, else the name of an earlier step) and their attribute: an ID,
+    a related record, or a list of related records.
+    """
+
+    name: str
+    model: type[Record]
+    keys: tuple[tuple[str | None, str], ...]
+
+
+def token_hash(token: str) -> str:
+    """Return the SHA-256 hash of a token, as hexadecimal text."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def link_state(session: AsyncSession, entity: str, record_id: UUID) -> ShareLinkState:
+    """Return the state of the link of a record."""
+    link = await session.scalar(
+        select(ShareLink).where(ShareLink.entity == entity, ShareLink.record_id == record_id)
+    )
+    if link is None:
+        return ShareLinkState(active=False)
+    return ShareLinkState(active=True, created_at=link.created_at)
+
+
+async def make_link(session: AsyncSession, entity: str, record_id: UUID) -> ShareLinkCreated:
+    """Make a new link of a record, and return its token. The old link of the record stops."""
+    token = secrets.token_urlsafe(32)
+    await session.execute(
+        delete(ShareLink).where(ShareLink.entity == entity, ShareLink.record_id == record_id)
+    )
+    link = ShareLink(
+        id=uuid4(),
+        entity=entity,
+        record_id=record_id,
+        token_hash=token_hash(token),
+        created_by=session.info.get(USER_KEY),
+        created_at=dt.datetime.now(dt.UTC),
+    )
+    session.add(link)
+    await commit(session)
+    return ShareLinkCreated(token=token, created_at=link.created_at)
+
+
+async def revoke_link(session: AsyncSession, entity: str, record_id: UUID) -> None:
+    """Delete the link of a record, if it has one."""
+    await session.execute(
+        delete(ShareLink).where(ShareLink.entity == entity, ShareLink.record_id == record_id)
+    )
+    await commit(session)
+
+
+async def shared_id(session: AsyncSession, entity: str, token: str) -> UUID:
+    """Return the ID of the record of a token. A wrong or a revoked token gives a 404 error."""
+    record_id = await session.scalar(
+        select(ShareLink.record_id).where(
+            ShareLink.entity == entity, ShareLink.token_hash == token_hash(token)
+        )
+    )
+    if record_id is None:
+        raise not_shared()
+    return record_id
+
+
+def not_shared() -> ProblemError:
+    """Return the error of a link that opens nothing: the same for all causes."""
+{% if i18n %}
+    return ProblemError(404, t("The link is not valid."))
+{% else %}
+    return ProblemError(404, "The link is not valid.")
+{% endif %}
+
+
+async def related_records(
+    session: AsyncSession, record: object, steps: Sequence[RelatedStep]
+) -> dict[str, list[Any]]:
+    """Return the related records of the steps, by the name of the step.
+
+    A step reads the IDs of the shared record and of the records of the
+    other steps. The steps run again until no step finds a new ID, so that
+    a cycle of relations finds all records.
+    """
+    found: dict[str, dict[UUID, Any]] = {step.name: {} for step in steps}
+    asked: dict[str, set[UUID]] = {step.name: set() for step in steps}
+    more = True
+    while more:
+        more = False
+        for step in steps:
+            ids: set[UUID] = set()
+            for source, attr in step.keys:
+                for item in [record] if source is None else list(found[source].values()):
+                    value: object = getattr(item, attr)
+                    targets = cast(list[object], value) if isinstance(value, list) else [value]
+                    for target in targets:
+                        target_id: object = getattr(target, "id", target)
+                        if isinstance(target_id, UUID) and target_id not in asked[step.name]:
+                            ids.add(target_id)
+            if not ids:
+                continue
+            more = True
+            asked[step.name] |= ids
+            rows = await session.scalars(select(step.model).where(step.model.id.in_(ids)))
+            found[step.name].update({row.id: row for row in rows})
+    return {name: list(rows.values()) for name, rows in found.items()}

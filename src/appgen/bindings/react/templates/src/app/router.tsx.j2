@@ -22,6 +22,9 @@ import { NotFoundPage } from "@/pages/not-found";
 {% if used_layouts %}
 import { {% for layout_name in used_layouts %}{{ layout_name | pascal }}Layout{{ ", " if not loop.last }}{% endfor %} } from "@/widgets/layouts";
 {% endif %}
+{% for share in shares.values() | sort(attribute="view") %}
+import { {{ share.view | pascal }}SharedView } from "@/widgets/{{ share.view | kebab }}";
+{% endfor %}
 {% if use_root or definition.auth or ui_plan.embedded_pages %}
 
 {% endif %}
@@ -33,6 +36,9 @@ import { EmbedLayout } from "./layout/embed-layout";
 {% endif %}
 {% if use_root %}
 import { RootLayout } from "./layout/root-layout";
+{% endif %}
+{% if shares %}
+import { SharedLayout } from "./layout/shared-layout";
 {% endif %}
 
 // The pages, grouped by layout. Each layout shows its pages in the outlet.
@@ -58,6 +64,17 @@ export const router = createBrowserRouter([
 {% endif %}
 {% if auth_pages.connections %}
   { path: "/connections", element: <ConnectionsRoute /> }, {{ trace((ts_connections | first).id) }}
+{% endif %}
+{% if shares %}
+  {
+    // The records of the secret links: without a sign-in and without the app shell (ADR 0049).
+    element: <SharedLayout />,
+    children: [
+{% for share in shares.values() %}
+      { path: {{ route_path(share.shared_path) | tojson }}, element: <{{ share.view | pascal }}SharedView /> }, {{ trace(share.page_id) }}
+{% endfor %}
+    ],
+  },
 {% endif %}
 {% if ui_plan.embedded_pages %}
   {

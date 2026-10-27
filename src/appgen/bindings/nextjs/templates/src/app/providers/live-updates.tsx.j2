@@ -1,0 +1,19 @@
+{{ trace_header(*(nextjs.live | map(attribute="id"))) }}
+"use client";
+
+import { useEffect } from "react";
+
+import { notifyChange } from "@/shared/api";
+import { batched, watchLive } from "@/shared/lib/live";
+
+/**
+ * Load the open views again after the changes of their records in other
+ * browsers (ADR 0051): the events of the stream `/api/live`.{% if definition.auth %} The root
+ * layout gives a new key to it after a sign-in or a sign-out, so that the
+ * stream has the events of the new user.{% endif %}
+
+ */
+export function LiveUpdates() {
+  useEffect(() => watchLive(() => Promise.resolve("/api/live"), batched(notifyChange)), []);
+  return null;
+}

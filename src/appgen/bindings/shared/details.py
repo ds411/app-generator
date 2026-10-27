@@ -136,6 +136,8 @@ class DetailPlan:
     tabs: list[TabPlan] = field(default_factory=list[TabPlan])
     lookups: list[str] = field(default_factory=list[str])
     """The related entities that the view reads, sorted by name."""
+    paths: list[str] = field(default_factory=list[str])
+    """The field paths that the view shows: the title, the header, and the sections."""
     related: list[list[RelatedStep]] | None = None
     """With the API: the related records that the view loads by ID, in stages."""
     actions: list[ActionPlan] = field(default_factory=list[ActionPlan])
@@ -238,6 +240,7 @@ def build_detail(ctx: ViewContext, name: str) -> DetailPlan:
         plan.sections.append(_section(ctx, plan, section_name, section, paths))
     for tab_name, tab in view.tabs.items():
         plan.tabs.append(_tab(ctx, plan, tab_name, tab, paths))
+    plan.paths = paths
     plan.lookups = sorted(ctx.lookups_of(entity, paths))
     if ctx.server:
         plan.related = ctx.related(entity, paths + action_paths(view))

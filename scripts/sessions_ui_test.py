@@ -16,6 +16,10 @@ of the forms. This test proves it for tests/fixtures/courses.yaml:
    with `$me`, the list page whose filter starts with the user, the
    student of a new record of its form, and the totals of the user in
    the table of the lessons. The values come from the seed records.
+   Then a member sees no button "Share" on the page of a lesson, and an
+   admin makes a secret link of the lesson (ADR 0049). A guest opens the
+   link without a sign-in, the admin revokes it, and the link opens
+   nothing.
 
 Run it from the repository root:
 
@@ -42,6 +46,7 @@ from auth_ui_test import (
     PASSWORDS,
     PORTS,
     UI_TESTS,
+    Permissions,
     generate,
     run,
     started,
@@ -52,6 +57,7 @@ from smoke_test import expected_ui
 
 from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
 from appgen.dsl.auth import ME, has_me
@@ -206,6 +212,48 @@ def me_totals(
     return found
 
 
+def expected_share(binding: str, definition: AppDefinition) -> dict[str, Any] | None:
+    """Return the values of the test of the secret links (ADR 0049), or None without `share`.
+
+    The admin may call the update operation of the entity, the member may
+    not. The guest sees the title of the record and the display value of
+    a related record.
+    """
+    plans = share_plans(definition)
+    auth, access = definition.auth, definition.access
+    if not plans or auth is None or access is None:
+        return None
+    plan = next(iter(plans.values()))
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    default = definition.entities[auth.user_entity].fields[access.role_field].default
+
+    def may(user: Record) -> bool:
+        return Permissions(definition, str(user.get(access.role_field) or default)).operation(
+            plan.update
+        )
+
+    admin = next(u for u in users if may(u))
+    member = next(u for u in users if not may(u))
+    record = data[plan.entity][0]
+    entity = definition.entities[plan.entity]
+    # The record of the first many-to-one relation: the shared view shows its display value.
+    relation, target = next(
+        (name, r.target) for name, r in entity.relations.items() if r.kind == "many_to_one"
+    )
+    related = next(r for r in data[target] if r["id"] == record[relation])
+    return {
+        "admin": admin[auth.username_field],
+        "member": member[auth.username_field],
+        "path": plan.path.replace("{id}", str(record["id"])),
+        "prefix": plan.shared_prefix,
+        "title": str(record[definition_display(entity)]),
+        "related": str(related[definition_display(definition.entities[target])]),
+        # Next.js shows its page "not found" for a wrong token, React a message.
+        "invalid": "This page does not exist" if binding == "nextjs" else "The link is not valid.",
+    }
+
+
 def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]:
     """Return the values of the UI test: for each user with records, what the pages show."""
     ui, auth = definition.ui, definition.auth
@@ -247,7 +295,11 @@ def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]
         )
     if len(users) < 2:
         raise SessionsUiTestError("The test needs two users with records in the seed data.")
-    return {"password": PASSWORDS["nextjs" if binding == "react-api" else binding], "users": users}
+    return {
+        "password": PASSWORDS["nextjs" if binding == "react-api" else binding],
+        "users": users,
+        "share": expected_share(binding, definition),
+    }
 
 
 def check_ui(binding: str, definition: AppDefinition) -> None:

@@ -61,6 +61,9 @@ events after each commit.
 {% if auth %}
 {% set _ = factories.append("make_" ~ u.snake) %}
 {% set ns.lines = ns.lines + ["from app.core.auth import make_token"] %}
+{% if first %}
+{% set ns.lines = ns.lines + ["from httpx import ASGITransport, AsyncClient"] %}
+{% endif %}
 {% endif %}
 {% if factories %}
 {% set ns.lines = ns.lines + [py.from_import("tests.factories", factories | unique | list)] %}
@@ -263,6 +266,31 @@ async def test_the_stream_needs_a_signed_in_user(app: FastAPI) -> None:
     async with open_stream(app, "entity={{ guarded[0].name }}") as stream:
         assert stream.status == 401
         assert json.loads(stream.body)["status"] == 401
+{% endif %}
+{% if auth and first %}
+{% set role = lt.readers[0][1] %}
+
+
+{{ trace(first.live.id) }}
+async def test_a_ticket_opens_the_stream_of_its_user(app: FastAPI) -> None:
+    async with sessions_of(app)() as session:
+        _, headers = await headers_of(session{{ (", " ~ (role | tojson)) if access }})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/live/ticket", headers=headers)
+        assert response.status_code == 200
+        ticket = response.json()["ticket"]
+        assert response.json()["expires_in"] == 30
+        assert (await client.post("/live/ticket")).status_code == 401
+    async with (
+        sessions_of(app)() as session,
+        open_stream(app, f"entity={{ first.name }}&ticket={ticket}") as stream,
+    ):
+        record = await make_{{ first.snake }}(session)
+        assert await stream.next() == change("created", "{{ first.name }}", record.id)
+    # A token of a session is not a ticket.
+    token = headers["Authorization"].removeprefix("Bearer ")
+    async with open_stream(app, f"entity={{ first.name }}&ticket={token}") as stream:
+        assert stream.status == 401
 {% endif %}
 {% if lt.denied %}
 {% set e, role = lt.denied %}

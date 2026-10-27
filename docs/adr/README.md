@@ -59,4 +59,5 @@ gives the rules.
 | 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |
 | 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |
 | 0046   | [Places: point fields and the geo filters](0046-geo-points.md)          | Accepted |
+| 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |
 | 0051   | [Live updates of the records](0051-live-updates.md)                     | Accepted |

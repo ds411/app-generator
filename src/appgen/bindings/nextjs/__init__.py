@@ -15,13 +15,20 @@ from pydantic import Field
 
 from appgen.bindings import shared
 from appgen.bindings.nextjs import db
-from appgen.bindings.nextjs.model import DEPLOY_KEY, FSD_LAYERS, RATE_LIMIT_STORE_KEY, context
+from appgen.bindings.nextjs.model import (
+    DEPLOY_KEY,
+    FSD_LAYERS,
+    RATE_LIMIT_STORE_KEY,
+    SHARE_GROUP,
+    context,
+)
 from appgen.bindings.shared import forms, shadcn, typescript, ui, views
 from appgen.bindings.shared.auth import auth_rules, kind_operations, public_kinds
 from appgen.bindings.shared.events import ts_events
 from appgen.bindings.shared.gaps import gap_rules, gap_spec
 from appgen.bindings.shared.i18n import finish, i18n_rules
 from appgen.bindings.shared.notices import notice_rules
+from appgen.bindings.shared.sharing import share_rules
 from appgen.bindings.shared.totals import rule_side_key
 from appgen.dsl.storage import format_size
 from appgen.gen.binding import Binding, ExtensionKey, Output
@@ -83,6 +90,11 @@ _APP_SHELL = (
         template="app/group/embed-layout.tsx.j2",
         path="app/(embed)/layout.tsx",
         when="ui_plan.embedded_pages",
+    ),
+    Output(
+        template="app/group/shared-layout.tsx.j2",
+        path="app/" + SHARE_GROUP + "/layout.tsx",
+        when="shares",
     ),
     Output(template="app/not-found.tsx.j2", path="app/not-found.tsx"),
     Output(
@@ -217,12 +229,24 @@ BINDING = Binding(
             when="i18n",
         ),
         *auth_rules(),
+        *share_rules(),
         *notice_rules(),
         *forms.form_rules(),
         Output(
             template="app/page.tsx.j2",
             path="{{ nextjs.pages[name].route_file }}",
             for_each="page",
+        ),
+        # The pages of the secret links of the records (ADR 0049).
+        Output(
+            template="app/shared-page.tsx.j2",
+            path="app/" + SHARE_GROUP + "/{{ nextjs.share_routes[name] }}/page.tsx",
+            for_each="entity",
+            when="name in shares",
+        ),
+        *(
+            Output(template=f"{path}.j2", path=path, when="shares")
+            for path in ("src/shared/db/schema/share-links.ts", "src/shared/db/sharing.ts")
         ),
         # The metadata of the pages: the previews of the links, the sitemap, and robots.txt.
         Output(
@@ -311,6 +335,23 @@ BINDING = Binding(
             path="src/shared/db/acting-user.ts",
             # The change log without auth has no user of a change: the module gives null.
             when="nextjs.history or nextjs.notices",
+        ),
+        Output(
+            template="src/shared/db/paths.ts.j2",
+            path="src/shared/db/paths.ts",
+            # The receiver paths of the notices, and the owner paths of the live events.
+            when="nextjs.notices or nextjs.live | selectattr('owner_path') | list",
+        ),
+        # The live updates (ADR 0051): the changes of the repositories, the route of the events,
+        # and the client that loads the open views again.
+        *(
+            Output(template=template, path=path, when="nextjs.live")
+            for template, path in (
+                ("src/shared/db/live.ts.j2", "src/shared/db/live.ts"),
+                ("app/api/live/route.ts.j2", "app/api/live/route.ts"),
+                ("ui/lib/live.ts.j2", "src/shared/lib/live.ts"),
+                ("src/app/providers/live-updates.tsx.j2", "src/app/providers/live-updates.tsx"),
+            )
         ),
         *(
             Output(template=f"{path}.j2", path=path, when="nextjs.notices")
@@ -633,9 +674,8 @@ BINDING = Binding(
         | {"job", "event"}
         | {"storage"}
         | {"history", "notification"}
+        | {"live"}
     ),
-    # The live updates of the Next.js app follow with its events route (#405).
-    excludes=frozenset({"live"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

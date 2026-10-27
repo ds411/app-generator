@@ -743,6 +743,39 @@ import the helpers.
   endpoints, and the text in another language when a language
   translates the text of the first notification.
 
+### The secret links of the FastAPI app
+
+The FastAPI app keeps the links of the pages with `share` in the table
+`share_links` ([ADR 0049](adr/0049-share-links.md)). `app/core/sharing.py`
+has the model `ShareLink`, the schemas `ShareLinkState` and
+`ShareLinkCreated`, and the helpers of the links.
+
+- `make_link()` makes a token of 32 random bytes (base64url), keeps its
+  SHA-256 hash, and replaces the old link of the record. Only its answer
+  has the token. `link_state()` gives `active` and `created_at`, and
+  `revoke_link()` deletes the row. `shared_id()` gives the ID of the
+  record of a token, or the error 404 of `not_shared()`.
+- `app/features/<slice>/share.py` has the endpoints
+  `GET`, `POST`, and `DELETE /<entity>/{id}/share`, with the guard of the
+  update operation and its record rules of a change, and the public
+  endpoint `GET /shared/<entity>/{token}`. The answer of the public
+  endpoint has the `record` and the `related` records, by the name of the
+  entity in snake case: the constant `RELATED` has the stages of the
+  related records that the detail view shows, and `related_records()`
+  reads them. A wrong token, a revoked token, and the token of a deleted
+  record give the same 404 answer.
+- The links have the operation IDs `read_<entity>_share_link`,
+  `create_<entity>_share_link`, `revoke_<entity>_share_link`, and
+  `read_shared_<entity>`. The generator stops with an error if an
+  operation of the definition has one of these IDs, or if an entity has
+  the table `share_links`.
+- The generated tests in `tests/features/<slice>/test_share.py` make a
+  link and read the record and its related records without a sign-in.
+  They check that a wrong token, the old token after a new link, a
+  revoked token, and the token of a deleted record give 404, and that
+  the endpoints of the links need a sign-in and the permission of the
+  update operation.
+
 ### The live updates of the FastAPI app
 
 The FastAPI app sends the changes of the records of the entities with
@@ -769,7 +802,10 @@ listeners of the sessions, the broker, and the endpoint `GET /live`.
 - `live_viewer()` reads the token without the dependency of the user,
   in a session of its own, so that a stream holds no database
   connection. It gives 401 or 403 for an entity that the client may not
-  read.
+  read. With the sign-in, `POST /live/ticket` gives the signed-in user a
+  ticket for 30 seconds (`sign()` of the sessions, with the purpose
+  `live`), and `GET /live?ticket=...` takes it instead of the token,
+  because `EventSource` cannot send a header.
 - The broker gives each stream a `Subscription`: a queue of at most 100
   events. A full queue gives `reset`. With Redis, a task sends the
   changes to the channel `<package>:live`, and another task gives the
@@ -1103,6 +1139,93 @@ bell of the top bar.
 - The UI test `ui-tests/tests/auth.spec.ts` cancels a booking of a
   member as an administrator in the room booking example, signs in as
   the member, and opens the notice in the bell.
+
+### The secret links of the Next.js app and of the React app
+
+The front ends share a record of a page with `share` as the FastAPI app
+does ([ADR 0049](adr/0049-share-links.md)).
+
+- The detail page has the button "Share" (`ShareButton` of
+  `@/features/share-record`) in its header, for a user that may call the
+  update operation. Its dialog shows the state of the link, makes a link
+  and shows it one time with a copy button, makes a new link, and
+  revokes the link. `<entity>Sharing` of `@/entities/<entity>` is a
+  `SharingApi`: `state(id)`, `create(id)`, and `revoke(id)`.
+- The widget of the detail view has the shared view
+  `<View>SharedView` (`<view>-shared-view.tsx`): the title, the badges,
+  and the sections of the view, without the actions and without the tabs
+  of the lists and of the change log. A wrong or revoked token shows the
+  message "The link is not valid."
+- The Next.js app has the table `share_links`
+  (`src/shared/db/schema/share-links.ts`) and the helpers in
+  `src/shared/db/sharing.ts`. The server actions
+  `get<Entity>ShareLinkAction`, `create<Entity>ShareLinkAction`, and
+  `revoke<Entity>ShareLinkAction` have the access of the update
+  operation and its record rules of a change. The route group
+  `app/(shared-links)` has the shared pages, for example
+  `app/(shared-links)/shared/lessons/[token]/page.tsx`, without the app
+  shell. The server component reads the record and the related records
+  (`relatedRecords()`), and the search engines do not index the page.
+- The mock store of the React app keeps the links in the local storage
+  of the browser (`sharing()` and `shared()` of the mock store), so that
+  a link opens in another tab. The shared view reads the related records
+  from the stores. With the FastAPI app (`x-react-data: api`), the HTTP
+  store calls the endpoints, and the shared view reads the related
+  records of the answer with `fromJson()` of their stores. The route
+  `/shared/<entity>/:token` is outside `RequireAuth`, in the layout
+  `SharedLayout` (`src/app/layout/shared-layout.tsx`).
+- The UI test `ui-tests/tests/sessions.spec.ts` makes a link of a lesson
+  of the course hub as a teacher, opens it without a sign-in, revokes
+  it, and sees that the link does not open.
+
+### The live updates of the Next.js app and of the React app
+
+The front ends load their open views again after the changes of the
+records of the entities with `live` ([ADR 0051](adr/0051-live-updates.md)).
+
+- The Next.js app sends the changes as the FastAPI app does.
+  `src/shared/db/live.ts` has the table `LIVE` of the live entities,
+  the broker (`liveBroker()`, one for each process, also after a hot
+  reload), and the audiences of the record rules (`liveAudience()`).
+  The repository of a live entity has the option `live`: `create`,
+  `update`, `remove`, and the file uploads run in `liveChanges()`, and
+  call `noteChange()` in their transactions. `afterCommit()` of
+  `src/shared/db/client.ts` gives the changes to the broker after the
+  commit of the outer transaction. A change in the operation of an
+  event joins the changes of the outer work.
+- The route `app/api/live/route.ts` reads the session cookie, and sends
+  the events of a `Subscription` of the broker. The stream asks the
+  subscription for the next event only when the client reads, and sends
+  a comment each 15 seconds without an event. The headers
+  `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`
+  stop the compression of Next.js and the buffers of the proxies.
+  `instrumentation.ts` ends the streams at SIGINT and SIGTERM.
+- With `LIVE_EVENTS_URL`, the broker uses `@redis/client`: a publisher
+  without the offline queue, and a subscriber of the channel
+  `<app name>:live`. The packages are the packages of the shared rate
+  limit.
+- `src/shared/lib/live.ts` (a shared template) has the client:
+  `watchLive()` reads the stream with `EventSource`, and `batched()`
+  calls `notifyChange()` once for each entity after 50 ms, or once
+  without an entity after `reset`. The component
+  `src/app/providers/live-updates.tsx` starts the client. In the
+  Next.js app, `notifyChange()` of `@/shared/api` calls the listeners
+  of the resources of the views. In the React app, it marks the HTTP
+  stores of the entity (`src/shared/api/http-store.ts`) as old, so the
+  open views load their data again. The root layout of the Next.js app
+  gives the component the key of the signed-in user, so a new user
+  opens a new stream.
+- With the sign-in, the React app gets a ticket from `POST /live/ticket`
+  before each new stream, and opens a new stream after each new access
+  token (`subscribeAccessToken()` of `src/shared/api/http.ts`).
+- `scripts/live_test.py` runs the server code of the Next.js app of
+  `tests/fixtures/record-rules.yaml` with tsx and PGlite: the events of
+  each role and user, two brokers with one Redis, a broker without
+  Redis, and the end of the streams. The UI test
+  `ui-tests/tests/live.spec.ts` changes a task in a second browser, and
+  checks that the task board of the first browser shows each change in
+  less than 2 s: in the Next.js app, and in the React app with the
+  FastAPI app (`scripts/api_client_test.py`).
 
 ## Shared templates
 
