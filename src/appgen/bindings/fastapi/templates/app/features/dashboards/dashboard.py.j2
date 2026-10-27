@@ -22,6 +22,16 @@ Scope = Annotated[RecordScope | None, Depends(scope_of("read"))]
 """The records that the request may read (the record rules of the role, ADR 0025), or all."""
 {% endif %}
 {% for w in d.widgets %}
+{% if w.snapshots %}
+
+
+{{ trace(w.id) }}
+{{ py.signature("async def " ~ w.value_function, w.value_params(), " -> float | None:") }}
+    """The value of the widget `{{ w.name }}`: the endpoint and the daily snapshots (ADR 0042)."""
+{% for line in w.value_lines() %}
+    {{ line }}
+{% endfor %}
+{% endif %}
 
 
 {{ trace(w.id) }}

@@ -13,6 +13,7 @@ from appgen.bindings.nextjs import versions
 from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
+from appgen.bindings.nextjs.snapshots import ts_snapshots
 from appgen.bindings.nextjs.totals import repository_totals
 from appgen.bindings.nextjs.webhooks import ts_webhooks
 from appgen.bindings.shared import shadcn
@@ -320,6 +321,10 @@ def context(definition: AppDefinition) -> dict[str, Any]:
     jobs = ts_jobs(definition, by_entity)
     if has_notices(definition):
         check_notice_table(by_entity)
+    snapshots = ts_snapshots(definition, by_entity)
+    if snapshots is not None:
+        # The built-in job of the snapshots (ADR 0042) runs as the jobs of the definition.
+        jobs[snapshots.job.name] = snapshots.job
     seed = seed_tables(definition, tables)
     apis = ts_apis(definition)
     totals = repository_totals(definition, by_entity)
@@ -331,7 +336,7 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "theme": build_theme(definition),
         "theme_element": theme.id if theme is not None else "app",
         "ui_plan": plan,
-        "ui_views": ViewContext(definition, forms=True, api_server=True),
+        "ui_views": ViewContext(definition, forms=True, api_server=True, snapshot_store=True),
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
@@ -380,6 +385,9 @@ def context(definition: AppDefinition) -> dict[str, Any]:
             # that call the routes.
             "jobs": jobs,
             "cron_jobs": cron_jobs(f"{definition.app.name}-web", jobs),
+            # The daily snapshots of the stat widgets (ADR 0042): the value functions of the
+            # built-in job, and the server actions of the charts.
+            "snapshots": snapshots,
             "upload_limit": upload_limit(definition),
             # The events (ADR 0031): the repositories run their operations.
             "events": has_events(definition),

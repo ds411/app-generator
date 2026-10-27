@@ -1660,7 +1660,7 @@
     },
     "ChartWidget": {
       "additionalProperties": false,
-      "description": "A chart of an aggregate for each group of records.",
+      "description": "A chart of an aggregate for each group of records, or of the daily values of a stat.",
       "patternProperties": {
         "^x-": {}
       },
@@ -1709,10 +1709,26 @@
           "type": "string"
         },
         "entity": {
-          "$ref": "#/$defs/EntityName"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "group_by": {
-          "$ref": "#/$defs/FieldPath"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "interval": {
           "default": "month",
@@ -1753,13 +1769,29 @@
             }
           ],
           "default": null
+        },
+        "snapshots": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "days": {
+          "default": 30,
+          "maximum": 366,
+          "minimum": 2,
+          "title": "Days",
+          "type": "integer"
         }
       },
       "required": [
         "kind",
-        "chart",
-        "entity",
-        "group_by"
+        "chart"
       ],
       "title": "ChartWidget",
       "type": "object"
@@ -6867,6 +6899,19 @@
           ],
           "default": null,
           "title": "Compare"
+        },
+        "snapshots": {
+          "anyOf": [
+            {
+              "const": "daily",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshots"
         }
       },
       "required": [

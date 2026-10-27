@@ -141,6 +141,8 @@ class PyJob:
     test: PyJobTest | None = None
     clients: list[PyJobClient] = field(default_factory=list["PyJobClient"])
     """The clients of the APIs that the operation calls."""
+    builtin: bool = False
+    """True for the built-in job `stat_snapshots` (ADR 0042): its own module has the logic."""
 
     @property
     def module(self) -> str:
@@ -149,7 +151,7 @@ class PyJob:
     @property
     def gap(self) -> bool:
         """True for a job without an entity: its extension file has the logic."""
-        return self.entity is None
+        return self.entity is None and not self.builtin
 
     @property
     def offset_code(self) -> str:
