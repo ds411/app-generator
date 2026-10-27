@@ -26,6 +26,7 @@ from appgen.dsl.ui.views import (
     BoardView,
     CalendarView,
     CardsView,
+    QueryViewBase,
     TableView,
     View,
 )
@@ -200,6 +201,8 @@ def _view_components(view: View) -> set[str]:
     """Return the components of a detail view. The list views come from `_list_components`."""
     if isinstance(view, ApiViewBase):
         return {"card"} if isinstance(view, ApiDetailView) else set()
+    if isinstance(view, QueryViewBase):
+        return set()
     names = _action_components(view.actions.values())
     if isinstance(view, TableView | CardsView | BoardView | CalendarView):
         return names
@@ -218,6 +221,7 @@ _LIST_COMPONENTS: dict[str, tuple[str, ...]] = {
     "board": ("card", "badge", "scroll-area"),
     "calendar": ("button",),
     "search": ("input",),
+    "param": ("input",),
     "boolean": ("switch",),
     "date_range": ("popover", "calendar"),
     "select": ("select",),

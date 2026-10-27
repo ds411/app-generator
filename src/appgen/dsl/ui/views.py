@@ -471,18 +471,134 @@ class ApiDetailView(ApiViewBase):
     sections: Annotated[dict[MemberName, ApiDetailSection], pydantic.Field(min_length=1)]
 
 
+class QueryColumn(Element):
+    """A column of a table of the rows of a query."""
+
+    field: MemberName | None = None
+    """A field of the rows. The default is the column name."""
+    label: Text | None = None
+    format: Format | None = None
+    """The default comes from the field type."""
+    width: TokenRef | None = None
+    """A size token."""
+    align: Literal["start", "center", "end"] = "start"
+    link: MemberName | None = None
+    """A page that the cell opens, with the ID of the record. Only for rows that are records."""
+    hide_below: BreakpointName | None = None
+    """The column hides on screens narrower than this breakpoint."""
+
+
+class QueryCard(Element):
+    """The content of a card of a row of a query."""
+
+    title: MemberName
+    subtitle: MemberName | None = None
+    fields: list[MemberName] = pydantic.Field(default_factory=list[str])
+    footer: list[MemberName] = pydantic.Field(default_factory=list[str])
+
+
+class QueryFilter(Element):
+    """A field of the view that gives the value of a param of the query (ADR 0045)."""
+
+    param: MemberName | None = None
+    """A param of the query. The default is the filter name."""
+    label: Text | None = None
+    """The default is the label of the param."""
+    default: JsonScalar = None
+
+
+_QUERY_KEYS = {
+    "entity": "A view has an entity or a query, not both",
+    "source": "A view has a source or a query, not both",
+    "actions": "A view of a query has no actions",
+    "row_actions": "A view of a query has no row actions",
+    "bulk_actions": "A view of a query has no bulk actions",
+    "selection": "A view of a query has no selection",
+    "row_click": "A view of a query has no row actions",
+    "sort": "A view of a query has no sort: the query gives the order of the rows",
+    "order_field": "A view of a query has no manual order: the query gives the order of the rows",
+}
+"""The keys of the other views that a view of a query cannot have, with the reason."""
+
+
+class QueryViewBase(Element):
+    """The keys of all views of a query: the query and its params (ADR 0045)."""
+
+    query: MemberName
+    """An operation with `kind: query`. The view shows its rows."""
+    params: dict[str, JsonScalar] = pydantic.Field(default_factory=dict[str, JsonScalar])
+    """The value of each param that no filter gives. The value `$route.<name>` is a path
+    parameter of the page."""
+    filters: dict[MemberName, QueryFilter] = pydantic.Field(default_factory=dict[str, QueryFilter])
+    """The fields above the rows that give the other params."""
+    title: Text | None = None
+    description: Text | None = None
+    states: States | None = None
+    """The default comes from `ui.defaults.states`, and then from the binding."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_record_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key, reason in _QUERY_KEYS.items():
+                if key in data:
+                    raise PydanticCustomError(
+                        "query_view_key", "{reason} (key '{key}')", {"reason": reason, "key": key}
+                    )
+        return data  # pyright: ignore[reportUnknownVariableType]
+
+
+class QueryTableView(QueryViewBase):
+    """A table of the rows of a query, one page at a time."""
+
+    kind: Literal["table"]
+    columns: Annotated[dict[MemberName, QueryColumn], pydantic.Field(min_length=1)]
+    pagination: Pagination | None = None
+
+
+class QueryCardsView(QueryViewBase):
+    """A grid of cards, one for each row of a query, one page at a time."""
+
+    kind: Literal["cards"]
+    card: QueryCard
+    grid: Grid | None = None
+    pagination: Pagination | None = None
+
+
+class QueryCalendarView(QueryViewBase):
+    """The rows of a query on a calendar, by a date or a date-time field."""
+
+    kind: Literal["calendar"]
+    start: MemberName
+    """A date or a date-time field of the rows: the day and the start time of each row."""
+    end: MemberName | None = None
+    """A field of the same type as `start`: the end. Without it, a row has no length."""
+    label: MemberName | None = None
+    """The text of a row. The default is the display field of the entity of the records."""
+    mode: Literal["week", "month"] = "month"
+    """The first mode. The user can switch between the week and the month."""
+    link: MemberName | None = None
+    """A page that a row opens, with the ID of the record. Only for rows that are records."""
+
+
 type ApiView = ApiTableView | ApiCardsView | ApiDetailView
 """A view of API data (`source`)."""
+
+type QueryView = QueryTableView | QueryCardsView | QueryCalendarView
+"""A view of the rows of a query (`query`)."""
 
 type EntityView = TableView | CardsView | BoardView | CalendarView | DetailView
 """A view of the records of an entity."""
 
 
 def view_tag(value: object) -> str | None:
-    """Return the union tag of a view: `tag-api-<kind>` for a view with `source`."""
+    """Return the union tag of a view: `tag-api-<kind>` for a view with `source`, and
+    `tag-query-<kind>` for a view with `query`."""
     tag = kind_tag(value)
-    if tag is not None and isinstance(value, dict) and "source" in value:
-        return "tag-api-" + tag.removeprefix("tag-")
+    if tag is not None and isinstance(value, dict):
+        for key, prefix in (("source", "tag-api-"), ("query", "tag-query-")):
+            if key in value:
+                return prefix + tag.removeprefix("tag-")
     return tag
 
 
@@ -494,8 +610,11 @@ type View = Annotated[
     | Annotated[DetailView, Tag("tag-detail")]
     | Annotated[ApiTableView, Tag("tag-api-table")]
     | Annotated[ApiCardsView, Tag("tag-api-cards")]
-    | Annotated[ApiDetailView, Tag("tag-api-detail")],
+    | Annotated[ApiDetailView, Tag("tag-api-detail")]
+    | Annotated[QueryTableView, Tag("tag-query-table")]
+    | Annotated[QueryCardsView, Tag("tag-query-cards")]
+    | Annotated[QueryCalendarView, Tag("tag-query-calendar")],
     Discriminator(view_tag),
 ]
-"""A view of the records of an entity, or of API data (`source`). The `kind` key selects the
-type."""
+"""A view of the records of an entity, of API data (`source`), or of the rows of a query
+(`query`). The `kind` key selects the type."""

@@ -259,7 +259,11 @@ example the free slots of a room or the totals of each month. It has
 of each row, for rows that are not records), not both. Its logic is a
 generation gap that returns all rows: the generated code gives a page
 of them, and applies the permission and the record rules. Do not name
-a param `limit` or `offset`.
+a param `limit` or `offset`. To show the rows, give a table, a card
+list, or a calendar `query: <query>` in place of `entity`, with
+`filters` for the params that the user enters and `params` for the
+others (a literal, or `$route.<name>`). Each required param needs a
+value. The view shows the fields of the rows, not the relations.
 
 For a record with lines, for example an invoice with invoice lines,
 give the create and the update operation `lines` with the names of the

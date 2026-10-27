@@ -60,6 +60,7 @@ from appgen.dsl.ui.views import (
     DetailView,
     EntityView,
     Filter,
+    QueryViewBase,
     SearchFilter,
     SelectFilter,
     TableView,
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
     from appgen.bindings.shared.api_views import ApiViewPlan
     from appgen.bindings.shared.dashboards import DashboardPlan
     from appgen.bindings.shared.details import DetailPlan
+    from appgen.bindings.shared.query_views import QueryViewPlan
 
 type ValueKind = Literal["field", "id", "one", "many"]
 
@@ -561,6 +563,13 @@ class ViewContext:
             if isinstance(view, ApiViewBase)
         }
         """The kind of each view of API data (`table`, `cards`, or `detail`), by name."""
+        self.query_views: dict[str, str] = {
+            name: view.kind
+            for name, view in (ui.views.items() if ui else ())
+            if isinstance(view, QueryViewBase)
+        }
+        """The kind of each view of the rows of a query (`table`, `cards`, or `calendar`), by
+        name (ADR 0045)."""
         self.dashboards: list[str] = list(ui.dashboards) if ui else []
         self._plans: dict[str, ViewPlan] = {}
         # A local import: the forms module imports this module.
@@ -570,6 +579,7 @@ class ViewContext:
         self._details: dict[str, Any] = {}
         self._dashboards: dict[str, Any] = {}
         self._api_views: dict[str, Any] = {}
+        self._query_views: dict[str, Any] = {}
         self._bars: dict[str, ActionBarPlan] = {}
 
     @property
@@ -579,6 +589,7 @@ class ViewContext:
             self.list_views
             or self.detail_views
             or self.api_views
+            or self.query_views
             or self.dashboards
             or self.page_action_bars
         )
@@ -752,6 +763,14 @@ class ViewContext:
             self._api_views[name] = build_api_view(self, name, self.api_server)
         return self._api_views[name]
 
+    def query_view_plan(self, name: str) -> QueryViewPlan:
+        """Return the plan of a view of a query (see `appgen.bindings.shared.query_views`)."""
+        from appgen.bindings.shared.query_views import build_query_view
+
+        if name not in self._query_views:
+            self._query_views[name] = build_query_view(self, name)
+        return self._query_views[name]
+
     def dashboard_plan(self, name: str) -> DashboardPlan:
         """Return the plan of a dashboard (see `appgen.bindings.shared.dashboards`)."""
         from appgen.bindings.shared.dashboards import build_dashboard
@@ -772,7 +791,8 @@ class ViewContext:
         """Return the runtime parts that the views need, for the outputs and shadcn/ui.
 
         The parts are the view kinds, the filter kinds (`search`, `boolean`,
-        `date_range`, `select`, `multi_select`), the value components
+        `date_range`, `select`, `multi_select`, and `param` for the input of
+        a param of a query), the value components
         (`badge`, `avatar`, `formatted`), the charts (`chart`, and
         `dates` for a chart of dates), the period of a dashboard
         (`period`), and the manual order of a table or a board (`order`).
@@ -804,6 +824,11 @@ class ViewContext:
             found |= api_plan.uses & values
             if api_plan.filters:
                 found.add("search")
+        for name, kind in self.query_views.items():
+            query_plan = self.query_view_plan(name)
+            found.add(kind)
+            found |= query_plan.uses & values
+            found |= {f.feature for f in query_plan.filters}
         for name in self.dashboards:
             dashboard = self.dashboard_plan(name)
             found.add("dashboard")
@@ -955,6 +980,36 @@ class ViewContext:
             target=target_entity,
         )
 
+    def row_value(
+        self, name: str, member: Field, fmt: str | None = None, row: str = "item"
+    ) -> Value:
+        """Return the value of a field of a row that is not a record: a field of the `result`
+        of a query (ADR 0045). An enum shows as a badge with the default colors."""
+        raw = f"{row}.{camel(name)}"
+        fmt = fmt or member.format or ("badge" if member.type == "enum" else None)
+        fmt = fmt or _DEFAULT_FORMATS[member.type]
+        currency = member.currency if fmt == "currency" else None
+        currency_arg = f", {js(currency)}" if currency else ""
+        text = (
+            f'String({raw} ?? "")'
+            if member.type in ("string", "text", "email", "url", "enum")
+            else f'formatValue({raw}, "{fmt if fmt not in ("badge", "avatar") else "text"}"'
+            f"{currency_arg})"
+        )
+        return Value(
+            path=name,
+            label=member.label or label(name),
+            kind="field",
+            type=member.type,
+            expr=raw,
+            key_expr=raw,
+            text_expr=text,
+            sort_expr=raw,
+            format=fmt,
+            enum_values=tuple(member.values or ()) if member.type == "enum" else (),
+            currency=currency,
+        )
+
     def _file_value(
         self,
         entity: str,
@@ -1045,7 +1100,9 @@ class ViewContext:
         definition = self.definition
         assert definition.ui is not None
         view = definition.ui.views[name]
-        assert not isinstance(view, ApiViewBase), "A view of API data has an ApiViewPlan."
+        assert not isinstance(view, ApiViewBase | QueryViewBase), (
+            "A view of API data or of a query has its own plan."
+        )
         plan = ViewPlan(name=name, view=view, entity=view.entity)
         paths: list[str] = []
         if isinstance(view, TableView):
@@ -1870,6 +1927,7 @@ def view_rules() -> tuple[Output, ...]:
                         ("filters", "select-filter", "'select' in ui_views.features"),
                         ("filters", "multi-select-filter", "'multi_select' in ui_views.features"),
                         ("filters", "record-filter", "'record_select' in ui_views.features"),
+                        ("filters", "param-filter", "'param' in ui_views.features"),
                     )
                 ),
             )
@@ -1914,6 +1972,21 @@ def view_rules() -> tuple[Output, ...]:
                 ),
                 Output(
                     template="ui/views/api-index.ts.j2", path=_VIEW + "/index.ts", for_each=kind
+                ),
+            )
+        ),
+        # The views of the rows of a query (ADR 0045).
+        *(
+            rule
+            for kind in ("query_table_view", "query_cards_view", "query_calendar_view")
+            for rule in (
+                Output(
+                    template="ui/views/query-view.tsx.j2",
+                    path=_VIEW + "/ui/{{ name | kebab }}-view.tsx",
+                    for_each=kind,
+                ),
+                Output(
+                    template="ui/views/query-index.ts.j2", path=_VIEW + "/index.ts", for_each=kind
                 ),
             )
         ),

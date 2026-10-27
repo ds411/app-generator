@@ -56,3 +56,22 @@ async def test_a_query_gives_rows_that_are_not_records(
         "limit": 50,
         "offset": 0,
     }
+
+
+async def test_a_query_gives_the_records_of_a_param_of_a_uuid(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    listing = str((await make_listing(session)).id)
+    other = str((await make_listing(session)).id)
+    late = await make_booking(
+        session, listing_id=listing, check_in="2031-06-10", check_out="2031-06-12"
+    )
+    early = await make_booking(
+        session, listing_id=listing, check_in="2031-06-01", check_out="2031-06-03"
+    )
+    await make_booking(session, listing_id=other, check_in="2031-06-01", check_out="2031-06-03")
+
+    response = await client.get("/bookings/bookings-of-listing", params={"listing": listing})
+
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [str(early.id), str(late.id)]

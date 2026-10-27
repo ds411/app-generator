@@ -998,6 +998,8 @@ operations:
   gets only the records that the user may read. The extension file
   gives all rows, and the generated code removes the other records.
 - An `operation` action cannot run a query (`unsuitable-operation`).
+- A table, a card list, or a calendar shows the rows of a query, with
+  filters for its params (see [Views of a query](#views-of-a-query)).
 
 ### Lines of a record
 
@@ -1900,8 +1902,9 @@ pages:
 
 A view shows the records of one entity. Each view has `kind`, `entity`,
 and optional `title`, `description`, `actions`, and `states`. A view
-can also show the answer of an API operation in place of the records:
-see [Views of API data](#views-of-api-data).
+can also show the answer of an API operation in place of the records
+(see [Views of API data](#views-of-api-data)), or the rows of a query
+(see [Views of a query](#views-of-a-query)).
 
 **Table** (`kind: table`):
 
@@ -2142,6 +2145,88 @@ ui:
       source: apis.holidays.operations.getNextPublicHolidays
       params: { countryCode: $route.country }
       card: { title: name, subtitle: date, fields: [localName] }
+```
+
+#### Views of a query
+
+A table, a card list, or a calendar can show the rows of a query (see
+[Queries](#queries) and [ADR 0045](adr/0045-queries.md)). The view has
+`query: <operation>` in place of `entity`. Each param of the query gets
+its value from a filter of the view or from `params`, not from both
+(`invalid-option`), and each required param needs a value
+(`missing-key`).
+
+- `filters` is a mapping from a name to a filter: `param` (default: the
+  name), `label` (default: the label of the param), and `default`. The
+  filter of a text, a number, a date, or a date and time is an input of
+  that type, the filter of an enum is a select, and the filter of a
+  boolean is a switch: on gives `true`, and off gives `false` to a
+  required param, else no value. While the filter of a required param
+  has no value, the view shows a message and does not run the query.
+- `params` gives the other params: a literal of the type of the param,
+  or `$route.<name>` for a path parameter of the page (`invalid-value`).
+- The fields of the view are the fields of the rows: the fields of the
+  entity of `returns` and `id` (not its relations or its file fields),
+  or the fields of `result` (`unknown-reference`, `unsuitable-field`).
+- A table has `columns` (`field`, `label`, `format`, `width`, `align`,
+  `link`, `hide_below`), a card list has `card` (`title`, `subtitle`,
+  `fields`, `footer`) and `grid`, and both have `pagination` (the mode
+  `pages`). A calendar has `start`, `end`, `label`, `mode`, and `link`:
+  `start` and `end` are date or date-time fields of the same type, and
+  rows that are not records need `label`.
+- `link` opens the page of a record: only for rows that are records.
+- The query gives the order of the rows, so the view has no `sort` and
+  no `order_field`, and its rows are not records of the view: it has no
+  actions, no row actions, no bulk actions, and no selection.
+- The page of the view has no `entity`, and its path has each `$route`
+  parameter of the view. A tab or a list widget of a dashboard cannot
+  show a view of a query (`unsuitable-view`).
+
+The view loads one page of the rows with the function of the query. In
+the Next.js app, the function calls the server action of the query, so
+the extension file runs on the server, with the permission and the
+record rules. The React app calls the endpoint of the FastAPI app with
+`x-react-data: api`, else the extension file with the mock data. A
+calendar loads all rows, 200 at a time.
+
+```yaml
+operations:
+  open_tasks_of_person:
+    kind: query
+    entity: Task
+    params:
+      person_id: { type: uuid, required: true }
+    returns: Task
+  tasks_by_status:
+    kind: query
+    entity: Task
+    params:
+      due_before: { type: date }
+    result:
+      status: { type: string, required: true, label: Status }
+      tasks: { type: integer, required: true, label: Tasks }
+pages:
+  open_tasks:
+    path: "/people/{id}/open-tasks"
+    title: Open tasks
+    content: { view: open_task_table }
+  task_counts: { path: /task-counts, title: Tasks by status, content: { view: status_cards } }
+ui:
+  views:
+    open_task_table:
+      kind: table
+      query: open_tasks_of_person
+      params: { person_id: $route.id }
+      columns:
+        title: { link: task_detail }
+        due_date: { align: end }
+      pagination: { page_size: 10 }
+    status_cards:
+      kind: cards
+      query: tasks_by_status
+      filters:
+        due_before: { label: Due before }
+      card: { title: status, fields: [tasks] }
 ```
 
 ### forms
@@ -2872,7 +2957,8 @@ use in the app does not show.
   `Move the row`, `The row did not move.`.
 - Filters: `No matching records`, `Change or reset the filters.`,
   `Reset the filters`, `Reset`, `{label}: all`, `{count} chosen`,
-  `No value has this name.`, `Clear the filter`, `Clear {label}`.
+  `No value has this name.`, `Clear the filter`, `Clear {label}`,
+  `Enter the required values`, `The view needs a value in: {names}.`.
 - Boards and calendars: `Move to`, `Drop a card here`,
   `The column has more than {limit} cards.`, `The card did not move.`,
   `Show more` (a board of the API client),

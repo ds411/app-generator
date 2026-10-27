@@ -1,11 +1,15 @@
 # yaml-language-server: $schema=../../schema/app.schema.json
 # Listings: the holiday homes of M35 and their bookings. The queries
-# give the listings of a city for a count of guests, and the count of the
-# bookings and the nights of each month of a year (ADR 0045). The logic
-# of the queries is hand-written: the checks copy the files of
-# tests/fixtures/listings/extensions/<binding> into each app before they
-# generate it. scripts/check-fastapi.sh generates and checks the FastAPI
-# app of this definition, and runs its tests on Postgres and SQLite.
+# give the listings of a city for a count of guests, the bookings of a
+# listing, and the count of the bookings and the nights of each month of
+# a year (ADR 0045). The logic of the queries is hand-written: the checks
+# copy the files of tests/fixtures/listings/extensions/<binding> into each
+# app before they generate it. A table, a card list, and a calendar show
+# the rows of the queries, with filters and path parameters for the
+# params. scripts/check-fastapi.sh generates and checks the FastAPI app of
+# this definition, and runs its tests on Postgres and SQLite.
+# scripts/listings_ui_test.py runs the UI tests of the views of the
+# queries in each front end.
 version: 0
 
 app:
@@ -73,6 +77,15 @@ pages:
     title: Edit listing
     entity: Listing
     content: { form: edit_listing }
+  listing_calendar:
+    path: "/listings/{id}/calendar"
+    title: Bookings of the listing
+    content: { view: listing_calendar }
+  stays: { path: /stays, title: Stays, content: { view: stay_table } }
+  booking_months:
+    path: "/booking-months/{year}"
+    title: Bookings by month
+    content: { view: month_cards }
   bookings: { path: /bookings, title: Bookings, content: { view: booking_table } }
   new_booking: { path: /bookings/new, title: New booking, content: { form: new_booking } }
 
@@ -85,6 +98,13 @@ operations:
       city: { type: string, required: true, max_length: 80 }
       guests: { type: integer, min: 1, max: 20 }
     returns: Listing
+  bookings_of_listing:
+    kind: query
+    entity: Booking
+    description: The bookings of a listing, by check-in.
+    params:
+      listing: { type: uuid, required: true }
+    returns: Booking
   bookings_by_month:
     kind: query
     entity: Booking
@@ -95,6 +115,40 @@ operations:
       month: { type: date, required: true, label: Month }
       bookings: { type: integer, required: true, label: Bookings }
       nights: { type: integer, required: true, label: Nights }
+
+ui:
+  views:
+    stay_table:
+      kind: table
+      query: listings_for_guests
+      title: Stays
+      filters:
+        city: { default: Lisbon }
+        guests: { label: Guests }
+      columns:
+        title: { link: listing_detail }
+        city: {}
+        guests: { align: end }
+        nightly_rate: { label: Price per night, align: end }
+      pagination: { page_size: 2 }
+      states:
+        empty: { title: No stays, text: No listing has room for these guests. }
+    month_cards:
+      kind: cards
+      query: bookings_by_month
+      params: { year: $route.year }
+      card:
+        title: month
+        fields: [bookings, nights]
+      states:
+        empty: { title: No bookings in this year }
+    listing_calendar:
+      kind: calendar
+      query: bookings_of_listing
+      params: { listing: $route.id }
+      start: check_in
+      end: check_out
+      label: guest
 
 seed:
   Listing:

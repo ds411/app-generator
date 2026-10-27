@@ -155,6 +155,43 @@ export type ExpectedConnections = {
   sync: { path: string; action: string; toast: string; notConnected: string } | null;
 };
 
+/** The views of the rows of the queries of tests/fixtures/listings.yaml, for scripts/listings_ui_test.py (ADR 0045). */
+export type ExpectedQueryViews = {
+  /** A table of a query of records, with a required text filter and a number filter. */
+  table: {
+    path: string;
+    /** The titles of the first page and of the second page, and the count of all rows. */
+    pages: string[][];
+    total: number;
+    /** The label and the value of the number filter, and the titles of its rows. */
+    filter: { label: string; value: string; titles: string[] };
+    /** A value of the number filter without rows, and the title of the empty state. */
+    none: { value: string; title: string };
+    /** The label of the required filter, another value, and the titles of its rows. */
+    required: { label: string; value: string; titles: string[] };
+    /** The title of the message while the required filter has no value. */
+    missing: string;
+  };
+  /** A card list of a query of rows that are not records, with a path parameter. */
+  cards: {
+    path: string;
+    /** The values of the fields of each card, by label. */
+    cards: Record<string, string>[];
+    emptyPath: string;
+    empty: string;
+  };
+  /** A calendar of the records of a query of the record of the page. */
+  calendar: {
+    /** The title of the record in the table, and the path suffix of its calendar. */
+    record: string;
+    suffix: string;
+    /** The day that the browser shows first (UTC). */
+    today: string;
+    events: string[];
+    others: string[];
+  };
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -168,6 +205,8 @@ export type Expected = {
   auth?: ExpectedAuth;
   /** Only for the test of the connections to the APIs. */
   connections?: ExpectedConnections;
+  /** Only for the test of the views of the queries. */
+  queryViews?: ExpectedQueryViews;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

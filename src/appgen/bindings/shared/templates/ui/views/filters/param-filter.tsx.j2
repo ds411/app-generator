@@ -1,0 +1,41 @@
+{{ trace_header("app") }}
+"use client";
+
+import { useId } from "react";
+
+import { Input } from "@/shared/ui/input";
+
+/** The input of the value of a param of a query (ADR 0045): a text, a number, a date, or a date and time. */
+export function ParamFilter({
+  label,
+  type = "text",
+  step,
+  required = false,
+  value,
+  onChange,
+}: {
+  label: string;
+  type?: "text" | "number" | "date" | "datetime-local";
+  step?: string;
+  required?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex w-full items-center gap-2 sm:w-auto">
+      <label htmlFor={id} className="shrink-0 text-sm text-muted-foreground">
+        {label}
+      </label>
+      <Input
+        id={id}
+        type={type}
+        step={step}
+        required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-full sm:w-44"
+      />
+    </div>
+  );
+}

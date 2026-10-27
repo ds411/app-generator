@@ -8,6 +8,9 @@
 {% set id_param = params[-1] if detail else none %}
 {% set api_view = element.content.view if element.content is not none and element.content.view in ui_views.api_views else none %}
 {% set api_route = api_view and ui_views.api_view_plan(api_view).props %}
+{# A view of a query loads its rows with the function of the query (ADR 0045). #}
+{% set query_view = element.content.view if element.content is not none and element.content.view in ui_views.query_views else none %}
+{% set query_route = query_view and ui_views.query_view_plan(query_view).route_params %}
 {% set description = element.meta.description if element.meta else none %}
 {# A description that a field of the record of the page gives (`$record.<field>`). #}
 {% set description_field = description[8:] if description and description.startswith("$record.") else none %}
@@ -17,7 +20,7 @@ import { {{ element.entity | camel }}Api } from "@/entities/{{ element.entity | 
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
 {% endif %}
-{% if (params and not view and not dashboard and not api_view) or form or api_route or description_field %}
+{% if (params and not view and not dashboard and not api_view and not query_view) or form or api_route or query_route or description_field %}
 import { useParams } from "@/shared/lib/router";
 {% endif %}
 {% if description %}
@@ -34,8 +37,8 @@ import { {{ dashboard | pascal }}Dashboard } from "@/widgets/{{ dashboard | keba
 import { {{ name | pascal }}PageActions } from "@/widgets/page-actions";
 {% endif %}
 import { PageHeader } from "@/widgets/page-header";
-{% if view or detail or api_view %}
-import { {{ (view or detail or api_view) | pascal }}View } from "@/widgets/{{ (view or detail or api_view) | kebab }}";
+{% if view or detail or api_view or query_view %}
+import { {{ (view or detail or api_view or query_view) | pascal }}View } from "@/widgets/{{ (view or detail or api_view or query_view) | kebab }}";
 {% endif %}
 {% if custom %}
 
@@ -66,9 +69,9 @@ export function {{ name | pascal }}Page() {
   const params = useParams();
 {% elif detail %}
   const { {{ id_param }}{% if id_param != id_param | camel %}: {{ id_param | camel }}{% endif %} } = useParams();
-{% elif api_route %}
+{% elif api_route or query_route %}
   const route = useParams();
-{% elif params and not view and not dashboard and not api_view %}
+{% elif params and not view and not dashboard and not api_view and not query_view %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
 {% set regions = page_regions(element, page_actions | length > 0) %}
@@ -81,6 +84,8 @@ export function {{ name | pascal }}Page() {
 <{{ detail | pascal }}View id={ {{- id_param | camel }} ?? ""} /> {{ trace(element.content.id, jsx=True) }}
 {% elif api_view %}
 <{{ api_view | pascal }}View{% if api_route %} route={route}{% endif %} /> {{ trace(element.content.id, jsx=True) }}
+{% elif query_view %}
+<{{ query_view | pascal }}View{% if query_route %} route={route}{% endif %} /> {{ trace(element.content.id, jsx=True) }}
 {% elif dashboard %}
 <{{ dashboard | pascal }}Dashboard /> {{ trace(element.content.id, jsx=True) }}
 {% elif form %}

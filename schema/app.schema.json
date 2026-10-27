@@ -5543,6 +5543,486 @@
       "title": "Provider",
       "type": "object"
     },
+    "QueryCalendarView": {
+      "additionalProperties": false,
+      "description": "The rows of a query on a calendar, by a date or a date-time field.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "query": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryFilter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "calendar",
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "default": "month",
+          "enum": [
+            "week",
+            "month"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query",
+        "kind",
+        "start"
+      ],
+      "title": "QueryCalendarView",
+      "type": "object"
+    },
+    "QueryCard": {
+      "additionalProperties": false,
+      "description": "The content of a card of a row of a query.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "footer": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Footer",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "QueryCard",
+      "type": "object"
+    },
+    "QueryCardsView": {
+      "additionalProperties": false,
+      "description": "A grid of cards, one for each row of a query, one page at a time.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "query": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryFilter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "cards",
+          "title": "Kind",
+          "type": "string"
+        },
+        "card": {
+          "$ref": "#/$defs/QueryCard"
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query",
+        "kind",
+        "card"
+      ],
+      "title": "QueryCardsView",
+      "type": "object"
+    },
+    "QueryColumn": {
+      "additionalProperties": false,
+      "description": "A column of a table of the rows of a query.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Format"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "align": {
+          "default": "start",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hide_below": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakpointName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "QueryColumn",
+      "type": "object"
+    },
+    "QueryFilter": {
+      "additionalProperties": false,
+      "description": "A field of the view that gives the value of a param of the query (ADR 0045).",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "param": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "$ref": "#/$defs/JsonScalar",
+          "default": null
+        }
+      },
+      "title": "QueryFilter",
+      "type": "object"
+    },
+    "QueryTableView": {
+      "additionalProperties": false,
+      "description": "A table of the rows of a query, one page at a time.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "query": {
+          "$ref": "#/$defs/MemberName"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonScalar"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "filters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryFilter"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Filters",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "states": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/States"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryColumn"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pagination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query",
+        "kind",
+        "columns"
+      ],
+      "title": "QueryTableView",
+      "type": "object"
+    },
     "ReceiverPath": {
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
       "type": "string"
@@ -7173,6 +7653,15 @@
         },
         {
           "$ref": "#/$defs/ApiDetailView"
+        },
+        {
+          "$ref": "#/$defs/QueryTableView"
+        },
+        {
+          "$ref": "#/$defs/QueryCardsView"
+        },
+        {
+          "$ref": "#/$defs/QueryCalendarView"
         }
       ]
     },

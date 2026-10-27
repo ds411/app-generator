@@ -41,6 +41,7 @@ from appgen.dsl.ui.views import (
     DateRangeFilter,
     DetailTab,
     DetailView,
+    QueryViewBase,
     SearchFilter,
     SelectFilter,
     TableView,
@@ -474,7 +475,7 @@ def list_query(definition: AppDefinition, entity: PyEntity) -> PyListQuery:
             builder.add(param)
     views: list[View] = list(definition.ui.views.values()) if definition.ui is not None else []
     for view in views:
-        if isinstance(view, ApiViewBase):
+        if isinstance(view, ApiViewBase | QueryViewBase):
             continue
         if isinstance(view, DetailView):
             for tab in view.tabs.values():
