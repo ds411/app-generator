@@ -1,0 +1,61 @@
+{% from "src/features/query/api/macros.j2" import row_type, entity_imports %}
+{% set fn = name | camel %}
+{% set public = definition.auth and name in definition.auth.public_operations %}
+{# The record rules of the entity of the rows (ADR 0025) apply to a query that is not public. #}
+{% set rows_entity = element.returns if element.returns != "none" else none %}
+{% set rule = record_rules.get(rows_entity) if rows_entity and not public else none %}
+{{ trace_header(element_id) }}
+"use server";
+
+import { z } from "zod";
+
+import { type ActionResult, type ListResult, pageOfRows, type RowsPage } from "@/shared/api";
+import { runAction } from "@/shared/api/server";
+{% if rule %}
+import { recordScope } from "@/shared/auth/access";
+{% endif %}
+
+{{ entity_imports(name, element, [fn ~ "ParamsSchema"] if element.params else []) | trim }}
+{% if rule %}
+import { {{ rows_entity | camel }}Repository } from "@/entities/{{ rows_entity | kebab }}/server";
+{% endif %}
+
+import { {{ fn }} } from "./{{ name | kebab }}.ext";
+
+/** The rules of a page of the rows. */
+const pageSchema = z.object({ page: z.int().min(1), pageSize: z.int().min(1).max(200) });
+
+/** The server action of the query {{ name }}: one page of the rows of the extension file. */
+export async function {{ fn }}Action(
+{% if element.params %}
+  params: {{ name | pascal }}Params,
+{% endif %}
+  page: RowsPage,
+): Promise<ActionResult<ListResult<{{ row_type(name, element) }}>>> {
+  return runAction(
+    async () => {
+      const rows = await {{ fn }}({% if element.params %}{{ fn }}ParamsSchema.parse(params){% endif %});
+{% if rule %}
+      // A user of a record rule gets only the records of the rule.
+{% for id in rule.element_ids %}
+      {{ trace(id) }}
+{% endfor %}
+      const shown = await {{ rows_entity | camel }}Repository.visible(
+        rows.map((row) => row.id),
+        await recordScope({{ ts_value(rows_entity) }}, "read"),
+      );
+      return pageOfRows(
+        rows.filter((row) => shown.has(row.id)),
+        pageSchema.parse(page),
+      );
+{% else %}
+      return pageOfRows(rows, pageSchema.parse(page));
+{% endif %}
+    },
+{% if public %}
+    { public: true },
+{% elif definition.access %}
+    { operation: {{ name | tojson }} },
+{% endif %}
+  );
+}

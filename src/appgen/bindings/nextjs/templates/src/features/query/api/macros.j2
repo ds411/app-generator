@@ -1,0 +1,18 @@
+{#- The types of a query (ADR 0045): the type of a row, and the imports of the params and the rows. -#}
+{% macro row_type(name, op) -%}
+{{ op.returns | pascal if op.returns != "none" else name | pascal ~ "Row" }}
+{%- endmacro %}
+{#- The imports from the entity slices. `values` are values of the slice of the query entity. -#}
+{% macro entity_imports(name, op, values=()) -%}
+{% set types = [] %}
+{% if op.params %}{% set _ = types.append(name | pascal ~ "Params") %}{% endif %}
+{% if op.returns == "none" or op.returns == op.entity %}{% set _ = types.append(row_type(name, op)) %}{% endif %}
+{% if values %}
+import { {{ values | join(", ") }}{% for t in types | sort %}, type {{ t }}{% endfor %} } from "@/entities/{{ op.entity | kebab }}";
+{% else %}
+import type { {{ types | sort | join(", ") }} } from "@/entities/{{ op.entity | kebab }}";
+{% endif %}
+{% if op.returns not in ("none", op.entity) %}
+import type { {{ op.returns | pascal }} } from "@/entities/{{ op.returns | kebab }}";
+{% endif %}
+{%- endmacro %}

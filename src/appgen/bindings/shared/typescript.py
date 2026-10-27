@@ -12,7 +12,7 @@ from typing import Any
 
 from appgen.bindings.shared.integrations import ts_features
 from appgen.bindings.shared.lines import line_items, lines_operations
-from appgen.dsl.model import AppDefinition, Entity, Field, Relation
+from appgen.dsl.model import AppDefinition, Entity, Field, Operation, Relation
 from appgen.gen.naming import camel, pascal, words
 
 _TS_TYPES = {
@@ -219,6 +219,11 @@ def operations_of(definition: AppDefinition, entity_name: str) -> list[tuple[str
     return [(n, op) for n, op in definition.operations.items() if op.entity == entity_name]
 
 
+def query_operations(definition: AppDefinition) -> list[tuple[str, Operation]]:
+    """Return the queries (ADR 0045), in source order, as (name, operation) pairs."""
+    return [(n, op) for n, op in definition.operations.items() if op.kind == "query"]
+
+
 def inverse_lists(definition: AppDefinition, entity_name: str) -> list[tuple[str, str, Relation]]:
     """Return the `one_to_many` relations whose records are of this entity.
 
@@ -333,6 +338,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "has_history": has_history,
     "history_user_key": history_user_key,
     "operations_of": operations_of,
+    "query_operations": query_operations,
     "inverse_lists": inverse_lists,
     "line_items": line_items,
     "lines_operations": lines_operations,

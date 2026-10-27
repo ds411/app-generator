@@ -214,7 +214,7 @@ BINDING = Binding(
             template="app/features/slice/operation.py.j2",
             path=_OPERATION + ".py",
             for_each="operation",
-            when="element.kind != 'custom'",
+            when="element.kind not in ('custom', 'query')",
         ),
         Output(
             template="app/features/slice/custom_gen.py.j2",
@@ -227,6 +227,20 @@ BINDING = Binding(
             path=_OPERATION + "_ext.py",
             for_each="operation",
             when="element.kind == 'custom'",
+            extension=True,
+        ),
+        # A query (ADR 0045): the endpoint, and the gap that gives the rows.
+        Output(
+            template="app/features/slice/query_gen.py.j2",
+            path=_OPERATION + "_gen.py",
+            for_each="operation",
+            when="element.kind == 'query'",
+        ),
+        Output(
+            template="app/features/slice/query_ext.py.j2",
+            path=_OPERATION + "_ext.py",
+            for_each="operation",
+            when="element.kind == 'query'",
             extension=True,
         ),
         Output(
@@ -504,7 +518,7 @@ BINDING = Binding(
         ),
     ),
     covers=frozenset(
-        {"app", "entity", "field", "sequence", "relation", "operation", "param"}
+        {"app", "entity", "field", "sequence", "relation", "operation", "param", "result_field"}
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}

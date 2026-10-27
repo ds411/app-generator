@@ -400,8 +400,13 @@ def test_the_edge_cases_cover_all_elements_with_data(tmp_path: Path, nextjs: Bin
     data = [
         e for e in report.coverage.elements if e.element_id.startswith(("entities.", "operations."))
     ]
-    # The stubs of the custom operations stay open gaps until a developer writes them.
-    custom = {f"operations.{n}" for n, op in definition.operations.items() if op.kind == "custom"}
+    # The stubs of the custom operations and of the queries stay open gaps until a developer
+    # writes them.
+    custom = {
+        f"operations.{n}"
+        for n, op in definition.operations.items()
+        if op.kind in ("custom", "query")
+    }
     assert {e.element_id for e in data if e.status == "gap"} == custom
     assert {e.status for e in data if e.element_id not in custom} == {"covered"}
 

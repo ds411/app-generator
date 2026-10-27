@@ -1,0 +1,17 @@
+{% from "src/features/query/api/macros.j2" import row_type, entity_imports %}
+{% set fn = name | camel %}
+{{ trace_header(element_id) }}
+import { FIRST_ROWS, type ListResult, type RowsPage, unwrap } from "@/shared/api";
+
+{{ entity_imports(name, element) | trim }}
+
+import { {{ fn }}Action } from "./{{ name | kebab }}.gen";
+
+{% if element.description %}
+/** {{ element.description }} One page of the rows. */
+{% else %}
+/** The query {{ name }}: one page of the rows. */
+{% endif %}
+export async function {{ fn }}({% if element.params %}params: {{ name | pascal }}Params, {% endif %}page: RowsPage = FIRST_ROWS): Promise<ListResult<{{ row_type(name, element) }}>> {
+  return unwrap(await {{ fn }}Action({% if element.params %}params, {% endif %}page));
+}

@@ -84,6 +84,21 @@ operations:
     kind: custom
     entity: Item
     returns: none
+  # A query of records, and a query of rows that are not records (ADR 0045).
+  samples_of_level:
+    kind: query
+    entity: Sample
+    params:
+      level: { type: enum, values: ["on", "off", standby], required: true }
+      since: { type: date }
+    returns: Sample
+  sample_counts:
+    kind: query
+    entity: Sample
+    result:
+      level: { type: enum, values: ["on", "off", standby], required: true }
+      samples: { type: integer, required: true }
+      ratio: { type: decimal, precision: 5, scale: 4 }
 
 pages:
   home: { path: /, title: Home }

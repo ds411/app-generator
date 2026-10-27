@@ -260,9 +260,10 @@ git config core.hooksPath .githooks
   the same way, and runs its seed test on Postgres. Then it generates
   `tests/fixtures/record-rules.yaml` (the record rules with conditions
   and owner paths) and the other fixtures of the script header, for
-  example `tests/fixtures/totals.yaml` (the totals of the relations)
-  and `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037), and
-  runs the same checks on them. It needs Docker.
+  example `tests/fixtures/totals.yaml` (the totals of the relations),
+  `tests/fixtures/invoices.yaml` (sequence numbers, ADR 0037), and
+  `tests/fixtures/listings.yaml` (queries with hand-written logic, ADR
+  0045), and runs the same checks on them. It needs Docker.
   Run it by hand with
   `scripts/check-fastapi.sh [output folder]`. The script header lists
   the environment variables for other images (for example a mirror).
@@ -280,7 +281,9 @@ git config core.hooksPath .githooks
   `tests/fixtures/invoices.yaml` with the sequence test
   (`scripts/sequence_test.py`), and `tests/fixtures/totals.yaml`, whose
   test reads the totals of the relations and checks the compare rules
-  over totals with PGlite (`scripts/totals_test.py`). It needs pnpm and Docker. Run it by hand
+  over totals with PGlite (`scripts/totals_test.py`), and
+  `tests/fixtures/listings.yaml`, whose test calls the server actions of
+  the queries with PGlite (`scripts/queries_test.py`). It needs pnpm and Docker. Run it by hand
   with `scripts/check-nextjs.sh [output folder]`.
 - When a push changes the generator core, the React binding, or the
   shared binding code, the hook also runs `scripts/check-react.sh`. The
@@ -290,9 +293,10 @@ git config core.hooksPath .githooks
   `tests/fixtures/seed-data.yaml`, and runs lint, type check, and
   `appgen check` on it. Then it does the same for
   `tests/fixtures/invoices.yaml`, and runs the sequence test of the mock
-  store (`scripts/sequence_test.py --binding react`). Last, it does the
+  store (`scripts/sequence_test.py --binding react`). Then it does the
   same for `tests/fixtures/totals.yaml` (the totals and the lines
-  editors). It needs pnpm and Docker. Run it by hand with
+  editors). Last, it does the same for `tests/fixtures/listings.yaml`
+  (the queries, ADR 0045). It needs pnpm and Docker. Run it by hand with
   `scripts/check-react.sh [output folder]`.
 - When a push changes the generator core, a front-end binding, or the
   shared binding code, the hook also runs

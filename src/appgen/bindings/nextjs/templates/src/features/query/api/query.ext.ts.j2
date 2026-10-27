@@ -1,0 +1,20 @@
+{% from "src/features/query/api/macros.j2" import row_type, entity_imports %}
+{{ trace_header(element_id) }}
+import "server-only";
+
+{{ entity_imports(name, element) | trim }}
+
+/**
+{% if element.description %}
+ * {{ element.description }}
+ *
+{% endif %}
+ * Return all rows of the query{{ " for the params" if element.params }}, in their order. The
+ * generated server action returns one page of them. The repositories in
+ * `@/entities/<entity>/server` read the data.
+ */
+export async function {{ name | camel }}({% if element.params %}_params: {{ name | pascal }}Params{% endif %}): Promise<{{ row_type(name, element) }}[]> {
+  // TODO(appgen): write the query {{ name }}.
+  // When it is done, change the kind of the trace in the header from gap to manual.
+  throw new Error("Not implemented yet: {{ element_id }}");
+}

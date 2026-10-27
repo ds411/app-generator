@@ -9,9 +9,9 @@ the shared UI templates can import the files.
 
 The files of each kind of element, without the `.gen` or `.ext` suffix:
 
-- Custom operation: `src/features/<op>/api/<op>` (`.ts`). The params type
-  is in the entity slice. In the Next.js app, the generated file is the
-  server action.
+- Custom operation and query: `src/features/<op>/api/<op>` (`.ts`). The
+  params type is in the entity slice. In the Next.js app, the generated
+  file is the server action.
 - Custom page content: `src/pages/<page>/ui/<page>-content` (`.tsx`).
 - Custom detail tab: `src/widgets/<view>/ui/<tab>-tab` (`.tsx`).
 - Custom detail section: `src/widgets/<view>/ui/[<tab>-]<section>-section`
@@ -82,9 +82,15 @@ def _ts_type(definition: AppDefinition, entity: str, member: Field | None, name:
 
 
 def operation_gap(definition: AppDefinition, name: str) -> GapSpec:
-    """Return the gap of a custom operation: a function of the record and the params."""
+    """Return the gap of a custom operation: a function of the record and the params.
+
+    The gap of a query (ADR 0045) is a function of the params that returns
+    all rows: records of `returns`, or the rows of `result`.
+    """
     operation: Operation = definition.operations[name]
     entity = operation.entity
+    if operation.kind == "query":
+        return _query_gap(operation, name)
     imports = [_entity_import(entity, pascal(entity))]
     returns = "void"
     if operation.returns != "none":
@@ -103,6 +109,26 @@ def operation_gap(definition: AppDefinition, name: str) -> GapSpec:
         imports=imports,
         params=params,
         returns=f"Promise<{returns}>",
+    )
+
+
+def _query_gap(operation: Operation, name: str) -> GapSpec:
+    entity = operation.entity
+    row = pascal(operation.returns) if operation.row_entity else f"{pascal(name)}Row"
+    own = ([f"{pascal(name)}Params"] if operation.params else []) + (
+        [row] if operation.row_entity in (None, entity) else []
+    )
+    imports = [_entity_import(entity, *sorted(own))] if own else []
+    if operation.row_entity not in (None, entity):
+        imports.append(_entity_import(operation.returns, row))
+    return GapSpec(
+        element_id=operation.id,
+        base=f"src/features/{kebab(name)}/api/{kebab(name)}",
+        name=camel(name),
+        what=f"the rows of the query {name}",
+        imports=imports,
+        params=[("params", f"{pascal(name)}Params")] if operation.params else [],
+        returns=f"Promise<{row}[]>",
     )
 
 

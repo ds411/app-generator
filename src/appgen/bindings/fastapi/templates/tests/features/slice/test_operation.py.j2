@@ -60,6 +60,7 @@
 {% if filter %}
 {% set ns.lines = ns.lines + ["from app.features." ~ e.slice ~ ".schemas import " ~ e.name ~ "Read"] %}
 {% endif %}
+{% elif op.kind == "query" %}
 {% else %}
 {% set ns.lines = ns.lines + [
     "from uuid import uuid4",
@@ -261,6 +262,55 @@ pytestmark = pytest.mark.anyio
 
 
 {{ sig("test_" ~ op.name ~ "_rejects_an_unknown_parameter", "client: AsyncClient") }}    {{ request("get", ['"' ~ url ~ '"', 'params={"unknown_field": 1}']) }}
+
+    assert_problem(response, 422)
+{% elif op.kind == "query" %}
+{% set required_params = op.params | selectattr("required") | rejectattr("has_default") | list %}
+{% set get_args = ['"' ~ url ~ '"'] + (["params=params"] if op.params else []) %}
+
+
+{{ sig("test_" ~ op.name ~ "_gives_501_until_it_has_its_logic", "client: AsyncClient") }}    # The stub in {{ op.name }}_ext.py raises NotImplementedError, and the
+    # API gives 501. With the rows of the query, it gives a page of rows.
+{% if op.params %}
+    n = 0
+    params = {
+{% for p in op.params %}
+        "{{ p.name }}": {{ p.sample }},
+{% endfor %}
+    }
+
+{% endif %}
+    {{ request("get", get_args) }}
+
+    if response.status_code == 501:
+        assert_problem(response, 501)
+    else:
+        assert response.status_code == 200, response.text
+        assert set(response.json()) == {"items", "total", "limit", "offset"}
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_params_that_are_not_valid", "client: AsyncClient") }}{% if required_params %}
+    {{ request("get", ['"' ~ url ~ '"']) }}
+{% else %}
+    {{ request("get", ['"' ~ url ~ '"', 'params={"unknown_field": 1}']) }}
+{% endif %}
+
+    assert_problem(response, 422)
+
+
+{{ sig("test_" ~ op.name ~ "_rejects_a_page_that_is_not_valid", "client: AsyncClient") }}{% if op.params %}
+    n = 0
+    params = {
+{% for p in op.params %}
+        "{{ p.name }}": {{ p.sample }},
+{% endfor %}
+        "limit": 0,
+    }
+{% else %}
+    params = {"limit": 0}
+{% endif %}
+
+    {{ request("get", ['"' ~ url ~ '"', "params=params"]) }}
 
     assert_problem(response, 422)
 {% else %}

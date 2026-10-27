@@ -13,6 +13,11 @@ changes:
 
 - `<operation>_ext.py`: the logic of a custom operation. Until you write
   it, the endpoint gives 501.
+{% if py.entities.values() | map(attribute="queries") | select | list %}
+- `<query>_ext.py`: all rows of a query, in their order (ADR 0045). The
+  endpoint returns one page of them. Until you write it, the endpoint
+  gives 501.
+{% endif %}
 - `validation_ext.py`: the rules that the create and update operations
   check before they store a record. By default, it accepts all records.
 - `app/extensions/routers_ext.py`: the routers of the endpoints that the

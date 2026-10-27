@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# Listings: the holiday homes of M35 and their bookings. The queries
+# give the listings of a city for a count of guests, and the count of the
+# bookings and the nights of each month of a year (ADR 0045). The logic
+# of the queries is hand-written: the checks copy the files of
+# tests/fixtures/listings/extensions/<binding> into each app before they
+# generate it. scripts/check-fastapi.sh generates and checks the FastAPI
+# app of this definition, and runs its tests on Postgres and SQLite.
+version: 0
+
+app:
+  name: listings
+  title: Listings
+  description: Holiday homes and their bookings.
+
+entities:
+  Listing:
+    display_field: title
+    crud: { views: [table, detail], forms: [create, update] }
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      city: { type: string, required: true, max_length: 80 }
+      guests: { type: integer, required: true, min: 1, max: 20 }
+      nightly_rate:
+        type: decimal
+        required: true
+        min: 0
+        precision: 8
+        scale: 2
+        format: currency
+        currency: EUR
+    relations:
+      bookings: { kind: one_to_many, target: Booking, inverse: listing }
+
+  Booking:
+    display_field: guest
+    crud: { views: [table], forms: [create] }
+    fields:
+      guest: { type: string, required: true, max_length: 120 }
+      check_in: { type: date, required: true }
+      check_out: { type: date, required: true }
+    relations:
+      listing:
+        kind: many_to_one
+        target: Listing
+        required: true
+        inverse: bookings
+        on_delete: cascade
+    rules:
+      check_out_after_check_in:
+        kind: compare
+        field: check_out
+        op: gt
+        other: check_in
+        message: The check-out must be after the check-in.
+      no_double_booking:
+        kind: no_overlap
+        start: check_in
+        end: check_out
+        scope: [listing]
+        message: The listing has another booking on these dates.
+
+pages:
+  listings: { path: /listings, title: Listings, content: { view: listing_table } }
+  listing_detail:
+    path: "/listings/{id}"
+    title: Listing
+    entity: Listing
+    content: { view: listing_detail }
+  new_listing: { path: /listings/new, title: New listing, content: { form: new_listing } }
+  edit_listing:
+    path: "/listings/{id}/edit"
+    title: Edit listing
+    entity: Listing
+    content: { form: edit_listing }
+  bookings: { path: /bookings, title: Bookings, content: { view: booking_table } }
+  new_booking: { path: /bookings/new, title: New booking, content: { form: new_booking } }
+
+operations:
+  listings_for_guests:
+    kind: query
+    entity: Listing
+    description: The listings of a city with room for a count of guests, the cheapest first.
+    params:
+      city: { type: string, required: true, max_length: 80 }
+      guests: { type: integer, min: 1, max: 20 }
+    returns: Listing
+  bookings_by_month:
+    kind: query
+    entity: Booking
+    description: The count of the bookings and of their nights in each month of a year.
+    params:
+      year: { type: integer, required: true, min: 2000, max: 2100 }
+    result:
+      month: { type: date, required: true, label: Month }
+      bookings: { type: integer, required: true, label: Bookings }
+      nights: { type: integer, required: true, label: Nights }
+
+seed:
+  Listing:
+    records:
+      harbour_loft: { title: Harbour loft, city: Lisbon, guests: 2, nightly_rate: 95 }
+      old_town_flat: { title: Old town flat, city: Lisbon, guests: 4, nightly_rate: 120 }
+      river_house: { title: River house, city: Lisbon, guests: 6, nightly_rate: 180 }
+      canal_room: { title: Canal room, city: Amsterdam, guests: 2, nightly_rate: 110 }
+  Booking:
+    records:
+      ana: { guest: Ana, check_in: 2026-03-02, check_out: 2026-03-06, listing: harbour_loft }
+      ben: { guest: Ben, check_in: 2026-03-10, check_out: 2026-03-12, listing: old_town_flat }
+      chloe: { guest: Chloe, check_in: 2026-04-01, check_out: 2026-04-08, listing: river_house }

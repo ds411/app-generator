@@ -54,5 +54,5 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["golden"]
+norecursedirs = ["golden", "extensions"]
 addopts = ["--strict-markers", "--strict-config"]

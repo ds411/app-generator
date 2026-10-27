@@ -919,11 +919,12 @@ function in the React app.
 
 | Key           | Content                                                                  |
 | ------------- | ------------------------------------------------------------------------ |
-| `kind`        | Required. `create`, `read`, `update`, `delete`, `list`, or `custom`.     |
-| `entity`      | Required. The entity of the operation.                                   |
-| `description` | Text. A custom operation shows it in its extension file.                 |
-| `params`      | `custom` only. A mapping from parameter name to a field (the field keys). |
-| `returns`     | `custom` only. An entity name, or `none` (the default).                  |
+| `kind`        | Required. `create`, `read`, `update`, `delete`, `list`, `custom`, or `query`. |
+| `entity`      | Required. The entity of the operation. A query is in the slice of the entity. |
+| `description` | Text. A custom operation and a query show it in their extension file.    |
+| `params`      | `custom` and `query` only. A mapping from parameter name to a field (the field keys). |
+| `returns`     | `custom` and `query` only. An entity name, or `none` (the default).      |
+| `result`      | `query` only. A mapping from field name to a field: the fields of each row, for rows that are not records (see [Queries](#queries)). |
 | `apis`        | `custom` only. The names of the [apis](#apis) that the logic calls.       |
 | `lines`       | `create` and `update` only. The `one_to_many` relations whose records the operation writes with the record (see [Lines of a record](#lines-of-a-record)). |
 
@@ -944,6 +945,59 @@ operations:
       note: { type: text, max_length: 500 }
     returns: Task
 ```
+
+### Queries
+
+A `query` operation returns a list of rows for its params, for example
+the free time slots of a room, a ranked feed, or the totals of each
+month ([ADR 0045](adr/0045-queries.md)). The logic is a generation gap:
+a function of the extension file returns all rows in their order, and
+the generated code returns one page of them.
+
+```yaml
+operations:
+  open_tasks_of_person:
+    kind: query
+    entity: Task
+    description: The open tasks of a person, the most urgent first.
+    params:
+      person_id: { type: uuid, required: true }
+    returns: Task
+  hours_by_status:
+    kind: query
+    entity: Task
+    description: The count of the tasks and the estimate of each status.
+    params:
+      project_id: { type: uuid }
+    result:
+      status: { type: string, required: true, label: Status }
+      tasks: { type: integer, required: true, label: Tasks }
+      hours: { type: decimal, scale: 1, label: Hours }
+```
+
+- A query has `returns` (each row is a record of the entity) or
+  `result` (each row has the fields of `result`), not both. The type of
+  a field of `result` is a type that a view shows: `string`, `text`,
+  `integer`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `email`,
+  `url`, or `enum` (`unsuitable-field`). A field of `result` has no
+  `unique`, `computed`, `translatable`, `filter`, `sequence`,
+  `currency_field`, or `default`.
+- The params have the types of the fields of `result`, and the names
+  `limit` and `offset` are for the page (`reserved-name`).
+- The FastAPI app has the endpoint `GET /<entity path>/<query name>`,
+  for example `GET /tasks/open-tasks-of-person?person_id=...`, with the
+  params as query parameters and the `limit` and `offset` of the lists.
+  The response is a page: `items`, `total`, `limit`, and `offset`. A
+  param that is not valid gives 422, and the stub of the extension file
+  gives 501.
+- The Next.js app has a server action, and the React app has a function
+  with mock data, or a call of the endpoint of the FastAPI app with
+  `x-react-data: api`. Both give a page of the rows, from 1.
+- The permission of the query applies (see [access](#access)). The
+  record rules of the roles for the entity of `returns` apply: a user
+  gets only the records that the user may read. The extension file
+  gives all rows, and the generated code removes the other records.
+- An `operation` action cannot run a query (`unsuitable-operation`).
 
 ### Lines of a record
 

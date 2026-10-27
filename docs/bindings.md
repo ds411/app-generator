@@ -359,6 +359,10 @@ app:
   groups that have records, with the labels of their records.
 - A custom operation calls its endpoint: the FastAPI app runs the
   logic, so the React app has no extension file for it.
+- A query ([ADR 0045](adr/0045-queries.md)) calls its endpoint
+  `GET /<entity path>/<query>` with the params and the page, and the
+  FastAPI app runs the logic and the record rules. The React app has no
+  extension file for it.
 - With `auth`, the sign-in uses `POST /auth/sign-in`, and each request
   sends the bearer token.
 - With `translations`, each request sends the locale of the selected
@@ -402,6 +406,11 @@ custom UI element (a widget, a form widget, or a detail tab) shows its
 element ID only in a development build (`process.env.NODE_ENV` in
 Next.js, `import.meta.env.DEV` in React). A production build shows the
 neutral text "Not available yet.".
+
+The gap of a query ([ADR 0045](adr/0045-queries.md)) returns all rows
+of the query in their order. The generated file returns one page of
+them, and keeps only the records of `returns` that the record rules let
+the user read.
 
 The examples keep their hand-written code in
 `examples/<example>/extensions/<binding>/`, with the paths of the app.

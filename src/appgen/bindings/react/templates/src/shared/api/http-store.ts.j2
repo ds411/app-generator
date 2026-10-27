@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) %}
 {% if type_names | length > 6 %}
 import {
 {% for type_name in type_names %}
@@ -300,6 +300,30 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     return result;
   }
 
+{% if query_operations(definition) %}
+  /**
+   * Return a page of the JSON rows of the endpoint of a query, for example
+   * `/listings-for-guests` (ADR 0045), with the params as query parameters.
+   */
+  async rows(suffix: string, params: ApiParams, page: RowsPage): Promise<ListResult<Record<string, unknown>>> {
+    const search = new URLSearchParams();
+    for (const [name, value] of Object.entries(params)) {
+      for (const item of typeof value === "object" && value !== null ? value : [value]) {
+        if (item !== null && item !== undefined && item !== "") {
+          search.append(name, String(item));
+        }
+      }
+    }
+    search.set("limit", String(page.pageSize));
+    search.set("offset", String((page.page - 1) * page.pageSize));
+    const result = (await apiRequest("GET", `${this.path}${suffix}?${search.toString()}`)) as {
+      items: Record<string, unknown>[];
+      total: number;
+    };
+    return { items: result.items, total: result.total, ...page };
+  }
+
+{% endif %}
   /** Return the record of a JSON object of the API. */
   fromJson(json: unknown): T {
     const values = json as Record<string, unknown>;

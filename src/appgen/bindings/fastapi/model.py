@@ -1127,10 +1127,27 @@ class PyOperation:
     """`read` or `change`, if a record rule of a role can apply to the operation (ADR 0025)."""
     lines: list[PyLines] = dataclass_field(default_factory=list[PyLines])
     """The lines that a create or an update operation writes with the record (ADR 0035)."""
+    result: list[PyField] = dataclass_field(default_factory=list[PyField])
+    """A query: the fields of its rows, for rows that are not records (ADR 0045)."""
 
     @property
     def custom(self) -> bool:
         return self.kind == "custom"
+
+    @property
+    def query(self) -> bool:
+        """True for a query: a `GET` endpoint that returns a page of rows (ADR 0045)."""
+        return self.kind == "query"
+
+    @property
+    def row_class(self) -> str:
+        """A query: the schema of a row, the read schema of an entity or the schema of `result`."""
+        return f"{self.returns}Read" if self.returns else pascal(self.name) + "Row"
+
+    @property
+    def query_class(self) -> str:
+        """A query: the model of its query parameters, the params and the page."""
+        return pascal(self.name) + "Query"
 
     def line_imports(self) -> list[str]:
         """Return the imports of the schemas of the items of the lines of other slices."""
@@ -1261,13 +1278,18 @@ class PyEntity:
 
     @property
     def params(self) -> list[PyField]:
-        """The params of the custom operations of the entity."""
-        return [p for op in self.operations if op.custom for p in op.params]
+        """The params of the custom operations and of the queries of the entity."""
+        return [p for op in self.param_operations for p in op.params]
+
+    @property
+    def results(self) -> list[PyField]:
+        """The fields of the rows of the queries of the entity that are not records (ADR 0045)."""
+        return [f for op in self.operations for f in op.result]
 
     @property
     def enum_fields(self) -> list[PyField]:
-        """The fields and the params of type `enum`."""
-        return [f for f in [*self.fields, *self.params] if f.enum is not None]
+        """The fields, the params, and the fields of the rows of type `enum`."""
+        return [f for f in [*self.fields, *self.params, *self.results] if f.enum is not None]
 
     @property
     def enums(self) -> list[PyEnum]:
@@ -1317,6 +1339,16 @@ class PyEntity:
     @property
     def custom_operations(self) -> list[PyOperation]:
         return [o for o in self.operations if o.custom]
+
+    @property
+    def param_operations(self) -> list[PyOperation]:
+        """The custom operations and the queries: the operations with a schema of params."""
+        return [o for o in self.operations if o.custom or o.query]
+
+    @property
+    def queries(self) -> list[PyOperation]:
+        """The queries of the entity (ADR 0045)."""
+        return [o for o in self.operations if o.query]
 
     @property
     def file_permission(self) -> PyOperation | None:
@@ -1404,7 +1436,11 @@ class PyEntity:
         """
         dependencies = [f"Depends({self.guard})"] if op.protected else []
         returns = op.returns if op.custom else self.name if op.kind != "delete" else None
-        if op.kind != "list" and returns and self.app_entities[returns].translations_query:
+        if (
+            op.kind not in ("list", "query")
+            and returns
+            and self.app_entities[returns].translations_query
+        ):
             dependencies.append("Depends(translations_query)")
         return dependencies
 
@@ -2189,7 +2225,9 @@ class PyEntity:
     def schema_imports(self) -> str:
         """Return the import block of the schemas module of the slice."""
         types = {f.schema_type for f in [*self.fields, *self.params]}
-        types |= {f.read_type for f in self.fields} | {c.type for c in self.computed}
+        types |= {f.read_type for f in [*self.fields, *self.results]} | {
+            c.type for c in self.computed
+        }
         lines: set[str] = set()
         if any(t.startswith("dt.") for t in types):
             lines.add("import datetime as dt")
@@ -2198,6 +2236,7 @@ class PyEntity:
         lines.add("from uuid import UUID")
         declarations = [f.declaration(m) for f in self.fields for m in ("create", "update", "read")]
         declarations += [p.declaration("create") for p in self.params]
+        declarations += [f.declaration("read") for f in self.results]
         declarations += [
             d
             for r in self.relations
@@ -2497,6 +2536,8 @@ class PyApp:
                 found[f"{entity.name}{op.kind.capitalize()}"] = entity.id
             if op.custom and op.params:
                 found[op.params_class] = op.id
+            if op.query and not op.returns:
+                found[op.row_class] = op.id
             if op.returns:
                 found[f"{op.returns}Read"] = self.entities[op.returns].id
             if entity.files and op.kind in ("create", "read", "update", "list"):
@@ -2799,6 +2840,11 @@ def _record_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> N
     for entity in entities.values():
         for op in entity.operations:
             returns = entities[op.returns] if op.returns else None
+            if op.query:
+                # The rows of a query are records of `returns`, or not records (ADR 0045).
+                if op.protected and returns and (returns.scoped or returns.hides):
+                    op.scope_action = "read"
+                continue
             shows = op.kind in ("list", "read", "create", "update") and bool(entity.hides)
             if op.protected and (entity.scoped or shows or (returns and returns.hides)):
                 op.scope_action = "read" if op.kind in ("list", "read") else "change"
@@ -3685,14 +3731,16 @@ def _operation(name: str, operation: Operation, entities: dict[str, PyEntity]) -
         "delete": [404, 409, 422],
         "list": [422],
         "custom": [404, 409, 422, 501],
+        "query": [422, 501],
     }[operation.kind]
+    gap = operation.kind in ("custom", "query")
     return PyOperation(
         name=name,
         id=operation.id,
         kind=operation.kind,
         entity=entity.name,
         method={"create": "post", "read": "get", "update": "patch", "delete": "delete"}.get(
-            operation.kind, "get" if operation.kind == "list" else "post"
+            operation.kind, "get" if operation.kind in ("list", "query") else "post"
         ),
         path="",
         status=status,
@@ -3703,9 +3751,13 @@ def _operation(name: str, operation: Operation, entities: dict[str, PyEntity]) -
         ],
         returns=returns,
         description=operation.description,
-        module=f"{name}_gen" if operation.kind == "custom" else name,
+        module=f"{name}_gen" if gap else name,
         slice=entity.slice,
         apis=list(operation.apis),
+        result=[
+            _field(f_name, f, f"{pascal(name)}Row{pascal(f_name)}", f"{entity.slice}_{name}")
+            for f_name, f in (operation.result or {}).items()
+        ],
     )
 
 
@@ -3713,14 +3765,14 @@ def _place_routes(entity: PyEntity) -> None:
     """Give each operation of an entity its path, and sort the routes.
 
     The first operation of each CRUD kind gets the usual REST path. A
-    custom operation, and a second operation of a kind, get a path with
-    the operation name. The routes with a fixed path come before the
+    custom operation, a query, and a second operation of a kind, get a path
+    with the operation name. The routes with a fixed path come before the
     routes with an ID, so that a fixed path never reads as an ID.
     """
     seen: set[str] = set()
     for op in entity.operations:
         base = "/{id}" if op.kind in ("read", "update", "delete", "custom") else ""
-        if op.kind != "custom" and op.kind not in seen:
+        if op.kind not in ("custom", "query") and op.kind not in seen:
             op.path = base
         else:
             op.path = f"{base}/{kebab(op.name)}"

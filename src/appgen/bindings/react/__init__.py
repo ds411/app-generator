@@ -24,6 +24,8 @@ _PAGE = "src/pages/{{ name | kebab }}"
 _ENTITY = "src/entities/{{ name | kebab }}"
 _GAP = "{{ gap_spec(definition, element_id, element_kind).base }}"
 _CUSTOM_OP = "element.kind == 'custom'"
+_QUERY_OP = "element.kind == 'query'"
+_CUSTOM_OR_QUERY = "element.kind in ('custom', 'query')"
 _LINES_OP = "element.lines and element.kind in ('create', 'update')"
 _INTEGRATION = "src/shared/api/{{ ts_apis[name].folder }}"
 
@@ -325,7 +327,7 @@ BINDING = Binding(
             template="src/features/operation/index.ts.j2",
             path="src/features/{{ name | kebab }}/index.ts",
             for_each="operation",
-            when=_CUSTOM_OP,
+            when=_CUSTOM_OR_QUERY,
         ),
         # An operation with lines (ADR 0035): the function writes the record and its lines.
         Output(
@@ -351,11 +353,18 @@ BINDING = Binding(
             for_each="operation",
             when=_CUSTOM_OP,
         ),
+        # A query (ADR 0045): a page of the rows of the extension file, or of the FastAPI app.
+        Output(
+            template="src/features/query/query.gen.ts.j2",
+            path=_GAP + ".gen.ts",
+            for_each="operation",
+            when=_QUERY_OP,
+        ),
         Output(
             template="gap/function.ext.ts.j2",
             path=_GAP + ".ext.ts",
             for_each="operation",
-            when=_CUSTOM_OP + " and not react.api",
+            when=_CUSTOM_OR_QUERY + " and not react.api",
             extension=True,
         ),
         *(
@@ -367,7 +376,7 @@ BINDING = Binding(
     ),
     covers=frozenset(
         {"app", "page", "page_meta", "entity", "field", "sequence", "relation", "operation"}
-        | {"param"}
+        | {"param", "result_field"}
         | {"theme", "tokens", "token_group", "token"}
         | {"layout", "sidebar", "topbar", "content", "footer"}
         | {"layout_override", "sidebar_override", "topbar_override", "content_override"}

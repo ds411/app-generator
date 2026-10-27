@@ -4928,7 +4928,7 @@
     },
     "Operation": {
       "additionalProperties": false,
-      "description": "An action that the app can do on an entity.",
+      "description": "An action that the app can do on an entity, or a query that returns a list (ADR 0045).",
       "patternProperties": {
         "^x-": {}
       },
@@ -4963,6 +4963,24 @@
         "returns": {
           "$ref": "#/$defs/Text",
           "default": "none"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/Field"
+              },
+              "propertyNames": {
+                "$ref": "#/$defs/MemberName"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
         },
         "apis": {
           "items": {
@@ -5079,7 +5097,8 @@
         "update",
         "delete",
         "list",
-        "custom"
+        "custom",
+        "query"
       ],
       "type": "string"
     },

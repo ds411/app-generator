@@ -113,7 +113,22 @@ INVERSE_KINDS = {
     "one_to_one": "one_to_one",
     "many_to_many": "many_to_many",
 }
-CUSTOM_ONLY_KEYS = ("params", "returns", "apis")
+OPERATION_KEY_KINDS: dict[str, tuple[str, ...]] = {
+    "params": ("custom", "query"),
+    "returns": ("custom", "query"),
+    "apis": ("custom",),
+    "result": ("query",),
+}
+"""The keys of the operations that only some kinds have, with these kinds."""
+QUERY_PAGE_PARAMS = ("limit", "offset")
+"""The query parameters of the page of a query endpoint: no param has these names (ADR 0045)."""
+QUERY_PARAM_TYPES = frozenset(
+    {"string", "text", "integer", "decimal", "boolean", "date", "datetime", "uuid", "email"}
+    | {"url", "enum"}
+)
+"""The types of the params of a query: a value of a query parameter of a URL (ADR 0045)."""
+ROW_TYPES = QUERY_PARAM_TYPES
+"""The types of the fields of the rows of a query: a value that a view can show (ADR 0045)."""
 RESERVED_WEBHOOK_PATHS = (
     "/_next",
     "/apis",
@@ -282,20 +297,78 @@ def check_relations(definition: AppDefinition) -> Iterator[Diagnostic]:
 
 
 def check_operations(definition: AppDefinition) -> Iterator[Diagnostic]:
-    """Only custom operations have params and a return type. Only a create or an update
-    operation writes lines."""
+    """Only custom operations and queries have params and a return type, and only a query has
+    the fields of its rows. Only a create or an update operation writes lines."""
     for operation in definition.operations.values():
         yield from _check_lines(definition, operation)
-        if operation.kind == "custom":
-            continue
-        for key in CUSTOM_ONLY_KEYS:
-            if key in operation.model_fields_set:
+        for key, kinds in OPERATION_KEY_KINDS.items():
+            if operation.kind not in kinds and key in operation.model_fields_set:
+                names = " and ".join(f"'{kind}'" for kind in kinds)
                 yield _error(
                     "invalid-option",
-                    f"'{key}' is only for 'custom' operations.",
+                    f"'{key}' is only for {names} operations.",
                     operation,
                     at=key,
                 )
+        if operation.kind == "query":
+            yield from _check_query(operation)
+
+
+def _check_query(operation: Operation) -> Iterator[Diagnostic]:
+    """A query returns records of an entity or rows of its own fields, and its params and fields
+    suit the query parameters of a URL and the views (ADR 0045)."""
+    records = operation.returns != "none"
+    if records == (operation.result is not None):
+        yield _error(
+            "invalid-option" if records else "missing-key",
+            "A query needs one of 'returns' and 'result'."
+            if not records
+            else "A query has 'returns' or 'result', not both.",
+            operation,
+            at="result" if records else None,
+            hint="Write 'returns: <entity>' for rows that are records, or 'result' with the "
+            "fields of the rows.",
+        )
+    for name, param in operation.params.items():
+        if name in QUERY_PAGE_PARAMS:
+            yield _error(
+                "reserved-name",
+                f"The name '{name}' is a query parameter of the page of each query.",
+                param,
+                hint="Use another name, for example 'max_count'.",
+            )
+        if param.type not in QUERY_PARAM_TYPES and not param.is_file:
+            yield _error(
+                "unsuitable-field",
+                f"A param of a query is a query parameter of a URL, which cannot hold a value "
+                f"of the type '{param.type}'.",
+                param,
+                at="type",
+                hint="Use a text, a number, a boolean, a date, a date and time, a UUID, or an "
+                "enum.",
+            )
+    for field in (operation.result or {}).values():
+        yield from _check_field(field)
+        if field.type not in ROW_TYPES:
+            yield _error(
+                "unsuitable-field",
+                f"A view cannot show a value of the type '{field.type}' in a row of a query.",
+                field,
+                at="type",
+                hint="Use a text, a number, a boolean, a date, a date and time, a UUID, or an "
+                "enum.",
+            )
+        for key in (
+            "unique",
+            "computed",
+            "translatable",
+            "filter",
+            "sequence",
+            "currency_field",
+            "default",
+        ):
+            if key in field.model_fields_set:
+                yield _error("invalid-option", f"'{key}' is only for entity fields.", field, at=key)
 
 
 def _check_lines(definition: AppDefinition, operation: Operation) -> Iterator[Diagnostic]:
