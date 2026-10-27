@@ -4,6 +4,9 @@
 # `identity_provider` sends the users at once to Entra ID, not to the
 # sign-in page of the user pool. The user pool does not mark the email
 # address of a SAML user as verified, so the provider has `trust_email`.
+# The user pool maps the group claim of Entra ID to the attribute
+# `custom:groups`, a text such as `[id1, id2]`: `roles` gives the role
+# of the user at each sign-in from the object IDs of the groups.
 # scripts/check-fastapi.sh signs in to the FastAPI app through the mock
 # user pool of scripts/mock_oidc.py, and scripts/check-auth-ui.sh signs
 # in to the Next.js app and to the React app with the FastAPI app.
@@ -75,12 +78,19 @@ auth:
       authorize_params: { identity_provider: EntraID }
       trust_email: true
       create_users: true
+      # A user whose groups have no role gets this role.
       default_role: staff
       claims: { name: name }
+      roles:
+        claim: "custom:groups"
+        map:
+          # The object IDs of the groups in Entra ID.
+          0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
+          5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
 access:
   role_field: role
   roles:
     admin: { operations: ["*"], pages: ["*"] }
     staff:
       operations: [list_notes, read_note, create_note, list_people]
-      pages: [notes, note_detail, people]
+      pages: [notes, note_detail]

@@ -471,9 +471,15 @@ export async function signIn(username: string, password: string): Promise<SignIn
 /** The mock user of each provider: a sign-in with the provider signs in this user. */
 const PROVIDER_USERS: Record<string, string> = {
 {% for name, p in definition.auth.providers.items() %}
-{% set role_users = (mock_users | selectattr(role_key, "eq", p.default_role) | list) if role_key and p.create_users and p.default_role else [] %}
+{% set grouped_role = (p.roles.map.values() | first) if role_key and p.roles else none %}
+{% set wanted_role = grouped_role or (p.default_role if role_key and p.create_users else none) %}
+{% set role_users = (mock_users | selectattr(role_key, "eq", wanted_role) | list) if wanted_role else [] %}
 {% set user = (role_users or mock_users) | first %}
 {% if user %}
+{% if grouped_role %}
+  // With `roles`: a user of the first role, because the mock data has no groups.
+  {{ trace(p.roles.id) }}
+{% endif %}
   {{ name }}: {{ user.id | tojson }}, {{ trace(p.id) }}
 {% endif %}
 {% endfor %}

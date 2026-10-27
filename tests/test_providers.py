@@ -327,3 +327,97 @@ def test_the_nextjs_app_sends_the_parameters_and_trusts_the_email_of_cognito() -
     assert "      trustEmail: true,\n" in providers
     assert "    ...provider.authorizeParams,\n" in providers
     assert "unverified && !provider.trustEmail)" in providers
+
+
+ROLES = '      roles: { claim: groups, map: { "Admins": admin, "Readers": viewer } }\n'
+
+
+def test_the_roles_of_a_provider_need_access_and_known_roles() -> None:
+    assert codes(with_provider(ROLES)) == []
+    # With `roles`, `default_role` is the role of a user without a group, also without
+    # `create_users`.
+    assert codes(with_provider(ROLES + "      default_role: viewer\n")) == []
+    assert codes(with_provider(ROLES + "      default_role: guest\n")) == [
+        ("unknown-reference", "auth.providers.company")
+    ]
+    assert codes(with_provider(ROLES.replace("viewer }", "guest }"))) == [
+        ("unknown-reference", "auth.providers.company")
+    ]
+    without_access = with_provider(ROLES).split("access:\n")[0]
+    assert codes(without_access) == [("invalid-option", "auth.providers.company")]
+    with pytest.raises(DefinitionError, match="one or more items"):
+        load_definition_text(with_provider("      roles: { claim: groups, map: {} }\n"), "app.yaml")
+
+
+def test_the_roles_have_no_role_of_the_field_default() -> None:
+    # Without `default_role`, a user without a group gets no role: the default of the role field
+    # does not count, and the app refuses the sign-in.
+    text = COGNITO.read_text().replace("      default_role: staff\n", "")
+    definition = load_definition_text(text, str(COGNITO))
+    assert validate_definition(definition) == []
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+
+    assert "default_role=" not in files["app/core/providers.py"].split("def provider_of")[1]
+    tests = files["tests/test_providers.py"]
+    assert "async def test_a_user_without_a_group_of_a_role_cannot_sign_in(" in tests
+    nextjs_files = {f.path: f.content for f in generate(definition, nextjs.BINDING).files}
+    assert "defaultRole:" not in nextjs_files["src/shared/auth/providers.ts"]
+
+
+def test_the_fastapi_app_sets_the_role_of_the_groups_at_each_sign_in() -> None:
+    definition = load_definition(COGNITO)
+    files = {f.path: f.content for f in generate(definition, fastapi.BINDING).files}
+    providers = files["app/core/providers.py"]
+
+    assert "            # @trace auth.providers.company.roles\n" in providers
+    assert '            roles_claim="custom:groups",\n' in providers
+    assert (
+        "            role_map=(\n"
+        '                ("0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e", "admin"),\n'
+        '                ("5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f", "staff"),\n'
+        "            ),\n"
+    ) in providers
+    assert "def groups_of(value: Any) -> list[str]:" in providers
+    assert "def role_of(provider: Provider, claims: dict[str, Any]) -> PersonRole:" in providers
+    assert "        if role is not None and user.role != role:\n" in providers
+    tests = files["tests/test_providers.py"]
+    assert (
+        "async def test_a_new_group_at_the_provider_changes_the_role_at_the_next_sign_in(" in tests
+    )
+    assert "async def test_a_user_without_a_group_of_a_role_gets_the_default_role(" in tests
+
+
+def test_an_app_without_roles_has_no_role_of_the_groups() -> None:
+    for binding, path in (
+        (fastapi.BINDING, "app/core/providers.py"),
+        (nextjs.BINDING, "src/shared/auth/providers.ts"),
+    ):
+        files = {f.path: f.content for f in generate(load_definition(EXAMPLE), binding).files}
+        assert "groups" not in files[path].lower().replace("cognito:groups", "")
+        assert "no-role" not in files.get("src/features/sign-in/ui/sign-in-form.tsx", "")
+
+
+def test_the_nextjs_app_sets_the_role_of_the_groups_at_each_sign_in() -> None:
+    files = {f.path: f.content for f in generate(load_definition(COGNITO), nextjs.BINDING).files}
+    providers = files["src/shared/auth/providers.ts"]
+
+    assert 'type Role = NonNullable<(typeof personTable.$inferInsert)["role"]>;' in providers
+    assert "      // @trace auth.providers.company.roles\n" in providers
+    assert '      rolesClaim: "custom:groups",\n' in providers
+    assert '        ["0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e", "admin"],\n' in providers
+    assert '      defaultRole: "staff",\n' in providers
+    assert "function roleOf(provider: Provider, claims: JWTPayload): Role {" in providers
+    assert "await getDb().update(personTable).set({ role }).where(" in providers
+    assert '"provider" | "unknown-user" | "no-role"' in providers
+    form = files["src/features/sign-in/ui/sign-in-form.tsx"]
+    assert 'if (code === "no-role") return "Your groups at the provider give you no role' in form
+
+
+def test_the_react_app_with_mock_data_signs_in_a_user_of_the_first_role() -> None:
+    definition = load_definition(COGNITO)
+    files = {f.path: f.content for f in generate(definition, react.BINDING).files}
+    admin = next(u for u in mock_data(definition)["Person"] if u.get("role") == "admin")
+
+    auth = files["src/shared/auth/index.ts"]
+    assert "  // @trace auth.providers.company.roles\n" in auth
+    assert f'  company: "{admin["id"]}", // @trace auth.providers.company\n' in auth

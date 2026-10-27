@@ -123,8 +123,17 @@ export type ExpectedAuth = {
     /** The form of a new record on the list page: the label of its button, a widget that shows, and the widgets that do not. */
     form: { label: string; firstId: string; hiddenIds: string[] } | null;
   }[];
-  /** The sign-in with each provider that makes users (ADR 0020): the button, and the menu of the user. */
-  providers?: { name: string; title: string; menu: string[] }[];
+  /**
+   * The sign-in with each provider that makes users (ADR 0020): the button,
+   * and the sign-ins in turn with the menu of the user after each one.
+   * `loginHint` and `groups` go to the mock provider in the authorization
+   * request: the user and the groups of the claim of `roles`.
+   */
+  providers?: {
+    name: string;
+    title: string;
+    signIns: { loginHint?: string; groups?: string[]; menu: string[] }[];
+  }[];
   /**
    * The notices (ADR 0041): a user with all operations changes the state
    * of a record of the receiver with the edit form of its detail page.

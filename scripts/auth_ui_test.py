@@ -54,7 +54,11 @@ test proves it for the room booking example (`examples/room-booking`):
    mock user pool of Amazon Cognito of scripts/mock_oidc.py: the
    authorization request has `identity_provider`, the endpoints are on
    another origin than the issuer, and the ID token does not mark the
-   email address as verified (`trust_email`, ADR 0020).
+   email address as verified (`trust_email`, ADR 0020). One user signs
+   in with a group of each role of `roles` in turn, and then without a
+   group, and sees the menu of the role each time: the test changes the
+   redirect of the start of the sign-in, so that the authorization
+   request has `login_hint` and the mock parameter `groups`.
 
 Run it from the repository root:
 
@@ -666,32 +670,47 @@ def expected_record_rules(binding: str, definition: AppDefinition) -> list[dict[
 
 
 def expected_providers(binding: str, definition: AppDefinition) -> list[dict[str, Any]]:
-    """Return the sign-in with each provider that makes users: the button, and the menu after it.
+    """Return the sign-ins with each provider that makes users: the button, and the menus.
 
     Through the mock provider, the user is a new user with the default
-    role of the provider. With mock data, the React app signs in the mock
-    user of the provider: the first one with the default role.
+    role of the provider. With `roles`, one user signs in with a group of
+    each role in turn, and then without a group: the user gets the role of
+    the group each time, and at last the default role. With mock data, the
+    React app signs in the mock user of the provider: the first one with
+    the first role of `roles`, or else with the default role.
     """
     auth, access = definition.auth, definition.access
     assert auth is not None and access is not None
     users = mock_data(definition)[auth.user_entity]
     default = definition.entities[auth.user_entity].fields[access.role_field].default
+
+    def menu(role: str | None) -> list[str]:
+        return menu_labels(definition, Permissions(definition, role))
+
     checks: list[dict[str, Any]] = []
     for name, provider in auth.providers.items():
         if not provider.create_users:
             continue
         role = provider.default_role or default
+        roles = provider.roles
         if binding == "react":
-            user = next((u for u in users if u.get(access.role_field) == role), users[0])
+            wanted = next(iter(roles.map.values())) if roles else role
+            user = next((u for u in users if u.get(access.role_field) == wanted), users[0])
             value = user.get(access.role_field)
             role = value if isinstance(value, str) else None
-        checks.append(
-            {
-                "name": name,
-                "title": str(provider.title or name),
-                "menu": menu_labels(definition, Permissions(definition, role)),
-            }
-        )
+        sign_ins: list[dict[str, Any]] = [{"menu": menu(role)}]
+        if roles is not None and binding != "react":
+            email = f"{name}.grouped@example.com"
+            groups = {group_role: group for group, group_role in reversed(roles.map.items())}
+            sign_ins = [
+                {"loginHint": email, "groups": [groups[r]], "menu": menu(r)}
+                for r in dict.fromkeys(roles.map.values())
+            ]
+            if provider.default_role is not None:
+                sign_ins.append(
+                    {"loginHint": email, "groups": [], "menu": menu(provider.default_role)}
+                )
+        checks.append({"name": name, "title": str(provider.title or name), "signIns": sign_ins})
     return checks
 
 

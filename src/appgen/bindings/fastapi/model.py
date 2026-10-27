@@ -2506,13 +2506,20 @@ class PyProvider:
     username_claim: str
     create_users: bool
     default_role: str | None
-    """With `create_users` and `access`: the role of a new user."""
+    """With `create_users` and `access`: the role of a new user. With `roles`: the role of a user
+    whose groups have no role."""
     claims: list[tuple[PyField, str]]
     """With `create_users`: the fields of a new user, and the claims that give their values."""
     authorize_params: list[tuple[str, str]]
     """The fixed parameters of the authorization request, in source order."""
     trust_email: bool
     """Accept an email address that the ID token does not mark as verified."""
+    roles_claim: str | None = None
+    """With `roles`: the claim with the groups of the user."""
+    role_map: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    """With `roles`: each group and its role, in the order of the check."""
+    roles_id: str | None = None
+    """With `roles`: the ID of the element `roles`, for its trace."""
 
     def pairs_arg(self, key: str, pairs: list[tuple[str, str]]) -> str:
         """Return the keyword argument `<key>=` of the provider in `provider_of`: a tuple of
@@ -3157,8 +3164,9 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
     found: list[PyProvider] = []
     for name, provider in auth.providers.items():
         default_role = provider.default_role
+        # With `roles`, a user whose groups have no role gets only `default_role`.
         if default_role is None and role is not None and provider.create_users:
-            value = users.fields[role].default
+            value = users.fields[role].default if provider.roles is None else None
             default_role = str(value) if value is not None else None
         found.append(
             PyProvider(
@@ -3175,6 +3183,9 @@ def _providers(definition: AppDefinition, entities: dict[str, PyEntity]) -> list
                 claims=[(fields[f], claim) for f, claim in provider.claims.items()],
                 authorize_params=list(provider.authorize_params.items()),
                 trust_email=provider.trust_email,
+                roles_claim=provider.roles.claim if provider.roles else None,
+                role_map=list(provider.roles.map.items()) if provider.roles else [],
+                roles_id=provider.roles.id if provider.roles else None,
             )
         )
     return found

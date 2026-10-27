@@ -5960,6 +5960,17 @@
           "title": "Claims",
           "type": "object"
         },
+        "roles": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderRoles"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "authorize_params": {
           "additionalProperties": {
             "$ref": "#/$defs/Text"
@@ -5982,6 +5993,35 @@
         "client_secret_env"
       ],
       "title": "Provider",
+      "type": "object"
+    },
+    "ProviderRoles": {
+      "additionalProperties": false,
+      "description": "The roles of the users from a claim of a provider, for example the groups of Entra ID.\n\nAt each sign-in, the app sets the role of the user to the first role of\n`map` whose group is in the claim. Without a match, the user gets the\n`default_role` of the provider, or the app refuses the sign-in.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "claim": {
+          "$ref": "#/$defs/Claim"
+        },
+        "map": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/Text"
+          },
+          "title": "Map",
+          "type": "object"
+        }
+      },
+      "required": [
+        "claim",
+        "map"
+      ],
+      "title": "ProviderRoles",
       "type": "object"
     },
     "QueryCalendarView": {
