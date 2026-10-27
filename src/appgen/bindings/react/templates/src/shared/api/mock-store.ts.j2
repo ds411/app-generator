@@ -5,14 +5,16 @@ import { defaultLanguage, storeTranslations, translateRecord } from "@/shared/li
 {% elif translatable %}
 import { storeTranslations, translateRecord } from "@/shared/lib/i18n";
 {% endif %}
-{% if record_rules %}
+{% if memberships %}
+import { hasValuesOf, MEMBER_OPERATIONS, onRecord, type RecordAction, type RecordScope } from "@/shared/lib/permissions";
+{% elif record_rules %}
 import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/permissions";
 {% endif %}
 {% if translatable or record_rules %}
 
 {% endif %}
 import { applyQuery } from "./query";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type SharedRecord", "type SharingApi"] if shares else []) %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult"] + (["type MemberPermissions"] if memberships else []) + ["NotFoundError"] + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 5 %}
 import {
 {% for type_name in type_names %}
@@ -44,11 +46,26 @@ export type OwnerStep = { key: string; target: string };
  * from a record to its users.
  */
 export type RecordRules = {
+{% if memberships %}
+  scopeOf: (action: RecordAction, operation?: string) => RecordScope | null;
+{% else %}
   scopeOf: (action: RecordAction) => RecordScope | null;
+{% endif %}
   path: readonly OwnerStep[];
   /** The key of an owner of one many-to-one relation: a new record of a user of the rule belongs to the user. */
   owner?: string;
+{% if memberships %}
+  /** The operation of each call of the store: a membership gives an operation in its scopes (ADR 0048). */
+  operations?: Readonly<Partial<Record<CallKind, string>>>;
+  /** The path to the scope entity of the memberships: no steps for the scope entity, none out of the scope. */
+  scope?: readonly PathStep[];
+{% endif %}
 };
+{% if memberships %}
+
+/** The calls of the store on the records. */
+export type CallKind = "list" | "read" | "create" | "update" | "delete";
+{% endif %}
 
 /** A new or changed record out of the record rule of the user. */
 export class RecordRuleError extends Error {
@@ -57,6 +74,16 @@ export class RecordRuleError extends Error {
     this.name = "RecordRuleError";
   }
 }
+{% if memberships %}
+
+/** A record in a scope of the memberships of the user (ADR 0048), whose role in that scope does not give the operation. */
+export class ScopeError extends Error {
+  constructor() {
+    super({{ tr(js("Your role in the scope of the record may not do this operation.")) }});
+    this.name = "ScopeError";
+  }
+}
+{% endif %}
 
 {% endif %}
 {% set reads_others = record_rules or react.totals or react.notices %}
@@ -95,6 +122,13 @@ export function pathIds(record: object, path: readonly PathStep[]): string[] {
     records = (recordsByEntity.get(step.target)?.() ?? []).filter((item) => ids.includes(item.id));
   }
   return [];
+}
+
+{% endif %}
+{% if memberships %}
+/** Return the records of the store of an entity, for example the memberships of the users (ADR 0048). */
+export function recordsOf(entity: string): readonly EntityRecord[] {
+  return recordsByEntity.get(entity)?.() ?? [];
 }
 
 {% endif %}
@@ -431,7 +465,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     await wait();
 {% if record_rules %}
     const result = applyQuery(
-      this.records.filter((record) => this.allows(record, "read")),
+      this.records.filter((record) => this.allows(record, "read"{{ ', "list"' if memberships }})),
       query,
     );
 {% else %}
@@ -446,7 +480,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   async get(id: string): Promise<T> {
     await wait();
-    return this.show(this.find(id));
+    return this.show(this.find(id{{ ', "read", "read"' if memberships }}));
   }
 
   async create(input: TInput): Promise<T> {
@@ -459,7 +493,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.checkWorkflows(undefined, record);
 {% if record_rules %}
-    this.checkRules(record);
+    this.checkRules(record{{ ', "create"' if memberships }});
 {% endif %}
     this.records = [...this.records, record];
     this.notify();
@@ -492,7 +526,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     await wait();
 {% set stored = ", ...storeTranslations(before, patch, this.translatable)" if translatable else "" %}
 {% if record_rules %}
-    const before = this.find(id, "change");
+    const before = this.find(id, "change"{{ ', "update"' if memberships }});
     const record = { ...before, ...patch{{ stored }}, ...this.ownerValues(), id } as T;
 {% else %}
     const before = this.find(id);
@@ -500,7 +534,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% endif %}
     this.checkWorkflows(before, record);
 {% if record_rules %}
-    this.checkRules(record);
+    this.checkRules(record{{ ', "update"' if memberships }});
 {% endif %}
     this.records = this.records.map((item) => (item.id === id ? record : item));
     this.notify();
@@ -527,9 +561,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   async remove(id: string): Promise<void> {
     await wait();
 {% if react.events or react.history %}
-    const record = this.find(id{{ ', "change"' if record_rules }});
+    const record = this.find(id{{ ', "change"' if record_rules }}{{ ', "delete"' if memberships }});
 {% else %}
-    this.find(id{{ ', "change"' if record_rules }});
+    this.find(id{{ ', "change"' if record_rules }}{{ ', "delete"' if memberships }});
 {% endif %}
     this.records = this.records.filter((item) => item.id !== id);
     this.notify();
@@ -598,7 +632,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       list: async (id, page = { page: 1, pageSize: 20 }) => {
         guards.list?.();
         await wait();
-        this.find(id);
+        this.find(id{{ ', "read", "read"' if memberships }});
         const entries = this.entries.filter((entry) => entry.recordId === id).reverse();
         const start = (page.page - 1) * page.pageSize;
         const items = entries.slice(start, start + page.pageSize).map(
@@ -666,14 +700,14 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       state: async (id) => {
         guard?.();
         await wait();
-        this.find(id{{ ', "change"' if record_rules }});
+        this.find(id{{ ', "change"' if record_rules }}{{ ', "update"' if memberships }});
         const link = linkOf(id);
         return { active: link !== undefined, createdAt: link?.createdAt ?? null };
       },
       create: async (id) => {
         guard?.();
         await wait();
-        this.find(id{{ ', "change"' if record_rules }});
+        this.find(id{{ ', "change"' if record_rules }}{{ ', "update"' if memberships }});
         const link: StoredLink = {
           entity: this.entity,
           recordId: id,
@@ -686,7 +720,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
       revoke: async (id) => {
         guard?.();
         await wait();
-        this.find(id{{ ', "change"' if record_rules }});
+        this.find(id{{ ', "change"' if record_rules }}{{ ', "update"' if memberships }});
         storeLinks(others(id));
       },
     };
@@ -723,6 +757,29 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 
 {% endif %}
+{% if memberships %}
+  /**
+   * Return the operations that the memberships of the user give on the
+   * records (ADR 0048): on some records, and on each record of the IDs. The
+   * operations that the role gives are not part of the answer.
+   */
+  async permissions(ids: string[]): Promise<MemberPermissions> {
+    await wait();
+    const records: Record<string, string[]> = Object.fromEntries(ids.map((id) => [id, []]));
+    const operations: string[] = [];
+    for (const [operation, entity] of Object.entries(MEMBER_OPERATIONS)) {
+      const scopes = entity === this.entity ? this.rules?.scopeOf("read", operation)?.scopes : undefined;
+      if (scopes === undefined || scopes.length === 0) continue;
+      operations.push(operation);
+      if (!onRecord(operation)) continue;
+      for (const record of this.records) {
+        if (this.inScopes(record, scopes)) records[record.id]?.push(operation);
+      }
+    }
+    return { operations, records };
+  }
+
+{% endif %}
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -742,7 +799,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     const change = async (id: string, field: TField, value: FileValue | null): Promise<T> => {
       await wait();
 {% if record_rules %}
-      const before = this.find(id, "change");
+      const before = this.find(id, "change"{{ ', "update"' if memberships }});
 {% else %}
       const before = this.find(id);
 {% endif %}
@@ -793,7 +850,48 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
   }
 
-{% if record_rules %}
+{% if memberships %}
+  /** Return true if the user may use a record for a call: without a record rule or a membership, all records. */
+  private allows(record: T, action: RecordAction, kind?: CallKind): boolean {
+    const scope = this.scopeFor(action, kind);
+    return scope === null || this.inScope(record, scope);
+  }
+
+  /**
+   * Return the records that the user may use for a call: the record rule of
+   * the role, or the scopes of the memberships whose role gives the
+   * operation of the call (ADR 0048). Null for all records.
+   */
+  private scopeFor(action: RecordAction, kind?: CallKind): RecordScope | null {
+    const operation = kind === undefined ? undefined : this.rules?.operations?.[kind];
+    return this.rules?.scopeOf(action, operation) ?? null;
+  }
+
+  /**
+   * Return true if a record has the values of a scope, belongs to its user
+   * if the scope has an owner, and is in a scope of the memberships if the
+   * scope has them.
+   */
+  private inScope(record: T, scope: RecordScope): boolean {
+    return (
+      hasValuesOf(scope, record) &&
+      (!scope.owner || this.ownersOf(record).includes(scope.user)) &&
+      (scope.scopes === undefined || this.inScopes(record, scope.scopes))
+    );
+  }
+
+  /** Return true if a record is in one of the scope records with the IDs. */
+  private inScopes(record: T, scopes: readonly string[]): boolean {
+    return this.scopesOf(record).some((id) => scopes.includes(id));
+  }
+
+  /** Return the IDs of the scope records of a record: the record of the scope entity, else the end of its path. */
+  private scopesOf(record: T): string[] {
+    const steps = this.rules?.scope;
+    if (steps === undefined) return [];
+    return steps.length === 0 ? [record.id] : pathIds(record, steps);
+  }
+{% elif record_rules %}
   /** Return true if the user may use a record for an action: without a record rule, all records. */
   private allows(record: T, action: RecordAction): boolean {
     const scope = this.rules?.scopeOf(action) ?? null;
@@ -804,6 +902,8 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   private inScope(record: T, scope: RecordScope): boolean {
     return hasValuesOf(scope, record) && (!scope.owner || this.ownersOf(record).includes(scope.user));
   }
+{% endif %}
+{% if record_rules %}
 
   /** Return the IDs of the users that a record belongs to: the records at the end of the owner path. */
   private ownersOf(record: T): string[] {
@@ -811,8 +911,13 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 
   /** Throw a RecordRuleError if a new or changed record is not part of the record rule of the user. */
+{% if memberships %}
+  private checkRules(record: T, kind: CallKind): void {
+    if (!this.allows(record, "change", kind)) {
+{% else %}
   private checkRules(record: T): void {
     if (!this.allows(record, "change")) {
+{% endif %}
       throw new RecordRuleError();
     }
   }
@@ -824,6 +929,24 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     return key === undefined || scope === null || !scope.owner ? {} : { [key]: scope.user };
   }
 
+{% if memberships %}
+  /**
+   * Return the record with an ID. A record that the user may not use does
+   * not exist. A record in another scope of the memberships of the user
+   * gives a ScopeError (ADR 0048): the user knows the record.
+   */
+  private find(id: string, action: RecordAction = "read", kind?: CallKind): T {
+    const record = this.records.find((item) => item.id === id);
+    const scope = this.scopeFor(action, kind);
+    if (record && scope !== null && !this.inScope(record, scope) && this.inScopes(record, scope.memberOf ?? [])) {
+      throw new ScopeError();
+    }
+    if (!record || !(scope === null || this.inScope(record, scope))) {
+      throw new NotFoundError(this.entity, id);
+    }
+    return record;
+  }
+{% else %}
   /** Return the record with an ID. A record that the user may not use does not exist. */
   private find(id: string, action: RecordAction = "read"): T {
     const record = this.records.find((item) => item.id === id);
@@ -832,6 +955,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
     return record;
   }
+{% endif %}
 {% else %}
   private find(id: string): T {
     const record = this.records.find((item) => item.id === id);

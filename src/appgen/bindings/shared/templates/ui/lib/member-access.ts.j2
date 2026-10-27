@@ -1,0 +1,142 @@
+{{ trace_header(memberships.element_id) }}
+// The operations that the memberships of the signed-in user give on the
+// records of the entities of the scope (ADR 0048). The app layer gives the
+// call `permissions` of the data access of each entity. An action of the
+// UI asks for its records, and the module asks the data access once for
+// all records of one render. The UI renders again when the answer comes.
+// A change of the records forgets the answers: a record can go to another
+// scope, and a membership can change.
+import { useSyncExternalStore } from "react";
+
+import type { MemberPermissions } from "@/shared/api";
+import { MEMBER_OPERATIONS, onRecord } from "@/shared/lib/permissions";
+
+/** The call `permissions` of the data access of an entity of the scope. */
+export type PermissionsSource = (entity: string, ids: string[]) => Promise<MemberPermissions>;
+
+/** The answers of the data access for a user and an entity: `null` while a request is open. */
+type Known = {
+  operations: ReadonlySet<string> | null | undefined;
+  records: Map<string, ReadonlySet<string> | null>;
+};
+
+const known = new Map<string, Known>();
+const waiting = new Map<string, { user: string; entity: string; ids: Set<string> }>();
+const listeners = new Set<() => void>();
+let source: PermissionsSource | null = null;
+let version = 0;
+let scheduled = false;
+
+function changed(): void {
+  version += 1;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/** Give the call `permissions` of the data access: the app layer does it once. */
+export function setPermissionsSource(load: PermissionsSource): void {
+  source = load;
+}
+
+/** Forget the answers: after a change of the records of an entity of the scope, or of the memberships. */
+export function forgetPermissions(): void {
+  known.clear();
+  changed();
+}
+
+function knownOf(key: string): Known {
+  let found = known.get(key);
+  if (found === undefined) {
+    found = { operations: undefined, records: new Map() };
+    known.set(key, found);
+  }
+  return found;
+}
+
+/** Ask the data access of an entity for the operations, and for a record if an ID is given. */
+function ask(user: string, entity: string, id: string | null): void {
+  const key = `${user}:${entity}`;
+  const found = knownOf(key);
+  const request = waiting.get(key) ?? { user, entity, ids: new Set<string>() };
+  if (found.operations === undefined) {
+    found.operations = null;
+  }
+  if (id !== null) {
+    found.records.set(id, null);
+    request.ids.add(id);
+  }
+  waiting.set(key, request);
+  if (!scheduled) {
+    scheduled = true;
+    queueMicrotask(() => void flush());
+  }
+}
+
+async function flush(): Promise<void> {
+  scheduled = false;
+  const requests = [...waiting.entries()];
+  waiting.clear();
+  await Promise.all(
+    requests.map(async ([key, request]) => {
+      const ids = [...request.ids];
+      let answer: MemberPermissions = { operations: [], records: {} };
+      try {
+        answer = source === null ? answer : await source(request.entity, ids);
+      } catch {
+        // Without an answer, the memberships give nothing: the server checks each call again.
+      }
+      const found = knownOf(key);
+      found.operations = new Set(answer.operations);
+      for (const id of ids) {
+        found.records.set(id, new Set(answer.records[id] ?? []));
+      }
+    }),
+  );
+  changed();
+}
+
+/**
+ * Return true if a membership of a user gives an operation (ADR 0048): an
+ * operation on one record on each record of the IDs, an other operation in
+ * some scope. Return false until the data access answers, and on the server.
+ */
+export function memberGives(user: string | null, operation: string, ids: readonly string[] = []): boolean {
+  const entity = MEMBER_OPERATIONS[operation];
+  if (user === null || entity === undefined || typeof window === "undefined") {
+    return false;
+  }
+  const found = knownOf(`${user}:${entity}`);
+  if (!onRecord(operation)) {
+    if (found.operations === undefined) {
+      ask(user, entity, null);
+    }
+    return found.operations?.has(operation) ?? false;
+  }
+  if (ids.length === 0) {
+    return false;
+  }
+  let gives = true;
+  for (const id of ids) {
+    const operations = found.records.get(id);
+    if (operations === undefined) {
+      ask(user, entity, id);
+    }
+    gives &&= operations?.has(operation) ?? false;
+  }
+  return gives;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Render the component again when the data access answers (ADR 0048). */
+export function useMemberPermissions(): void {
+  useSyncExternalStore(
+    subscribe,
+    () => version,
+    () => 0,
+  );
+}

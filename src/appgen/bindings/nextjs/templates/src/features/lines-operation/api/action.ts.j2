@@ -57,7 +57,7 @@ export async function {{ fn }}Action(
 {% for rule_id in rules.element_ids %}
       {{ trace(rule_id) }}
 {% endfor %}
-      const scope = await recordScope({{ ts_value(entity) }}, "change");
+      const scope = await recordScope({{ ts_value(entity) }}, "change"{% if memberships and rules.scope is not none %}, {{ ts_value(name) }}{% endif %});
 {% endif %}
 {% if op.kind == "create" %}
 {% if owner_key %}

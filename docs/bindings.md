@@ -632,12 +632,24 @@ scope entity ([ADR 0048](adr/0048-memberships.md)).
   changes, and `check_scope` of a create or a change use the scopes.
   `get()` gives 403 for a record in another scope of the user, and 404
   for a record out of all scopes.
+- `app/features/<slice>/permissions.py` of each entity of the scope has
+  the endpoint `GET /permissions/<entity>?ids=` (the operation ID
+  `read_<entity>_member_permissions`) for the front end. It needs a
+  sign-in, and gives `MemberPermissions`: the operations of the
+  entity that a membership of the user gives in some scope
+  (`operations`), and for each ID the operations on one record that a
+  membership gives in the scope of the record (`records`). The
+  operations that the role gives are not part of the answer. The
+  generator stops with an error if an entity has the path
+  `/permissions`, or if an operation has the operation ID of one of
+  these endpoints.
 - The generated tests in `tests/test_memberships.py` store a user with
   a role of `roles` that does not give the operation, a membership with
   a role that gives it, a membership with a role that does not, and a
-  scope record without a membership. They check 200, 403, and 404 for
-  each entity of the scope with a suitable operation, the list, the
-  create, and an operation that no role gives.
+  scope record without a membership. They check the permissions of the
+  memberships, 200, 403, and 404 for each entity of the scope with a
+  suitable operation, the list, the create, and an operation that no
+  role gives.
 
 ### The lines of the FastAPI app
 
@@ -1298,6 +1310,57 @@ does ([ADR 0049](adr/0049-share-links.md)).
 - The UI test `ui-tests/tests/sessions.spec.ts` makes a link of a lesson
   of the course hub as a teacher, opens it without a sign-in, revokes
   it, and sees that the link does not open.
+
+### The memberships of the Next.js app and of the React app
+
+The front ends apply the `memberships` of `access` as the FastAPI app
+does ([ADR 0048](adr/0048-memberships.md)).
+
+- `@/shared/lib/permissions` has the operations of each role of the
+  memberships (`MEMBER_ROLES`), the entity of each of these operations
+  (`MEMBER_OPERATIONS`), the entities of the scope (`SCOPE_ENTITIES`),
+  and `scopesOf(memberships, operation)`. The `RecordScope` of a
+  request has `scopes` and `memberOf` when a membership gives the
+  operation.
+- The Next.js app reads the memberships of the user in
+  `membershipsOf()` of `src/shared/auth/access.ts`. `requireOperation()`
+  passes if a membership gives the operation in some scope, and
+  `recordScope(entity, action, operation)` gives the scopes of the
+  operation. The repository of an entity of the scope has `inScopes`:
+  the condition of the path to the scope, with a subquery for each
+  step. A read, a change, or a delete of a record in another scope of
+  the user gives the error 403 "Your role in the scope of the record may
+  not do this operation.", and of a record out of all scopes "not
+  found".
+- The mock store of the React app has `operations` and `scope` in its
+  `RecordRules`: the operation of each call, and the path to the scope.
+  `recordScope()` of `@/shared/auth` reads the memberships from the
+  mock records of the membership entity (`recordsOf()`), and the store
+  throws a `ScopeError` for a record in another scope of the user.
+  With the FastAPI app, the browser does not know the memberships:
+  `requireOperation()` lets the operations of `MEMBER_OPERATIONS` pass,
+  and the API checks them.
+- The data access of each entity of the scope has
+  `<entity>Permissions(ids)`: the server action
+  `get<Entity>PermissionsAction` in Next.js, `permissions()` of the mock
+  store, and `GET /permissions/<entity>?ids=` with the FastAPI app.
+  `src/app/providers/member-permissions.ts` gives these calls to
+  `@/shared/lib/member-access`, and forgets the answers after a change
+  of the records of an entity of the scope or of the membership entity.
+- `useAccess()` has `canCallOn(operation, ids)`: true if the role gives
+  the operation, or if a membership gives it on each record of the IDs.
+  `canCall(operation)` is true for a create or a list that a membership
+  gives in some scope. `memberGives()` asks the data access once for all
+  records of one render, and the hook renders the component again when
+  the answer comes. The actions of a record, of the rows, and of the
+  detail page, the button "Share", and the restore of the change log
+  use the records of the action.
+- The UI test `ui-tests/tests/sessions.spec.ts` signs in as a user with
+  two roles in two courses of the course hub. The button "Edit" shows
+  and saves on a lesson of the course whose role gives the change, and
+  does not show on a lesson of the other course. The button "New
+  lesson" shows for this user, and not for a user whose roles do not
+  give the create.
 
 ## Shared templates
 

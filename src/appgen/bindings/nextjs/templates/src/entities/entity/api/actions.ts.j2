@@ -11,8 +11,10 @@
 {% set owner_key = rules.path[0].key if rules and rules.direct else none %}
 {# The record rules (ADR 0018, ADR 0025) apply to the actions that are not public. #}
 {% set owned = (["list", "read", "create", "update", "delete"] | reject("in", public) | list) if rules else [] %}
+{# An entity of the scope of the memberships (ADR 0048): the scope of the records depends on the operation. #}
+{% set member = memberships and rules and rules.scope is not none %}
 {% macro scope(kind) -%}
-await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "read") else "change") }})
+await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "read") else "change") }}{% if member and kind in ops %}, {{ ts_value(ops[kind]) }}{% endif %})
 {%- endmacro %}
 {% set files = element.file_fields if definition.storage else {} %}
 {% set all_ops = kind_operations(definition, name) %}
@@ -23,13 +25,13 @@ await recordScope({{ ts_value(name) }}, {{ ts_value("read" if kind in ("list", "
 {% set history = element.history %}
 {% set share = shares.get(name) %}
 {% if files %}
-import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, NotFoundError, {{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
+import { type ActionResult, {{ "type HistoryEntry, " if history }}type ListQuery, type ListResult, {{ "type MemberPermissions, " if member }}NotFoundError, {{ "type ShareLinkCreated, type ShareLinkState, " if share }}ValidationError } from "@/shared/api";
 {% else %}
-import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
+import type { ActionResult, {{ "HistoryEntry, " if history }}ListQuery, ListResult{{ ", MemberPermissions" if member }}{{ ", ShareLinkCreated, ShareLinkState" if share }} } from "@/shared/api";
 {% endif %}
 import { idSchema, parseListQuery, runAction } from "@/shared/api/server";
 {% if owned %}
-import { recordScope } from "@/shared/auth/access";
+import { {{ "memberPermissions, " if member }}recordScope } from "@/shared/auth/access";
 {% endif %}
 {% if share %}
 import { sessionUserId } from "@/shared/auth/session";
@@ -308,5 +310,19 @@ export async function revoke{{ type }}ShareLinkAction(id: string): Promise<Actio
     },
     {{ share_opts }},
   );
+}
+{% endif %}
+{% if member %}
+
+{{ trace(memberships.element_id) }}
+/**
+ * Return the operations that the memberships of the signed-in user give on
+ * the records of {{ type }} (ADR 0048): on some records, and on each record of the IDs.
+ */
+export async function get{{ type }}PermissionsAction(ids: string[]): Promise<ActionResult<MemberPermissions>> {
+  return runAction(async () => {
+    const wanted = ids.slice(0, 1000).map((id) => idSchema.parse(id));
+    return memberPermissions({{ ts_value(name) }}, wanted, (found, scopes) => {{ var }}Repository.inScopesOf(found, scopes));
+  }, {});
 }
 {% endif %}

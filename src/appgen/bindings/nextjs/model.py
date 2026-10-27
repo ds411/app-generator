@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from appgen.bindings.nextjs import versions
-from appgen.bindings.nextjs.db import belongs_to, build_tables, seed_tables
+from appgen.bindings.nextjs.db import belongs_to, build_tables, in_scopes, seed_tables
 from appgen.bindings.nextjs.jobs import cron_jobs, ts_jobs
 from appgen.bindings.nextjs.notices import check_notice_table, ts_notify
 from appgen.bindings.nextjs.snapshots import ts_snapshots
@@ -23,6 +23,7 @@ from appgen.bindings.shared.forms import FormContext
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
+from appgen.bindings.shared.memberships import member_plan
 from appgen.bindings.shared.notices import has_notices, mention_plans, notice_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
@@ -342,6 +343,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition),
         "auth_pages": auth_pages(definition, server=True),
         "record_rules": rules,
+        # The roles of the users in the records of a scope (ADR 0048), or None.
+        "memberships": member_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": shares,
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
@@ -377,6 +380,12 @@ def context(definition: AppDefinition) -> dict[str, Any]:
                 entity: belongs_to(r.path, by_entity, 4)
                 for entity, r in rules.items()
                 if r.path and not r.direct
+            },
+            # The conditions of the scope paths of the memberships (ADR 0048).
+            "scope_conditions": {
+                entity: in_scopes(entity, r.scope, by_entity, 4)
+                for entity, r in rules.items()
+                if r.scope is not None
             },
             "seed": seed,
             "seed_files": any(table.files for table in seed),

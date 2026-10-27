@@ -115,7 +115,8 @@ export default async function Route({ params }: PageProps<{{ ("/" ~ info.route_d
 {% endif %}
   const { {% if info.params[-1] != "id" %}{{ info.params[-1] }}: {% endif %}id } = await params;
 {% if rule %}
-  if (!(await {{ element.entity | camel }}Repository.exists(id, await recordScope({{ ts_value(element.entity) }}, "read")))) { {{ trace(rule.element_ids[0]) }}
+{% set read_op = kind_operations(definition, element.entity).get("read") if memberships and rule.scope is not none else none %}
+  if (!(await {{ element.entity | camel }}Repository.exists(id, await recordScope({{ ts_value(element.entity) }}, "read"{% if read_op %}, {{ ts_value(read_op) }}{% endif %})))) { {{ trace(rule.element_ids[0]) }}
 {% else %}
   if (!(await {{ element.entity | camel }}Repository.exists(id))) {
 {% endif %}

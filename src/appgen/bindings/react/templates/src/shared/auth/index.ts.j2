@@ -19,7 +19,7 @@
 import { {{ "API_URL, " if definition.auth.providers }}{{ "ApiError, " if verify }}apiRequest, setAccessToken } from "@/shared/api";
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
-import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+import { {{ "MEMBER_OPERATIONS, " if memberships }}roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% endif %}
 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
@@ -51,8 +51,23 @@ const ROLE_KEY = {{ (app.name ~ "-role") | tojson }};
 {% endif %}
 
 {% if role_key %}
+{% if memberships %}
+import { recordsOf } from "@/shared/api";
+{% endif %}
 import type { PageName } from "@/shared/config/pages";
-{% if record_rules and not react.api %}
+{% if memberships %}
+import {
+  MEMBER_OPERATIONS,
+  type Membership,
+  type RecordAction,
+  type RecordScope,
+  recordScopeOf,
+  roleMayCall,
+  roleMayOpenPage,
+  SCOPE_ENTITIES,
+  scopesOf,
+} from "@/shared/lib/permissions";
+{% elif record_rules and not react.api %}
 import {
   type RecordAction,
   type RecordScope,
@@ -161,13 +176,75 @@ export function canOpenPage(page: PageName): boolean {
   return roleMayOpenPage(currentRole(), page);
 }
 
+{% if memberships and not react.api %}
+{% set m = memberships %}
+
+/** Return the memberships of a user (ADR 0048): the mock records of {{ m.entity }}. */
+function membershipsOf(userId: string): Membership[] {
+  return recordsOf({{ m.entity | tojson }}).flatMap((record) => {
+    const values = record as Record<string, unknown>;
+    return values.{{ m.user_key }} === userId ? [{ scope: String(values.{{ m.scope_key }}), role: String(values.{{ m.role_key }}) }] : [];
+  });
+}
+
+/**
+ * Throw a ForbiddenError if the signed-in user may not call an operation
+ * (ADR 0012). A role of a membership of the user (ADR 0048) also gives its
+ * operations, on the records of its scopes: the store filters the records.
+ */
+export function requireOperation(operation: string): void {
+  if (roleMayCall(currentRole(), operation)) {
+    return;
+  }
+  const userId = currentUserId();
+  if (userId === null || MEMBER_OPERATIONS[operation] === undefined || scopesOf(membershipsOf(userId), operation).length === 0) {
+    throw new ForbiddenError();
+  }
+}
+
+/**
+ * Return the records that the signed-in user may use for an action on the
+ * records of an entity: the record rule of its role (ADR 0018, ADR 0025),
+ * or null for all records. If the role does not give the operation, a
+ * membership gives it (ADR 0048): the records of the scopes of the
+ * operation. The mock data then gives only these records, as a
+ * demonstration: an app with a back end applies the rules on the server.
+ */
+export function recordScope(entity: string, action: RecordAction, operation?: string): RecordScope | null {
+  const role = currentRole();
+  const userId = currentUserId();
+  if (
+    userId !== null &&
+    operation !== undefined &&
+    !roleMayCall(role, operation) &&
+    SCOPE_ENTITIES.includes(entity) &&
+    MEMBER_OPERATIONS[operation] !== undefined
+  ) {
+    const memberships = membershipsOf(userId);
+    return { user: userId, owner: false, where: {}, scopes: scopesOf(memberships, operation), memberOf: memberships.map((item) => item.scope) };
+  }
+  return recordScopeOf(role, userId, entity, action);
+}
+{% elif memberships %}
+/**
+ * Throw a ForbiddenError if the signed-in user may not call an operation
+ * (ADR 0012). An operation that a role of the memberships gives (ADR 0048)
+ * passes: the API checks the memberships of the user in each request.
+ */
+export function requireOperation(operation: string): void {
+  if (!roleMayCall(currentRole(), operation) && MEMBER_OPERATIONS[operation] === undefined) {
+    throw new ForbiddenError();
+  }
+}
+{% else %}
 /** Throw a ForbiddenError if the signed-in user may not call an operation (ADR 0012). */
 export function requireOperation(operation: string): void {
   if (!roleMayCall(currentRole(), operation)) {
     throw new ForbiddenError();
   }
 }
-{% if record_rules and not react.api %}
+{% endif %}
+{% if record_rules and not react.api and not memberships %}
 
 /**
  * Return the records that the signed-in user may use for an action on the

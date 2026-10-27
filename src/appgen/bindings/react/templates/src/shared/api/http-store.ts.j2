@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { ApiError, apiRequest } from "./http";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult"] + (["type MemberPermissions"] if memberships else []) + ["NotFoundError"] + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 6 %}
 import {
 {% for type_name in type_names %}
@@ -334,6 +334,19 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
       }
       throw error;
     }
+  }
+
+{% endif %}
+{% if memberships %}
+  /**
+   * Return the operations that the memberships of the user give on the
+   * records (ADR 0048): `GET /permissions<path>?ids=`. The FastAPI app checks
+   * each call again.
+   */
+  async permissions(ids: string[]): Promise<MemberPermissions> {
+    const search = new URLSearchParams(ids.map((id) => ["ids", id]));
+    const query = ids.length > 0 ? `?${search.toString()}` : "";
+    return (await apiRequest("GET", `/permissions${this.path}${query}`)) as MemberPermissions;
   }
 
 {% endif %}

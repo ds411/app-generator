@@ -19,8 +19,10 @@ from itertools import permutations
 from typing import TYPE_CHECKING
 
 from appgen.bindings.fastapi.pysource import LINE_LENGTH, call
-from appgen.dsl.access import ALL, Role, scope_entities
+from appgen.bindings.shared.memberships import RECORD_KINDS as ON_RECORD
+from appgen.dsl.access import Role, membership_roles, scope_entities
 from appgen.dsl.model import AppDefinition
+from appgen.gen.render import GenerationError
 
 if TYPE_CHECKING:
     from appgen.bindings.fastapi.model import PyEntity, PyField, PyOperation, PyRelation
@@ -95,6 +97,10 @@ class PyMemberships:
     """The element ID of each role."""
     entities: list[str]
     """The entities of the scope: the scope entity first, then the entities of `paths`."""
+    operation_entities: dict[str, str] = field(default_factory=dict[str, str])
+    """The entity of each operation that a role gives."""
+    record_operations: frozenset[str] = frozenset()
+    """The operations of the roles on one record: a read, a change, a delete, or a custom one."""
     tests: list[PyMemberTest] = field(default_factory=list[PyMemberTest])
     """The generated tests: one for each entity of the scope with an operation that suits."""
 
@@ -103,29 +109,47 @@ class PyMemberships:
         """The operations that a role of the memberships gives, sorted by name."""
         return sorted({name for names in self.roles.values() for name in names})
 
+    def operations_of(self, entity: str) -> list[str]:
+        """Return the operations of the roles on the records of an entity, sorted by name."""
+        return sorted(name for name, owner in self.operation_entities.items() if owner == entity)
+
+
+PREFIX = "/permissions"
+"""The path prefix of the endpoints of the permissions of the memberships."""
+
 
 def python_memberships(
     definition: AppDefinition, entities: dict[str, PyEntity]
 ) -> PyMemberships | None:
-    """Return the memberships of the app, or None without `access.memberships`."""
+    """Return the memberships of the app, or None without `access.memberships`.
+
+    Raise GenerationError if an entity has the path of the endpoints of the
+    permissions, or if an operation has the operation ID of one of them.
+    """
     access = definition.access
     memberships = access.memberships if access is not None else None
     if access is None or memberships is None:
         return None
     scoped = scope_entities(definition)
+    for entity in entities.values():
+        if entity.path == PREFIX:
+            raise GenerationError(
+                f"The entity '{entity.name}' has the path '{PREFIX}' of the permissions of the "
+                "memberships. Give it another path with x-fastapi-path."
+            )
+    for name in scoped:
+        operation_id = f"read_{entities[name].snake}_member_permissions"
+        if operation_id in definition.operations:
+            raise GenerationError(
+                f"The endpoint of the permissions of '{name}' has the operation ID "
+                f"'{operation_id}' of an operation. Rename the operation."
+            )
     entity = entities[memberships.entity]
     relations = {r.name: r for r in entity.relations}
     user, scope = relations[memberships.user], relations[memberships.scope]
     role = next(f for f in entity.fields if f.name == memberships.role_field)
-    scope_ops = [
-        name
-        for name, op in definition.operations.items()
-        if op.entity in scoped and op.kind != "query"
-    ]
-    roles = {
-        name: sorted(scope_ops if ALL in r.operations else r.operations)
-        for name, r in memberships.roles.items()
-    }
+    roles = membership_roles(definition)
+    names = sorted({name for ops in roles.values() for name in ops})
     found = PyMemberships(
         id=memberships.id,
         entity=entity,
@@ -136,6 +160,10 @@ def python_memberships(
         roles=roles,
         role_ids={name: r.id for name, r in memberships.roles.items()},
         entities=list(scoped),
+        operation_entities={name: definition.operations[name].entity for name in names},
+        record_operations=frozenset(
+            name for name in names if definition.operations[name].kind in ON_RECORD
+        ),
     )
     found.tests = _member_tests(definition, entities, found)
     return found
