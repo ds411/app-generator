@@ -410,7 +410,11 @@ neutral text "Not available yet.".
 The gap of a query ([ADR 0045](adr/0045-queries.md)) returns all rows
 of the query in their order. The generated file returns one page of
 them, and keeps only the records of `returns` that the record rules let
-the user read.
+the user read. A view of a query (`appgen.bindings.shared.query_views`,
+the shared template `ui/views/query-view.tsx.j2`) calls the function of
+the query in `src/features/<query>` with the params of its filters and
+of the page, so the view is the same in the Next.js app and in the
+React app.
 
 The examples keep their hand-written code in
 `examples/<example>/extensions/<binding>/`, with the paths of the app.

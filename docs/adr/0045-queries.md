@@ -69,6 +69,38 @@ So a hand-written query cannot show a record of another user by
 mistake. The rows of `result` are not records, and the extension file
 is responsible for them.
 
+### Views of a query
+
+Added on 2026-10-27. A table, a card list, or a calendar takes
+`query: <operation>` in place of `entity`, with separate model classes
+(`QueryTableView`, `QueryCardsView`, `QueryCalendarView`), as the views
+of API data (ADR 0022). The options for the params:
+
+- **Only literal params.** A view of the free slots of a day cannot
+  change the day.
+- **The filters of the entity views** (`kind: search`, `select`, ...).
+  These filters test the fields of the records, and a param is not a
+  field.
+- **A filter for each param.** The type of the param gives the input:
+  a text, a number, a date, a date and time, a select of the values of
+  an enum, or a switch for a boolean.
+
+The view has the third option: `filters` names the params that the user
+gives, and `params` gives the others, as a literal or as
+`$route.<name>`, a path parameter of the page. Each param gets one
+value, and each required param needs a value. While the filter of a
+required param has no value, the view does not run the query.
+
+The view loads one page of the rows with the function of the query, so
+the same view works in each front end: in the Next.js app the server
+action runs the gap on the server, and the React app calls the endpoint
+of the FastAPI app, or the gap with mock data. The query gives the
+order of the rows, so the view has no sort. The rows of `returns` are
+records, and a view shows their fields and `id`, and links to the page
+of a record. A view does not load the related records, so it does not
+show the relations. A calendar loads all rows, one page of 200 rows at
+a time.
+
 ## Consequences
 
 - An app can have the free slots, the feeds, and the statements of the
@@ -77,6 +109,10 @@ is responsible for them.
 - The page of the rows is in memory: the gap returns all rows. A query
   over many records must limit its rows itself. A later change can give
   the page to the gap.
-- The views of a query and the filters that give the params come in a
-  later change. An `operation` action cannot run a query.
+- An `operation` action cannot run a query: a view shows its rows.
+- A view of a query cannot show the related records of its rows. A
+  query that needs them gives the values in the fields of `result`.
+- The element kinds `query_table_view`, `query_cards_view`,
+  `query_calendar_view`, `query_column`, `query_card`, and
+  `query_filter` are new. The front ends cover them.
 - The element kind `result_field` is new. Each binding covers it.

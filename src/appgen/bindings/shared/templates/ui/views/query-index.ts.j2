@@ -1,0 +1,3 @@
+{% set plan = ui_views.query_view_plan(name) %}
+{{ trace_header(element_id) }}
+export { {{ name | pascal }}View{% if plan.route_params %}, type {{ name | pascal }}ViewProps{% endif %} } from "./ui/{{ name | kebab }}-view";

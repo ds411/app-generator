@@ -74,6 +74,12 @@ from appgen.dsl.ui.views import (
     Filter,
     ListViewBase,
     Pagination,
+    QueryCalendarView,
+    QueryCardsView,
+    QueryColumn,
+    QueryTableView,
+    QueryView,
+    QueryViewBase,
     SearchFilter,
     SelectFilter,
     TableView,
@@ -121,17 +127,18 @@ def check_ui_views(definition: AppDefinition) -> Iterator[Diagnostic]:
         yield from _check_badge_set(definition, badge)
     for view in definition.ui.views.values():
         yield from _check_view(definition, view)
-        if isinstance(view, ListViewBase | ApiListViewBase) and view.pagination is not None:
+        paged = isinstance(view, ListViewBase | ApiListViewBase | QueryTableView | QueryCardsView)
+        if paged and view.pagination is not None:
             yield from _check_pagination(view, view.pagination)
 
 
 def _check_pagination(
-    view: ListViewBase | ApiListViewBase, pagination: Pagination
+    view: ListViewBase | ApiListViewBase | QueryTableView | QueryCardsView, pagination: Pagination
 ) -> Iterator[Diagnostic]:
     """A list that scrolls is a table or a card list of an entity, without page sizes."""
     if pagination.mode != "scroll":
         return
-    if isinstance(view, ApiListViewBase):
+    if not isinstance(view, ListViewBase):
         yield _error(
             "invalid-option",
             "The mode 'scroll' is for the tables and the card lists of entities.",
@@ -397,6 +404,9 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
     if isinstance(view, ApiViewBase):
         yield from _check_api_view(definition, view)
         return
+    if isinstance(view, QueryViewBase):
+        yield from _check_query_view(definition, view)
+        return
     if view.entity not in definition.entities:
         yield _missing(view, "entity", "entity", view.entity, definition.entities)
         return
@@ -580,6 +590,294 @@ def _api_view_paths(view: ApiView) -> Iterator[tuple[Element, str, list[str]]]:
                 yield section, "fields", section.fields
 
 
+def _check_query_view(definition: AppDefinition, view: QueryView) -> Iterator[Diagnostic]:
+    """The query of a view must exist and get a value for each required param, and its rows
+    must have the fields of the view (ADR 0045)."""
+    operation = definition.operations.get(view.query)
+    if operation is None:
+        yield _missing(view, "query", "operation", view.query, definition.operations)
+        return
+    if operation.kind != "query":
+        yield _error(
+            "unsuitable-operation",
+            f"The operation '{view.query}' is a {operation.kind} operation. A view shows the "
+            "rows of an operation with 'kind: query'.",
+            view,
+            at="query",
+        )
+        return
+    if view.states is not None:
+        yield from _check_states(view.states, {})
+    yield from _check_query_params(view, operation)
+    entity = operation.row_entity
+    if entity is not None and entity not in definition.entities:
+        # The check of the operations reports the entity of `returns`.
+        return
+    for element, key, name in _query_view_fields(view):
+        row_type = yield from _row_field(definition, view.query, operation, element, key, name)
+        fmt = getattr(element, "format", None) if key in ("field", None) else None
+        types = FORMAT_TYPES[fmt] if fmt is not None else None
+        if row_type is not None and types is not None and row_type not in types:
+            yield _error(
+                "unsuitable-field",
+                f"The format '{fmt}' does not suit the field '{name}' ({row_type}) of the rows "
+                f"of '{view.query}'. It needs one of: {', '.join(sorted(types))}.",
+                element,
+                at="format",
+            )
+        if row_type is not None and key in ("start", "end") and row_type not in DATE_TYPES:
+            yield _error(
+                "unsuitable-field",
+                f"The {key} of a calendar must be a date or a date-time field, but '{name}' "
+                f"has the type '{row_type}'.",
+                element,
+                at=key,
+            )
+    for element in _query_view_links(view):
+        if entity is None:
+            yield _error(
+                "invalid-option",
+                f"A link opens the page of a record, but the rows of the query '{view.query}' "
+                "are not records.",
+                element,
+                at="link",
+                hint="Remove 'link', or give the query 'returns: <entity>'.",
+            )
+    if isinstance(view, QueryCalendarView):
+        if view.label is None and entity is None:
+            yield _error(
+                "missing-key",
+                f"The rows of the query '{view.query}' are not records, so a calendar of them "
+                "needs 'label'.",
+                view,
+                at="start",
+                hint="Add 'label' with a field of the rows.",
+            )
+        if view.end is not None:
+            record = definition.entities[entity] if entity is not None else None
+            fields = record.fields if record is not None else operation.result or {}
+            start, end = fields.get(view.start), fields.get(view.end)
+            types = {start.type, end.type} if start and end else set[str]()
+            if types <= DATE_TYPES and len(types) == 2:
+                yield _error(
+                    "unsuitable-field",
+                    "The start and the end of a calendar must have the same type.",
+                    view,
+                    at="end",
+                )
+
+
+def _check_query_params(view: QueryView, operation: Operation) -> Iterator[Diagnostic]:
+    """Each param gets one value, from `params` or from a filter, and the values suit the
+    types of the params. Each required param gets a value."""
+    params = operation.params
+    sources: dict[str, str] = {}
+    """The source of the value of each param: `'params'` or the filter."""
+    for name, value in view.params.items():
+        param = params.get(name)
+        if param is None:
+            yield _no_param(view, "params", view.query, name, params)
+            continue
+        sources[name] = "'params'"
+        if isinstance(value, str) and value.startswith("$"):
+            if not ROUTE_PARAM.match(value):
+                yield _error(
+                    "invalid-value",
+                    f"The value '{value}' of the param '{name}' is not valid. A value that "
+                    "starts with '$' must be '$route.<name>', a path parameter of the page.",
+                    view,
+                    at="params",
+                )
+            continue
+        problem = _param_value_problem(param, value)
+        if problem is not None:
+            yield _error(
+                "invalid-value",
+                f"The value {json.dumps(value)} of the param '{name}' is not valid: {problem}.",
+                view,
+                at="params",
+            )
+    for filter_name, filter_ in view.filters.items():
+        name = filter_.param or filter_name
+        key = "param" if filter_.param else None
+        param = params.get(name)
+        if param is None:
+            yield _no_param(filter_, key, view.query, name, params)
+            continue
+        if name in sources:
+            yield _error(
+                "invalid-option",
+                f"The param '{name}' gets its value from {sources[name]} and from the filter "
+                f"'{filter_name}'. A param gets one value.",
+                filter_,
+                at=key,
+                hint="Remove one of them.",
+            )
+            continue
+        sources[name] = f"the filter '{filter_name}'"
+        if filter_.default is not None:
+            problem = _param_value_problem(param, filter_.default)
+            if problem is not None:
+                yield _error(
+                    "invalid-value",
+                    f"The default {json.dumps(filter_.default)} of the filter '{filter_name}' "
+                    f"is not valid: {problem}.",
+                    filter_,
+                    at="default",
+                )
+    for name, param in params.items():
+        if param.required and name not in sources:
+            yield _error(
+                "missing-key",
+                f"The query '{view.query}' needs the param '{name}'.",
+                view,
+                at="query",
+                hint=f"Add a filter for it, for example 'filters: {{ {name}: {{}} }}', or give "
+                f"its value in 'params', or '$route.<name>' for a path parameter of the page.",
+            )
+
+
+def _no_param(
+    element: Element, key: str | None, query: str, name: str, params: Mapping[str, Field]
+) -> Diagnostic:
+    matches = difflib.get_close_matches(name, list(params), n=1)
+    return _error(
+        "unknown-reference",
+        f"The query '{query}' has no param '{name}'.",
+        element,
+        at=key,
+        hint=f"Did you mean '{matches[0]}'?" if matches else None,
+    )
+
+
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$")
+
+
+def _param_value_problem(param: Field, value: object) -> str | None:
+    """Return why a literal value does not suit the type of a param of a query, or None."""
+    match param.type:
+        case "integer":
+            ok = isinstance(value, int) and not isinstance(value, bool)
+            need = "an integer"
+        case "decimal":
+            ok = isinstance(value, int | float) and not isinstance(value, bool)
+            need = "a number"
+        case "boolean":
+            ok = isinstance(value, bool)
+            need = "true or false"
+        case "date":
+            ok = isinstance(value, str) and bool(_DATE.match(value))
+            need = "a date (YYYY-MM-DD)"
+        case "datetime":
+            ok = isinstance(value, str) and bool(_DATETIME.match(value))
+            need = "a date and time (ISO 8601)"
+        case "enum":
+            values = list(param.values or [])
+            ok = value in values
+            need = "one of " + ", ".join(f"'{v}'" for v in values)
+        case _:
+            ok = isinstance(value, str)
+            need = "a text"
+    return None if ok else f"the param has the type '{param.type}', which needs {need}"
+
+
+def _query_view_fields(view: QueryView) -> Iterator[tuple[Element, str | None, str]]:
+    """Yield each element of a view of a query with a key and a field of the rows."""
+    match view:
+        case QueryTableView():
+            for name, column in view.columns.items():
+                yield column, "field" if column.field else None, column.field or name
+        case QueryCardsView():
+            card = view.card
+            yield card, "title", card.title
+            if card.subtitle is not None:
+                yield card, "subtitle", card.subtitle
+            for name in card.fields:
+                yield card, "fields", name
+            for name in card.footer:
+                yield card, "footer", name
+        case QueryCalendarView():
+            yield view, "start", view.start
+            if view.end is not None:
+                yield view, "end", view.end
+            if view.label is not None:
+                yield view, "label", view.label
+
+
+def _query_view_links(view: QueryView) -> Iterator[Element]:
+    """Yield the elements of a view of a query with a link to the page of a record."""
+    if isinstance(view, QueryTableView):
+        yield from (c for c in view.columns.values() if c.link is not None)
+    elif isinstance(view, QueryCalendarView) and view.link is not None:
+        yield view
+
+
+def _row_field(
+    definition: AppDefinition,
+    query: str,
+    operation: Operation,
+    element: Element,
+    key: str | None,
+    name: str,
+) -> Generator[Diagnostic, None, str | None]:
+    """Yield an error if the rows of a query have no field `name`. Return the field type.
+
+    The rows of a query with `returns` are records: a view shows their fields and `id`, not
+    the related records. The rows of a query with `result` have its fields.
+    """
+    entity = operation.row_entity
+    if entity is None:
+        fields = operation.result or {}
+        field = fields.get(name)
+        if field is None:
+            matches = difflib.get_close_matches(name, list(fields), n=1)
+            yield _error(
+                "unknown-reference",
+                f"The rows of the query '{query}' have no field '{name}' in 'result'.",
+                element,
+                at=key,
+                hint=f"Did you mean '{matches[0]}'?" if matches else None,
+            )
+            return None
+        return field.type
+    if name == "id":
+        return "uuid"
+    record = definition.entities[entity]
+    if name in record.relations:
+        yield _error(
+            "unsuitable-field",
+            f"A view of a query shows the fields of its records, but '{name}' is a relation "
+            f"of '{entity}'.",
+            element,
+            at=key,
+            hint="Show a field of the entity, or give the query a 'result' with the field.",
+        )
+        return None
+    field = record.fields.get(name)
+    if field is None:
+        matches = difflib.get_close_matches(name, [*record.fields, "id"], n=1)
+        yield _error(
+            "unknown-reference",
+            f"The rows of the query '{query}' are records of '{entity}', which has no field "
+            f"'{name}'.",
+            element,
+            at=key,
+            hint=f"Did you mean '{matches[0]}'?" if matches else None,
+        )
+        return None
+    if field.is_file:
+        yield _error(
+            "unsuitable-field",
+            f"A view of a query cannot show the file field '{entity}.{name}'.",
+            element,
+            at=key,
+            hint="Show another field.",
+        )
+        return None
+    return field.type
+
+
 def _check_detail(definition: AppDefinition, entity: str, view: DetailView) -> Iterator[Diagnostic]:
     if view.header is not None:
         header = view.header
@@ -636,10 +934,11 @@ def _check_list_view(
     view = views.get(name)
     if view is None:
         yield _missing(element, key, "view", name, views)
-    elif isinstance(view, ApiViewBase):
+    elif isinstance(view, ApiViewBase | QueryViewBase):
+        what = "API data" if isinstance(view, ApiViewBase) else "the rows of a query"
         yield _error(
             "unsuitable-view",
-            f"The view '{name}' shows API data. A list of records needs a view of an entity.",
+            f"The view '{name}' shows {what}. A list of records needs a view of an entity.",
             element,
             at=key,
         )
@@ -1221,7 +1520,7 @@ def check_ui_references(definition: AppDefinition) -> Iterator[Diagnostic]:
             case Layout() | Grid():
                 for breakpoint in element.responsive:
                     yield from _check_breakpoint(tokens, element, "responsive", breakpoint)
-            case Column():
+            case Column() | QueryColumn():
                 if element.hide_below is not None:
                     yield from _check_breakpoint(tokens, element, "hide_below", element.hide_below)
             case ViewResponsive():
@@ -1360,7 +1659,7 @@ def _check_page_content(
         view = views.get(content.view)
         if view is None:
             yield _missing(content, "view", "view", content.view, views)
-        elif isinstance(view, ApiViewBase):
+        elif isinstance(view, ApiViewBase | QueryViewBase):
             yield from _check_api_page(page, content, view)
         elif isinstance(view, DetailView) and not _path_params(page.path):
             yield _error(
@@ -1389,12 +1688,16 @@ def _check_page_content(
             yield _missing(content, "dashboard", "dashboard", content.dashboard, dashboards)
 
 
-def _check_api_page(page: Page, content: PageContent, view: ApiView) -> Iterator[Diagnostic]:
-    """A page with a view of API data has no entity, and has each path parameter of the view."""
+def _check_api_page(
+    page: Page, content: PageContent, view: ApiView | QueryView
+) -> Iterator[Diagnostic]:
+    """A page with a view of API data or of a query has no entity, and has each path
+    parameter of the view."""
     if page.entity is not None:
+        what = "API data" if isinstance(view, ApiViewBase) else "the rows of a query"
         yield _error(
             "unsuitable-view",
-            f"The view '{content.view}' shows API data, but the page shows '{page.entity}'.",
+            f"The view '{content.view}' shows {what}, but the page shows '{page.entity}'.",
             content,
             at="view",
             hint="Remove 'entity' from the page.",

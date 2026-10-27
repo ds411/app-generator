@@ -1,0 +1,448 @@
+{% set plan = ui_views.query_view_plan(name) %}
+{% set view = plan.view %}
+{% set kind = view.kind %}
+{% set calendar = kind == "calendar" %}
+{% set route = plan.route_params | length > 0 %}
+{% set has_params = plan.params_type is not none %}
+{% set s = plan.states %}
+{# The rows of a query (ADR 0045): the function of the query gives one page of the rows. #}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ns = namespace(icons=[]) %}
+{% for icon in plan.icons %}{% set ns.icons = ns.icons + [(icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if plan.filters %}{% set ns.icons = ns.icons + ["XIcon"] %}{% endif %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+{% endif %}
+{# With the FastAPI app, the view of the calendar grid keeps the mode and the shown day. #}
+{% set controlled = calendar and ui_views.server %}
+{% if plan.filters or not calendar or controlled %}
+import { useState } from "react";
+{% endif %}
+{% if kind == "table" %}
+import type { ColumnDef } from "@tanstack/react-table";
+{% endif %}
+
+{% set missing = has_params and plan.required %}
+{% if missing and not calendar %}
+import type { ListResult } from "@/shared/api";
+{% endif %}
+{% for entity, types in plan.entity_types().items() %}
+import type { {{ types | join(", ") }} } from "@/entities/{{ entity | kebab }}";
+{% endfor %}
+import { {{ plan.function }} } from "{{ plan.module }}";
+{% if "badges." in plan.code() %}
+import { badges } from "@/shared/config/badges";
+{% endif %}
+{% if "compute." in plan.code() %}
+import { compute } from "@/shared/lib/compute";
+{% endif %}
+{% set format_names = (["formatValue"] if plan.needs("formatValue") else []) + (["toDate"] if calendar else []) %}
+{% if format_names %}
+import { {{ format_names | join(", ") }} } from "@/shared/lib/format";
+{% endif %}
+{% if plan.needs("pageHref") %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% if kind == "cards" %}
+import { pageCount } from "@/shared/lib/query";
+{% elif calendar %}
+import { sortBy } from "@/shared/lib/query";
+{% endif %}
+{% if "link" in plan.uses %}
+import { Link } from "@/shared/lib/router";
+{% endif %}
+import { useResource } from "@/shared/lib/use-resource";
+{% if plan.filters %}
+import { Button } from "@/shared/ui/button";
+{% endif %}
+{% if controlled %}
+import { type CalendarEvent, CalendarGrid, type CalendarMode, startOfDay } from "@/shared/ui/calendar-grid";
+{% elif calendar %}
+import { type CalendarEvent, CalendarGrid } from "@/shared/ui/calendar-grid";
+{% endif %}
+{% if kind == "cards" %}
+{% set card = plan.card %}
+{% set card_names = ["Card", "CardHeader", "CardTitle"] + (["CardDescription"] if card.subtitle else []) + (["CardContent"] if card.fields else []) + (["CardFooter"] if card.footer else []) %}
+import { {{ card_names | sort | join(", ") }} } from "@/shared/ui/card";
+{% endif %}
+{% if kind == "table" %}
+import { DataTable, type ServerPages } from "@/shared/ui/data-table";
+{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "boolean") | list %}
+import { BooleanFilter } from "@/shared/ui/filters/boolean-filter";
+{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "input") | list %}
+import { ParamFilter } from "@/shared/ui/filters/param-filter";
+{% endif %}
+{% if plan.filters | selectattr("kind", "eq", "select") | list %}
+import { SelectFilter } from "@/shared/ui/filters/select-filter";
+{% endif %}
+{% if kind == "cards" %}
+import { ListPagination } from "@/shared/ui/list-pagination";
+{% endif %}
+{% if "avatar" in plan.uses %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "badge" in plan.uses %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "formatted" in plan.uses %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% set state = ["ViewLoading", "ViewMessage"] %}
+{% if s.error.action == "retry" %}{% set state = state + ["RetryButton"] %}{% endif %}
+import { {{ state | join(", ") }} } from "@/shared/ui/view-state";
+{% if kind == "table" %}
+
+/** A row of the query, with its position as the key of its row. */
+type Row = { id: string; item: {{ plan.row_type }} };
+{% endif %}
+{% if plan.filters %}
+
+type Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: {{ f.state_type }};
+{% endfor %}
+};
+
+const INITIAL_FILTERS: Filters = {
+{% for f in plan.filters %}
+  {{ f.key }}: {{ f.initial }}, {{ trace(f.element_id) }}
+{% endfor %}
+};
+{% set selects = plan.filters | selectattr("kind", "eq", "select") | list %}
+{% if selects %}
+
+/** The values of the params that are enums. */
+const OPTIONS = {
+{% for f in selects %}
+  {{ f.key }}: [
+{% for value, option in f.options %}
+    { value: {{ js(value) }}, label: {{ tr(js(option)) }} },
+{% endfor %}
+  ],
+{% endfor %}
+};
+{% endif %}
+{% endif %}
+{% if has_params %}
+{% set args = (["filters: Filters"] if plan.filters else []) + (["route: Record<string, string | undefined>"] if route else []) %}
+
+/** Return the params of the query{{ ", or null while a required filter has no value" if plan.required }}. */
+function paramsOf({{ args | join(", ") }}): {{ plan.params_type }}{{ " | null" if plan.required }} {
+{% for f in plan.required %}
+  if ({{ f.blank }}) return null;
+{% endfor %}
+  return {
+{% for key, code in plan.params %}
+    {{ key }}: {{ code }},
+{% endfor %}
+  };
+}
+{% endif %}
+{% if kind == "table" %}
+
+/** The columns of the table. The query gives the order of the rows. */
+const COLUMNS: ColumnDef<Row>[] = [
+{% for c in plan.columns %}
+  { {{ trace(c.element_id) }}
+    id: {{ js(c.name | camel) }},
+    header: {{ tr(js(c.header)) }},
+    accessorFn: ({ item }) => {{ c.value.expr }},
+    cell: ({ row: { original: { item } } }) => {{ c.cell }},
+    enableSorting: false,
+{% if c.classes or c.width %}
+    meta: { {% if c.classes %}className: {{ js(c.classes) }}{% endif %}{% if c.classes and c.width %}, {% endif %}{% if c.width %}width: {{ js(c.width) }}{% endif %} },
+{% endif %}
+  },
+{% endfor %}
+];
+{% endif %}
+
+{% if calendar %}
+/** The size of each page that the calendar loads: it shows all rows. */
+const PAGE_SIZE = {{ plan.page_size }};
+{% elif view.pagination %}
+const PAGE_SIZE = {{ plan.page_size }}; {{ trace(view.pagination.id) }}
+{% else %}
+const PAGE_SIZE = {{ plan.page_size }};
+{% endif %}
+{% if not calendar %}
+const PAGE_SIZES: number[] = {{ js(plan.page_sizes) }};
+{% endif %}
+{% if kind == "cards" %}
+
+/** The card of one row. */
+function RowCard({ item }: { item: {{ plan.row_type }} }) {
+  return (
+    <Card className="gap-3 py-4"> {{ trace(card.element_id, jsx=True) }}
+      <CardHeader className="px-4">
+        <CardTitle className="line-clamp-2 text-base leading-snug">{ {{- card.title -}} }</CardTitle>
+{% if card.subtitle %}
+        <CardDescription className="truncate">{{ card.subtitle }}</CardDescription>
+{% endif %}
+      </CardHeader>
+{% if card.fields %}
+      <CardContent className="px-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+{% for field_label, jsx in card.fields %}
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{{ jsx_text(field_label) }}</dt>
+            <dd className="truncate">{{ jsx }}</dd>
+          </div>
+{% endfor %}
+        </dl>
+      </CardContent>
+{% endif %}
+{% if card.footer %}
+      <CardFooter className="flex-wrap gap-2 px-4 text-sm text-muted-foreground">
+{% for jsx in card.footer %}
+        {{ jsx }}
+{% endfor %}
+      </CardFooter>
+{% endif %}
+    </Card>
+  );
+}
+{% endif %}
+{% if calendar %}
+{% set cal = plan.calendar %}
+
+/** Return a date (`YYYY-MM-DD`) or a date and time (ISO 8601) as a Date, or null. */
+function eventDate(value: unknown): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date = toDate(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Return the rows with a start as the events of the calendar, by start. */
+function toEvents(items: {{ plan.row_type }}[]): CalendarEvent[] {
+  const events = items.flatMap((item, index) => {
+    const start = eventDate({{ cal.start.expr }});
+    if (start === null) return [];
+{% if cal.end %}
+    const end = eventDate({{ cal.end.expr }});
+{% endif %}
+    return [
+      {
+        id: String(index),
+        start,
+{% if cal.end %}
+        end: end !== null && end > start ? end : start,
+{% else %}
+        end: start,
+{% endif %}
+        label: {{ cal.label }},
+{% if cal.href %}
+        href: {{ cal.href }},
+{% endif %}
+      },
+    ];
+  });
+  return sortBy(events, (event) => event.start.getTime());
+}
+
+/** Load all rows of the query, one page at a time. */
+async function loadAll({{ "params: " ~ plan.params_type if has_params }}): Promise<{{ plan.row_type }}[]> {
+  const items: {{ plan.row_type }}[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await {{ plan.call("{ page, pageSize: PAGE_SIZE }") }};
+    items.push(...result.items);
+    if (result.items.length === 0 || items.length >= result.total) return items;
+  }
+}
+{% endif %}
+{% if route %}
+
+export type {{ name | pascal }}ViewProps = {
+  /** The path parameters of the page, for the params of the query. */
+  route: Record<string, string | undefined>;
+};
+{% endif %}
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% endif %}
+export function {{ name | pascal }}View({% if route %}{ route }: {{ name | pascal }}ViewProps{% endif %}) {
+{% if plan.filters %}
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+{% endif %}
+{% if kind == "table" %}
+  const [pages, setPages] = useState<ServerPages>({ page: 1, pageSize: PAGE_SIZE, sorting: [] });
+{% elif kind == "cards" %}
+  const [pages, setPages] = useState({ page: 1, pageSize: PAGE_SIZE });
+{% elif controlled %}
+  const [mode, setMode] = useState<CalendarMode>({{ js(plan.calendar.mode) }});
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+{% endif %}
+{% if has_params %}
+  const params = paramsOf({{ ((["filters"] if plan.filters else []) + (["route"] if route else [])) | join(", ") }});
+{% endif %}
+{% if calendar %}
+  const resource = useResource(
+    {{ "JSON.stringify(params)" if has_params else js(name) }},
+{% if missing %}
+    () => (params === null ? Promise.resolve<{{ plan.row_type }}[]>([]) : loadAll(params)),
+{% else %}
+    () => loadAll({{ "params" if has_params }}),
+{% endif %}
+    undefined,
+    { keep: true },
+  );
+{% else %}
+  const resource = useResource(
+    JSON.stringify([{{ "params, " if has_params }}pages.page, pages.pageSize]),
+{% if missing %}
+    () =>
+      params === null
+        ? Promise.resolve<ListResult<{{ plan.row_type }}>>({ items: [], total: 0, page: 1, pageSize: pages.pageSize })
+        : {{ plan.call("{ page: pages.page, pageSize: pages.pageSize }") }},
+{% else %}
+    () => {{ plan.call("{ page: pages.page, pageSize: pages.pageSize }") }},
+{% endif %}
+    undefined,
+    { keep: true },
+  );
+{% endif %}
+{% if plan.filters %}
+
+  const updateFilters = (next: Filters) => {
+    setFilters(next);
+{% if not calendar %}
+    setPages((value) => ({ ...value, page: 1 }));
+{% endif %}
+  };
+  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+{% endif %}
+{% for id in plan.state_ids %}
+  {{ trace(id) }}
+{% endfor %}
+
+  return (
+    <div className="space-y-4">
+{% if plan.filters %}
+      <div className="flex flex-wrap items-center gap-2">
+{% for f in plan.filters %}
+{% if f.kind == "boolean" %}
+        <BooleanFilter label={{ jsx_attr(f.label) }} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% elif f.kind == "select" %}
+        <SelectFilter label={{ jsx_attr(f.label) }} options={OPTIONS.{{ f.key }}} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% else %}
+        <ParamFilter label={{ jsx_attr(f.label) }} type={{ js(f.input_type) }}{% if f.step %} step={{ js(f.step) }}{% endif %}{% if f.required %} required{% endif %} value={filters.{{ f.key }}} onChange={(value) => updateFilters({ ...filters, {{ f.key }}: value })} />
+{% endif %}
+{% endfor %}
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+            {{ jsx_text("Reset") }}
+            <XIcon />
+          </Button>
+        )}
+      </div>
+{% endif %}
+{% if missing %}
+      {params === null ? (
+{% set labels = namespace(items=[]) %}
+{% for f in plan.required %}{% set labels.items = labels.items + [tr(js(f.label))] %}{% endfor %}
+{% set names = "[" ~ labels.items | join(", ") ~ "].join(\", \")" %}
+        <ViewMessage
+          title={{ jsx_attr("Enter the required values") }}
+          text={ {{- js_format("The view needs a value in: {names}.", names=names) -}} }
+        />
+      ) : resource.status === "loading" ? (
+{% else %}
+      {resource.status === "loading" ? (
+{% endif %}
+        <ViewLoading indicator={{ js(s.loading.indicator) }} shape={{ js("cards" if calendar else kind) }}{% if s.loading.text %} text={{ jsx_attr(s.loading.text) }}{% endif %} />
+      ) : resource.status === "error" ? (
+        <ViewMessage
+          tone="error"
+          title={{ jsx_attr(s.error.title or "Something went wrong") }}
+{% if s.error.text %}
+          text={{ jsx_attr(s.error.text) }}
+{% endif %}
+{% if s.error.icon %}
+          icon={ {{- s.error.icon | pascal }}Icon}
+{% endif %}
+{% if s.error.action == "retry" %}
+          action={<RetryButton onRetry={resource.reload} />}
+{% endif %}
+        />
+{% if calendar %}
+      ) : (
+{% if controlled %}
+        <CalendarGrid
+          events={toEvents(resource.data)}
+          mode={mode}
+          anchor={anchor}
+          onModeChange={setMode}
+          onAnchorChange={setAnchor}
+          dateOnly={ {{- "true" if cal.date_only else "false" }}}
+        />
+{% else %}
+        <CalendarGrid events={toEvents(resource.data)} initialMode={{ js(cal.mode) }} dateOnly={ {{- "true" if cal.date_only else "false" }}} />
+{% endif %}
+      )}
+{% else %}
+      ) : resource.data.total === 0 ? (
+{% set e = s.empty %}
+        <ViewMessage
+          title={{ jsx_attr(e.title or "No records yet") }}
+{% if e.text %}
+          text={{ jsx_attr(e.text) }}
+{% endif %}
+{% if e.icon %}
+          icon={ {{- e.icon | pascal }}Icon}
+{% endif %}
+{% if plan.filters %}
+          action={
+            filtered ? (
+              <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+                {{ jsx_text("Reset the filters") }}
+              </Button>
+            ) : undefined
+          }
+{% endif %}
+        />
+{% if kind == "table" %}
+      ) : (
+        <DataTable
+          columns={COLUMNS}
+          data={resource.data.items.map((item, index): Row => ({ id: String(index), item }))}
+          pageSize={PAGE_SIZE}
+          pageSizes={PAGE_SIZES}
+          server={{ '{{' }} ...pages, total: resource.data.total, onChange: setPages {{ '}}' }}
+        />
+      )}
+{% else %}
+      ) : (
+        <>
+{% if view.grid %}
+          <div className={{ js(grid_classes(view.grid)) }}> {{ trace(view.grid.id, jsx=True) }}
+{% for override in view.grid.responsive.values() %}
+            {{ trace(override.id, jsx=True) }}
+{% endfor %}
+{% else %}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+{% endif %}
+            {resource.data.items.map((item, index) => (
+              <RowCard key={index} item={item} />
+            ))}
+          </div>
+          <ListPagination
+            page={pages.page}
+            pageCount={pageCount(resource.data.total, pages.pageSize)}
+            pageSize={pages.pageSize}
+            pageSizes={PAGE_SIZES}
+            total={resource.data.total}
+            onPageChange={(page) => setPages((value) => ({ ...value, page }))}
+            onPageSizeChange={(pageSize) => setPages({ page: 1, pageSize })}
+          />
+        </>
+      )}
+{% endif %}
+{% endif %}
+    </div>
+  );
+}

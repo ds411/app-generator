@@ -9,7 +9,9 @@
 # provider through the mock provider: in Next.js, and in React with the
 # FastAPI app (scripts/auth_ui_test.py). Then connect a new user to an API
 # on the page /connections, through the authorization page of the mock
-# server of the API (scripts/connection_ui_test.py, ADR 0033).
+# server of the API (scripts/connection_ui_test.py, ADR 0033). Last, show
+# the rows of the queries of tests/fixtures/listings.yaml in a table, a
+# card list, and a calendar (scripts/listings_ui_test.py, ADR 0045).
 # The pre-push hook runs this script when a push changes the generator
 # or a front-end binding. Run it by hand from the repository root:
 #
@@ -28,3 +30,4 @@ fi
 
 uv run --locked scripts/auth_ui_test.py "$@"
 uv run --locked scripts/connection_ui_test.py "$@"
+uv run --locked scripts/listings_ui_test.py "$@"

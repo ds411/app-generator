@@ -607,6 +607,8 @@ BINDING = Binding(
         | {"calendar_view"}
         | {"api_table_view", "api_cards_view", "api_detail_view", "api_column", "api_sort"}
         | {"api_search_filter", "api_card", "api_detail_header", "api_detail_section"}
+        | {"query_table_view", "query_cards_view", "query_calendar_view", "query_column"}
+        | {"query_card", "query_filter"}
         | {"search_filter", "select_filter", "boolean_filter", "date_range_filter", "pagination"}
         | {"badge_set", "badge_value"}
         | {"detail_view", "detail_header", "detail_section", "detail_tab", "sort"}
