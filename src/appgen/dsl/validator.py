@@ -1988,7 +1988,8 @@ def _check_password_off(auth: Auth) -> Iterator[Diagnostic]:
 def _check_provider(
     definition: AppDefinition, auth: Auth, provider: Provider, entity: Entity
 ) -> Iterator[Diagnostic]:
-    """A provider asks for `openid`, and with `create_users` gives each required field."""
+    """A provider asks for `openid`, its roles exist, and with `create_users` it gives each
+    required field."""
     if "openid" not in provider.scopes:
         yield _error(
             "invalid-value",
@@ -2005,8 +2006,11 @@ def _check_provider(
                 at="authorize_params",
                 hint="Remove the parameter. Use 'scopes' for the scopes.",
             )
+    yield from _check_provider_roles(definition, provider)
     if not provider.create_users:
-        for key in ("default_role", "claims"):
+        # With `roles`, the default role is the role of a user whose groups have no role.
+        keys = ("claims",) if provider.roles is not None else ("default_role", "claims")
+        for key in keys:
             if getattr(provider, key):
                 yield _error(
                     "invalid-option",
@@ -2061,7 +2065,26 @@ def _check_provider(
                 provider,
                 hint="Make the relation optional, or remove 'create_users'.",
             )
-    yield from _check_default_role(definition, provider, provider.default_role, entity, "provider")
+    if provider.roles is None:
+        yield from _check_default_role(
+            definition, provider, provider.default_role, entity, "provider"
+        )
+
+
+def _check_provider_roles(definition: AppDefinition, provider: Provider) -> Iterator[Diagnostic]:
+    """The roles of the groups of a provider need `access`, and each role exists, as the default
+    role of the provider does. Without a role, the app refuses the sign-in."""
+    if provider.roles is None:
+        return
+    access = definition.access
+    if access is None:
+        yield _error("invalid-option", "'roles' needs the section 'access'.", provider, at="roles")
+        return
+    for role in provider.roles.map.values():
+        if role not in access.roles:
+            yield _missing(provider, "roles", "role", role, access.roles)
+    if provider.default_role is not None and provider.default_role not in access.roles:
+        yield _missing(provider, "default_role", "role", provider.default_role, access.roles)
 
 
 def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:

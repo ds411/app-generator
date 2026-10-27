@@ -98,6 +98,22 @@ its own until now.
   `scripts/mock_oidc.py` also acts as a user pool: its issuer has a
   path, its endpoints are on another origin, it needs `identity_provider`,
   and its ID tokens have `email_verified: "false"`.
+- Roles from the groups of the provider (update for #484). `roles` of a
+  provider names a claim with the groups of the user (`claim`), and
+  gives a role of `access` for each group (`map`). At each sign-in, the
+  app sets the role field of the user to the first role of `map`, in
+  the order of the definition, whose group is in the claim, else to
+  `default_role`. Without `default_role`, the app refuses the sign-in
+  (403 in the FastAPI app, `?error=no-role` in the Next.js app). The
+  app sets the role at each sign-in, not only for a new user, so that a
+  change of the groups at the provider reaches the app at the next
+  sign-in. The role of a session that runs stays until the next sign-in.
+  The claim can be a list, or one text: Cognito puts a SAML attribute
+  with more than one value in a custom attribute as `[a, b]`. The apps
+  accept a list, `[a, b]` (also as JSON), `a,b`, and `a`. The roles of
+  memberships (ADR 0048) stay as they are: `roles` sets only
+  `access.role_field`. The mock provider takes the groups from the
+  mock parameter `groups` of the authorization request.
 
 ## Consequences
 
@@ -120,3 +136,7 @@ its own until now.
   the company. A sign-in that starts at the identity provider (for
   example the My Apps portal of Entra ID) has no `state`, and the apps
   refuse it.
+- With `roles`, the provider decides the role of each user: a change of
+  the role in the app lasts only until the next sign-in of the user.
+  A user who loses all groups of `map` keeps the role of the last
+  sign-in until the next one.

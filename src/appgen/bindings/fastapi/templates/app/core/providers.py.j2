@@ -4,6 +4,7 @@
 {% set access = definition.access %}
 {% set role = (u.fields | selectattr("name", "eq", access.role_field) | first) if access else none %}
 {% set creates = py.providers | selectattr("create_users") | list %}
+{% set grouped = (py.providers | selectattr("roles_claim") | list) if role else [] %}
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
 {% set address = (u.fields | selectattr("name", "eq", definition.address_field()) | first) if verify else none %}
 """The sign-in with OpenID Connect providers (ADR 0020).
@@ -20,16 +21,24 @@ With `return_to` (a page of a front end in `CORS_ORIGINS`), the callback
 sends the browser back to the page with the token in the fragment of the
 URL: `#access_token=...&token_type=bearer&expires_in=...`, or `#error=...`.
 Without `return_to`, the callback returns the token as JSON.
+{% if grouped %}
+
+A provider with `roles` sets the role of the user at each sign-in, from
+the groups in a claim of the ID token.
+{% endif %}
 """
 
 import base64
 import hashlib
 import hmac
+{% if grouped %}
+import json
+{% endif %}
 import secrets
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal{{ ", cast" if grouped }}
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
@@ -41,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 {{ py.from_import("app.core.auth", ["Token", "find_user", "make_token", "sign", "signing_key", "unsign"] + (["remove_unverified_password"] if verify else [])) }}
 from app.core.config import Settings
-{% if creates %}
+{% if creates or grouped %}
 from app.core.db import SessionDep, commit
 {% else %}
 from app.core.db import SessionDep
@@ -52,6 +61,9 @@ from app.core.i18n import t
 {% endif %}
 {% if creates %}
 from app.features.{{ u.slice }} import repository
+{% endif %}
+{% if grouped %}
+from app.features.{{ u.slice }}.enums import {{ role.enum.name }}
 {% endif %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
 {% if creates %}
@@ -89,6 +101,12 @@ class Provider:
     """The fixed parameters of the authorization request, for example the identity provider."""
     trust_email: bool = False
     """Accept an email address that the ID token does not mark as verified."""
+{% if grouped %}
+    roles_claim: str | None = None
+    """The claim with the groups of the user: the app sets the role at each sign-in."""
+    role_map: tuple[tuple[str, str], ...] = ()
+    """Each group and its role, in the order of the check."""
+{% endif %}
 
 
 def provider_of(settings: Settings, name: ProviderName) -> Provider:
@@ -105,9 +123,11 @@ def provider_of(settings: Settings, name: ProviderName) -> Provider:
             username_claim={{ p.username_claim | tojson }},
 {% if p.create_users %}
             create_users=True,
+{% endif %}
 {% if p.default_role and role %}
             default_role="{{ p.default_role }}",
 {% endif %}
+{% if p.create_users %}
 {% if p.claims %}
             claims=({% for f, claim in p.claims %}("{{ f.attr }}", {{ claim | tojson }}),{% if not loop.last %} {% endif %}{% endfor %}),
 {% endif %}
@@ -117,6 +137,11 @@ def provider_of(settings: Settings, name: ProviderName) -> Provider:
 {% endif %}
 {% if p.trust_email %}
             trust_email=True,
+{% endif %}
+{% if p.roles_claim and role %}
+            {{ trace(p.roles_id) }}
+            roles_claim={{ p.roles_claim | tojson }},
+            {{ p.pairs_arg("role_map", p.role_map) }}
 {% endif %}
         ),
 {% endfor %}
@@ -239,12 +264,45 @@ async def check_id_token(
     return claims
 
 
+{% if grouped %}
+def groups_of(value: Any) -> list[str]:
+    """Return the groups of the value of a claim: a list, or a text in the form `[a, b]`, `a,b`,
+    or `a`. A SAML attribute with more than one value can come as such a text."""
+    if isinstance(value, list):
+        return [str(item) for item in cast(list[object], value)]
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    if text.startswith("["):
+        try:
+            found = json.loads(text)
+        except ValueError:
+            text = text.removeprefix("[").removesuffix("]")
+        else:
+            return groups_of(found) if isinstance(found, list) else []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def role_of(provider: Provider, claims: dict[str, Any]) -> {{ role.enum.name }}:
+    """Return the role of the groups in the claims: the first role of the provider whose group
+    is in the claim, else the default role. Give 403 without a role."""
+    groups = set(groups_of(claims.get(provider.roles_claim or "")))
+    for group, name in provider.role_map:
+        if group in groups:
+            return {{ role.enum.name }}(name)
+    if provider.default_role is None:
+        {{ py.problem(403, "Your groups at the provider give you no role in this app. Ask an administrator.", 8) }}
+    return {{ role.enum.name }}(provider.default_role)
+
+
+{% endif %}
 async def user_of(
     session: AsyncSession,
     provider: Provider,
     claims: dict[str, Any],
 ) -> {{ u.name }}:
-    """Return the user of the claims of an ID token. With `create_users`, make a new user."""
+    """Return the user of the claims of an ID token. With `create_users`, make a new user.{% if grouped %} With
+    `roles`, set the role of the user from the groups in the claims.{% endif %}"""
     username = claims.get(provider.username_claim)
     if not isinstance(username, str) or not username:
         {{ py.problem(401, "The ID token has no claim '{claim}'.", 8, claim="provider.username_claim") }}
@@ -252,8 +310,17 @@ async def user_of(
     unverified = claims.get("email_verified") in (False, "false")
     if provider.username_claim == "email" and unverified and not provider.trust_email:
         {{ py.problem(401, "The provider did not verify the email address.", 8) }}
+{% if grouped %}
+    role = role_of(provider, claims) if provider.roles_claim is not None else None
+{% endif %}
     user = await find_user(session, username)
     if user is not None:
+{% if grouped %}
+        if role is not None and user.{{ role.attr }} != role:
+            # The groups at the provider changed after the last sign-in.
+            user.{{ role.attr }} = role
+            await commit(session)
+{% endif %}
 {% if verify %}
         {{ trace(verify.id) }}
         email = claims.get("email")
@@ -267,7 +334,12 @@ async def user_of(
         {{ py.problem(403, "No user has the user name {username}. Ask an administrator.", 8, username="username") }}
     values: dict[str, Any] = {attr: claims.get(claim) for attr, claim in provider.claims}
     values["{{ username.attr }}"] = username
-{% if role %}
+{% if grouped %}
+    if role is not None:
+        values["{{ role.attr }}"] = role
+    elif provider.default_role is not None:
+        values["{{ role.attr }}"] = provider.default_role
+{% elif role %}
     if provider.default_role is not None:
         values["{{ role.attr }}"] = provider.default_role
 {% endif %}

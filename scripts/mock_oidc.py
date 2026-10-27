@@ -5,7 +5,9 @@ authorization endpoint sends the browser back to the app with a code.
 The user is the email address in the parameter `login_hint` of the
 authorization request, or else `mock.user@example.com`. The ID tokens
 have the claims `sub`, `email`, `email_verified`, and `name`, and an RS256
-signature with a key that the provider makes when it starts.
+signature with a key that the provider makes when it starts. The
+parameter `groups` of the authorization request (a mock parameter, `a,b`)
+gives the groups of the user: the claim `groups`, a list.
 
 The provider checks the client ID and the client secret (the basic
 scheme or the form), the redirect URI, the one-time code, and the PKCE
@@ -21,7 +23,10 @@ authorization endpoint refuses a request without the parameter
 `identity_provider` of the SAML provider. Its ID tokens have the
 claims of a federated user: `email_verified` is the text `"false"`,
 because no attribute of the SAML provider gives it, and the claims
-`cognito:username`, `cognito:groups`, and `identities` are there.
+`cognito:username`, `cognito:groups`, and `identities` are there. The
+groups of the parameter `groups` are in the claim `custom:groups`, as the
+text `[a, b]`: a SAML attribute with more than one value (the groups of
+Entra ID) arrives in this form in a custom attribute of the user pool.
 
 Run it from the repository root:
 
@@ -202,6 +207,7 @@ class MockProvider:
                 "challenge": query["code_challenge"],
                 "nonce": query.get("nonce", ""),
                 "email": query.get("login_hint") or DEFAULT_EMAIL,
+                "groups": query.get("groups", ""),
             }
         answer = {"code": code} | ({"state": query["state"]} if "state" in query else {})
         separator = "&" if "?" in redirect_uri else "?"
@@ -234,10 +240,11 @@ class MockProvider:
             "access_token": secrets.token_urlsafe(24),
             "token_type": "Bearer",
             "expires_in": TOKEN_SECONDS,
-            "id_token": self.id_token(flow["email"], flow["nonce"]),
+            "id_token": self.id_token(flow["email"], flow["nonce"], flow["groups"]),
         }
 
-    def id_token(self, email: str, nonce: str) -> str:
+    def id_token(self, email: str, nonce: str, groups: str = "") -> str:
+        """Return a signed ID token. `groups` is the parameter `groups`: `a,b`, or empty."""
         now = int(time.time())
         name = email.partition("@")[0].replace(".", " ").title()
         claims: dict[str, Any] = {
@@ -251,6 +258,9 @@ class MockProvider:
             "email_verified": True,
             "name": name,
         }
+        group_list = [group for group in groups.split(",") if group]
+        if group_list:
+            claims["groups"] = group_list
         if self.identity_provider:
             pool = self.issuer.rpartition("/")[2]
             claims |= {
@@ -270,6 +280,9 @@ class MockProvider:
                 "token_use": "id",
                 "auth_time": now,
             }
+            if group_list:
+                del claims["groups"]
+                claims["custom:groups"] = f"[{', '.join(group_list)}]"
         header = {"alg": "RS256", "typ": "JWT", "kid": "mock-key"}
         parts = [json.dumps(part, separators=(",", ":")).encode() for part in (header, claims)]
         signing_input = ".".join(_b64(part) for part in parts).encode()

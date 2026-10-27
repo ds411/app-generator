@@ -2949,7 +2949,8 @@ auth:
   user must exist. With `create_users: true`, the first sign-in makes a
   new user: `claims` gives the other fields of the new user from claims
   (field name: claim name), and it must give each required field without
-  a default. With `access`, `default_role` is the role of a new user.
+  a default. With `access`, `default_role` is the role of a new user
+  (with `roles`, see below).
   `title` (default: the name) is the text on the sign-in button.
 - `authorize_params` adds fixed parameters to the authorization request
   of a provider, for example `{ identity_provider: EntraID }` for a user
@@ -2966,6 +2967,37 @@ auth:
   identity provider: the user pool does not mark the address of a SAML
   user as verified. See [Sign-in with Amazon Cognito and Entra
   ID](cognito-entra-id.md).
+- `roles` sets the role of the user at each sign-in with a provider,
+  from the groups in a claim of the ID token. It needs `access`.
+  `claim` names the claim, for example `groups`, or `custom:groups` for
+  the groups of Entra ID in a user pool of Amazon Cognito. The value of
+  the claim is a list, or a text in the form `[a, b]`, `a,b`, or `a`: a
+  SAML attribute with more than one value arrives as such a text. `map`
+  gives the role of each group, for example of the object ID of a group
+  of Entra ID. The user gets the first role of `map`, in the order of
+  the definition, whose group is in the claim. Without such a group, the
+  user gets `default_role`, also without `create_users`. Without
+  `default_role`, the apps refuse the sign-in (403). A change of the
+  groups at the provider changes the role at the next sign-in. With
+  mock data, the React app signs in a mock user with the first role of
+  `map`.
+
+  ```yaml
+  providers:
+    company:
+      issuer: https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_Example
+      client_id_env: COMPANY_CLIENT_ID
+      client_secret_env: COMPANY_CLIENT_SECRET
+      authorize_params: { identity_provider: EntraID }
+      trust_email: true
+      create_users: true
+      default_role: staff
+      roles:
+        claim: "custom:groups"
+        map:
+          0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
+          5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
+  ```
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up`, `password_reset`, or `second_factor`.
@@ -3454,7 +3486,8 @@ use in the app does not show.
   `Do you have an account?`.
 - The sign-in with a provider: `or`,
   `No user has this user name. Ask an administrator.`,
-  `The sign-in with the provider failed.`.
+  `The sign-in with the provider failed.`,
+  `Your groups at the provider give you no role in this app. Ask an administrator.`.
 - The password reset: `Did you forget the password?`,
   `Reset the password`,
   `Enter your user name. The app sends you a link to set a new password.`,

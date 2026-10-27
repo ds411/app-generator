@@ -26,6 +26,7 @@ The generated apps speak only OpenID Connect
 - [Step 3: the app client](#step-3-the-app-client)
 - [Step 4: the settings of the apps](#step-4-the-settings-of-the-apps)
 - [The verified email address](#the-verified-email-address)
+- [Roles from the groups of Entra ID](#roles-from-the-groups-of-entra-id)
 - [Limits](#limits)
 - [Checks without a user pool](#checks-without-a-user-pool)
 
@@ -47,6 +48,11 @@ auth:
       create_users: true
       default_role: staff
       claims: { name: name }
+      roles:
+        claim: "custom:groups"
+        map:
+          0b8e7f5c-2d4a-4c1e-9f3a-6a1d2b3c4d5e: admin
+          5f6e7d8c-9b0a-4f1e-8d2c-3b4a5c6d7e8f: staff
 ```
 
 - `issuer` is the issuer of the user pool:
@@ -59,6 +65,8 @@ auth:
   sign-in page with a button for each provider.
 - `trust_email` accepts the email address of a SAML user. See
   [The verified email address](#the-verified-email-address).
+- `roles` gives the role of the user from the groups of Entra ID at each
+  sign-in. See [Roles from the groups of Entra ID](#roles-from-the-groups-of-entra-id).
 - `tests/fixtures/cognito-sign-in.yaml` is a complete definition.
 
 ## Step 1: the user pool and its domain
@@ -146,6 +154,48 @@ attribute. There are two fixes:
   pool, with the value `true` for each user. Then the provider needs no
   `trust_email`.
 
+## Roles from the groups of Entra ID
+
+With `roles`, the apps set the role of the user at each sign-in from
+the groups of the user in Entra ID. The company then manages the rights
+of the staff in Entra ID. A change of the groups changes the role at the
+next sign-in.
+
+In Entra ID, in the single sign-on of the enterprise application:
+
+1. Add a group claim. Select "Groups assigned to the application", so
+   that the assertion has only the groups that the app knows. Entra ID
+   sends at most 150 groups in a SAML assertion: with more, it sends a
+   link to Microsoft Graph in place of the groups, and the apps do not
+   follow it.
+2. Keep the source attribute "Group ID". Entra ID then sends the object
+   IDs of the groups, not their names. The keys of `roles.map` are these
+   IDs.
+3. Assign each group of `roles.map` to the enterprise application.
+
+In the user pool:
+
+1. Add a custom attribute `groups` (a string, mutable, at most 2048
+   characters). The user pool calls it `custom:groups`. A mutable
+   attribute lets the user pool change it at each sign-in.
+2. Map the attribute of the SAML assertion
+   `http://schemas.microsoft.com/ws/2008/06/identity/claims/groups` to
+   `custom:groups`.
+3. Give the app client the right to read `custom:groups`, so that the ID
+   token has it.
+
+The user pool puts the values of a SAML attribute with more than one
+value in one text, in the form `[id1, id2]`. The apps also accept a list
+and the forms `id1,id2` and `id1`. The apps give the user the first role
+of `roles.map`, in the order of the definition, whose group is in the
+claim. Without such a group, the user gets `default_role`. Without
+`default_role`, the apps refuse the sign-in, and the sign-in page tells
+the user to ask an administrator.
+
+The groups of the user pool itself are in the claim `cognito:groups`.
+Use `claim: "cognito:groups"` to give the roles from these groups in
+place of the groups of Entra ID.
+
 ## Limits
 
 - A sign-in that starts at Entra ID (for example from the My Apps
@@ -162,7 +212,10 @@ provider `scripts/mock_oidc.py` also acts as a user pool with the SAML
 provider `EntraID`: its issuer has the path of a user pool, its
 endpoints are on another origin, it refuses an authorization request
 without `identity_provider`, and its ID tokens have
-`email_verified: "false"`. `scripts/check_provider_sign_in.py` (the
-FastAPI app) and `scripts/auth_ui_test.py` (the Next.js app, and the
+`email_verified: "false"`. The mock parameter `groups` of the
+authorization request gives the groups of the user, in the claim
+`custom:groups` as the text `[a, b]`. `scripts/check_provider_sign_in.py`
+(the FastAPI app) and `scripts/auth_ui_test.py` (the Next.js app, and the
 React app with the FastAPI app) sign in to
-`tests/fixtures/cognito-sign-in.yaml` through it.
+`tests/fixtures/cognito-sign-in.yaml` through it: one user with a group
+of each role in turn, and then without a group.

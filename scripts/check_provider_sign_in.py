@@ -11,7 +11,10 @@ the first provider, the script also checks the callback to a page of a
 front end (`return_to`). A provider with the parameter
 `identity_provider` (`authorize_params`) signs in at the mock user pool of
 Amazon Cognito, whose ID tokens do not mark the email address as
-verified: the provider needs `trust_email`.
+verified: the provider needs `trust_email`. A provider with `roles` signs
+in one user with each group of `roles.map` in turn, and then without a
+group: `/auth/me` gives the role of the group each time, and at last the
+default role, or the app refuses the sign-in (403).
 
 Run it from the repository root, with an app that a check script
 generated and installed (`uv sync`):
@@ -89,20 +92,59 @@ def sign_in(
     provider: mock_oidc.MockProvider,
     email: str,
     return_to: str | None = None,
+    groups: tuple[str, ...] = (),
 ) -> tuple[int, Any, str]:
-    """Do the steps of the browser, and return the answer of the callback."""
+    """Do the steps of the browser, and return the answer of the callback. The mock provider
+    gives the user the groups (the claim `groups`, or `custom:groups` in the user pool)."""
     query = f"?{urlencode({'return_to': return_to})}" if return_to else ""
     status, headers, body = browser.get(f"{APP_URL}/auth/providers/{name}/start{query}")
     _expect(status, 302, f"GET /auth/providers/{name}/start", body)
     location: str = headers["Location"]
     if not location.startswith(f"{provider.authorization_endpoint}?"):
         raise CheckError(f"The start sent the browser to {location}, not to the provider.")
-    status, headers, body = browser.get(f"{location}&{urlencode({'login_hint': email})}")
+    mock_query = {"login_hint": email} | ({"groups": ",".join(groups)} if groups else {})
+    status, headers, body = browser.get(f"{location}&{urlencode(mock_query)}")
     _expect(status, 302, "the sign-in at the mock provider", body)
     callback: str = headers["Location"]
     if not callback.startswith(f"{APP_URL}/auth/providers/{name}/callback?"):
         raise CheckError(f"The provider sent the browser to {callback}, not to the callback.")
     return browser.get(callback)
+
+
+def me_of(body: str) -> dict[str, Any]:
+    """Return the user of the token of the answer of a callback (`GET /auth/me`)."""
+    token = json.loads(body)["access_token"]
+    status, _, body = Browser().get(
+        f"{APP_URL}/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    _expect(status, 200, "GET /auth/me", body)
+    me: dict[str, Any] = json.loads(body)
+    return me
+
+
+def check_roles(
+    name: str, provider: Provider, mock: mock_oidc.MockProvider, role_field: str
+) -> None:
+    """Sign in one user with each group of `roles.map` in turn, and then without a group."""
+    assert provider.roles is not None
+    email = f"{name}.grouped@example.com"
+    for group, role in provider.roles.map.items():
+        status, _, body = sign_in(Browser(), name, mock, email, groups=(group,))
+        _expect(status, 200, f"the callback of {name} with the group {group}", body)
+        found = me_of(body).get(role_field)
+        if found != role:
+            raise CheckError(f"The group {group} gave the role {found}, not {role}.")
+        log(f"{name}: the group {group} gives the role {role}")
+    status, _, body = sign_in(Browser(), name, mock, email)
+    if provider.default_role is None:
+        _expect(status, 403, f"the sign-in of a user without a group with {name}", body)
+        log(f"{name}: the app refuses a user whose groups give no role (403)")
+        return
+    _expect(status, 200, f"the callback of {name} without a group", body)
+    found = me_of(body).get(role_field)
+    if found != provider.default_role:
+        raise CheckError(f"No group gave the role {found}, not {provider.default_role}.")
+    log(f"{name}: without a group, the user gets the default role {found}")
 
 
 def check_provider(
@@ -117,12 +159,7 @@ def check_provider(
         log(f"{name}: the app refuses an unknown user (403)")
         return
     _expect(status, 200, f"the callback of {name}", body)
-    token = json.loads(body)["access_token"]
-    status, _, body = Browser().get(
-        f"{APP_URL}/auth/me", headers={"Authorization": f"Bearer {token}"}
-    )
-    _expect(status, 200, "GET /auth/me", body)
-    me: dict[str, Any] = json.loads(body)
+    me = me_of(body)
     if email not in me.values():
         raise CheckError(f"GET /auth/me gave {me}, not the user {email}.")
     log(f"{name}: a new user signs in, and GET /auth/me gives the user")
@@ -189,7 +226,8 @@ def main() -> int:
     parser.add_argument("definition", type=Path)
     parser.add_argument("app", type=Path, help="The folder of the generated FastAPI app.")
     args = parser.parse_args()
-    auth = load_definition(args.definition).auth
+    definition = load_definition(args.definition)
+    auth, access = definition.auth, definition.access
     if auth is None or not auth.providers:
         parser.error(f"{args.definition} has no providers in auth.providers.")
     try:
@@ -202,6 +240,8 @@ def main() -> int:
                 pool = "identity_provider" in provider.authorize_params
                 mock = plain.cognito if pool and plain.cognito else plain
                 check_provider(name, provider, mock, first=index == 0)
+                if provider.roles is not None and access is not None:
+                    check_roles(name, provider, mock, access.role_field)
     except (CheckError, subprocess.CalledProcessError) as error:
         print(f"provider-sign-in: failed: {error}", file=sys.stderr)
         return 1

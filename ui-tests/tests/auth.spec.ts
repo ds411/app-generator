@@ -271,15 +271,33 @@ for (const rule of auth?.recordRules ?? []) {
 }
 
 for (const provider of auth?.providers ?? []) {
-  test(`a user signs in with the provider ${provider.name}, and sees the menu of its role`, async ({ page }, testInfo) => {
+  test(`a user signs in with the provider ${provider.name}, and sees the menu of its role`, async ({ browser, baseURL }, testInfo) => {
     test.skip(testInfo.project.name !== "light", "The sign-in does not depend on the color mode.");
-    await page.goto("/sign-in");
-    const app = new URL(page.url()).origin;
-    await page.getByRole("button", { name: provider.title, exact: true }).click();
-    // The browser goes to the provider, and comes back to the start page of the app.
-    await page.waitForURL((url) => url.origin === app && url.pathname === "/");
-    await page.waitForLoadState("networkidle");
-    expect(await menuLabels(page)).toEqual(provider.menu);
+    for (const { loginHint, groups = [], menu } of provider.signIns) {
+      // Each sign-in starts without a session, in a new context of the browser.
+      const context = await browser.newContext({ baseURL });
+      const page = await context.newPage();
+      if (loginHint !== undefined) {
+        // The mock provider takes the user and the groups from the authorization request. The
+        // start of the sign-in redirects to it, and a route does not see a redirect: the route
+        // changes the redirect of the start.
+        await page.route(/\/auth\/providers\/[^/]+\/start/, async (route) => {
+          const response = await route.fetch({ maxRedirects: 0 });
+          const location = new URL(response.headers()["location"] ?? "");
+          location.searchParams.set("login_hint", loginHint);
+          location.searchParams.set("groups", groups.join(","));
+          await route.fulfill({ response, headers: { ...response.headers(), location: location.toString() } });
+        });
+      }
+      await page.goto("/sign-in");
+      const app = new URL(page.url()).origin;
+      await page.getByRole("button", { name: provider.title, exact: true }).click();
+      // The browser goes to the provider, and comes back to the start page of the app.
+      await page.waitForURL((url) => url.origin === app && url.pathname === "/");
+      await page.waitForLoadState("networkidle");
+      expect(await menuLabels(page), `${loginHint ?? "the mock user"} with the groups [${groups.join(", ")}]`).toEqual(menu);
+      await context.close();
+    }
   });
 }
 

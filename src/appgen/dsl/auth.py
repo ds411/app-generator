@@ -126,6 +126,21 @@ class SecondFactor(Element):
     """With `access`: the roles that must use the second factor."""
 
 
+class ProviderRoles(Element):
+    """The roles of the users from a claim of a provider, for example the groups of Entra ID.
+
+    At each sign-in, the app sets the role of the user to the first role of
+    `map` whose group is in the claim. Without a match, the user gets the
+    `default_role` of the provider, or the app refuses the sign-in.
+    """
+
+    claim: Claim
+    """The claim with the groups of the user, for example `groups` or `custom:groups`. Its value
+    is a list, or a text in the form `[a, b]`, `a,b`, or `a`."""
+    map: Annotated[dict[Text, MemberName], pydantic.Field(min_length=1)]
+    """A group of the claim to a role of `access`, in the order of the check."""
+
+
 class Provider(Element):
     """An OpenID Connect provider for the sign-in (ADR 0020).
 
@@ -150,9 +165,12 @@ class Provider(Element):
     create_users: bool = False
     """Make a new user at the first sign-in of an unknown user name. Else the app refuses it."""
     default_role: MemberName | None = None
-    """With `create_users` and `access`: the role of a new user."""
+    """With `create_users` and `access`: the role of a new user. With `roles`: the role of a user
+    whose groups have no role."""
     claims: dict[MemberName, Claim] = pydantic.Field(default_factory=dict[str, str])
     """With `create_users`: the fields of a new user from claims, for example `name: name`."""
+    roles: ProviderRoles | None = None
+    """With `access`: the role of the user at each sign-in, from the groups in a claim."""
     authorize_params: dict[ParamName, Text] = pydantic.Field(default_factory=dict[str, str])
     """Fixed parameters of the authorization request, for example `identity_provider: EntraID`:
     a user pool of Amazon Cognito then sends the user at once to that identity provider."""
