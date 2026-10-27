@@ -7,27 +7,18 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 {% else %}
 from collections.abc import AsyncIterator, Sequence
 {% endif %}
+{% if py.me %}
+from contextvars import ContextVar
+{% endif %}
 from enum import StrEnum
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends, Request
+{% set sa = ["JSON", "DateTime", "Dialect", "Enum", "MetaData", "TypeDecorator", "event", "select"] + (["BigInteger", "String"] if py.sequences else []) + (["BindParameter", "Uuid", "bindparam"] if py.me else []) %}
+{{ py.from_import("sqlalchemy", sa) }}
 {% if py.sequences %}
-from sqlalchemy import (
-    JSON,
-    BigInteger,
-    DateTime,
-    Dialect,
-    Enum,
-    MetaData,
-    String,
-    TypeDecorator,
-    event,
-    select,
-)
 from sqlalchemy import Sequence as DatabaseSequence
-{% else %}
-from sqlalchemy import JSON, DateTime, Dialect, Enum, MetaData, TypeDecorator, event, select
 {% endif %}
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +38,9 @@ from sqlalchemy.sql.expression import ColumnElement
 {% endif %}
 
 from app.core.errors import ProblemError
+{% if py.near %}
+from app.core.geo import add_math_functions
+{% endif %}
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
@@ -192,6 +186,10 @@ def make_engine(database_url: str) -> AsyncEngine:
     engine = create_async_engine(database_url, pool_pre_ping=True)
     if engine.dialect.name == "sqlite":
         event.listen(engine.sync_engine, "connect", _enable_foreign_keys)
+{% if py.near %}
+        # The filter `near` computes distances with `sin` and `cos` (ADR 0046).
+        event.listen(engine.sync_engine, "connect", add_math_functions)
+{% endif %}
     return engine
 
 
@@ -227,6 +225,25 @@ EVENT_KEY = "appgen.event"
 USER_KEY = "appgen.user"
 """The key of `session.info` with the ID of the signed-in user: the change log (ADR 0040) and the
 notices (ADR 0041) name the user of a change."""
+
+
+{% endif %}
+{% if py.me %}
+SIGNED_IN: ContextVar[UUID | None] = ContextVar("signed_in", default=None)
+"""The ID of the user of the token of the request, else None: the value `$me` of the filters.
+
+`remember_user` of `app.core.auth` sets it at the start of each request.
+"""
+
+
+def me() -> BindParameter[UUID]:
+    """Return the value `$me` in SQL: the ID of the signed-in user of the request, else NULL.
+
+    The database gets the value at each run of a statement, so that a total
+    (a column property) gives the value of the user of each request. Without
+    a user, a condition `= me()` keeps no records.
+    """
+    return bindparam("me", type_=Uuid(), callable_=SIGNED_IN.get, unique=True)
 
 
 {% endif %}

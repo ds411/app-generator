@@ -62,6 +62,7 @@ type FieldType = Literal[
     "json",
     "file",
     "image",
+    "point",
 ]
 type RelationKind = Literal["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 type OnDelete = Literal["restrict", "cascade", "set_null"]
@@ -139,6 +140,11 @@ class Field(Element):
     def is_file(self) -> bool:
         """True for a field that holds a file: a `file` or an `image` field (ADR 0027)."""
         return self.type in FILE_TYPES
+
+    @property
+    def is_point(self) -> bool:
+        """True for a place on the earth: a `point` field, with a latitude and a longitude."""
+        return self.type == "point"
 
     @property
     def size_limit(self) -> int:

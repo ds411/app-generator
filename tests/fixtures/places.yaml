@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# Places: the points of M35 (ADR 0046). A place has a point, and the
+# list of the places has the filters `near` (a point and a distance) and
+# `area` (a box of a map), also through the relation to its city.
+# scripts/check-fastapi.sh generates and checks the FastAPI app of this
+# definition, and runs its tests on Postgres and SQLite.
+version: 0
+
+app:
+  name: places
+  title: Places
+  description: Places to visit, and their cities.
+
+entities:
+  City:
+    display_field: name
+    crud: true
+    fields:
+      name: { type: string, required: true, max_length: 80 }
+      center: { type: point, label: Center, description: The center of the city. }
+    relations:
+      places: { kind: one_to_many, target: Place, inverse: city }
+
+  Place:
+    display_field: name
+    crud: { views: [table, detail], forms: [create, update] }
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      kind: { type: enum, values: [museum, park, view], required: true }
+      location: { type: point, required: true, label: Location }
+      entrance: { type: point, default: { lat: 38.7139, lng: -9.1335 } }
+    relations:
+      city: { kind: many_to_one, target: City, inverse: places }
+    history: true
+
+pages:
+  places: { path: /places, title: Places, content: { view: place_list } }
+
+ui:
+  views:
+    place_list:
+      kind: table
+      entity: Place
+      columns:
+        name: {}
+        kind: {}
+        city: {}
+      filters:
+        nearby: { kind: near, field: location, label: Near, distance: 5 }
+        visible: { kind: area, field: location, label: In the map }
+        near_city: { kind: near, field: city.center, label: Near the city }
+        kind: { kind: select, field: kind }
+
+seed:
+  City:
+    records:
+      lisbon: { name: Lisbon, center: { lat: 38.7223, lng: -9.1393 } }
+      porto: { name: Porto, center: "41.1579,-8.6291" }
+  Place:
+    records:
+      tower:
+        name: Belém Tower
+        kind: view
+        location: { lat: 38.6916, lng: -9.216 }
+        city: lisbon
+      gardens:
+        name: Crystal Palace Gardens
+        kind: park
+        location: { lat: 41.148, lng: -8.6254 }
+        city: porto

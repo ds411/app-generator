@@ -6,15 +6,15 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 {% set exposed = py_apis.values() | selectattr("expose") | list %}
-{% if definition.auth and exposed %}
+{% if definition.auth and (exposed or py.me) %}
 from fastapi import Depends, FastAPI
 {% else %}
 from fastapi import FastAPI
 {% endif %}
 from fastapi.middleware.cors import CORSMiddleware
 
-{% if definition.auth and exposed %}
-from app.core.auth import current_user
+{% if definition.auth and (exposed or py.me) %}
+{{ py.from_import("app.core.auth", (["current_user"] if exposed else []) + (["remember_user"] if py.me else [])) }}
 from app.core.auth import router as auth_router
 {% elif definition.auth %}
 from app.core.auth import router as auth_router
@@ -128,6 +128,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description={{ app.description | tojson }},
 {% endif %}
         lifespan=lifespan,
+{% if py.me %}
+        # Each request keeps its signed-in user for `$me` in the filters of the totals and the widgets.
+        dependencies=[Depends(remember_user)],
+{% endif %}
     )
     app.state.settings = settings
     app.state.engine = make_engine(settings.database_url)

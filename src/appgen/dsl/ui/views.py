@@ -15,6 +15,7 @@ from appgen.dsl.element import (
     MemberName,
     Text,
 )
+from appgen.dsl.geo import DEFAULT_DISTANCE, MAX_DISTANCE
 from appgen.dsl.ui.common import (
     Action,
     BreakpointName,
@@ -124,6 +125,8 @@ class Column(Element):
 class FilterBase(Element):
     label: Text | None = None
     default: JsonScalar | list[JsonScalar] = None
+    """The value of a new view. `$me` is the signed-in user, for a select filter of a relation
+    to the user entity."""
 
 
 class SearchFilter(FilterBase):
@@ -155,11 +158,34 @@ class DateRangeFilter(FilterBase):
     field: FieldPath
 
 
+class NearFilter(Element):
+    """The records whose `point` field is at most a distance from a point (ADR 0046)."""
+
+    kind: Literal["near"]
+    field: FieldPath
+    label: Text | None = None
+    distance: Annotated[float, pydantic.Field(gt=0, le=MAX_DISTANCE)] = DEFAULT_DISTANCE
+    """The largest distance from the point, in kilometers, until the user picks another."""
+
+
+class AreaFilter(Element):
+    """The records whose `point` field is in a box, for example the visible part of a map."""
+
+    kind: Literal["area"]
+    field: FieldPath
+    label: Text | None = None
+
+
+type GeoFilter = NearFilter | AreaFilter
+"""The filters of a `point` field (ADR 0046)."""
+
 type Filter = Annotated[
     Annotated[SearchFilter, Tag("tag-search")]
     | Annotated[SelectFilter, Tag("tag-select")]
     | Annotated[BooleanFilter, Tag("tag-boolean")]
-    | Annotated[DateRangeFilter, Tag("tag-date_range")],
+    | Annotated[DateRangeFilter, Tag("tag-date_range")]
+    | Annotated[NearFilter, Tag("tag-near")]
+    | Annotated[AreaFilter, Tag("tag-area")],
     Discriminator(kind_tag),
 ]
 

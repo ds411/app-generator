@@ -192,6 +192,22 @@ export type ExpectedQueryViews = {
   };
 };
 
+/** The values of the signed-in users, for scripts/sessions_ui_test.py (M36). */
+export type ExpectedSessions = {
+  password: string;
+  users: {
+    username: string;
+    /** The stat widgets with `$me` on the start page: the label, and the value. */
+    stats: { label: string; value: string }[];
+    /** The list page with a filter of `$me`: the titles of the records of the user, and of the others. */
+    list: { path: string; title: string; own: string[]; others: string[] };
+    /** The form with the default `$me`: the label of its button, the ID of the widget, and its text. */
+    form: { label: string; id: string; value: string } | null;
+    /** The list pages with a column of a total with `$me`: the value of each row. */
+    totals: { path: string; title: string; column: string; rows: { title: string; value: string }[] }[];
+  }[];
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -207,6 +223,8 @@ export type Expected = {
   connections?: ExpectedConnections;
   /** Only for the test of the views of the queries. */
   queryViews?: ExpectedQueryViews;
+  /** Only for the test of the signed-in users. */
+  sessions?: ExpectedSessions;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

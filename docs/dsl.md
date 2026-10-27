@@ -45,6 +45,7 @@ valid.
   - [Grids](#grids)
   - [UI states and defaults](#ui-states-and-defaults)
 - [auth](#auth)
+  - [The signed-in user](#the-signed-in-user)
 - [access](#access)
 - [translations](#translations)
 - [Extension keys](#extension-keys)
@@ -228,6 +229,7 @@ entities:
 | `json`     | A JSON value.                        |                                       |
 | `file`     | One file, for example a PDF.         | `max_size`, `types`                   |
 | `image`    | One image, for example a photo.      | `max_size`, `types`                   |
+| `point`    | A place: a latitude and a longitude. |                                       |
 
 All fields also take `description`, `label`, `required` (default
 `false`), `unique` (default `false`), `default`, `format`, and
@@ -265,6 +267,7 @@ language of `translations` (see
 [Values in each language](#values-in-each-language)).
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
+A `point` field holds a place on the earth (see [Point fields](#point-fields)).
 
 `sequence` gives a `string` or an `integer` field the next number of a
 sequence (see [Sequence numbers](#sequence-numbers)).
@@ -338,7 +341,10 @@ and `max`.
 `filter` selects the related records of all totals of the expression.
 It is the filter of the [dashboards](#dashboards): stored fields of the
 related entity, each with a value or with operators, but without
-`$today` and `$now`. A field without totals takes no `filter`.
+`$today` and `$now`. A `many_to_one` relation of the related entity to
+the user entity takes only `$me`, the signed-in user (see
+[The signed-in user](#the-signed-in-user)), for example the unread
+messages of the user. A field without totals takes no `filter`.
 
 ```yaml
 # in: entities
@@ -527,6 +533,53 @@ The front ends (React and Next.js) show and upload the files:
   mock data. With the data source `api`, it sends the files to the
   endpoints of the FastAPI app.
 - The sign-up form cannot ask for a file field.
+
+### Point fields
+
+A `point` field holds a place on the earth: a latitude and a longitude
+in degrees (WGS 84), for example the place of a listing
+([ADR 0046](adr/0046-geo-points.md)). The value is a mapping with `lat`
+(from -90 to 90) and `lng` (from -180 to 180), for example
+`{lat: 38.7223, lng: -9.1393}`. A seed record also takes the text
+`<lat>,<lng>`, for example `"38.7223,-9.1393"` in a CSV data file.
+
+```yaml
+entities:
+  Site:
+    display_field: name
+    crud: [list]
+    fields:
+      name: { type: string, required: true }
+      location: { type: point, required: true, label: Location }
+ui:
+  views:
+    site_table:
+      kind: table
+      entity: Site
+      columns: { name: {} }
+      filters:
+        nearby: { kind: near, field: location, label: Near, distance: 5 }
+        in_map: { kind: area, field: location }
+```
+
+- A point field takes `required`, `label`, `description`, and a
+  `default` point. It takes no `unique`, and it cannot be computed.
+- The apps keep a point in two columns of numbers, `<field>_lat` and
+  `<field>_lng`, with an index of the two columns. They need no PostGIS,
+  so that the FastAPI tests run on SQLite. No other field or relation of
+  the entity can have the name of one of the two columns.
+- An entity rule, a sort, and the `filter` of a dashboard widget or of a
+  job cannot use a point field. The list views filter the points with
+  the filters `near` and `area` (see [views](#views)).
+- A point field cannot be the `display_field`, a field or a value of a
+  notification, or a field of the sign-up form. The param of an
+  operation cannot be a point: use two `decimal` params.
+- A form field of a point field gets the widget `point`.
+- The FastAPI app gives a point as an object with `lat` and `lng`
+  (the schema `GeoPoint`), and gives 422 for a latitude or a longitude
+  out of its range. The change log keeps a point as an object too.
+- The React and Next.js apps do not generate point fields yet: they stop
+  with an error.
 
 ### Entity rules
 
@@ -844,6 +897,7 @@ The values:
 | `datetime`                                 | An ISO 8601 date-time, for example `2026-01-05T09:30:00Z`. A date-time without an offset is in UTC. |
 | `json`                                     | Any value.                                         |
 | `file`, `image`                            | The path of a local file, from the folder of the definition, for example `files/board.png`. |
+| `point`                                    | A mapping `{lat: 38.7223, lng: -9.1393}`, or a text `<lat>,<lng>`. |
 
 The file of a `file` or an `image` field must suit the `max_size` and
 the `types` of its field, and have 1 MB or less: the apps keep the seed
@@ -1976,8 +2030,29 @@ format for the field type. `avatar` is for a relation (the initials of
 the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
-`multiple`), `boolean` (`field`), or `date_range` (`field`). All
-filters take `label` and `default`.
+`multiple`), `boolean` (`field`), `date_range` (`field`), `near`
+(`field`, `distance`), or `area` (`field`). All filters take `label`,
+and all filters except `near` and `area` take `default`. The `default`
+of a `select` filter of a relation to the user entity can be `$me`, the
+signed-in user (see [The signed-in user](#the-signed-in-user)): the view
+starts with the records of the user, and a clear of the filter shows all
+records.
+
+The filters `near` and `area` are for a `point` field
+([ADR 0046](adr/0046-geo-points.md)). `near` keeps the records whose
+point is at most a distance from a point. `distance` is the distance in
+kilometers until the user picks another one, by default 10. `area` keeps
+the records whose point is in a box, for example the visible part of a
+map. The list endpoint of the FastAPI app takes these query parameters
+for a filter of the field path `<path>`:
+
+- `near`: `<path>_near`, a point `<lat>,<lng>`, for example
+  `38.72,-9.14`, and `<path>_distance` in kilometers. The default of
+  the distance is the `distance` of the first `near` filter of the path.
+  The app gives the distances on a sphere (the haversine formula).
+- `area`: `<path>_area`, a box `<south>,<west>,<north>,<east>`, for
+  example `38.69,-9.23,38.80,-9.09`. A box whose west is greater than
+  its east crosses the antimeridian.
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page
@@ -2287,7 +2362,7 @@ ui:
 | `sections`      | `title`, `description`, and `fields` (a list of form field names). |
 | `grid`          | The column grid.                                                   |
 | `rules`         | Rules across fields: `kind: compare` (`field`, `op`, `other`, `message`) or `kind: custom` (a generation gap). |
-| `defaults`      | A literal, or `$route.<param>` for a path parameter of the page.  |
+| `defaults`      | A literal, `$route.<param>` for a path parameter of the page, or `$me` for the signed-in user. |
 | `on_success`    | `toast`, `close`, and `navigate`.                                  |
 
 A form field has `widget`, `label`, `placeholder`, `help`, `span`,
@@ -2295,8 +2370,9 @@ A form field has `widget`, `label`, `placeholder`, `help`, `span`,
 `max_length`, `pattern`, `min`, `max`, each with `value` and
 `message`). The widgets are `text`, `textarea`, `number`, `select`,
 `radio`, `checkbox`, `switch`, `date`, `datetime`, `relation`, `file`
-(for a `file` or an `image` field), `lines` (for a `one_to_many`
-relation), and `custom` (a generation gap). The default widget comes
+(for a `file` or an `image` field), `point` (for a `point` field),
+`lines` (for a `one_to_many` relation), and `custom` (a generation
+gap). The default widget comes
 from the field type.
 
 The widget `lines` is a lines editor ([ADR 0035](adr/0035-lines.md)):
@@ -2384,7 +2460,8 @@ tasks_by_week:
 
 A filter maps a field path to a value, or to operators (`eq`, `ne`,
 `lt`, `lte`, `gt`, `gte`, `in`, `not_in`). `$today` and `$now` are
-date values.
+date values. `$me` is the signed-in user, for a relation to the user
+entity (see [The signed-in user](#the-signed-in-user)).
 
 A dashboard with `period` has a picker of a date range above its
 widgets ([ADR 0038](adr/0038-dashboard-period.md)). `default` is the
@@ -2702,6 +2779,57 @@ with `return_to` set to its page `/auth/callback`: add the origin of
 the React app to `CORS_ORIGINS` of the FastAPI app. The React app with
 mock data signs in a mock user at once, as a demonstration. A failed
 sign-in opens the sign-in page with a message.
+
+### The signed-in user
+
+The value `$me` is the signed-in user, as the value of a relation to
+the user entity. It needs the section `auth`. A queue of tickets, for
+example, starts with the tickets of the agent, and the agent can still
+clear the filter and see all tickets. These places take `$me`:
+
+- The `default` of a `select` filter of a view, for a `many_to_one`,
+  `one_to_one`, or `many_to_many` relation to the user entity. With
+  `multiple`, write `[$me]`.
+- The `filter` of a widget of a dashboard, for the same relations.
+- The `defaults` of a form, for a field of the form with such a
+  relation: a new record belongs to the user.
+- The `filter` of a computed field with totals, for a `many_to_one`
+  relation of the related records to the user entity: each user gets
+  the total of the own records.
+
+A job runs without a user, so its filter does not take `$me`. Without a
+signed-in user, `$me` is a value that no record has: `eq` keeps no
+records, and `ne` keeps all records.
+
+```yaml
+# example: room-booking
+# in: ui
+views:
+  my_bookings:
+    kind: table
+    entity: Booking
+    columns: { title: {}, room: {}, starts_at: {} }
+    filters:
+      organizer: { kind: select, field: organizer, default: $me }
+forms:
+  new_booking:
+    defaults: { organizer: $me }
+dashboards:
+  overview:
+    widgets:
+      my_bookings:
+        kind: stat
+        label: My bookings
+        entity: Booking
+        filter: { organizer: $me }
+```
+
+The FastAPI app reads the user of the token of each request, also on a
+public endpoint, and gives it to the SQL of the totals and of the
+widgets. The Next.js app reads the user of the session: the root layout
+gives it to the views, the forms, and the widgets, and the repositories
+read it for the totals. The React app reads the user of the browser
+tab. With mock data, the mock store reads it for the totals.
 
 ## access
 

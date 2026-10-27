@@ -119,6 +119,8 @@ class PyJobFilter:
     where: list[Expr] = field(default_factory=list[Expr])
     today: bool = False
     now: bool = False
+    me: bool = False
+    """Always False: a job has no signed-in user (`$me`)."""
 
 
 @dataclass(slots=True)

@@ -51,6 +51,9 @@ import { formatValue } from "@/shared/lib/format";
 {% if plan.rules | selectattr("condition") | list %}{% set form_lib = ["compareRule"] + form_lib %}{% endif %}
 {% if plan.totals %}{% set form_lib = form_lib[:1] + ["linesTotal"] + form_lib[1:] %}{% endif %}
 import { {{ form_lib | join(", ") }} } from "@/shared/lib/form";
+{% if plan.me %}
+import { useMe } from "@/shared/lib/me";
+{% endif %}
 {% if plan.navigate and "pageHref" in plan.navigate %}
 import { pageHref } from "@/shared/lib/pages";
 {% endif %}
@@ -233,10 +236,10 @@ function {{ f.key }}Records(rows: readonly {{ row }}[]): Record<string, unknown>
  * of the fields. A user of a record rule is the owner, and the fields get
  * the values that the rule allows.
  */
-function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, scope: RecordScope | null{{ ", lines: Lines | undefined" if plan.loads_lines }}): Values {
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined, scope: RecordScope | null{{ ", lines: Lines | undefined" if plan.loads_lines }}{{ ", me: string | null" if plan.me }}): Values {
 {% else %}
-/** The first values: the record, the defaults of the form, or the defaults of the fields. */
-function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined{{ ", lines: Lines | undefined" if plan.loads_lines }}): Values {
+/** The first values: the record, the defaults of the form, or the defaults of the fields.{{ " `me` is the ID of the signed-in user, or null." if plan.me }} */
+function initialValues({{ "record" if "record" in initial_code else "_record" }}: {{ plan.type }} | undefined, {{ "routeParams" if "routeParams" in initial_code else "_routeParams" }}: RouteParams | undefined{{ ", lines: Lines | undefined" if plan.loads_lines }}{{ ", me: string | null" if plan.me }}): Values {
 {% endif %}
   return {
 {% for f in plan.fields %}
@@ -366,6 +369,7 @@ export type {{ c }}Props = {
 };
 
 {% set lines_arg = ", lines" if plan.loads_lines else "" %}
+{% set me_arg = ", me" if plan.me else "" %}
 {% if form.description %}
 /** {{ title }}: {{ form.description }} */
 {% else %}
@@ -411,7 +415,10 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
   // and the values that the rule sets (ADR 0018, ADR 0025).
   const scope = useAccess().scopeOf({{ js(plan.entity) }});
 {% endif %}
-  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}));
+{% if plan.me %}
+  const me = useMe();
+{% endif %}
+  const [values, setValues] = useState<Values>(() => initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}{{ me_arg }}));
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -474,7 +481,7 @@ export function {{ c }}({ {{ "record, " if uses_record }}routeParams, onSuccess,
       toast.success({{ tr(js("Saved.")) }});
 {% endif %}
 {% if not close %}
-      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}));
+      setValues(initialValues({{ "record" if uses_record else "undefined" }}, routeParams{{ ", scope" if plan.scoped }}{{ lines_arg }}{{ me_arg }}));
       setSubmitted(false);
 {% endif %}
       onSuccess?.();

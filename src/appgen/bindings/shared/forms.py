@@ -26,6 +26,7 @@ from appgen.bindings.shared.totals import TsTotal, entity_totals
 from appgen.bindings.shared.typescript import Member, members, translations_key
 from appgen.bindings.shared.ui import css_class_var, js
 from appgen.bindings.shared.views import ViewContext, definition_display, label
+from appgen.dsl.auth import ME
 from appgen.dsl.expressions import expression_paths, expression_totals, parse_expression
 from appgen.dsl.model import AppDefinition, Field, Operation
 from appgen.dsl.storage import format_size
@@ -264,6 +265,8 @@ class FormPlan:
     """The TypeScript type of the values that the custom rules check."""
     route_params: bool = False
     """True if a default reads a path parameter of the page."""
+    me: bool = False
+    """True if a default is `$me`: the first values read `me`, the ID of the signed-in user."""
     widgets: set[str] = field(default_factory=set[str])
     """The widgets that the form uses."""
     lines_type: str | None = None
@@ -575,6 +578,7 @@ def _build(definition: AppDefinition, name: str, server: bool = False) -> FormPl
         navigate=_navigate(definition, form, entity, operation),
         rule_values=form_values(definition, name)[0],
         route_params=route_params,
+        me=any(form.defaults.get(f) == ME for f in form.fields),
         widgets={f.widget for f in [*fields, *widget_fields]}
         | ({"number_format"} if any(f.format for f in widget_fields) else set()),
         lines_type=lines_type,
@@ -910,6 +914,8 @@ def _initial(plan: FieldPlan, default: Any, update: bool, member: Member | None)
     if isinstance(default, str) and default.startswith("$route."):
         param = default.removeprefix("$route.")
         fallback = f"routeParams?.[{js(param)}] ?? {plan.empty}"
+    elif default == ME:
+        fallback = "me === null ? [] : [me]" if plan.kind == "many" else f"me ?? {plan.empty}"
     elif default is not None:
         fallback = _literal(plan, default)
     elif member is not None and member.default is not None and member.default != []:

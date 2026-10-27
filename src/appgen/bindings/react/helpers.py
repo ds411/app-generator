@@ -13,9 +13,10 @@ from typing import Any
 from appgen.bindings.react import versions
 from appgen.bindings.react.api_client import api_entities, data_source, widget_endpoints
 from appgen.bindings.shared import shadcn
-from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rules
+from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rules, uses_me
 from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.geo import reject_point_fields
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -142,6 +143,7 @@ def package_json(definition: AppDefinition) -> dict[str, Any]:
 
 def context(definition: AppDefinition) -> dict[str, Any]:
     """Return the values that the binding adds to the context of all templates."""
+    reject_point_fields(definition, "react")
     theme = definition.ui.theme if definition.ui is not None else None
     api = data_source(definition) == "api"
     apis = api_entities(definition) if api else {}
@@ -169,6 +171,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "record_rules": record_rules(definition),
+        # The values `$me` of the filters and of the defaults: the hook `useMe`.
+        "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
         "record_totals": {name: total_keys(definition, name, api=api) for name in entities},
         # The create and the update operations with lines (ADR 0035), by name.

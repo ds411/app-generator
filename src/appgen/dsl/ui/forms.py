@@ -20,6 +20,7 @@ type Widget = Literal[
     "datetime",
     "relation",
     "file",
+    "point",
     "lines",
     "custom",
 ]
@@ -144,5 +145,6 @@ class Form(Element):
     grid: Grid | None = None
     rules: dict[MemberName, FormRule] = pydantic.Field(default_factory=dict[str, FormRule])
     defaults: dict[MemberName, JsonValue] = pydantic.Field(default_factory=dict[str, JsonValue])
-    """A literal, or `$route.<param>` for a path parameter of the page."""
+    """A literal, `$route.<param>` for a path parameter of the page, or `$me` for the signed-in
+    user (a relation to the user entity)."""
     on_success: FormOnSuccess | None = None

@@ -19,7 +19,10 @@ hide the owner and the fields that a condition of the rule sets.
 
 from dataclasses import dataclass
 
+from appgen.dsl.auth import has_me
 from appgen.dsl.model import AppDefinition
+from appgen.dsl.ui.dashboards import CustomWidget
+from appgen.dsl.ui.views import AreaFilter, ListViewBase, NearFilter
 from appgen.gen.binding import Output
 from appgen.gen.naming import camel
 
@@ -138,6 +141,38 @@ def path_steps(definition: AppDefinition, entity: str, path: str) -> tuple[PathS
         steps.append(PathStep(current, name, key, many, relation.target, relation.id))
         current = relation.target
     return tuple(steps)
+
+
+def uses_me(definition: AppDefinition) -> bool:
+    """Return True if a filter or a default of a form has `$me`, the signed-in user.
+
+    The front ends then have the hook `useMe` in `src/shared/lib/me`: the
+    views, the forms, and the widgets read the ID of the user with it. The
+    filters of the totals have `$me` too.
+    """
+    if definition.auth is None:
+        return False
+    ui = definition.ui
+    values: list[object] = [
+        spec.filter for entity in definition.entities.values() for spec in entity.fields.values()
+    ]
+    if ui is not None:
+        values += [
+            f.default
+            for view in ui.views.values()
+            if isinstance(view, ListViewBase)
+            for f in view.filters.values()
+            # A geo filter has no default (ADR 0046).
+            if not isinstance(f, NearFilter | AreaFilter)
+        ]
+        values += [form.defaults for form in ui.forms.values()]
+        values += [
+            widget.filter
+            for dashboard in ui.dashboards.values()
+            for widget in dashboard.widgets.values()
+            if not isinstance(widget, CustomWidget)
+        ]
+    return has_me(values)
 
 
 def auth_rules() -> tuple[Output, ...]:

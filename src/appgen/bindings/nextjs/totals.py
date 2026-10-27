@@ -10,6 +10,11 @@ from its related records. The views compute the fields from the totals.
 The compare rules with totals of the lines (`totalRules`) read their
 totals after a change, with the subqueries of `totals` and of
 `ruleTotals`, the totals that only the rules use.
+
+A filter of a total with `$me` reads the signed-in user of the request:
+the repository calls its option `me` (`requestUserId` of
+`src/shared/auth/session.ts`), and gives the ID to the subqueries.
+Without a user, no record has the value.
 """
 
 import re
@@ -51,6 +56,9 @@ class RepositoryTotals:
     """The functions of `drizzle-orm`."""
     tables: list[str] = field(default_factory=list[str])
     """The tables of `@/shared/db`."""
+    me: bool = False
+    """True if a filter of a total has `$me`: the subqueries take `me`, the ID of the
+    signed-in user of the request, or null."""
 
 
 def repository_totals(
@@ -73,9 +81,11 @@ def repository_totals(
                 entry = format_ts(code, 4, f"{total.key}: ", ",")
                 queries.append(TsTotalQuery(total.key, entry, total.ids))
                 used |= filter_.tables
+                result.me = result.me or filter_.me
                 used.add(tables[total.target].const)
         text = "\n".join(t.code for t in [*result.totals, *result.rules])
         result.operators = [n for n in _OPERATORS if re.search(rf"\b{n}\(", text)]
+        result.operators += ["sql"] if "sql`" in text else []
         result.tables = sorted(used)
         found[name] = result
     return found

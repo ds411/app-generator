@@ -106,6 +106,7 @@ to a record, as `records`.
 | `uuid`                            | A UUID.                                                      |
 | `json`                            | Any value. In a CSV cell: JSON text.                         |
 | `file`, `image`                   | The path of a local file, from the folder of the definition, for example `files/a101.jpg`. The file has 1 MB or less, and suits the `max_size` and the `types` of the field. |
+| `point`                           | `{lat: 38.7223, lng: -9.1393}`, with the latitude from -90 to 90 and the longitude from -180 to 180. In a CSV cell: `"38.7223,-9.1393"`. |
 
 Leave out a value that the data does not have. A required field without
 a default needs a value. Do not invent a value: ask, or add a `default`

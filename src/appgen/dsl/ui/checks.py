@@ -9,6 +9,7 @@ import re
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping
 from typing import cast
 
+from appgen.dsl.auth import ME
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Operation, Page, Relation
@@ -61,6 +62,7 @@ from appgen.dsl.ui.views import (
     ApiTableView,
     ApiView,
     ApiViewBase,
+    AreaFilter,
     BadgeRef,
     BadgeSet,
     BoardView,
@@ -73,6 +75,7 @@ from appgen.dsl.ui.views import (
     DetailView,
     Filter,
     ListViewBase,
+    NearFilter,
     Pagination,
     QueryCalendarView,
     QueryCardsView,
@@ -111,6 +114,8 @@ FORM_OPERATION_KINDS = ("create", "update", "custom")
 ROUTE_DEFAULT = re.compile(r"^\$route\.[a-z][a-z0-9_]*$")
 ROUTE_PARAM = re.compile(r"^\$route\.([a-z][a-z0-9_]*)$")
 """A path parameter of the page as the value of a parameter of an API view."""
+ME_KINDS = frozenset({*SINGLE_KINDS, "many_to_many"})
+"""The relation kinds that take `$me`, the signed-in user, in a filter or a form default."""
 
 
 def check_ui_tokens(definition: AppDefinition) -> Iterator[Diagnostic]:
@@ -197,12 +202,18 @@ def _check_form(definition: AppDefinition, form: Form) -> Iterator[Diagnostic]:
                 if name not in form.fields:
                     yield _missing(rule, key, "form field", name, form.fields)
     for name, value in form.defaults.items():
+        target: FieldTarget | None = None
         if name not in form.fields:
-            yield from _form_target(definition, form, params, form, name, at="defaults")
-        if isinstance(value, str) and value.startswith("$") and not ROUTE_DEFAULT.match(value):
+            target = yield from _form_target(definition, form, params, form, name, at="defaults")
+        elif value == ME:
+            # The loop of the fields reports a name that does not resolve.
+            target = _quiet_form_target(definition, form, params, name)
+        if value == ME:
+            yield from check_me(definition, form, "defaults", target)
+        elif isinstance(value, str) and value.startswith("$") and not ROUTE_DEFAULT.match(value):
             yield _error(
                 "invalid-value",
-                f"The default {value!r} is not valid. Write a literal, or $route.<param>.",
+                f"The default {value!r} is not valid. Write a literal, $route.<param>, or $me.",
                 form,
                 at="defaults",
             )
@@ -226,6 +237,63 @@ def _form_target(
         yield _error("unsuitable-field", "A form cannot set the primary key 'id'.", element, at=at)
         return None
     return (yield from _resolve(definition, element, at, form.entity, name))
+
+
+def _quiet_form_target(
+    definition: AppDefinition, form: Form, params: dict[str, Field] | None, name: str
+) -> FieldTarget | None:
+    """Return the target of a form field name, or None without an error."""
+    if params is not None:
+        return FieldTarget(form.operation, name, params[name]) if name in params else None
+    try:
+        return resolve_path(definition, form.entity, name)
+    except FieldPathError:
+        return None
+
+
+def check_me(
+    definition: AppDefinition,
+    element: Element,
+    at: str,
+    target: FieldTarget | None,
+    kinds: Collection[str] = ME_KINDS,
+) -> Iterator[Diagnostic]:
+    """`$me`, the signed-in user, needs `auth`, and a relation to the user entity of a kind.
+
+    Without a target (a path that does not resolve), only the check of
+    `auth` runs: another check reports the path.
+    """
+    auth = definition.auth
+    if auth is None:
+        yield _error(
+            "invalid-value",
+            "The value $me is the signed-in user, but the definition has no section 'auth'.",
+            element,
+            at=at,
+            hint="Add the section 'auth', or use another value.",
+        )
+        return
+    if target is None:
+        return
+    member = target.member
+    user = auth.user_entity
+    if isinstance(member, Relation) and member.target == user and member.kind in kinds:
+        return
+    where = f"'{target.entity}.{target.name}'"
+    if isinstance(member, Relation) and member.target == user:
+        what = f"{where} is a {member.kind} relation"
+    elif isinstance(member, Relation):
+        what = f"{where} is a relation to '{member.target}'"
+    else:
+        what = f"{where} is a field of the type '{target.type}'"
+    names = ", ".join(sorted(kinds))
+    yield _error(
+        "unsuitable-field",
+        f"The value $me is a user of '{user}', but {what}.",
+        element,
+        at=at,
+        hint=f"Use $me only for a relation to '{user}' ({names}).",
+    )
 
 
 def _check_form_field(field: FormField, target: FieldTarget) -> Iterator[Diagnostic]:
@@ -1130,15 +1198,23 @@ def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterat
 
 
 def check_record_filter(
-    definition: AppDefinition, element: Element, entity: str, record_filter: Mapping[str, object]
+    definition: AppDefinition,
+    element: Element,
+    entity: str,
+    record_filter: Mapping[str, object],
+    me: Collection[str] | None = ME_KINDS,
 ) -> Iterator[Diagnostic]:
-    """The paths, the operators, and the values of the filter of a widget or of a job."""
+    """The paths, the operators, and the values of the filter of a widget, a job, or a total.
+
+    `me` gives the relation kinds that take `$me`, the signed-in user. None:
+    the filter has no user, for example the filter of a job.
+    """
     for path, condition in record_filter.items():
         target = yield from _resolve(definition, element, "filter", entity, path)
         if target is None:
             continue
-        if target.type in FILE_TYPES:
-            yield _no_file(element, "filter", "A filter", target)
+        if target.type in _NO_VALUE_TYPES:
+            yield _no_value(element, "filter", "A filter", target)
             continue
         conditions: dict[str, object] = (
             cast(dict[str, object], condition) if isinstance(condition, dict) else {"eq": condition}
@@ -1149,13 +1225,27 @@ def check_record_filter(
                 continue
             values = cast(list[object], value) if isinstance(value, list) else [value]
             for item in values:
-                yield from _check_filter_value(element, target, item)
+                yield from _check_filter_value(definition, element, target, item, me)
 
 
 def _check_filter_value(
-    element: Element, target: FieldTarget, value: object
+    definition: AppDefinition,
+    element: Element,
+    target: FieldTarget,
+    value: object,
+    me: Collection[str] | None,
 ) -> Iterator[Diagnostic]:
-    if isinstance(value, str) and value.startswith("$"):
+    if value == ME and me is not None:
+        yield from check_me(definition, element, "filter", target, me)
+    elif value == ME:
+        yield _error(
+            "invalid-value",
+            "The filter has no signed-in user, so it cannot use $me.",
+            element,
+            at="filter",
+            hint="A job runs without a user. Use a literal value.",
+        )
+    elif isinstance(value, str) and value.startswith("$"):
         if value not in RELATIVE_DATES or target.type not in DATE_TYPES:
             yield _error(
                 "invalid-value",
@@ -1379,6 +1469,14 @@ def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> It
                     yield from _check_suits(
                         filter_, "fields", "A search filter", target, TEXT_TYPES
                     )
+            if filter_.default == ME:
+                yield _error(
+                    "unsuitable-field",
+                    "The value $me is a user, but a search filter takes a text.",
+                    filter_,
+                    at="default",
+                    hint="Use $me in a select filter of a relation to the user entity.",
+                )
             return
         case SelectFilter():
             types = frozenset({"enum", *SINGLE_KINDS, "many_to_many"})
@@ -1386,27 +1484,42 @@ def _check_filter(definition: AppDefinition, entity: str, filter_: Filter) -> It
             types = frozenset({"boolean"})
         case DateRangeFilter():
             types = DATE_TYPES
+        case NearFilter() | AreaFilter():
+            types = frozenset({"point"})
     target = yield from _resolve(definition, filter_, "field", entity, filter_.field)
     if target is not None:
         yield from _check_suits(filter_, "field", f"A {filter_.kind} filter", target, types)
+    if isinstance(filter_, NearFilter | AreaFilter):
+        # A geo filter has no default (ADR 0046).
+        return
+    defaults = filter_.default if isinstance(filter_.default, list) else [filter_.default]
+    if ME in defaults:
+        yield from check_me(definition, filter_, "default", target)
 
 
 def _check_sort(
     definition: AppDefinition, element: Element, entity: str, path: str
 ) -> Iterator[Diagnostic]:
     target = yield from _resolve(definition, element, "field", entity, path)
-    if target is not None and target.type in FILE_TYPES:
-        yield _no_file(element, "field", "A sort", target)
+    if target is not None and target.type in _NO_VALUE_TYPES:
+        yield _no_value(element, "field", "A sort", target)
 
 
-def _no_file(element: Element, key: str, what: str, target: FieldTarget) -> Diagnostic:
+_NO_VALUE_TYPES = FILE_TYPES | {"point"}
+"""The field types that a sort and a filter of a widget or of a job cannot use."""
+
+
+def _no_value(element: Element, key: str, what: str, target: FieldTarget) -> Diagnostic:
+    point = target.type == "point"
     return _error(
         "unsuitable-field",
         f"{what} cannot use the field '{target.entity}.{target.name}' ({target.type}): it holds "
-        "a file.",
+        + ("a place, with a latitude and a longitude." if point else "a file."),
         element,
         at=key,
-        hint="Use another field.",
+        hint="Use a filter of the kind 'near' or 'area' in a list view."
+        if point and what == "A filter"
+        else "Use another field.",
     )
 
 

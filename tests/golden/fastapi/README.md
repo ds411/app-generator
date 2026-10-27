@@ -192,6 +192,8 @@ parameters:
 | `boolean`        | The field takes `true` or `false`. | `active=true` |
 | `date_range`     | `<field>_from` and `<field>_to`: the first and the last day. | `due_date_from=2026-01-01` |
 | `search`         | `q`: each word is in one of the fields of the search filters. | `q=alpha` |
+| `near`           | `<field>_near`, a point `<lat>,<lng>`, and `<field>_distance` in kilometers. | `location_near=38.72,-9.14&location_distance=5` |
+| `area`           | `<field>_area`, a box `<south>,<west>,<north>,<east>`. | `location_area=38.69,-9.23,38.80,-9.09` |
 
 A field path of a view keeps its dots, for example `project.status=active`.
 A tab of a detail view that lists the records of a many-to-many relation

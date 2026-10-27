@@ -112,6 +112,7 @@ BINDING = Binding(
         Output(template="app/core/errors.py.j2", path="app/core/errors.py"),
         Output(template="app/core/pagination.py.j2", path="app/core/pagination.py"),
         Output(template="app/core/search.py.j2", path="app/core/search.py", when="py.full_text"),
+        Output(template="app/core/geo.py.j2", path="app/core/geo.py", when="py.geo_filters"),
         Output(template="app/core/health.py.j2", path="app/core/health.py"),
         Output(template="app/core/logging.py.j2", path="app/core/logging.py"),
         Output(template="app/core/rate_limit.py.j2", path="app/core/rate_limit.py"),
@@ -161,6 +162,7 @@ BINDING = Binding(
             when="definition.access",
         ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
+        Output(template="tests/test_me.py.j2", path="tests/test_me.py", when="py.me_tests"),
         Output(
             template="tests/test_providers.py.j2",
             path="tests/test_providers.py",

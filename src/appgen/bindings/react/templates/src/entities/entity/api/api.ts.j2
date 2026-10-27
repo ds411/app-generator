@@ -36,7 +36,7 @@
 {% set history_users = history and definition.auth and not react.api %}
 {# The notices of the changes (ADR 0041): with mock data, the store adds them. #}
 {% set notify = mock_notify(notice_plans(definition, name)) if not react.api else none %}
-{% set auth_names = (["currentUserId"] if history_users else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards else []) + (["userLabel"] if history_users else []) %}
+{% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards else []) + (["userLabel"] if history_users else []) %}
 {% set typed = not react.api and not has_files and not history and not notify %}
 {% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) %}
 {% set mock_names = notify.store if notify else [] %}
@@ -211,7 +211,12 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% if t.filter %}
     filter: [
 {% for key, op, operand in t.conditions() %}
+{% if operand == "$me" %}
+      // The signed-in user at each read. Without a user, no record has the value.
+      [{{ ts_value(key) }}, {{ ts_value(op) }}, () => currentUserId() ?? ""],
+{% else %}
       [{{ ts_value(key) }}, {{ ts_value(op) }}, {{ ts_value(operand) }}],
+{% endif %}
 {% endfor %}
     ],
 {% endif %}

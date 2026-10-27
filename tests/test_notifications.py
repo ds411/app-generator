@@ -172,12 +172,13 @@ def test_fields_are_only_for_changed_and_name_stored_fields_or_many_to_one_relat
     assert codes(created) == [("invalid-option", "notifications.other")]
     assert messages(unsuitable) == [
         "The field or relation 'score' is the computed field 'Task.score'. A notification "
-        "uses the stored fields, except the files, and the 'many_to_one' relations.",
-        "The field or relation 'scan' is the file field 'Task.scan'. A notification uses the "
-        "stored fields, except the files, and the 'many_to_one' relations.",
-        "The field or relation 'comments' is the 'one_to_many' relation 'Task.comments'. A "
-        "notification uses the stored fields, except the files, and the 'many_to_one' "
+        "uses the stored fields, except the files and the points, and the 'many_to_one' "
         "relations.",
+        "The field or relation 'scan' is the file field 'Task.scan'. A notification uses the "
+        "stored fields, except the files and the points, and the 'many_to_one' relations.",
+        "The field or relation 'comments' is the 'one_to_many' relation 'Task.comments'. A "
+        "notification uses the stored fields, except the files and the points, and the "
+        "'many_to_one' relations.",
         "The field or relation 'nothing' does not exist.",
     ]
 

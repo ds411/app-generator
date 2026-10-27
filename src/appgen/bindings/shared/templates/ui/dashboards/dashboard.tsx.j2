@@ -7,7 +7,8 @@
 {% set lists = plan.widgets | selectattr("kind", "eq", "list") | list %}
 {% set tables = lists | selectattr("columns") | list %}
 {% set period = dashboard.period %}
-{% macro args(w) %}data{{ ", period" if w.takes_period }}{% endmacro %}
+{% set takes_me = functions | selectattr("takes_me") | list %}
+{% macro args(w) %}data{{ ", period" if w.takes_period }}{{ ", me" if w.takes_me }}{% endmacro %}
 {{ trace_header(element_id) }}
 "use client";
 
@@ -66,6 +67,9 @@ import { compute } from "@/shared/lib/compute";
 {% set fmt = (["firstWeekday"] if weeks else []) + (["formatValue"] if "stat" in plan.uses or "formatValue(" in code else []) %}
 {% if fmt %}
 import { {{ fmt | join(", ") }} } from "@/shared/lib/format";
+{% endif %}
+{% if takes_me %}
+import { useMe } from "@/shared/lib/me";
 {% endif %}
 {% if "pageHref(" in code %}
 import { pageHref } from "@/shared/lib/pages";
@@ -228,8 +232,12 @@ async function load(): Promise<DashboardData> {
 {% endif %}
 {% for w in functions %}
 
+{% if w.takes_me %}
+/** {{ w.label }}: `me` is the ID of the signed-in user, or null. */
+{% else %}
 /** {{ w.label }}. */
-function {{ w.function }}(data: DashboardData{{ ", period: Period" if w.takes_period }}): {{ w.returns }} { {{ trace(w.element_id) }}
+{% endif %}
+function {{ w.function }}(data: DashboardData{{ ", period: Period" if w.takes_period }}{{ ", me: string | null" if w.takes_me }}): {{ w.returns }} { {{ trace(w.element_id) }}
 {% if "lookups." in (w.body | join(" ")) %}
   const { lookups } = data;
 {% endif %}
@@ -255,6 +263,9 @@ export function {{ name | pascal }}Dashboard() {
   const resource = useResource([{{ js(name) }}, period.from, period.to].join(" "), () => load(period), subscribe, { keep: true });
 {% else %}
   const resource = useResource({{ js(name) }}, load{% if plan.entities %}, subscribe{% endif %});
+{% endif %}
+{% if takes_me %}
+  const me = useMe();
 {% endif %}
 
 {{ m.states(plan, "widget") }}

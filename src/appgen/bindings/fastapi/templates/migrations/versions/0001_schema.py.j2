@@ -75,6 +75,9 @@ def upgrade() -> None:
     op.create_index("ix_{{ e.table }}_{{ r.fk }}", "{{ e.table }}", ["{{ r.fk }}"])
 {% endif %}
 {% endfor %}
+{% for f in e.points %}
+    {{ e.point_index_migration(f) }}
+{% endfor %}
 {% endfor %}
 {% if py.search_indexes %}
     if op.get_bind().dialect.name == "postgresql":

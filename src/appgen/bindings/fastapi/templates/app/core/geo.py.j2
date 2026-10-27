@@ -1,0 +1,125 @@
+{{ trace_header("app") }}
+"""The filters `near` and `area` of the list endpoints (ADR 0046).
+
+A point field keeps its latitude and its longitude in two columns of
+numbers, with an index of the two columns. The filters need no PostGIS,
+so that they work on Postgres and on SQLite:
+
+- `near` keeps the points at most a distance from a center. A range of
+  latitudes (and of longitudes, when the circle has no pole and does
+  not cross the antimeridian) lets the database use the index, and the
+  haversine formula gives the exact distance on a sphere.
+- `area` keeps the points in a box. A box whose west is greater than its
+  east crosses the antimeridian.
+
+The query parameters give a point as `<lat>,<lng>`, for example
+`38.72,-9.14`, and a box as `<south>,<west>,<north>,<east>`.
+"""
+
+import math
+from typing import Annotated, Any, Self
+
+from pydantic import BeforeValidator, Field, WithJsonSchema, model_validator
+from pydantic.dataclasses import dataclass
+from sqlalchemy import ColumnElement, and_, func, or_
+from sqlalchemy.orm import InstrumentedAttribute
+
+from app.core.types import GeoPoint
+
+EARTH_RADIUS = 6371.0088
+"""The mean radius of the earth, in kilometers."""
+_DEGREE = math.pi / 180
+
+
+def _numbers(value: object, names: tuple[str, ...]) -> object:
+    """Return the numbers of a text `<a>,<b>,...` as a mapping of the names. Keep other values."""
+    if not isinstance(value, str):
+        return value
+    parts = value.split(",")
+    if len(parts) != len(names):
+        raise ValueError(f"expected {len(names)} numbers with commas: {','.join(names)}")
+    return dict(zip(names, (part.strip() for part in parts), strict=True))
+
+
+def _point(value: object) -> object:
+    return _numbers(value, ("lat", "lng"))
+
+
+def _box(value: object) -> object:
+    return _numbers(value, ("south", "west", "north", "east"))
+
+
+@dataclass
+class GeoBox:
+    """A box of a map, in degrees: the visible part of a map, for example."""
+
+    south: Annotated[float, Field(ge=-90, le=90)]
+    west: Annotated[float, Field(ge=-180, le=180)]
+    north: Annotated[float, Field(ge=-90, le=90)]
+    east: Annotated[float, Field(ge=-180, le=180)]
+
+    @model_validator(mode="after")
+    def _check_order(self) -> Self:
+        if self.south > self.north:
+            raise ValueError("the south must not be greater than the north")
+        return self
+
+
+PointText = Annotated[
+    GeoPoint,
+    BeforeValidator(_point),
+    WithJsonSchema({"type": "string", "examples": ["38.72,-9.14"]}),
+]
+"""A point in a query parameter: `<lat>,<lng>`."""
+
+BoxText = Annotated[
+    GeoBox,
+    BeforeValidator(_box),
+    WithJsonSchema({"type": "string", "examples": ["38.69,-9.23,38.80,-9.09"]}),
+]
+"""A box in a query parameter: `<south>,<west>,<north>,<east>`."""
+
+
+def near(
+    lat: InstrumentedAttribute[Any],
+    lng: InstrumentedAttribute[Any],
+    center: GeoPoint,
+    distance: float,
+) -> ColumnElement[bool]:
+    """Return the condition: the point of the columns is at most `distance` km from `center`."""
+    angle = distance / EARTH_RADIUS
+    if angle >= math.pi:
+        return lat.is_not(None)
+    reach = math.degrees(angle)
+    conditions: list[ColumnElement[bool]] = [lat.between(center.lat - reach, center.lat + reach)]
+    if abs(center.lat) + reach < 90:
+        # The widest longitude of the circle, at the latitude of its center.
+        spread = math.degrees(math.asin(math.sin(angle) / math.cos(center.lat * _DEGREE)))
+        if center.lng - spread >= -180 and center.lng + spread <= 180:
+            conditions.append(lng.between(center.lng - spread, center.lng + spread))
+    # The haversine formula: sin²(Δφ/2) + cos φ1 cos φ2 sin²(Δλ/2) <= sin²(angle/2).
+    half_lat = func.sin((lat * _DEGREE - center.lat * _DEGREE) / 2)
+    half_lng = func.sin((lng * _DEGREE - center.lng * _DEGREE) / 2)
+    cos_lat = math.cos(center.lat * _DEGREE)
+    term = half_lat * half_lat + cos_lat * func.cos(lat * _DEGREE) * half_lng * half_lng
+    conditions.append(term <= math.sin(angle / 2) ** 2)
+    return and_(*conditions)
+
+
+def in_area(
+    lat: InstrumentedAttribute[Any], lng: InstrumentedAttribute[Any], box: GeoBox
+) -> ColumnElement[bool]:
+    """Return the condition: the point of the columns is in the box."""
+    latitude = lat.between(box.south, box.north)
+    if box.west <= box.east:
+        return and_(latitude, lng.between(box.west, box.east))
+    # The box crosses the antimeridian.
+    return and_(latitude, or_(lng >= box.west, lng <= box.east))
+{% if py.near %}
+
+
+def add_math_functions(connection: Any, _record: Any) -> None:
+    """Add `sin` and `cos` to a connection of SQLite: some builds of SQLite do not have them."""
+    connection.create_function("sin", 1, math.sin, deterministic=True)
+    connection.create_function("cos", 1, math.cos, deterministic=True)
+{% endif %}

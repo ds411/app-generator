@@ -63,6 +63,7 @@ class _Conditions:
     where: list[Expr] = field(default_factory=list[Expr])
     today: bool = False
     now: bool = False
+    me: bool = False
 
 
 @dataclass(slots=True)
@@ -89,6 +90,9 @@ class PyTotal:
     """The computed fields and the rules that use the total, for the traces."""
     deferred: bool = False
     """True if only the rules use the total: the queries do not read it."""
+    me: bool = False
+    """True if the filter has `$me`: the total counts the records of the signed-in user, with
+    `me()` of `app.core.db`."""
 
     @property
     def type(self) -> str:
@@ -219,14 +223,16 @@ def _total(
     else:
         remote = next(r for r in target.relations if r.name == relation.back_populates)
         conditions = [f"{source}.{remote.fk_attr} == {entity.name}.id"]
+    me = False
     if computed is not None and computed.filter:
         builder_target = _Conditions(computed.id, target)
         builder = FilterBuilder(definition, builder_target, "total", source=source)
         for path, condition in computed.filter.items():
             builder.filter(path, condition)
         conditions += builder_target.where
+        me = builder_target.me
     return PyTotal(
-        attr, total.function, entity, relation, target, py_field, source, conditions, via
+        attr, total.function, entity, relation, target, py_field, source, conditions, via, me=me
     )
 
 
@@ -318,6 +324,8 @@ def models_imports(
     found: list[tuple[str, list[str], set[str]]] = []
     if totals:
         found.append(("app.core", [], {"totals"}))
+    if any(t.me for t in totals):
+        found.append(("app.core.db", [], {"me"}))
     for ids, line in first:
         module, _, names = line.removeprefix("from ").partition(" import ")
         found.append((module, ids, {n.strip() for n in names.split(",")}))

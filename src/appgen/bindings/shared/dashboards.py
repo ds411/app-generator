@@ -29,6 +29,7 @@ from appgen.bindings.shared.views import (
     label,
     state_ids,
 )
+from appgen.dsl.auth import ME, has_me
 from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.ui.common import Grid, States
 from appgen.dsl.ui.dashboards import (
@@ -97,6 +98,9 @@ class WidgetPlan:
     takes_period: bool = False
     """True if the function of the widget takes the period: the widget filters its records by
     the period field in the browser."""
+    takes_me: bool = False
+    """True if the function of the widget takes `me`, the ID of the signed-in user: the filter
+    has `$me`."""
     change: str | None = None
     """The TypeScript of the change of a stat from the previous period (`compare`), or None."""
     store: str | None = None
@@ -292,6 +296,11 @@ def _tests(value: Value, condition: JsonValue) -> list[str]:
 
 
 def _operand(value: JsonValue) -> str:
+    if value == ME:
+        # Without a signed-in user, `$me` is a value that no record has, as null in SQL.
+        return 'me ?? ""'
+    if isinstance(value, list) and has_me(value):
+        return "[" + ", ".join(_operand(item) for item in value) + "]"
     if value == "$today":
         return "today()"
     if value == "$now":
@@ -315,9 +324,10 @@ def _stat(
 ) -> None:
     result.body = _rows(ctx, widget.entity, widget.filter, entities, widget.period_field)
     result.takes_period = widget.period_field is not None
+    result.takes_me = has_me(widget.filter)
     if widget.compare:
-        fn = result.function
-        result.change = f"change({fn}(data, period), previous && {fn}(data, previous))"
+        fn, me = result.function, ", me" if result.takes_me else ""
+        result.change = f"change({fn}(data, period{me}), previous && {fn}(data, previous{me}))"
     if widget.field:
         _read(ctx, widget.entity, [widget.field], entities)
     result.body.append(
@@ -372,6 +382,7 @@ def _chart(
     entity = widget.entity
     result.body = _rows(ctx, entity, widget.filter, entities, widget.period_field)
     result.takes_period = widget.period_field is not None
+    result.takes_me = has_me(widget.filter)
     _read(ctx, entity, [widget.group_by, *([widget.field] if widget.field else [])], entities)
     group = ctx.value(entity, widget.group_by)
     total = _aggregate(ctx, entity, widget.aggregate, widget.field, "group")
@@ -446,6 +457,7 @@ def _list(
     result.view = widget.view
     result.body = _rows(ctx, entity, widget.filter, entities, widget.period_field)
     result.takes_period = widget.period_field is not None
+    result.takes_me = has_me(widget.filter)
     sort: Sort | None = widget.sort or view.sort
     if sort is not None:
         _read(ctx, entity, [sort.field], entities)
@@ -480,8 +492,10 @@ def _server(
     list loads the related records of its records by ID.
     """
     result.endpoint = ctx.widgets[widget.id]
-    # The API gives the values of the period: the function does not take it.
+    # The API gives the values of the period and of the signed-in user: the function does not
+    # take them.
     result.takes_period = False
+    result.takes_me = False
     data = f"data.{result.function}"
     if isinstance(widget, StatWidget | ChartWidget):
         # The dashboard loads again after a change of the records.
