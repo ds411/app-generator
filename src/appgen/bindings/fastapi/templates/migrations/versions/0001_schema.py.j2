@@ -56,6 +56,9 @@ def upgrade() -> None:
 {% for r, column in e.fk_columns %}
         {{ column }}
 {% endfor %}
+{% if e.guest_owner %}
+        sa.Column("guest_id", sa.Uuid(), nullable=True),
+{% endif %}
         sa.PrimaryKeyConstraint("id", name="pk_{{ e.table }}"),
 {% for f in e.fields if f.unique %}
         sa.UniqueConstraint("{{ f.name }}", name="uq_{{ e.table }}_{{ f.name }}"),
@@ -78,6 +81,9 @@ def upgrade() -> None:
 {% for f in e.points %}
     {{ e.point_index_migration(f) }}
 {% endfor %}
+{% endfor %}
+{% for e in py.entity_order() if e.guest_owner %}
+    op.create_index("ix_{{ e.table }}_guest_id", "{{ e.table }}", ["guest_id"])
 {% endfor %}
 {% if py.search_indexes %}
     if op.get_bind().dialect.name == "postgresql":

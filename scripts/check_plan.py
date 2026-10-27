@@ -185,7 +185,7 @@ def fastapi_sections() -> Iterator[Section]:
     for name in ("totals", "invoices"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
     yield Section("fastapi:listings", (fixture("listings", "fastapi", extensions=True),))
-    for name in ("courses", "places"):
+    for name in ("courses", "places", "shop"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
 
 

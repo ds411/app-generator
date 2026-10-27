@@ -845,6 +845,37 @@ has the model `ShareLink`, the schemas `ShareLinkState` and
   the endpoints of the links need a sign-in and the permission of the
   update operation.
 
+### The guests of the FastAPI app
+
+The FastAPI app gives records to the guests of `auth.guests`
+([ADR 0050](adr/0050-guests.md)). `app/core/guests.py` has the guest
+tokens, the dependencies of the guest operations, and the move.
+
+- `make_guest_token()` signs a new guest ID with the purpose `guest`,
+  and `read_guest_token()` gives the guest ID of a valid token. `POST
+  /auth/guest` (`start_guest_session`) gives a token, and stores
+  nothing.
+- `current_visitor()` gives the guest ID of a guest token, else the
+  signed-in user. The router of a guest operation uses
+  `check_guest_access` instead of `check_access`: a guest passes, and a
+  user needs its role. `guest_scope_of(action)` gives the `RecordScope`
+  of the request: with `guest=True` and the guest ID in `user` for a
+  guest, else the scope of the role.
+- `app/core/access.py` has `GUEST_RULE` and `GUEST_ENTITIES`. The
+  repository of an entity of the guests filters the records of a guest
+  by the column `guest_id`, sets it on a new record of a guest, and
+  clears the owner relation of a new or changed record of a guest.
+- `POST /auth/guest/move` (`move_guest_records`) gives the records of a
+  guest token to the signed-in user, with one `UPDATE` for each entity
+  of the guests. The generator stops with an error if an entity of the
+  guests has a member `guest_id`, or if an operation has one of the two
+  operation IDs.
+- The generated tests in `tests/test_guests.py` make a record as a
+  guest, check that another guest and a request without a token do not
+  get it, and move it to a user. `tests/conftest.py` overrides
+  `check_guest_access` and `current_visitor` for the tests of the
+  operations.
+
 ### The live updates of the FastAPI app
 
 The FastAPI app sends the changes of the records of the entities with

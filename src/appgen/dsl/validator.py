@@ -17,11 +17,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
-from appgen.dsl.access import ALL, Memberships, RecordRule, membership_scope
+from appgen.dsl.access import ALL, Memberships, RecordRule, membership_scope, scope_entities
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
     CONNECTIONS_PATH,
     FORGOT_PASSWORD_PATH,
+    GUEST_KINDS,
     ME,
     NOTICE_SETTINGS_PATH,
     PROVIDER_PATHS,
@@ -31,6 +32,7 @@ from appgen.dsl.auth import (
     SIGN_UP_PATH,
     VERIFY_EMAIL_PATH,
     Auth,
+    Guests,
     Provider,
     SecondFactor,
     SignUp,
@@ -1707,6 +1709,8 @@ def check_auth(definition: AppDefinition) -> Iterator[Diagnostic]:
         yield from _check_sign_up(definition, auth, auth.sign_up, entity)
     if entity is not None and auth.second_factor is not None:
         yield from _check_second_factor(definition, auth, auth.second_factor, entity)
+    if entity is not None and auth.guests is not None:
+        yield from _check_guests(definition, auth, auth.guests)
     yield from _check_password_off(auth)
     # The settings of the issuers, and the variables of the API clients, also use names.
     variables = {f"{name.upper()}_ISSUER" for name in auth.providers}
@@ -1924,6 +1928,97 @@ def _check_second_factor(
             hint="Turn on 'sign_up.verify_email': then a new user turns on the second "
             "factor at the first sign-in.",
         )
+
+
+def _check_guests(definition: AppDefinition, auth: Auth, guests: Guests) -> Iterator[Diagnostic]:
+    """The entities of the guests have an owner relation to the user entity that is not
+    required, and the guest operations are operations of these entities (ADR 0050)."""
+    if definition.access is None:
+        yield _error(
+            "invalid-option",
+            "'guests' needs the section 'access': the roles of the signed-in users.",
+            guests,
+        )
+    users = auth.user_entity
+    scoped = scope_entities(definition)
+    for name, owner in guests.entities.items():
+        entity = definition.entities.get(name)
+        if entity is None:
+            yield _missing(guests, "entities", "entity", name, definition.entities)
+            continue
+        if name == users:
+            yield _error(
+                "invalid-value",
+                f"'{name}' is the user entity: a guest cannot own users.",
+                guests,
+                at="entities",
+            )
+            continue
+        if name in scoped:
+            yield _error(
+                "invalid-value",
+                f"'{name}' is an entity of the scope of the memberships: its records belong to "
+                "a scope, not to a guest.",
+                guests,
+                at="entities",
+                hint=f"Remove '{name}' from 'entities'.",
+            )
+        relation = entity.relations.get(owner)
+        if relation is None:
+            yield _missing(guests, "entities", f"relation of '{name}'", owner, entity.relations)
+        elif relation.kind != "many_to_one" or relation.target != users:
+            yield _error(
+                "unsuitable-field",
+                f"The owner relation '{name}.{owner}' must be a many-to-one relation to the "
+                f"user entity '{users}'.",
+                guests,
+                at="entities",
+            )
+        elif relation.required:
+            yield _error(
+                "unsuitable-field",
+                f"The owner relation '{name}.{owner}' must not be required: a record of a guest "
+                "has no owner until it moves to a user.",
+                guests,
+                at="entities",
+                hint="Remove 'required: true' from the relation.",
+            )
+    if len(set(guests.operations)) != len(guests.operations):
+        yield _error(
+            "duplicate-name",
+            "The names in 'operations' must be unique.",
+            guests,
+            at="operations",
+        )
+    for name in guests.operations:
+        op = definition.operations.get(name)
+        if op is None:
+            yield _missing(guests, "operations", "operation", name, definition.operations)
+        elif op.entity not in guests.entities:
+            yield _error(
+                "invalid-value",
+                f"The operation '{name}' is an operation of '{op.entity}', which is not an "
+                "entity of 'guests.entities'.",
+                guests,
+                at="operations",
+            )
+        elif op.kind not in GUEST_KINDS:
+            yield _error(
+                "unsuitable-operation",
+                f"A guest may call list, read, create, update, and delete operations, and "
+                f"'{name}' is a '{op.kind}' operation.",
+                guests,
+                at="operations",
+            )
+        elif name in auth.public_operations:
+            yield _error(
+                "invalid-value",
+                f"The operation '{name}' is public: a request without a sign-in uses all "
+                "records, not the records of a guest.",
+                guests,
+                at="operations",
+                hint=f"Remove '{name}' from 'auth.public_operations' or from 'operations'.",
+            )
 
 
 def _check_default_role(

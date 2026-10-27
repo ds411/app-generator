@@ -1,0 +1,168 @@
+{% set g = py.guests %}
+{{ trace_header(g.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set m = py.memberships %}
+{% set names = g.entities | map(attribute="entity.name") | list %}
+{% set about = "A guest is a visitor without a sign-in. `POST /auth/guest` gives a guest token: a signed text with a new guest ID, for the header `Authorization` as a bearer token. With it, a request may call the guest operations, on the records of the guest only: the column `guest_id` of " ~ (names | join(", ")) ~ " holds the guest of a record. `POST /auth/guest/move` gives the records of a guest token to the signed-in user. The front ends call it at the sign-in and at the sign-up." %}
+"""The records of the guests (ADR 0050): the guest tokens, the guest operations, and the move.
+
+{{ about | wordwrap(72, break_long_words=False) }}
+"""
+
+import time
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+from sqlalchemy import update
+
+from app.core.access import RecordScope, check_access, scope_of
+from app.core.auth import CurrentUser, current_user, sign, signing_key, unsign
+from app.core.db import SessionDep, commit
+from app.core.errors import ProblemError, problem_responses
+{% if i18n %}
+from app.core.i18n import t
+{% endif %}
+{% for item in g.entities | sort(attribute="entity.slice") %}
+from app.features.{{ item.entity.slice }}.models import {{ item.entity.name }}
+{% endfor %}
+{% if u.name not in names %}
+from app.features.{{ u.slice }}.models import {{ u.name }}
+{% endif %}
+
+GUEST_SECONDS = {{ g.days * 86400 }}
+"""The time after which a guest token ends: {{ g.days }} days."""
+GUEST_OPERATIONS = frozenset(
+    {
+{% for name in g.operations %}
+        "{{ name }}",
+{% endfor %}
+    }
+)
+"""The operations that a guest may call, on its own records."""
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def make_guest_token(key: bytes, guest: UUID) -> str:
+    """Return a signed guest token for a guest."""
+    return sign(key, "guest", {"sub": str(guest), "exp": int(time.time()) + GUEST_SECONDS})
+
+
+def read_guest_token(key: bytes, token: str) -> UUID | None:
+    """Return the guest ID of a valid guest token that has not ended, else None."""
+    payload = unsign(key, "guest", token)
+    try:
+        return UUID(str(payload["sub"])) if payload else None
+    except ValueError, KeyError:
+        return None
+
+
+async def current_visitor(
+    request: Request,
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> {{ u.name }} | UUID:
+    """Return the guest ID of a valid guest token, else the signed-in user.
+
+    Give a 401 error without a valid guest token or token of a user.
+    """
+    key = signing_key(request)
+    guest = read_guest_token(key, credentials.credentials) if credentials else None
+    if guest is not None:
+        return guest
+    return await current_user(request, session, credentials)
+
+
+Visitor = Annotated[{{ u.name }} | UUID, Depends(current_visitor)]
+"""The signed-in user, or the ID of a guest, as a parameter of an endpoint."""
+
+
+async def check_guest_access(request: Request, visitor: Visitor, session: SessionDep) -> None:
+    """Check the access to a guest operation: a guest may call it, a user needs its role."""
+    if not isinstance(visitor, UUID):
+        await check_access(request, visitor{{ ", session" if m }})
+        return
+    operation = getattr(request.scope.get("route"), "operation_id", None)
+    if operation not in GUEST_OPERATIONS:
+        raise ProblemError(401, {{ py.message("Sign in to use this endpoint.") }})
+
+
+def guest_scope_of(action: str) -> Callable[..., Awaitable[RecordScope | None]]:
+    """Return a dependency: the records that a request of a guest operation may use.
+
+    A guest uses its own records. A signed-in user uses the records of the
+    record rules of its role (ADR 0025).
+    """
+    user_scope = scope_of(action)
+
+    async def scope(request: Request, session: SessionDep, visitor: Visitor) -> RecordScope | None:
+        if isinstance(visitor, UUID):
+            return RecordScope(visitor, "", action, guest=True)
+{% if m %}
+        return await user_scope(request, visitor, session)
+{% else %}
+        return await user_scope(visitor)
+{% endif %}
+
+    return scope
+
+
+class GuestToken(BaseModel):
+    """A guest token for the `Authorization: Bearer` header."""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = GUEST_SECONDS
+
+
+class GuestMove(BaseModel):
+    """The guest token whose records move to the signed-in user."""
+
+    guest_token: str = Field(min_length=1, max_length=1000)
+
+
+class MovedRecords(BaseModel):
+    """The number of the records that moved to the signed-in user."""
+
+    records: int
+
+
+router = APIRouter(prefix="/auth/guest", tags=["Auth"])
+
+
+@router.post("", status_code=201, operation_id="start_guest_session")
+async def start_guest_session(request: Request) -> GuestToken:
+    """Return a guest token with a new guest ID, for the guest operations."""
+    return GuestToken(access_token=make_guest_token(signing_key(request), uuid4()))
+
+
+@router.post("/move", responses=problem_responses(400, 401, 422), operation_id="move_guest_records")
+async def move_guest_records(
+    data: GuestMove, request: Request, user: CurrentUser, session: SessionDep
+) -> MovedRecords:
+    """Give the records of the guest of a guest token to the signed-in user.
+
+    The user becomes the owner of each record. The move changes only the
+    owner and the guest of the records: it runs no rules and no events.
+    """
+    guest = read_guest_token(signing_key(request), data.guest_token)
+    if guest is None:
+        {{ py.problem(400, "The guest token is not valid, or has ended.", 8) }}
+    records = 0
+{% for item in g.entities %}
+{% set e = item.entity %}
+    {{ trace(e.id) }}
+    moved = await session.scalars(
+        update({{ e.name }})
+        .where({{ e.name }}.guest_id == guest)
+        .values({{ item.owner.fk_attr }}=user.id, guest_id=None)
+        .returning({{ e.name }}.id)
+    )
+    records += len(moved.all())
+{% endfor %}
+    await commit(session)
+    return MovedRecords(records=records)

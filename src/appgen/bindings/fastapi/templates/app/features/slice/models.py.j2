@@ -67,6 +67,11 @@ class {{ e.name }}(Record):
     {{ line }}
 {% endfor %}
 {% endfor %}
+{% if e.guest_owner %}
+    {{ trace(py.guests.id) }}
+    guest_id: Mapped[UUID | None] = mapped_column(index=True)
+    """The guest of a record of a guest (ADR 0050), until the record moves to a user."""
+{% endif %}
 {% if e.totals %}
 
     if TYPE_CHECKING:

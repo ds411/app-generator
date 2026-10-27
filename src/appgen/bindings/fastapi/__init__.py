@@ -167,6 +167,7 @@ BINDING = Binding(
             when="py.memberships and py.memberships.tests",
         ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
+        Output(template="tests/test_guests.py.j2", path="tests/test_guests.py", when="py.guests"),
         Output(template="tests/test_me.py.j2", path="tests/test_me.py", when="py.me_tests"),
         Output(
             template="tests/test_providers.py.j2",
@@ -307,6 +308,7 @@ BINDING = Binding(
         ),
         Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
         Output(template="app/core/sharing.py.j2", path="app/core/sharing.py", when="py.shares"),
+        Output(template="app/core/guests.py.j2", path="app/core/guests.py", when="py.guests"),
         Output(template="app/core/live.py.j2", path="app/core/live.py", when="py.live"),
         *(
             Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
@@ -583,6 +585,7 @@ BINDING = Binding(
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
         | {"access", "role", "record_rule", "memberships", "membership_role"}
+        | {"guests"}
         | {"api", "api_operation"}
         | {"webhook"}
         | {"translations", "language"}

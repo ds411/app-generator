@@ -3,7 +3,8 @@
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set rules = definition.access.roles.values() | map(attribute="records") | select | list %}
 {% set m = py.memberships %}
-{% set scoped = rules or m %}
+{% set g = py.guests %}
+{% set scoped = rules or m or g %}
 """The permissions of the roles (ADR 0012): the operations that each role may call.
 
 The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
@@ -13,7 +14,8 @@ entity.{% endif %}{% if rules %} The record rules (ADR 0018, ADR 0025) limit a r
 records: the records of its user, and the records with the values of the
 conditions.{% endif %}{% if m %} A membership record (ADR 0048) gives its user a role
 in a record of {{ m.scope_entity.name }}: the role gives operations on the records of
-this scope.{% endif %}
+this scope.{% endif %}{% if g %} A guest (ADR 0050) uses only its own records of the
+entities of the guests.{% endif %}
 """
 
 {% if scoped %}
@@ -218,6 +220,10 @@ class RecordRule:
     member: bool = False
     """True for the rule of the memberships (ADR 0048): the records of the scopes of the request."""
 {% endif %}
+{% if g %}
+    guest: bool = False
+    """True for the rule of the guests (ADR 0050): the records of the guest of the request."""
+{% endif %}
 
     def applies(self, action: str) -> bool:
         """Return True if the rule applies to an action.
@@ -231,6 +237,13 @@ class RecordRule:
 {% if m %}
 MEMBER_RULE = RecordRule(actions=frozenset({"read", "change"}), member=True)
 """The rule of a request that a role of the memberships allows: the records of its scopes."""
+{% endif %}
+{% if g %}
+{{ trace(g.id) }}
+GUEST_RULE = RecordRule(actions=frozenset({"read", "change"}), guest=True)
+"""The rule of a request of a guest: the records of the guest."""
+GUEST_ENTITIES = frozenset({ {{- g.entities | map(attribute="entity.name") | map("tojson") | join(", ") -}} })
+"""The entities whose records a guest can own."""
 {% endif %}
 {% if rules %}
 RECORD_RULES: dict[str, dict[str, RecordRule]] = {
@@ -264,13 +277,26 @@ class RecordScope:
     member_of: frozenset[UUID] = frozenset()
     """The IDs of all scopes of the memberships of the user."""
 {% endif %}
+{% if g %}
+    guest: bool = False
+    """True for a guest (ADR 0050): `user` is the ID of the guest, and `role` is empty."""
+{% endif %}
 
     def rule(self, entity: str, action: str | None = None) -> RecordRule | None:
         """Return the rule of the role for the records of an entity, or None for all records.
 
         Without an action, the rule is for the action of the request.{% if m %} If a membership gives the
         operation of the request, the records of the scope are the records of its scopes.{% endif +%}
+{% if g %}
+
+        A guest (ADR 0050) uses its own records of the entities of the guests,
+        and has no rule for the other entities, as a public operation.
+{% endif %}
         """
+{% if g %}
+        if self.guest:
+            return GUEST_RULE if entity in GUEST_ENTITIES else None
+{% endif %}
 {% if m %}
         if self.scopes is not None and entity in SCOPE_ENTITIES:
             return MEMBER_RULE

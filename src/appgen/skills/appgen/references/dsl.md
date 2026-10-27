@@ -3072,6 +3072,50 @@ gives it to the views, the forms, and the widgets, and the repositories
 read it for the totals. The React app reads the user of the browser
 tab. With mock data, the mock store reads it for the totals.
 
+### Guests
+
+`auth.guests` gives records to the visitors without a sign-in, for
+example the items of a cart ([ADR 0050](https://github.com/ds411/app-generator/blob/main/docs/adr/0050-guests.md)). At the
+sign-in or the sign-up, the records of the guest move to the user.
+
+```yaml
+# not valid alone: the entities Customer and CartItem are not in the base example
+auth:
+  user_entity: Customer
+  username_field: email
+  guests:
+    entities:
+      CartItem: customer
+    operations: [list_cart_items, create_cart_item, update_cart_item, delete_cart_item]
+    token_days: 30
+```
+
+- `entities` names the entities whose records a guest can own, with the
+  owner relation of each: a `many_to_one` relation to the user entity
+  that is not required. The user entity and the entities of the scope of
+  the memberships cannot be entities of the guests.
+- `operations` names the operations that a guest may call: the `list`,
+  `read`, `create`, `update`, and `delete` operations of these entities.
+  A guest operation is not public. A guest uses only its own records.
+- `token_days` (1 to 365, default 30) is the time of a guest token.
+  Then the guest cannot use its records.
+- The guests need the section `access`. A signed-in user calls the guest
+  operations with the permissions and the record rules of its role, for
+  example an `owner` rule with the same relation.
+
+The FastAPI app gives a guest token at `POST /auth/guest`, for the
+header `Authorization` as a bearer token. Each entity of the guests has
+the column `guest_id`. A guest operation with a guest token uses the
+records of the guest: a new record gets the guest ID and no owner, and
+a change of a guest cannot set the owner. `POST /auth/guest/move` with
+the guest token gives the records of the guest to the signed-in user:
+the owner relation is the user, and the guest ID is cleared. A guest
+token that is not valid gives 400. The generator stops with an error if
+an entity of the guests has a member `guest_id`, or if an operation has
+the operation ID `start_guest_session` or `move_guest_records`. The
+Next.js app and the React app do not have the guests yet: the trace
+check reports `auth.guests` as a gap.
+
 ## access
 
 The optional `access` section gives each user a role, and each role the

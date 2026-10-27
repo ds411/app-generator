@@ -13,10 +13,19 @@
 {% set role = u.fields | selectattr("name", "eq", access.role_field) | first %}
 {% set default_role = sign_up.default_role or definition.entities[u.name].fields[role.name].default %}
 {% endif %}
-{% set ns = namespace(op=none, entity=none, new_op=none, new_entity=none) %}
+{% set ns = namespace(op=none, entity=none, new_op=none, new_entity=none, first_op=none, first_entity=none) %}
+{# The user of a test has one of the roles: the protected list is a list that each role may call, else the first. #}
+{% set role_values = definition.entities[u.name].fields[access.role_field].values if access else [] %}
 {% for e in py.entity_order() %}
 {% for op in e.operations if op.protected and op.kind == "list" %}
-{% if ns.op is none %}
+{% set each = namespace(allows=true) %}
+{% for value in role_values if value not in access.roles or not access.roles[value].allows_operation(op.name) %}
+{% set each.allows = false %}
+{% endfor %}
+{% if ns.first_op is none %}
+{% set ns.first_op, ns.first_entity = op, e %}
+{% endif %}
+{% if ns.op is none and each.allows %}
 {% set ns.op, ns.entity = op, e %}
 {% endif %}
 {% if sign_up and ns.new_op is none and (not access or access.roles[default_role].allows_operation(op.name)) %}
@@ -24,6 +33,9 @@
 {% endif %}
 {% endfor %}
 {% endfor %}
+{% if ns.op is none %}
+{% set ns.op, ns.entity = ns.first_op, ns.first_entity %}
+{% endif %}
 """The tests of the sign-in: tokens, the auth endpoints, and the protected endpoints."""
 
 {% if sf_required %}
