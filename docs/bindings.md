@@ -1453,7 +1453,9 @@ mybinding = "appgen.bindings.mybinding:BINDING"
   type check, build, run the tests of the app, `docker build`,
   `appgen check`, and the smoke test (`scripts/smoke_test.py`). Add the
   binding to the smoke test.
-- Add the script and its path patterns to `.githooks/pre-push`.
+- Put each part of the script in a section (`if section <name>:<part>; then`
+  ... `fi`), add the sections to `SECTIONS` in `scripts/check_plan.py`,
+  and add the check to `ALL_APPS` in `.githooks/pre-push`.
 - Pin the package versions of the generated app in a `versions.py`.
 - Describe the binding in the README.
 
