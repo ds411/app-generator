@@ -54,6 +54,59 @@ export function subscribeAccessToken(listener: () => void): () => void {
   };
 }
 {% endif %}
+{% if guests %}
+
+{{ trace(guests.element_id) }}
+// A visitor without a sign-in is a guest (ADR 0050): the guest token of
+// the API gives the guest operations on the records of the guest. The
+// local storage keeps it after the tab closes, until its time ends. A
+// request without a sign-in sends the guest token.
+const GUEST_KEY = {{ (app.name ~ "-guest") | tojson }};
+
+/** Return the guest token of the visitor, or null without one or after its time. */
+export function guestToken(): string | null {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(GUEST_KEY) ?? "null") as { token: string; end: number } | null;
+    return value !== null && value.end > Date.now() ? value.token : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep the guest token of the visitor for `seconds`, or delete it (null). */
+export function setGuestToken(token: string | null, seconds = 0): void {
+  try {
+    if (token === null) {
+      window.localStorage.removeItem(GUEST_KEY);
+    } else {
+      window.localStorage.setItem(GUEST_KEY, JSON.stringify({ token, end: Date.now() + seconds * 1000 }));
+    }
+  } catch {
+    // No storage: the guest has no records after the page.
+  }
+}
+
+let guestRequest: Promise<void> | null = null;
+
+/**
+ * Get a guest token from the API (`POST /auth/guest`) for a visitor without
+ * a sign-in and without a guest token: a guest operation needs one.
+ */
+export function startGuestSession(): Promise<void> {
+  if (accessToken() !== null || guestToken() !== null) {
+    return Promise.resolve();
+  }
+  guestRequest ??= apiRequest("POST", "/auth/guest")
+    .then((answer) => {
+      const token = answer as { access_token: string; expires_in: number };
+      setGuestToken(token.access_token, token.expires_in);
+    })
+    .finally(() => {
+      guestRequest = null;
+    });
+  return guestRequest;
+}
+{% endif %}
 
 {% if ts_apis.values() | selectattr("exposed") | list %}
 /**
@@ -106,7 +159,7 @@ export async function apiRequest(method: string, path: string, body?: unknown): 
     headers["Content-Type"] = "application/json";
   }
 {% endif %}
-  const token = accessToken();
+  const token = accessToken(){{ " ?? guestToken()" if guests }};
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }

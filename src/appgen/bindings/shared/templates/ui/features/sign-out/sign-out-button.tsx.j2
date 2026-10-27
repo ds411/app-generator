@@ -1,15 +1,44 @@
 {{ trace_header(definition.auth.id) }}
 "use client";
 
-import { LogOutIcon } from "lucide-react";
+import { {{ "LogInIcon, " if guests }}LogOutIcon } from "lucide-react";
 
 import { signOut } from "@/shared/auth";
+{% if guests %}
+import { useAccess } from "@/shared/lib/access";
+import { Link, useNavigate } from "@/shared/lib/router";
+{% else %}
 import { useNavigate } from "@/shared/lib/router";
+{% endif %}
 
+{% if guests %}
+/**
+ * A button that signs the user out and opens the sign-in page. A guest
+ * (ADR 0050) gets a link to the sign-in page instead: at the sign-in and at
+ * the sign-up, the records of the guest move to the user.
+ */
+export function SignOutButton() {
+  const navigate = useNavigate();
+  const { signedIn } = useAccess(); {{ trace(guests.element_id) }}
+  if (!signedIn) {
+    return (
+      <Link
+        href="/sign-in"
+        aria-label={{ jsx_attr("Sign in") }}
+        title={{ jsx_attr("Sign in") }}
+        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <LogInIcon className="size-4" />
+      </Link>
+    );
+  }
+  return (
+{% else %}
 /** A button that signs the user out and opens the sign-in page. */
 export function SignOutButton() {
   const navigate = useNavigate();
   return (
+{% endif %}
     <button
       type="button"
       aria-label={{ jsx_attr("Sign out") }}

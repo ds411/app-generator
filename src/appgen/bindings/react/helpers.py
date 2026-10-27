@@ -17,6 +17,7 @@ from appgen.bindings.shared.auth import auth_pages, kind_operations, record_rule
 from appgen.bindings.shared.available import available_rules
 from appgen.bindings.shared.events import has_events, ts_events
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.guests import guest_plan
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -180,6 +181,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "record_rules": record_rules(definition),
         # The roles of the users in the records of a scope (ADR 0048), or None.
         "memberships": member_plan(definition),
+        # The records of the visitors without a sign-in (ADR 0050), or None.
+        "guests": guest_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": share_plans(definition),
         # The values `$me` of the filters and of the defaults: the hook `useMe`.

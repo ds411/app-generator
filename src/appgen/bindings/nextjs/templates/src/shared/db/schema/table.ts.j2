@@ -43,12 +43,21 @@ export const {{ table.const }} = pgTable({{ table.name | tojson }}, {
   {{ trace(column.element_id) }}
   {{ column.key }}: {{ column.builder }},
 {% endfor %}
-{% if table.unique_rules %}
+{% if table.guest %}
+  // The guest of a record without an owner (ADR 0050), until the record moves to the user.
+  {{ trace(guests.element_id) }}
+  guestId: uuid("guest_id"),
+{% endif %}
+{% if table.unique_rules or table.guest %}
 }, (t) => [
 {% for rule in table.unique_rules %}
   {{ trace(rule.element_id) }}
   unique({{ rule.name | tojson }}).on({{ rule.columns }}),
 {% endfor %}
+{% if table.guest %}
+  {{ trace(guests.element_id) }}
+  index({{ ("ix_" ~ table.name ~ "_guest_id") | tojson }}).on(t.guestId),
+{% endif %}
 ]);
 {% else %}
 });

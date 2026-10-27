@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from appgen.bindings import fastapi, nextjs
+from appgen.bindings import fastapi, nextjs, react
+from appgen.bindings.react.api_client import DATA_KEY
 from appgen.dsl import load_definition_text, validate_definition
 from appgen.gen import Binding
 from appgen.gen.generator import generate
@@ -222,7 +223,125 @@ def test_an_app_without_guests_has_no_guest_code() -> None:
     assert not [path for path, content in files.items() if "guest_id" in content]
 
 
-def test_the_front_ends_have_a_gap_for_the_guests() -> None:
-    # The Next.js app and the React app keep the records of a guest in #404.
+REACT_API = TEXT.replace("\napp:\n", f"\napp:\n  {DATA_KEY}: api\n", 1)
+
+
+@pytest.mark.parametrize(
+    ("text", "binding"),
+    [(TEXT, nextjs.BINDING), (TEXT, react.BINDING), (REACT_API, react.BINDING)],
+    ids=["nextjs", "react", "react-api"],
+)
+def test_the_front_ends_cover_the_guests(text: str, binding: Binding) -> None:
+    definition = load_definition_text(text, "app.yaml")
+    assert generate(definition, binding).gaps == []
+    files = files_of(text, binding)
+    permissions = files["src/shared/lib/permissions.ts"]
+    assert 'export const GUEST_ENTITIES: readonly string[] = ["CartItem"];' in permissions
+    assert "user === null ? roleMayCall(null, operation) || GUEST_OPERATIONS" in permissions
+    # A guest sees the guest operations, and a link to the sign-in page.
+    assert "visitorMayCall(role, userId, operation)" in "".join(
+        content for path, content in files.items() if path.startswith("src/shared/lib/access")
+    )
+    button = files["src/features/sign-out/ui/sign-out-button.tsx"]
+    assert '<Link\n        href="/sign-in"' in button
+
+
+def test_the_nextjs_app_keeps_a_guest_session_in_a_cookie() -> None:
     files = files_of(TEXT, nextjs.BINDING)
-    assert "src/gaps/auth.guests.ext.ts" in files
+    session = files["src/shared/auth/session.ts"]
+    assert 'export const GUEST_COOKIE = "guest";' in session
+    assert "export const GUEST_SECONDS = 2592000;" in session
+    # A guest token has a guest ID, and a session token a user ID.
+    assert "JSON.stringify({ guest: guestId, exp })" in session
+    assert "  await moveGuestRecords(userId);\n  (await cookies()).set(SESSION_COOKIE" in session
+    assert (
+        "await tx.update(cartItemTable).set({ customerId: userId, guestId: null })"
+        ".where(eq(cartItemTable.guestId, guest));"
+    ) in session
+    access = files["src/shared/auth/access.ts"]
+    assert (
+        "if (GUEST_OPERATIONS.includes(operation) && (await sessionUserId()) === null) {" in access
+    )
+    assert "return GUEST_ENTITIES.includes(entity) ? guestScope(action) : null;" in access
+    schema = files["src/shared/db/schema/cart-item.ts"]
+    assert '  guestId: uuid("guest_id"),' in schema
+    assert 'index("ix_cart_item_guest_id").on(t.guestId),' in schema
+    assert "guestId" not in files["src/shared/db/schema/product.ts"]
+
+
+def test_the_nextjs_data_access_keeps_the_records_of_a_guest_apart() -> None:
+    files = files_of(TEXT, nextjs.BINDING)
+    actions = files["src/entities/cart-item/api/cart-item-actions.ts"]
+    assert (
+        "const owner = scope?.guest ? { customerId: null } : scope?.owner ? "
+        "{ customerId: scope.user } : {};"
+    ) in actions
+    assert "const owner = scope?.guest ? { customerId: undefined }" in actions
+    repository = files["src/shared/db/repository.ts"]
+    assert "return guest === undefined ? inArray(this.table.id, []) : eq(guest, scope.user);" in (
+        repository
+    )
+    assert "      values.guestId = options.scope.user;" in repository
+    assert "      delete record.guestId;" in repository
+
+
+def test_the_react_app_keeps_the_records_of_a_guest_in_the_mock_data() -> None:
+    files = files_of(TEXT, react.BINDING)
+    auth = files["src/shared/auth/index.ts"]
+    # The session storage keeps the guest ID of the tab.
+    assert 'const GUEST_KEY = "shop-guest-id";' in auth
+    assert "let guestId = tabGuestId();" in auth
+    assert "return { user: guestId, owner: false, where: {}, guest: true };" in auth
+    # The sign-in and the sign-up move the records of the guest of the tab, and start a new guest.
+    assert auth.count("moveGuestRecordsTo(user.id);") == 2
+    assert "  moveGuestRecords(guestId, userId);\n  guestId = tabGuestId(true);" in auth
+    store = files["src/shared/api/mock-store.ts"]
+    assert "return (record as Record<string, unknown>).guestId === scope.user;" in store
+    assert "return { [guest]: null, guestId: scope.user };" in store
+    # The session storage keeps the records of the guests: the sign-in loads the page again.
+    assert 'const GUEST_RECORDS_KEY = "shop-guest-records";' in store
+    assert store.count("    this.keepGuestRecords();") == 1
+    api = files["src/entities/cart-item/api/cart-item-api.ts"]
+    assert '    guest: "customerId",' in api
+
+
+def test_the_react_app_keeps_the_guest_token_of_the_api() -> None:
+    files = files_of(REACT_API, react.BINDING)
+    http = files["src/shared/api/http.ts"]
+    assert 'const GUEST_KEY = "shop-guest";' in http
+    assert 'guestRequest ??= apiRequest("POST", "/auth/guest")' in http
+    assert "const token = accessToken() ?? guestToken();" in http
+    auth = files["src/shared/auth/index.ts"]
+    assert "  await moveGuestRecords();\n}" in auth
+    assert 'await apiRequest("POST", "/auth/guest/move", { guest_token: guest });' in auth
+    store = files["src/shared/api/http-store.ts"]
+    assert store.count("if (this.shape.guest) {\n      await startGuestSession();") == 2
+    api = files["src/entities/cart-item/api/cart-item-api.ts"]
+    assert "  guest: true, // @trace auth.guests" in api
+    assert "guest: true" not in files["src/entities/product/api/product-api.ts"]
+
+
+@pytest.mark.parametrize("binding", [nextjs.BINDING, react.BINDING], ids=["nextjs", "react"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        TEXT.replace(
+            "      quantity: { type: integer",
+            "      guest_id: { type: string }\n      quantity: { type: integer",
+        ),
+        TEXT.replace(
+            "      product:\n        kind: many_to_one",
+            "      guest: { kind: many_to_one, target: Product }\n"
+            "      product:\n        kind: many_to_one",
+        ),
+    ],
+    ids=["field", "relation"],
+)
+def test_the_guests_of_the_front_ends_have_their_own_key(text: str, binding: Binding) -> None:
+    assert diagnostics(text) == []
+    message = (
+        "The entity 'CartItem' has a member with the key 'guestId', which is the key of the "
+        "guest of a record. Rename the member."
+    )
+    with pytest.raises(GenerationError, match=message):
+        files_of(text, binding)

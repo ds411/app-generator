@@ -184,6 +184,9 @@ class Table:
     """The unique rules of the entity: unique constraints over more than one column."""
     sequences: list[SequenceDef] = field(default_factory=list[SequenceDef])
     """The sequences of the fields with `sequence`."""
+    guest: bool = False
+    """True for an entity of the guests (ADR 0050): the column `guestId` holds the guest of a
+    record, with an index."""
 
     @property
     def orm_imports(self) -> list[str]:
@@ -208,6 +211,8 @@ class Table:
             names.add("primaryKey")
         if self.unique_rules:
             names.add("unique")
+        if self.guest:
+            names.add("index")
         return sorted(names, key=lambda name: name.removeprefix("type "))
 
     @property
@@ -343,6 +348,8 @@ def column_builder(
 
 def build_tables(definition: AppDefinition) -> list[Table]:
     """Return the Drizzle tables of a definition, in the order of the entities."""
+    auth = definition.auth
+    guests = auth.guests.entities if auth is not None and auth.guests is not None else {}
     tables: list[Table] = []
     for entity_name, entity in definition.entities.items():
         table = Table(
@@ -351,6 +358,7 @@ def build_tables(definition: AppDefinition) -> list[Table]:
             module=module_name(entity_name),
             const=table_const(entity_name),
             name=snake(entity_name),
+            guest=entity_name in guests,
         )
         for field_name, spec in entity.stored_fields.items():
             if spec.sequence is not None:

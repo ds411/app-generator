@@ -3110,9 +3110,14 @@ the guest token gives the records of the guest to the signed-in user:
 the owner relation is the user, and the guest ID is cleared. A guest
 token that is not valid gives 400. The generator stops with an error if
 an entity of the guests has a member `guest_id`, or if an operation has
-the operation ID `start_guest_session` or `move_guest_records`. The
-Next.js app and the React app do not have the guests yet: the trace
-check reports `auth.guests` as a gap.
+the operation ID `start_guest_session` or `move_guest_records`.
+
+The Next.js app keeps a guest session in a signed cookie, and moves the
+records of the guest at the sign-in and at the sign-up. The React app
+with the FastAPI app keeps the guest token of the API in the browser,
+and calls the move after the sign-in. The React app with mock data has
+a guest for the page. A guest sees a link to the sign-in page in the top
+bar.
 
 ## access
 

@@ -1,9 +1,14 @@
 {{ trace_header("app") }}
 {% if react.api %}
-{% if react.live and definition.auth %}
-export { API_URL, ApiError, accessToken, apiRequest, setAccessToken, subscribeAccessToken } from "./http";
+{% set http_names = ["API_URL", "ApiError", "accessToken", "apiRequest"] + (["guestToken"] if guests else []) + ["setAccessToken"] + (["setGuestToken", "startGuestSession"] if guests else []) + (["subscribeAccessToken"] if react.live and definition.auth else []) %}
+{% if guests %}
+export {
+{% for http_name in http_names %}
+  {{ http_name }},
+{% endfor %}
+} from "./http";
 {% else %}
-export { API_URL, ApiError, accessToken, apiRequest, setAccessToken } from "./http";
+export { {{ http_names | join(", ") }} } from "./http";
 {% endif %}
 export {
   type ApiParam,
@@ -30,7 +35,7 @@ export {
 } from "./dashboards";
 {% endif %}
 {% else %}
-{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore"] + (["pathIds"] if react.notices else []) + (["type RangeSpec"] if react.ranges else []) + (["recordsOf"] if memberships else []) + (["recordValue"] if react.notices else []) + (["ScopeError"] if memberships else []) + ["TransitionError", "type Workflow"] %}
+{% set mock_names = (["FileError", "type FileRule"] if definition.storage else []) + (["inTransaction"] if lines_ops else []) + ["MOCK_LATENCY_MS", "MockStore"] + (["moveGuestRecords"] if guests else []) + (["pathIds"] if react.notices else []) + (["type RangeSpec"] if react.ranges else []) + (["recordsOf"] if memberships else []) + (["recordValue"] if react.notices else []) + (["ScopeError"] if memberships else []) + ["TransitionError", "type Workflow"] %}
 export { {{ mock_names | join(", ") }} } from "./mock-store";
 {% endif %}
 export type {

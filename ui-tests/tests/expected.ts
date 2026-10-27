@@ -303,6 +303,27 @@ export type ExpectedSessions = {
   } | null;
 };
 
+/** The values of the guests, for scripts/guests_ui_test.py (ADR 0050). */
+export type ExpectedGuests = {
+  /** The list page of the records of a guest, its menu item, the label of its form action, and the submit label of the form. */
+  path: string;
+  title: string;
+  menu: string;
+  add: string;
+  submit: string;
+  /** The label of the relation field of the form, and the ID of the number field. */
+  relation: string;
+  numberId: string;
+  /** The records that a guest adds: the display value of the related record, and the number. */
+  items: { related: string; number: string }[];
+  /** The display values of the related records of the records of the users. */
+  others: string[];
+  /** A user with records, its password, and the display values of its records. */
+  user: { username: string; password: string; own: string[] };
+  /** The fields of the sign-up, with `{n}` for a number, and the password. */
+  signUp: { fields: { id: string; value: string }[]; password: string };
+};
+
 export type Expected = {
   binding: string;
   pages: ExpectedPage[];
@@ -326,6 +347,8 @@ export type Expected = {
   sessions?: ExpectedSessions;
   /** Only for the test of the map views. */
   places?: ExpectedPlaces;
+  /** Only for the test of the guests. */
+  guests?: ExpectedGuests;
 };
 
 // APPGEN_UI_EXPECTED names another file, so that the checks of two apps

@@ -80,6 +80,9 @@ export const {{ var }}Api = new HttpStore<{{ type }}, {{ type }}Input>({{ ts_val
 {% if api.translations %}
   translations: true,
 {% endif %}
+{% if guests and name in guests.names %}
+  guest: true, {{ trace(guests.element_id) }}
+{% endif %}
 });
 
 /** The records of {{ type }} for a choice, with the text of the display field: the server searches them. */
@@ -164,6 +167,10 @@ export const {{ var }}Api{% if typed %}: EntityApi<{{ type }}, {{ type }}Input>{
 {% endif %}
 {% if rule.direct %}
     owner: {{ ts_value(rule.path[0].key) }},
+{% endif %}
+{% if rule.guest %}
+    // The owner relation of a record of a guest (ADR 0050).
+    guest: {{ ts_value(rule.guest) }},
 {% endif %}
 {% if member %}
     // The memberships (ADR 0048): the operation of each call, and the path to the scope records.

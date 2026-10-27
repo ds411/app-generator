@@ -9,7 +9,10 @@
 
 // The memberships (ADR 0048) give a user a role in a record of {{ memberships.scope }}: the
 // role gives operations on the records of the scope, if the role of the
-// user does not give them.{% endif +%}
+// user does not give them.{% endif %}{% if guests %}
+
+// A guest (ADR 0050) is a visitor without a sign-in: it may call the
+// guest operations, on its own records only.{% endif +%}
 import type { PageName } from "@/shared/config/pages";
 
 const ALL = "*";
@@ -43,6 +46,23 @@ export function roleMayCall(role: string | null, operation: string): boolean {
 export function roleMayOpenPage(role: string | null, page: PageName): boolean {
   return PUBLIC_PAGES.includes(page) || (role !== null && allows(PAGES[role], page));
 }
+{% if guests %}
+
+/** The operations that a guest may call, on its own records (ADR 0050). */
+export const GUEST_OPERATIONS: readonly string[] = {{ guests.operations | list | tojson }}; {{ trace(guests.element_id) }}
+
+/** The entities whose records a guest can own. */
+export const GUEST_ENTITIES: readonly string[] = {{ guests.names | tojson }};
+
+/**
+ * Return true if a visitor may call an operation: a signed-in user with
+ * the role of the user, and a guest (no user) the public and the guest
+ * operations (ADR 0050).
+ */
+export function visitorMayCall(role: string | null, user: string | null, operation: string): boolean {
+  return user === null ? roleMayCall(null, operation) || GUEST_OPERATIONS.includes(operation) : roleMayCall(role, operation);
+}
+{% endif %}
 {% if record_rules %}
 
 /** The records of a rule: `read` (the lists and the reads) or `change` (the creates, the changes, the deletes, and the custom operations). */
@@ -78,6 +98,10 @@ export type RecordScope = {
   scopes?: readonly string[];
   /** The IDs of all scopes of the memberships of the user. */
   memberOf?: readonly string[];
+{% endif %}
+{% if guests %}
+  /** True for a guest (ADR 0050): `user` is the guest ID, and the guest uses only its own records. */
+  guest?: boolean;
 {% endif %}
 };
 

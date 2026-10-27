@@ -67,9 +67,41 @@ The generator stops with an error if an entity of the guests has a
 member `guest_id`, or if an operation has the operation ID
 `start_guest_session` or `move_guest_records`.
 
-The Next.js app and the React app get the guests in a later change.
-Until then, the trace check reports `auth.guests` as a gap in these
-apps.
+The Next.js app:
+
+- A guest session is the cookie `guest`: a signed text with a new
+  random guest ID and the end of its time, as the session cookie of a
+  user (ADR 0011). A guest token has no user ID, and a session token
+  has no guest ID. The first change of a guest sets the cookie: a
+  server component cannot set a cookie, and a read needs no guest ID.
+- Each entity of the guests has the column `guest_id`, with an index.
+  `requireOperation()` lets a guest operation pass without a session.
+  The data access of a guest uses only the records with its guest ID,
+  and the server actions clear the owner relation of a new or changed
+  record of a guest.
+- `startSession()` moves the records of the guest of the cookie to the
+  user, and deletes the cookie. Each way to sign in calls it.
+
+The React app:
+
+- With the FastAPI app, the browser keeps the guest token of the API in
+  the local storage, with the end of its time: the cart stays after the
+  tab closes. The data access of an entity of the guests asks for a
+  guest token before its first request without a sign-in. A request
+  without a sign-in sends the guest token, and the public endpoints do
+  not read it. After the sign-in and the sign-up, the app calls the
+  move, and deletes the guest token.
+- With mock data, the guest is the tab: the session storage of the
+  browser keeps the guest ID, and the records that a guest adds, with
+  the guest ID in the key `guestId`. The sign-in and the sign-up load
+  the page again, so the records stay in the storage after the move to
+  the user. The sign-in and the sign-up move the records of the guest
+  in the mock store, and start a new guest for the tab.
+
+In both front ends, a guest sees the guest operations, and a link to the
+sign-in page in the top bar instead of the button "Sign out". The
+generator stops with an error if an entity of the guests has a member
+with the key `guestId`.
 
 ## Consequences
 
@@ -82,7 +114,9 @@ apps.
   an owner and without a way to reach them. A job of the app can delete
   the old records of the guests.
 - A person with the guest token of another visitor has the records of
-  that guest, as with the token of a user. The front ends keep the
-  token as they keep the token of a user.
+  that guest, as with the token of a user. The cookie of the Next.js app
+  is `httpOnly`, as the session cookie. The React app keeps the guest
+  token in the local storage, where the scripts of the page can read
+  it, as the token of a user in the session storage.
 - A guest calls only its guest operations: the files, the change log,
   and the other endpoints of the entities need a user.

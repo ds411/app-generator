@@ -101,6 +101,8 @@ ui:
   layouts:
     app_shell:
       sidebar: { navigation: main, title: Shop, icon: store }
+      # The top bar has the sign-out button, or the sign-in link of a guest.
+      topbar: { breadcrumbs: false }
   defaults:
     layout: app_shell
   views:
