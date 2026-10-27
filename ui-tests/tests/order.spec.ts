@@ -90,7 +90,9 @@ test("a card of the board moves before a card of another column", async ({ page 
   await page.goto("/steps/board");
   const todo = page.locator('section[aria-label="Todo"]');
   const doing = page.locator('section[aria-label="Doing"]');
-  await expect(doing.locator('[data-slot="card-title"]').first()).toBeVisible();
+  // The dev server builds the board at its first visit: under the load of the
+  // parallel checks, that takes more than the default time.
+  await expect(doing.locator('[data-slot="card-title"]').first()).toBeVisible({ timeout: 30_000 });
   const before = await cardTitles(todo);
   const [card] = await cardTitles(doing);
   const cards = page.locator("[draggable]");
