@@ -286,7 +286,10 @@ git config core.hooksPath .githooks
   Ruff, pyright, the generated tests, and `appgen check` on them. A
   browser signs in to both apps through the mock OpenID Connect provider
   `scripts/mock_oidc.py` (`scripts/check_provider_sign_in.py`). Then it
-  generates `tests/fixtures/account-security.yaml` (the verification of
+  generates `tests/fixtures/cognito-sign-in.yaml` (a user pool of Amazon
+  Cognito with Entra ID as its SAML provider), checks it in the same
+  way, and signs in through the mock user pool of `scripts/mock_oidc.py`.
+  Then it generates `tests/fixtures/account-security.yaml` (the verification of
   the email address, and the second factor), and runs Ruff, pyright,
   the generated tests, and `appgen check` on it. Then it generates
   `tests/fixtures/seed-data.yaml` (seed records, ADR 0021), checks it in
@@ -359,7 +362,9 @@ git config core.hooksPath .githooks
   sign-up and of the reset as emails to the mock SMTP server
   `scripts/mock_smtp.py`, and the test opens the links of the emails.
   It also builds `tests/fixtures/record-rules.yaml`, and checks its
-  rules with conditions and owner paths. The binding `react-api` is the React app
+  rules with conditions and owner paths. It builds
+  `tests/fixtures/cognito-sign-in.yaml` with Next.js and react-api, and
+  signs in through the mock user pool of Amazon Cognito. The binding `react-api` is the React app
   with the FastAPI app of the example: the script starts both, and signs
   in through the flow of the FastAPI app. Then it builds
   `tests/fixtures/api-connections.yaml` with React, Next.js, and

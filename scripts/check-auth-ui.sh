@@ -7,7 +7,8 @@
 # (also with conditions and owner paths, in tests/fixtures/record-rules.yaml),
 # turn on a second factor and sign in with a code, and sign in with a
 # provider through the mock provider: in Next.js, and in React with the
-# FastAPI app (scripts/auth_ui_test.py). Then connect a new user to an API
+# FastAPI app, also through the mock user pool of Amazon Cognito of
+# tests/fixtures/cognito-sign-in.yaml (scripts/auth_ui_test.py). Then connect a new user to an API
 # on the page /connections, through the authorization page of the mock
 # server of the API (scripts/connection_ui_test.py, ADR 0033). Then show
 # the rows of the queries of tests/fixtures/listings.yaml in a table, a

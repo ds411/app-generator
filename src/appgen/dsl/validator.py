@@ -21,6 +21,7 @@ from appgen.dsl.access import ALL, Memberships, RecordRule, membership_scope
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
     CONNECTIONS_PATH,
+    FLOW_PARAMS,
     FORGOT_PASSWORD_PATH,
     ME,
     NOTICE_SETTINGS_PATH,
@@ -1995,6 +1996,15 @@ def _check_provider(
             provider,
             at="scopes",
         )
+    for name in provider.authorize_params:
+        if name in FLOW_PARAMS:
+            yield _error(
+                "reserved-name",
+                f"The flow sets the parameter '{name}' of the authorization request.",
+                provider,
+                at="authorize_params",
+                hint="Remove the parameter. Use 'scopes' for the scopes.",
+            )
     if not provider.create_users:
         for key in ("default_role", "claims"):
             if getattr(provider, key):

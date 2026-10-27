@@ -55,6 +55,10 @@ type Provider = {
   createUsers: boolean;
   /** The fields of a new user, and the claims that give their values. */
   claims: Record<string, string>;
+  /** The fixed parameters of the authorization request, for example the identity provider. */
+  authorizeParams: Record<string, string>;
+  /** Accept an email address that the ID token does not mark as verified. */
+  trustEmail: boolean;
 {% if role_key %}
   /** The role of a new user. */
   defaultRole?: string;
@@ -90,6 +94,8 @@ function providerOf(name: ProviderName): Provider {
       usernameClaim: {{ p.username_claim | tojson }},
       createUsers: {{ "true" if p.create_users else "false" }},
       claims: { {%- for field, claim in p.claims.items() %} {{ field | camel }}: {{ claim | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.claims }}},
+      authorizeParams: { {%- for key, value in p.authorize_params.items() %} {{ key | tojson }}: {{ value | tojson }}{{ "," if not loop.last }}{% endfor %}{{ " " if p.authorize_params }}},
+      trustEmail: {{ "true" if p.trust_email else "false" }},
 {% if role_key and p.create_users and p.default_role %}
       defaultRole: {{ p.default_role | tojson }},
 {% endif %}
@@ -210,7 +216,9 @@ export async function startProviderSignIn(name: ProviderName, next: string): Pro
   const metadata = await discover(provider);
   const [state, nonce, verifier] = [randomText(), randomText(), randomText()];
   const url = new URL(metadata.authorization_endpoint);
+  // The parameters of the flow come last: the definition cannot change them.
   const query = {
+    ...provider.authorizeParams,
     response_type: "code",
     client_id: provider.clientId,
     redirect_uri: callbackUrl(name),
@@ -285,7 +293,9 @@ async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
   if (typeof username !== "string" || !username) {
     throw new ProviderError(`The ID token has no claim '${provider.usernameClaim}'.`);
   }
-  if (provider.usernameClaim === "email" && (claims.email_verified === false || claims.email_verified === "false")) {
+  // With trustEmail, the provider gives only the addresses of the company (ADR 0020).
+  const unverified = claims.email_verified === false || claims.email_verified === "false";
+  if (provider.usernameClaim === "email" && unverified && !provider.trustEmail) {
     throw new ProviderError("The provider did not verify the email address.");
   }
   const rows = await getDb()
@@ -300,7 +310,8 @@ async function userOf(provider: Provider, claims: JWTPayload): Promise<string> {
     // The provider verified the email address. Nobody proved that the person who chose the
     // password of the sign-up owns the address, so the password must not give access to the
     // account (ADR 0023). The user can set a new password with a reset link.
-    if ((claims.email_verified === true || claims.email_verified === "true") && claims.email === found.address) {
+    const verified = provider.trustEmail || claims.email_verified === true || claims.email_verified === "true";
+    if (verified && claims.email === found.address) {
       await getDb()
         .delete(credentialsTable)
         .where(and(eq(credentialsTable.userId, found.id), isNull(credentialsTable.emailVerifiedAt)));

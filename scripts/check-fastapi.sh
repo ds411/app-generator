@@ -17,6 +17,9 @@
 # tests/fixtures/provider-sign-in.yaml (only the sign-in with
 # providers), and check it. For both apps, a browser signs in through
 # the mock OpenID Connect provider (scripts/check_provider_sign_in.py).
+# Then generate tests/fixtures/cognito-sign-in.yaml (a user pool of
+# Amazon Cognito with Entra ID as its SAML provider), check it, and sign
+# in through the mock user pool of scripts/mock_oidc.py.
 # Then generate tests/fixtures/account-security.yaml (the verification
 # of the email address, the delivery hook of the messages, and the
 # second factor), and check its code and run its tests. Then generate
@@ -65,6 +68,7 @@
 # Without an output folder, the script uses a temporary folder and
 # deletes it at the end. The other apps go to the folders
 # "<output folder>-room-booking", "<output folder>-provider-sign-in",
+# "<output folder>-cognito-sign-in",
 # "<output folder>-account-security", "<output folder>-seed-data",
 # "<output folder>-record-rules", "<output folder>-webhooks",
 # "<output folder>-jobs", "<output folder>-files",
@@ -90,6 +94,7 @@ set -eu
 definition=examples/project-tracker/app.yaml
 auth_definition=examples/room-booking/app.yaml
 provider_definition=tests/fixtures/provider-sign-in.yaml
+cognito_definition=tests/fixtures/cognito-sign-in.yaml
 security_definition=tests/fixtures/account-security.yaml
 seed_definition=tests/fixtures/seed-data.yaml
 rules_definition=tests/fixtures/record-rules.yaml
@@ -110,10 +115,11 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
 fi
 auth_out="$out-room-booking"
 provider_out="$out-provider-sign-in"
+cognito_out="$out-cognito-sign-in"
 security_out="$out-account-security"
 seed_out="$out-seed-data"
 rules_out="$out-record-rules"
@@ -261,6 +267,24 @@ if section fastapi:provider-sign-in; then
     cd "$root"
     step "provider sign-in: the sign-in with the mock provider"
     uv run --locked scripts/check_provider_sign_in.py "$provider_definition" "$provider_out"
+fi
+
+if section fastapi:cognito-sign-in; then
+    step "generate $cognito_definition in $cognito_out"
+    rm -rf "$cognito_out"
+    uv run --locked appgen generate "$cognito_definition" -b fastapi -o "$cognito_out" >/dev/null
+    uv run --locked appgen check "$cognito_definition" "$cognito_out"
+    cd "$cognito_out"
+    step "cognito sign-in: uv sync, ruff, pyright, pytest on SQLite"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+    step "cognito sign-in: the sign-in with the mock user pool"
+    uv run --locked scripts/check_provider_sign_in.py "$cognito_definition" "$cognito_out"
 fi
 
 if section fastapi:account-security; then

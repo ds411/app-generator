@@ -170,6 +170,11 @@ def fastapi_sections() -> Iterator[Section]:
         (fixture("provider-sign-in", "fastapi"),),
         ("check_provider_sign_in.py",),
     )
+    yield Section(
+        "fastapi:cognito-sign-in",
+        (fixture("cognito-sign-in", "fastapi"),),
+        ("check_provider_sign_in.py",),
+    )
     for name in ("account-security", "seed-data", "record-rules", "webhooks", "jobs", "files"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
     yield Section(
@@ -309,9 +314,14 @@ AUTH_UI_FIXTURES = {
 
 def auth_ui_apps(part: str, binding: str) -> tuple[App, ...]:
     if part == "room-booking":
+        # Next.js and react-api also sign in through the mock user pool of Cognito.
+        cognito = f"{FIXTURES}/cognito-sign-in.yaml"
         if binding == "react-api":
             keys = tuple(API.items())
-            return (App(ROOMS, "react", keys=keys), App(ROOMS, "fastapi", keys=keys))
+            bindings = ("react", "fastapi")
+            return tuple(App(d, b, keys=keys) for d in (ROOMS, cognito) for b in bindings)
+        if binding == "nextjs":
+            return (App(ROOMS, binding), fixture("record-rules", binding), App(cognito, binding))
         return (App(ROOMS, binding), fixture("record-rules", binding))
     name, extended = AUTH_UI_FIXTURES[part]
     if binding == "react-api":

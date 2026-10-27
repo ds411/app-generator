@@ -2888,6 +2888,21 @@ auth:
   (field name: claim name), and it must give each required field without
   a default. With `access`, `default_role` is the role of a new user.
   `title` (default: the name) is the text on the sign-in button.
+- `authorize_params` adds fixed parameters to the authorization request
+  of a provider, for example `{ identity_provider: EntraID }` for a user
+  pool of Amazon Cognito: the user pool then sends the users at once to
+  that identity provider, not to its own sign-in page. A parameter that
+  the flow sets (`response_type`, `client_id`, `redirect_uri`, `scope`,
+  `state`, `nonce`, `code_challenge`, and `code_challenge_method`) is
+  not valid (`reserved-name`).
+- `trust_email: true` makes the apps accept the email address of an ID
+  token also when the token does not mark it as verified
+  (`email_verified` is missing, `false`, or `"false"`). Use it only for a
+  provider that gives only the addresses of the company, for example a
+  user pool of Amazon Cognito with a single-tenant Entra ID as its SAML
+  identity provider: the user pool does not mark the address of a SAML
+  user as verified. See [Sign-in with Amazon Cognito and Entra
+  ID](https://github.com/ds411/app-generator/blob/main/docs/cognito-entra-id.md).
 - `password: false` turns off the sign-in with a password: the users
   sign in only with `providers`. It needs a provider, and it cannot
   have `sign_up`, `password_reset`, or `second_factor`.

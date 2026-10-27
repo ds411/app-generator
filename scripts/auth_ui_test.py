@@ -49,6 +49,12 @@ test proves it for the room booking example (`examples/room-booking`):
    the mock provider, and runs only the test of the sign-in with a
    provider: the browser goes through the flow of the FastAPI app, and
    comes back to the React app with a token.
+6. For Next.js and react-api, generate tests/fixtures/cognito-sign-in.yaml
+   too, and run only the test of the sign-in with a provider, through the
+   mock user pool of Amazon Cognito of scripts/mock_oidc.py: the
+   authorization request has `identity_provider`, the endpoints are on
+   another origin than the issuer, and the ID token does not mark the
+   email address as verified (`trust_email`, ADR 0020).
 
 Run it from the repository root:
 
@@ -124,6 +130,8 @@ RULES_DEFINITION = Path("tests/fixtures/record-rules.yaml")
 """The definition with record rules of conditions and owner paths (ADR 0025)."""
 RULES_TEST = "the record rule of the role"
 """The part of the names of the UI tests of the record rules, for RULES_DEFINITION."""
+COGNITO_DEFINITION = Path("tests/fixtures/cognito-sign-in.yaml")
+"""The definition with a user pool of Amazon Cognito as its provider (ADR 0020)."""
 
 
 class AuthUiTestError(Exception):
@@ -765,8 +773,8 @@ def wait_for(binding: str, url: str) -> None:
 
 
 @contextmanager
-def started(binding: str, app: Path) -> Generator[None]:
-    """Start the built app, and stop it at the end."""
+def started(binding: str, app: Path, definition: Path = DEFINITION) -> Generator[None]:
+    """Start the built app of a definition, and stop it at the end."""
     port = str(PORTS[binding])
     env = {**os.environ, "PORT": port}
     if binding in ("react", "react-api"):
@@ -788,7 +796,7 @@ def started(binding: str, app: Path) -> Generator[None]:
             "SMTP_FROM": "no-reply@example.com",
             # The test calls the route of the job of the emails of the notices.
             "JOBS_SECRET": JOBS_SECRET,
-            **provider_env(load_definition(DEFINITION)),
+            **provider_env(load_definition(definition)),
         }
         command = ["pnpm", "--silent", "start"]
     log_file = app / "server.log"
@@ -820,19 +828,30 @@ def provider_env(definition: AppDefinition) -> dict[str, str]:
     assert definition.auth is not None
     env: dict[str, str] = {}
     for name, provider in definition.auth.providers.items():
-        env[f"{name.upper()}_ISSUER"] = f"http://127.0.0.1:{OIDC_PORT}"
+        env[f"{name.upper()}_ISSUER"] = mock_oidc.issuer_of(OIDC_PORT, provider.authorize_params)
         env[provider.client_id_env] = mock_oidc.DEFAULT_CLIENT_ID
         env[provider.client_secret_env] = mock_oidc.DEFAULT_CLIENT_SECRET
     return env
 
 
-def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = False) -> None:
+def check_ui(
+    binding: str,
+    definition: AppDefinition,
+    app: Path,
+    rules: bool = False,
+    providers_only: bool = False,
+) -> None:
     """Run the UI test of the sign-in and the permissions on the app that runs.
 
     With `rules`, run only the tests of the record rules: the app is of
-    RULES_DEFINITION.
+    RULES_DEFINITION. With `providers_only`, run only the test of the
+    sign-in with a provider: the app is of COGNITO_DEFINITION.
     """
-    name = f"{binding}-record-rules" if rules else f"{binding}-auth"
+    if rules:
+        name = f"{binding}-record-rules"
+    else:
+        name = f"{binding}-cognito" if providers_only else f"{binding}-auth"
+    providers_only = providers_only or binding == "react-api"
     expected_file = (UI_TESTS / "expected" / f"{name}.json").resolve()
     expected_file.parent.mkdir(exist_ok=True)
     if rules:
@@ -844,7 +863,7 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
             "providers": [],
         }
         expected = {**expected_ui(binding, definition), "auth": auth}
-    elif binding == "react-api":
+    elif providers_only:
         # Only the test of the sign-in with a provider: the FastAPI app has no seed users.
         auth = {
             "app": definition.app.name,
@@ -852,7 +871,8 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
             "roles": [],
             "providers": expected_providers(binding, definition),
         }
-        expected = {**expected_ui("react", definition), "auth": auth}
+        ui_binding = "react" if binding == "react-api" else binding
+        expected = {**expected_ui(ui_binding, definition), "auth": auth}
     else:
         expected = {
             **expected_ui(binding, definition),
@@ -871,7 +891,7 @@ def check_ui(binding: str, definition: AppDefinition, app: Path, rules: bool = F
     command = ["pnpm", "exec", "playwright", "test", "tests/auth.spec.ts"]
     if rules:
         command += ["--grep", RULES_TEST]
-    elif binding == "react-api":
+    elif providers_only:
         command += ["--grep", PROVIDER_TEST]
     if os.environ.get("APPGEN_UPDATE_SCREENSHOTS") == "1":
         command.append("--update-snapshots")
@@ -896,8 +916,11 @@ def generate(definition: Path, binding: str, app: Path) -> None:
 
 
 @contextmanager
-def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[None]:
-    """Start the FastAPI app with SQLite and the mock provider, and stop it at the end.
+def started_api(
+    app: Path, settings: dict[str, str] | None = None, definition: Path = DEFINITION
+) -> Generator[None]:
+    """Start the FastAPI app of a definition with SQLite and the mock provider, and stop it at
+    the end.
 
     `settings` are more environment variables of the app, for example the seed.
     """
@@ -909,7 +932,7 @@ def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[
         "CORS_ORIGINS": json.dumps([web]),
         "PUBLIC_URL": f"http://127.0.0.1:{port}",
         "LOG_JSON": "false",
-        **provider_env(load_definition(DEFINITION)),
+        **provider_env(load_definition(definition)),
         **(settings or {}),
     }
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=app, env=env, check=True)
@@ -934,16 +957,20 @@ def started_api(app: Path, settings: dict[str, str] | None = None) -> Generator[
         process.wait(timeout=30)
 
 
-def react_api_test(out: Path) -> None:
-    """Sign in to the React app with the FastAPI app through the mock provider (ADR 0020)."""
-    binding, definition = "react-api", load_definition(DEFINITION)
-    source = out / "app.yaml"
+def react_api_test(out: Path, path: Path = DEFINITION) -> None:
+    """Sign in to the React app with the FastAPI app through the mock provider (ADR 0020).
+
+    With COGNITO_DEFINITION, the provider is the mock user pool.
+    """
+    binding, definition = "react-api", load_definition(path)
+    suffix = "-cognito" if path == COGNITO_DEFINITION else ""
+    source = out / f"app{suffix}.yaml"
     marker = "\napp:\n"
-    text = DEFINITION.read_text()
+    text = path.read_text()
     if marker not in text:
-        raise AuthUiTestError(f"{DEFINITION} has no 'app:' line.")
+        raise AuthUiTestError(f"{path} has no 'app:' line.")
     source.write_text(text.replace(marker, f"{marker}  {DATA_KEY}: api\n", 1))
-    api, web = out / "react-api-fastapi", out / binding
+    api, web = out / f"react-api{suffix}-fastapi", out / f"{binding}{suffix}"
     generate(source, "fastapi", api)
     generate(source, "react", web)
     log(binding, "uv sync, pnpm install, and pnpm build")
@@ -952,16 +979,38 @@ def react_api_test(out: Path) -> None:
     subprocess.run(["uv", "sync", "--quiet"], cwd=api, env=env, check=True)
     run("pnpm", "install", "--silent", cwd=web)
     run("pnpm", "--silent", "build", cwd=web, env={"VITE_API_URL": f"http://127.0.0.1:{API_PORT}"})
-    with mock_oidc.serving(port=OIDC_PORT), started_api(api), started(binding, web):
+    with (
+        mock_oidc.serving(port=OIDC_PORT),
+        started_api(api, definition=path),
+        started(binding, web, path),
+    ):
         wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
-        log(binding, "UI test of the sign-in with a provider (Playwright)")
-        check_ui(binding, definition, web)
-    log(binding, "passed")
+        log(binding, f"UI test of the sign-in with a provider of {path} (Playwright)")
+        check_ui(binding, definition, web, providers_only=bool(suffix))
+    log(binding, f"{path}: passed")
+
+
+def cognito_test(binding: str, out: Path) -> None:
+    """Sign in to the app of COGNITO_DEFINITION through the mock user pool (ADR 0020)."""
+    if binding == "react-api":
+        react_api_test(out, COGNITO_DEFINITION)
+        return
+    definition = load_definition(COGNITO_DEFINITION)
+    app = out / f"{binding}-cognito"
+    generate(COGNITO_DEFINITION, binding, app)
+    log(binding, "cognito: pnpm install and pnpm build")
+    run("pnpm", "install", "--silent", cwd=app)
+    run("pnpm", "--silent", "build", cwd=app)
+    with mock_oidc.serving(port=OIDC_PORT), started(binding, app, COGNITO_DEFINITION):
+        wait_for(binding, f"http://localhost:{PORTS[binding]}/sign-in")
+        log(binding, "UI test of the sign-in through the mock user pool (Playwright)")
+        check_ui(binding, definition, app, providers_only=True)
 
 
 def auth_ui_test(binding: str, out: Path) -> None:
     if binding == "react-api":
         react_api_test(out)
+        cognito_test(binding, out)
         return
     definition = load_definition(DEFINITION)
     app = out / binding
@@ -979,6 +1028,8 @@ def auth_ui_test(binding: str, out: Path) -> None:
         log(binding, "UI test of the sign-in and the permissions (Playwright)")
         check_ui(binding, definition, app)
     record_rules_test(binding, out)
+    if binding == "nextjs":
+        cognito_test(binding, out)
     log(binding, "passed")
 
 
