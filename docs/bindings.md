@@ -858,6 +858,37 @@ has the model `ShareLink`, the schemas `ShareLinkState` and
   the endpoints of the links need a sign-in and the permission of the
   update operation.
 
+### The guests of the FastAPI app
+
+The FastAPI app gives records to the guests of `auth.guests`
+([ADR 0050](adr/0050-guests.md)). `app/core/guests.py` has the guest
+tokens, the dependencies of the guest operations, and the move.
+
+- `make_guest_token()` signs a new guest ID with the purpose `guest`,
+  and `read_guest_token()` gives the guest ID of a valid token. `POST
+  /auth/guest` (`start_guest_session`) gives a token, and stores
+  nothing.
+- `current_visitor()` gives the guest ID of a guest token, else the
+  signed-in user. The router of a guest operation uses
+  `check_guest_access` instead of `check_access`: a guest passes, and a
+  user needs its role. `guest_scope_of(action)` gives the `RecordScope`
+  of the request: with `guest=True` and the guest ID in `user` for a
+  guest, else the scope of the role.
+- `app/core/access.py` has `GUEST_RULE` and `GUEST_ENTITIES`. The
+  repository of an entity of the guests filters the records of a guest
+  by the column `guest_id`, sets it on a new record of a guest, and
+  clears the owner relation of a new or changed record of a guest.
+- `POST /auth/guest/move` (`move_guest_records`) gives the records of a
+  guest token to the signed-in user, with one `UPDATE` for each entity
+  of the guests. The generator stops with an error if an entity of the
+  guests has a member `guest_id`, or if an operation has one of the two
+  operation IDs.
+- The generated tests in `tests/test_guests.py` make a record as a
+  guest, check that another guest and a request without a token do not
+  get it, and move it to a user. `tests/conftest.py` overrides
+  `check_guest_access` and `current_visitor` for the tests of the
+  operations.
+
 ### The live updates of the FastAPI app
 
 The FastAPI app sends the changes of the records of the entities with
@@ -1517,6 +1548,58 @@ records of the entities with `live` ([ADR 0051](adr/0051-live-updates.md)).
   checks that the task board of the first browser shows each change in
   less than 2 s: in the Next.js app, and in the React app with the
   FastAPI app (`scripts/api_client_test.py`).
+
+### The guests of the Next.js app and of the React app
+
+The front ends give records to the guests of `auth.guests` as the
+FastAPI app does ([ADR 0050](adr/0050-guests.md)).
+
+- `@/shared/lib/permissions` has the guest operations
+  (`GUEST_OPERATIONS`), the entities of the guests (`GUEST_ENTITIES`),
+  and `visitorMayCall(role, user, operation)`: without a user, the
+  public and the guest operations. The `RecordScope` of a guest has
+  `guest: true` and the guest ID in `user`. The record rules of each
+  entity of the guests (`record_rules`) have the key of its owner
+  relation (`guest`), also without a rule of a role.
+- The Next.js app keeps a guest session in the cookie `guest`
+  (`src/shared/auth/session.ts`): a signed text with a random guest ID
+  and the end of its time. A session token has a user ID, and a guest
+  token a guest ID, so one is not valid as the other. The first change
+  of a guest sets the cookie (`startGuestSession()`), because only a
+  server action or a route handler may set a cookie. A read without the
+  cookie has a new guest ID, so it has no records.
+  `requireOperation()` lets a guest operation pass without a session,
+  and `recordScope()` gives the scope of the guest for an entity of the
+  guests. The table of each entity of the guests has the column
+  `guest_id` with an index. The repository filters the records of a
+  guest by it, sets it on a new record of a guest, and keeps it out of
+  the records. The server actions clear the owner relation of a new or
+  changed record of a guest. `startSession()` moves the records of the
+  guest of the cookie to the user, with one `UPDATE` for each entity,
+  and deletes the cookie: at the sign-in with a password, with a second
+  factor, with a provider, and at the sign-up.
+- The React app with the FastAPI app keeps the guest token of the API
+  in the local storage of the browser (`src/shared/api/http.ts`), with
+  the end of its time. The data access of an entity of the guests asks
+  for a guest token (`POST /auth/guest`) before its first request
+  without a sign-in, and a request without a sign-in sends the guest
+  token. `startSession()` of `@/shared/auth` calls `POST
+  /auth/guest/move`, and deletes the guest token.
+- The React app with mock data has a guest ID for the tab: the session
+  storage keeps it. The mock store keeps the guest of a record in the
+  key `guestId`, and the session storage keeps the records that a guest
+  adds, also after the move, because the sign-in and the sign-up load
+  the page again. The sign-in and the sign-up move the records of the
+  guest to the user (`moveGuestRecords()` of the mock store), and start
+  a new guest for the tab.
+- `useAccess()` has `signedIn`. The button "Sign out" of the top bar is
+  a link to the sign-in page for a guest. The generator stops with an
+  error if an entity of the guests has a member with the key `guestId`.
+- The UI test `ui-tests/tests/guests.spec.ts` (scripts/guests_ui_test.py)
+  fills a cart of tests/fixtures/shop.yaml as a guest, and checks that
+  another guest does not see it. The guest signs up, and finds the cart.
+  A second guest fills a cart, signs in as a customer, and finds the
+  cart next to the own items of the customer.
 
 ### The users on the record pages in the Next.js app and in the React app
 

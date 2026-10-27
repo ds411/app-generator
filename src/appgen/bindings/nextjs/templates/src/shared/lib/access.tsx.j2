@@ -11,7 +11,9 @@ import type { PageName } from "@/shared/config/pages";
 {% if memberships %}
 import { memberGives, useMemberPermissions } from "@/shared/lib/member-access";
 {% endif %}
-{% if record_rules %}
+{% if guests %}
+import { type RecordScope, recordScopeOf, roleMayOpenPage, visitorMayCall } from "@/shared/lib/permissions";
+{% elif record_rules %}
 import { type RecordScope, recordScopeOf, roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
@@ -38,26 +40,38 @@ export type Access = {
    */
   scopeOf: (entity: string) => RecordScope | null;
 {% endif %}
+{% if guests %}
+  /** True if a user is signed in. A guest (ADR 0050) is not. */
+  signedIn: boolean;
+{% endif %}
 };
 
 {% if record_rules %}
+{# A guest (no user) may call the guest operations too (ADR 0050). #}
+{% set may_call = "visitorMayCall(role, userId, operation)" if guests else "roleMayCall(role, operation)" %}
 {% if memberships %}
 function accessOf(role: string | null, userId: string | null): Access {
   const canCallOn = (operation: string, ids: readonly string[]) =>
-    roleMayCall(role, operation) || memberGives(userId, operation, ids);
+    {{ may_call }} || memberGives(userId, operation, ids);
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
     canCall: (operation) => canCallOn(operation, []),
     canCallOn,
     scopeOf: (entity) => recordScopeOf(role, userId, entity, "change"),
+{% if guests %}
+    signedIn: userId !== null,
+{% endif %}
   };
 }
 {% else %}
 function accessOf(role: string | null, userId: string | null): Access {
   return {
     canOpenPage: (page) => roleMayOpenPage(role, page),
-    canCall: (operation) => roleMayCall(role, operation),
+    canCall: (operation) => {{ may_call }},
     scopeOf: (entity) => recordScopeOf(role, userId, entity, "change"),
+{% if guests %}
+    signedIn: userId !== null,
+{% endif %}
   };
 }
 {% endif %}

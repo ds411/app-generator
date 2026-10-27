@@ -126,6 +126,30 @@ class SecondFactor(Element):
     """With `access`: the roles that must use the second factor."""
 
 
+GUEST_KINDS = ("list", "read", "create", "update", "delete")
+"""The kinds of the operations that a guest may call (ADR 0050)."""
+
+
+class Guests(Element):
+    """The records of the guests: the visitors without a sign-in (ADR 0050).
+
+    A guest gets a guest token from the app, and owns the records that it
+    makes with the guest operations, for example the items of a cart. A
+    signed-in user can move the records of a guest token to itself: the
+    front ends do it at the sign-in and at the sign-up. Then the owner
+    relation of each record is the user.
+    """
+
+    entities: Annotated[dict[EntityName, MemberName], pydantic.Field(min_length=1)]
+    """The entities whose records a guest can own, and the owner relation of each: a
+    many-to-one relation to the user entity that is not required."""
+    operations: Annotated[list[MemberName], pydantic.Field(min_length=1)]
+    """The operations that a guest may call: the list, read, create, update, and delete
+    operations of the entities of `entities`. A guest uses only its own records."""
+    token_days: Annotated[int, pydantic.Field(ge=1, le=365)] = 30
+    """The time after which a guest token ends. Then the guest cannot use its records."""
+
+
 class ProviderRoles(Element):
     """The roles of the users from a claim of a provider, for example the groups of Entra ID.
 
@@ -240,3 +264,5 @@ class Auth(Element):
     """A second factor of the sign-in with a password. Off by default."""
     providers: dict[MemberName, Provider] = pydantic.Field(default_factory=dict[str, Provider])
     """The OpenID Connect providers that the users can sign in with."""
+    guests: Guests | None = None
+    """The records of the visitors without a sign-in, for example a cart (ADR 0050)."""

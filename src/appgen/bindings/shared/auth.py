@@ -89,7 +89,9 @@ class EntityRules:
     """The record rules of the roles on one entity (ADR 0018, ADR 0025), and its scope path.
 
     An entity of the scope of the memberships (ADR 0048) has rules too: a
-    membership gives its operations on the records of its scopes only.
+    membership gives its operations on the records of its scopes only. An
+    entity of the guests (ADR 0050) has rules too: a guest uses only its own
+    records.
     """
 
     path: tuple[PathStep, ...]
@@ -101,6 +103,9 @@ class EntityRules:
     scope: tuple[PathStep, ...] | None = None
     """The steps of the path to the scope entity of the memberships, no steps for the scope
     entity, or None for an entity out of the scope."""
+    guest: str | None = None
+    """The key of the owner relation of the records of a guest (ADR 0050), for example
+    `customerId`, or None for an entity out of `auth.guests`."""
 
     @property
     def direct(self) -> bool:
@@ -113,12 +118,15 @@ def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
 
     All rules of an entity with an owner use the same owner (the validator
     checks it), so each entity has one path. The entities of the scope of
-    the memberships (ADR 0048) have their scope path.
+    the memberships (ADR 0048) have their scope path, and the entities of the
+    guests (ADR 0050) the key of their owner relation.
     """
     if definition.access is None:
         return {}
     scoped = scope_entities(definition)
     memberships = definition.access.memberships
+    guests = definition.auth.guests if definition.auth is not None else None
+    guest_owners = guests.entities if guests is not None else {}
     owners: dict[str, str] = {}
     fixed: dict[str, set[str]] = {}
     ids: dict[str, list[str]] = {}
@@ -133,12 +141,20 @@ def record_rules(definition: AppDefinition) -> dict[str, EntityRules]:
         for entity in scoped:
             ids.setdefault(entity, []).append(memberships.id)
             fixed.setdefault(entity, set())
+    if guests is not None:
+        for entity in guests.entities:
+            ids.setdefault(entity, []).append(guests.id)
+            fixed.setdefault(entity, set())
     found: dict[str, EntityRules] = {}
     for entity in ids:
         steps = path_steps(definition, entity, owners[entity]) if entity in owners else ()
         path = scoped.get(entity)
         scope = None if path is None else path_steps(definition, entity, path) if path else ()
-        found[entity] = EntityRules(steps, tuple(sorted(fixed[entity])), tuple(ids[entity]), scope)
+        owner = guest_owners.get(entity)
+        guest = None if owner is None else camel(owner) + "Id"
+        found[entity] = EntityRules(
+            steps, tuple(sorted(fixed[entity])), tuple(ids[entity]), scope, guest
+        )
     return found
 
 

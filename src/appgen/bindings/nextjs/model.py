@@ -22,6 +22,7 @@ from appgen.bindings.shared import shadcn
 from appgen.bindings.shared.auth import auth_pages, record_rules, uses_me
 from appgen.bindings.shared.events import has_events
 from appgen.bindings.shared.forms import FormContext
+from appgen.bindings.shared.guests import guest_plan
 from appgen.bindings.shared.i18n import text_helpers
 from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
@@ -376,6 +377,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "record_rules": rules,
         # The roles of the users in the records of a scope (ADR 0048), or None.
         "memberships": member_plan(definition),
+        # The records of the visitors without a sign-in (ADR 0050), or None.
+        "guests": guest_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": shares,
         # The pages with `presence` by name: the other users on the records (ADR 0052).

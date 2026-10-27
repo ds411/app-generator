@@ -9,6 +9,8 @@
 {%- endmacro %}
 {% set rules = record_rules.get(name) %}
 {% set owner_key = rules.path[0].key if rules and rules.direct else none %}
+{# The key of the owner relation of a record of a guest (ADR 0050). #}
+{% set guest_key = rules.guest if rules else none %}
 {# The record rules (ADR 0018, ADR 0025) apply to the actions that are not public. #}
 {% set owned = (["list", "read", "create", "update", "delete"] | reject("in", public) | list) if rules else [] %}
 {# An entity of the scope of the memberships (ADR 0048): the scope of the records depends on the operation. #}
@@ -121,7 +123,15 @@ export async function create{{ type }}Action(input: {{ type }}Input): Promise<Ac
   return runAction(
     async () => {
       const scope = {{ scope("create") }};
+{% if guest_key %}
+      // A record of a guest has no owner until it moves to a user (ADR 0050).
 {% if owner_key %}
+      const owner = scope?.guest ? { {{ guest_key }}: null } : scope?.owner ? { {{ owner_key }}: scope.user } : {};
+{% else %}
+      const owner = scope?.guest ? { {{ guest_key }}: null } : {};
+{% endif %}
+      return {{ var }}Repository.create({{ var }}InputSchema.parse({ ...input, ...owner }), { scope });
+{% elif owner_key %}
       const values = scope?.owner ? { ...input, {{ owner_key }}: scope.user } : input;
       return {{ var }}Repository.create({{ var }}InputSchema.parse(values), { scope });
 {% else %}
@@ -143,7 +153,15 @@ export async function update{{ type }}Action(
 {% if "update" in owned %}
     async () => {
       const scope = {{ scope("update") }};
+{% if guest_key %}
+      // A guest cannot give its record an owner (ADR 0050).
 {% if owner_key %}
+      const owner = scope?.guest ? { {{ guest_key }}: undefined } : scope?.owner ? { {{ owner_key }}: scope.user } : {};
+{% else %}
+      const owner = scope?.guest ? { {{ guest_key }}: undefined } : {};
+{% endif %}
+      return {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse({ ...patch, ...owner }), scope);
+{% elif owner_key %}
       const values = scope?.owner ? { ...patch, {{ owner_key }}: scope.user } : patch;
       return {{ var }}Repository.update(idSchema.parse(id), {{ var }}PatchSchema.parse(values), scope);
 {% else %}

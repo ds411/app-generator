@@ -521,6 +521,11 @@ the token of each request, also on a public endpoint. Without a token,
   the second factor of a user who lost the authenticator app and the
   recovery codes.
 {% endif %}
+{% if py.guests %}
+{% set guest_ops = py.guests.operations | map("tojson") | map("replace", '"', "`") | join(", ") %}
+{% set guests_text = "- The guests (ADR 0050 of appgen): `POST /auth/guest` gives a guest token, for " ~ py.guests.days ~ " days. With it as the bearer token, a visitor without a sign-in calls the guest operations (" ~ guest_ops ~ "), on its own records only. `POST /auth/guest/move` with the guest token gives the records of the guest to the signed-in user." %}
+{{ guests_text | wordwrap(70, break_long_words=False) | indent(2) }}
+{% endif %}
 {% if password %}
 - `uv run python -m app.cli set-password <user name>` sets the password
   of a user.

@@ -591,6 +591,12 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% else %}
     const values: Row = { ...this.defaults, ...input };
 {% endif %}
+{% if guests %}
+    if (options.scope?.guest && this.columns.guestId !== undefined) {
+      // The column guestId holds the guest of a new record of a guest (ADR 0050).
+      values.guestId = options.scope.user;
+    }
+{% endif %}
     return {{ begin }}(async (tx) => {
       const rows: Row[] = await tx.insert(this.table).values(this.toRow(values)).returning();
       const [row] = rows as [Row];
@@ -1118,6 +1124,13 @@ export class Repository<T extends EntityRecord, TInput extends object>
     if (scope === null) {
       return undefined;
     }
+{% if guests %}
+    if (scope.guest) {
+      // A guest uses only its own records (ADR 0050).
+      const guest = this.columns.guestId;
+      return guest === undefined ? inArray(this.table.id, []) : eq(guest, scope.user);
+    }
+{% endif %}
 {% if memberships %}
     if (scope.scopes !== undefined) {
       // A membership gives the operation (ADR 0048): the records of its scopes.
@@ -1323,6 +1336,12 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const records = rows.map((row) =>
       Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toRecordValue(value)])),
     );
+{% endif %}
+{% if guests %}
+    for (const record of records) {
+      // The guest of a record stays on the server (ADR 0050).
+      delete record.guestId;
+    }
 {% endif %}
 {% if storage %}
     for (const record of records) {

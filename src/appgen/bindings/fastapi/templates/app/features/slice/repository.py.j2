@@ -7,10 +7,17 @@
 {% if e.before_attrs %}
     {{ e.before_code() }}
 {% endif %}
-{% if e.owner %}
+{% if e.owner or e.guest_owner %}
     values = data.model_dump(by_alias=False, exclude_unset=True)
+{% if e.owner %}
     if (owner := _owner(scope)) is not None and "{{ e.owner.fk_attr }}" in values:
         values["{{ e.owner.fk_attr }}"] = owner
+{% endif %}
+{% if e.guest_owner %}
+    if scope is not None and scope.guest and "{{ e.guest_owner.fk_attr }}" in values:
+        # Only the move gives the record of a guest to a user (ADR 0050).
+        values["{{ e.guest_owner.fk_attr }}"] = None
+{% endif %}
     await _apply(session, record, values)
 {% else %}
     await _apply(session, record, data.model_dump(by_alias=False, exclude_unset=True))
@@ -87,6 +94,11 @@ def owned[*Ts](statement: Select[*Ts], scope: RecordScope | None) -> Select[*Ts]
     rule = scope.rule("{{ e.name }}") if scope is not None else None
     if scope is None or rule is None:
         return statement
+{% if e.guest_owner %}
+    if rule.guest:
+        {{ trace(py.guests.id) }}
+        return statement.where({{ e.name }}.guest_id == scope.user)
+{% endif %}
 {% if e.scope_path %}
     if rule.member:
         return statement.where(in_scopes(scope.scopes or frozenset[UUID]()))
@@ -215,7 +227,19 @@ async def add(
     data: {{ e.name }}Create,
     scope: RecordScope | None = None,
 ) -> {{ e.name }}:
-{% if e.owner %}
+{% if e.owner and e.guest_owner %}
+    """Validate a new record, and add it to the session without a commit. Return the record.
+
+    With a scope of an owner rule, the record belongs to the user, whatever
+    the request gives. A record of a guest belongs to the guest, without an
+    owner (ADR 0050).
+    """
+{% elif e.guest_owner %}
+    """Validate a new record, and add it to the session without a commit. Return the record.
+
+    A record of a guest belongs to the guest, without an owner (ADR 0050).
+    """
+{% elif e.owner %}
     """Validate a new record, and add it to the session without a commit. Return the record.
 
     With a scope of an owner rule, the record belongs to the user, whatever
@@ -225,10 +249,18 @@ async def add(
     """Validate a new record, and add it to the session without a commit. Return the record."""
 {% endif %}
     record = {{ e.name }}(id=uuid4())
-{% if e.owner %}
+{% if e.owner or e.guest_owner %}
     values = data.model_dump(by_alias=False)
+{% if e.owner %}
     if (owner := _owner(scope)) is not None:
         values["{{ e.owner.fk_attr }}"] = owner
+{% endif %}
+{% if e.guest_owner %}
+    if scope is not None and scope.guest:
+        {{ trace(py.guests.id) }}
+        values["{{ e.guest_owner.fk_attr }}"] = None
+        record.guest_id = scope.user
+{% endif %}
     await _apply(session, record, values{{ ", created=True" if e.translatable }})
 {% else %}
     await _apply(session, record, data.model_dump(by_alias=False))

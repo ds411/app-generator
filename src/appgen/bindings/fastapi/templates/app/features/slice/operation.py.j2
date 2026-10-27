@@ -47,7 +47,9 @@
 {% if op.kind == "delete" and e.files %}
 {% set lines = lines + ["from app.core.storage import StorageDep"] %}
 {% endif %}
-{% if owner %}
+{% if owner and op.guest %}
+{% set lines = lines + ["from typing import Annotated", "from app.core.access import RecordScope", "from app.core.guests import guest_scope_of"] %}
+{% elif owner %}
 {% set lines = lines + ["from typing import Annotated", "from app.core.access import RecordScope, scope_of"] %}
 {% endif %}
 {% set schemas = {"create": [e.name ~ "Create", e.name ~ "Read"], "update": [e.name ~ "Read", e.name ~ "Update"], "read": [e.name ~ "Read"]}.get(op.kind) %}
@@ -58,7 +60,12 @@
 {% endif %}
 
 router = APIRouter(prefix="{{ e.path }}")
-{% if owner %}
+{% if owner and op.guest %}
+
+{{ trace(py.guests.id) }}
+Scope = Annotated[RecordScope | None, Depends(guest_scope_of("{{ owner }}"))]
+"""The records that the request may use: of the guest (ADR 0050), else of the role (ADR 0025)."""
+{% elif owner %}
 
 Scope = Annotated[RecordScope | None, Depends(scope_of("{{ owner }}"))]
 """The records that the request may use (the record rules of the role, ADR 0025), or all."""

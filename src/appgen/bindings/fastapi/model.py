@@ -22,6 +22,7 @@ from appgen.bindings.fastapi.dashboards import (
     PyDashboard,
     python_dashboards,
 )
+from appgen.bindings.fastapi.guests import PyGuests, python_guests
 from appgen.bindings.fastapi.i18n import language_test
 from appgen.bindings.fastapi.integrations import (
     mocks_imports,
@@ -1269,6 +1270,8 @@ class PyOperation:
     """The names of the third-party APIs that a custom operation calls."""
     scope_action: str | None = None
     """`read` or `change`, if a record rule of a role can apply to the operation (ADR 0025)."""
+    guest: bool = False
+    """True if a guest may call the operation, on its own records (ADR 0050)."""
     lines: list[PyLines] = dataclass_field(default_factory=list[PyLines])
     """The lines that a create or an update operation writes with the record (ADR 0035)."""
     result: list[PyField] = dataclass_field(default_factory=list[PyField])
@@ -1404,6 +1407,8 @@ class PyEntity:
     """The change log of the records (ADR 0040), or None."""
     share: PyShare | None = None
     """The secret links of the records (ADR 0049), or None."""
+    guest_owner: PyRelation | None = None
+    """The owner relation of the records of a guest (ADR 0050): the move sets it to the user."""
     notifications: list[PyNotification] = field(default_factory=list[PyNotification])
     """The notifications of the changes of the records (ADR 0041)."""
     live: PyLive | None = None
@@ -1600,11 +1605,13 @@ class PyEntity:
     def router_dependencies(self, op: PyOperation) -> list[str]:
         """Return the dependencies of an operation in the router of the slice.
 
-        A protected operation needs the user. An operation that returns a
-        record with translatable fields, except a list, takes the query
-        parameter `translations` (ADR 0026). A list declares it in its query.
+        A protected operation needs the user, and a guest operation the user
+        or a guest (ADR 0050). An operation that returns a record with
+        translatable fields, except a list, takes the query parameter
+        `translations` (ADR 0026). A list declares it in its query.
         """
-        dependencies = [f"Depends({self.guard})"] if op.protected else []
+        guard = "check_guest_access" if op.guest else self.guard
+        dependencies = [f"Depends({guard})"] if op.protected else []
         returns = op.returns if op.custom else self.name if op.kind != "delete" else None
         if (
             op.kind not in ("list", "query")
@@ -2286,7 +2293,13 @@ class PyEntity:
                 enums.setdefault(p.path.entity.slice, set()).add(f.enum.name)
         for slice_name, names in enums.items():
             lines.add(from_import(f"app.features.{slice_name}.enums", names))
-        if owner:
+        if owner and op is not None and op.guest:
+            lines |= {
+                "from app.core.access import RecordScope",
+                "from app.core.guests import guest_scope_of",
+                f"from app.features.{self.slice} import repository",
+            }
+        elif owner:
             lines |= {
                 "from app.core.access import RecordScope, scope_of",
                 f"from app.features.{self.slice} import repository",
@@ -2319,6 +2332,8 @@ class PyEntity:
             lines.add("from fastapi import APIRouter, Depends")
         if f"Depends({self.guard})" in dependencies:
             lines.add(f"from app.core.{self.guard_module} import {self.guard}")
+        if "Depends(check_guest_access)" in dependencies:
+            lines.add("from app.core.guests import check_guest_access")
         if "Depends(translations_query)" in dependencies:
             lines.add("from app.core.i18n import translations_query")
         modules = {o.module for o in self.operations}
@@ -2641,6 +2656,8 @@ class PyApp:
     """The data of the generated tests of the live updates (ADR 0051)."""
     memberships: PyMemberships | None = None
     """The roles of the users in the records of a scope (ADR 0048), or None."""
+    guests: PyGuests | None = None
+    """The records of the guests (ADR 0050), or None without `auth.guests`."""
 
     @property
     def events(self) -> bool:
@@ -3054,6 +3071,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _events(definition, entities, operations)
     python_lines(definition, entities, operations)
     total_rule_cases(definition, entities)
+    guests = python_guests(definition, entities)
     _record_rules(definition, entities)
     _history(definition, entities)
     python_shares(definition, entities)
@@ -3116,6 +3134,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         me_tests=me_tests(definition, entities, dashboards),
         live_tests=_live_tests(definition, entities, rule_tests),
         memberships=python_memberships(definition, entities),
+        guests=guests,
     )
 
 

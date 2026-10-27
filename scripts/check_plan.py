@@ -199,7 +199,7 @@ def fastapi_sections() -> Iterator[Section]:
     for name in ("totals", "invoices"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
     yield Section("fastapi:listings", (fixture("listings", "fastapi", extensions=True),))
-    for name in ("courses", "places"):
+    for name in ("courses", "places", "shop"):
         yield Section(f"fastapi:{name}", (fixture(name, "fastapi"),))
 
 
@@ -302,6 +302,7 @@ AUTH_UI_TESTS = {
     "listings": "listings_ui_test.py",
     "courses": "sessions_ui_test.py",
     "places": "places_ui_test.py",
+    "shop": "guests_ui_test.py",
 }
 """The parts of scripts/check-auth-ui.sh, with their test scripts."""
 AUTH_UI_SPECS = {
@@ -310,6 +311,7 @@ AUTH_UI_SPECS = {
     "listings": "listings",
     "courses": "sessions",
     "places": "places",
+    "shop": "guests",
 }
 """The UI test (ui-tests/tests/<name>.spec.ts) of each part."""
 AUTH_UI_BINDINGS = ("react", "nextjs", "react-api")
@@ -321,6 +323,7 @@ AUTH_UI_FIXTURES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "listings": (("listings", ("fastapi", "nextjs", "react")),),
     "courses": (("courses", ()),),
     "places": (("places", ()),),
+    "shop": (("shop", ()),),
 }
 """The fixtures of each part after the room booking, with the bindings of their hand-written
 code."""

@@ -1,0 +1,173 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The guests of M36 (ADR 0050): the products of a shop, and the carts of
+# the customers. A visitor fills a cart as a guest, without a sign-in.
+# At the sign-up or the sign-in, the items of the cart move to the
+# customer. A customer sees only the items of its own cart.
+# scripts/check-fastapi.sh checks the FastAPI app of this definition.
+version: 0
+
+app:
+  name: shop
+  title: Shop
+  description: Products, and the carts of the customers.
+
+entities:
+  Customer:
+    crud:
+      views: [table]
+      forms: [create]
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+      role: { type: enum, values: [admin, customer], default: customer }
+    relations:
+      cart_items: { kind: one_to_many, target: CartItem, inverse: customer }
+
+  Product:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, unique: true, max_length: 120 }
+      price:
+        type: decimal
+        required: true
+        min: 0
+        precision: 8
+        scale: 2
+        format: currency
+        currency: EUR
+    relations:
+      cart_items: { kind: one_to_many, target: CartItem, inverse: product }
+
+  # An item of a cart: of a customer, or of a guest until the move.
+  CartItem:
+    plural_label: Cart items
+    crud:
+      views: [table]
+      forms: [create, update]
+    fields:
+      quantity: { type: integer, required: true, min: 1, max: 99, default: 1 }
+    relations:
+      product:
+        kind: many_to_one
+        target: Product
+        required: true
+        on_delete: cascade
+        inverse: cart_items
+      customer:
+        kind: many_to_one
+        target: Customer
+        on_delete: cascade
+        inverse: cart_items
+
+pages:
+  products:
+    path: /
+    title: Products
+    entity: Product
+    content: { view: product_table }
+    actions:
+      new_product: { kind: form, form: new_product, label: New product, icon: plus }
+  product_detail:
+    path: "/products/{id}"
+    title: Product
+    entity: Product
+    content: { view: product_detail }
+  cart:
+    path: /cart
+    title: Cart
+    entity: CartItem
+    content: { view: cart_item_table }
+    actions:
+      add_to_cart: { kind: form, form: new_cart_item, label: Add to cart, icon: shopping-cart }
+  customers:
+    path: /customers
+    title: Customers
+    entity: Customer
+    content: { view: customer_table }
+    actions:
+      new_customer: { kind: form, form: new_customer, label: New customer, icon: user-plus }
+
+ui:
+  navigation:
+    main:
+      items:
+        products: { page: products, icon: package }
+        cart: { page: cart, icon: shopping-cart }
+        customers: { page: customers, icon: users }
+  layouts:
+    app_shell:
+      sidebar: { navigation: main, title: Shop, icon: store }
+      # The top bar has the sign-out button, or the sign-in link of a guest.
+      topbar: { breadcrumbs: false }
+  defaults:
+    layout: app_shell
+  views:
+    cart_item_table:
+      kind: table
+      entity: CartItem
+      columns:
+        product: {}
+        quantity: {}
+  forms:
+    # The cart of the customer, or of the guest: the form has no customer.
+    new_cart_item:
+      entity: CartItem
+      operation: create_cart_item
+      title: Add to cart
+      fields:
+        product: {}
+        quantity: {}
+
+# A visitor reads the products, and fills a cart as a guest.
+auth:
+  user_entity: Customer
+  username_field: email
+  public_pages: [products, product_detail, cart]
+  public_operations: [list_products, read_product]
+  sign_up:
+    fields: [name, email]
+  guests:
+    entities:
+      CartItem: customer
+    operations: [list_cart_items, read_cart_item, create_cart_item, update_cart_item, delete_cart_item]
+
+# An admin may do all. A customer reads the products, and uses the items
+# of its own cart.
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+      pages: ["*"]
+    customer:
+      label: Customer
+      operations:
+        - list_products
+        - read_product
+        - list_cart_items
+        - read_cart_item
+        - create_cart_item
+        - update_cart_item
+        - delete_cart_item
+      pages: [products, product_detail, cart]
+      records:
+        CartItem: { owner: customer }
+
+seed:
+  Customer:
+    records:
+      ada: { name: Ada Admin, email: ada@example.com, role: admin }
+      ben: { name: Ben Brown, email: ben@example.com }
+  Product:
+    records:
+      kettle: { title: Kettle, price: 29.9 }
+      teapot: { title: Teapot, price: 18.5 }
+      mug: { title: Mug, price: 6 }
+  CartItem:
+    records:
+      ben_mug: { product: mug, customer: ben, quantity: 2 }

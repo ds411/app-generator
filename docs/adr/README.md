@@ -65,5 +65,6 @@ gives the rules.
 | 0047   | [The available filter: records without an overlap in a range of days](0047-available-filter.md) | Accepted |
 | 0048   | [Roles from membership records](0048-memberships.md)                    | Accepted |
 | 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |
+| 0050   | [Records of guests that move to the user](0050-guests.md)               | Accepted |
 | 0051   | [Live updates of the records](0051-live-updates.md)                     | Accepted |
 | 0052   | [The other users on a record page](0052-presence.md)                    | Accepted |
