@@ -257,6 +257,12 @@ BINDING = Binding(
             when="py.entity(name).history_endpoints",
         ),
         Output(
+            template="app/features/slice/share.py.j2",
+            path=_SLICE + "/share.py",
+            for_each="entity",
+            when="py.entity(name).share",
+        ),
+        Output(
             template="app/features/slice/validation_ext.py.j2",
             path=_SLICE + "/validation_ext.py",
             for_each="entity",
@@ -287,6 +293,7 @@ BINDING = Binding(
             when="name in py.dashboards",
         ),
         Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
+        Output(template="app/core/sharing.py.j2", path="app/core/sharing.py", when="py.shares"),
         *(
             Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
             for module, when in (
@@ -321,6 +328,12 @@ BINDING = Binding(
             path=_TESTS + "/test_events.py",
             for_each="entity",
             when="py.entity(name).events",
+        ),
+        Output(
+            template="tests/features/slice/test_share.py.j2",
+            path=_TESTS + "/test_share.py",
+            for_each="entity",
+            when="py.entity(name).share",
         ),
         Output(
             template="tests/features/slice/test_history.py.j2",

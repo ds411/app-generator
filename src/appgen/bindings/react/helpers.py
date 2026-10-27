@@ -21,6 +21,7 @@ from appgen.bindings.shared.integrations import ts_apis, ts_connections
 from appgen.bindings.shared.lines import lines_operations
 from appgen.bindings.shared.mock_data import mock_data
 from appgen.bindings.shared.notices import has_notices
+from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import entity_totals, total_keys
 from appgen.bindings.shared.typescript import HELPERS as TYPESCRIPT_HELPERS
@@ -169,6 +170,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "ui_forms": FormContext(definition, server=api),
         "auth_pages": auth_pages(definition, server=api),
         "record_rules": record_rules(definition),
+        # The pages with `share` by entity: the secret links of the records (ADR 0049).
+        "shares": share_plans(definition),
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
         "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.

@@ -1,0 +1,125 @@
+{{ trace_header(py.entity(name).share.id) }}
+{% set e = py.entity(name) %}
+{% set s = e.share %}
+{% set ops = s.operations %}
+{% set deps = "    dependencies=[Depends(" ~ e.guard ~ ")],\n" if s.update.protected else "" %}
+{% set scope = ", scope" if s.scope else "" %}
+{% set scope_param = "    scope: ChangeScope,\n" if s.scope else "" %}
+{{ s.doc() }}
+
+{{ s.imports() }}
+
+router = APIRouter()
+{% if s.scope %}
+
+ChangeScope = Annotated[RecordScope | None, Depends(scope_of("change"))]
+"""The records that the request may change (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+{% if s.related %}
+
+{{ s.related_code() }}
+"""The related records that the shared page shows: the detail view of the page reads them."""
+{% endif %}
+
+
+class Shared{{ e.name }}Related(BaseModel):
+    """The related records that the shared page of a record shows, by entity."""
+{% if s.related %}
+
+{% for line in s.related_fields() %}
+    {{ line }}
+{% endfor %}
+{% endif %}
+
+
+class Shared{{ e.name }}(BaseModel):
+    """The record of a link, and the related records that its page shows."""
+
+    record: {{ e.name }}Read
+    related: Shared{{ e.name }}Related
+
+
+{{ trace(s.id) }}
+@router.get(
+    "{{ e.path }}/{id}/share",
+    responses=problem_responses(404),
+    summary="Read {{ e.snake | replace('_', ' ') }} share link",
+    operation_id="{{ ops.read }}",
+{{ deps }})
+async def {{ ops.read }}(
+    id: UUID,
+    session: SessionDep,
+{{ scope_param }}) -> ShareLinkState:
+    """Return the state of the link of a record: active or not, and its time."""
+    record = await repository.get(session, id{{ scope }})
+    return await link_state(session, "{{ e.name }}", record.id)
+
+
+{{ trace(s.id) }}
+@router.post(
+    "{{ e.path }}/{id}/share",
+    status_code=201,
+    responses=problem_responses(404),
+    summary="Create {{ e.snake | replace('_', ' ') }} share link",
+    operation_id="{{ ops.create }}",
+{{ deps }})
+async def {{ ops.create }}(
+    id: UUID,
+    session: SessionDep,
+{{ scope_param }}) -> ShareLinkCreated:
+    """Make a new link of a record. The token shows only here, and the old link stops."""
+    record = await repository.get(session, id{{ scope }})
+    return await make_link(session, "{{ e.name }}", record.id)
+
+
+{{ trace(s.id) }}
+@router.delete(
+    "{{ e.path }}/{id}/share",
+    status_code=204,
+    responses=problem_responses(404),
+    summary="Revoke {{ e.snake | replace('_', ' ') }} share link",
+    operation_id="{{ ops.revoke }}",
+{{ deps }})
+async def {{ ops.revoke }}(
+    id: UUID,
+    session: SessionDep,
+{{ scope_param }}) -> None:
+    """Revoke the link of a record: the link opens nothing after it."""
+    record = await repository.get(session, id{{ scope }})
+    await revoke_link(session, "{{ e.name }}", record.id)
+
+
+{{ trace(s.id) }}
+@router.get(
+    "{{ s.shared_path }}",
+    responses=problem_responses(404),
+    summary="Read shared {{ e.snake | replace('_', ' ') }}",
+    operation_id="{{ ops.shared }}",
+{% if e.translations_query %}
+    dependencies=[Depends(translations_query)],
+{% endif %}
+)
+async def {{ ops.shared }}(token: str, session: SessionDep) -> Shared{{ e.name }}:
+    """Return the record of a link without a sign-in, and the related records of its page.
+
+    A wrong token, a revoked token, and the token of a deleted record give
+    the same 404 error.
+    """
+    record = await session.get({{ e.name }}, await shared_id(session, "{{ e.name }}", token))
+    if record is None:
+        raise not_shared()
+{% if s.related %}
+    related = await related_records(session, record, RELATED)
+    return Shared{{ e.name }}(
+        record={{ e.name }}Read.model_validate(record),
+        related=Shared{{ e.name }}Related(
+{% for line in s.related_values() %}
+            {{ line }},
+{% endfor %}
+        ),
+    )
+{% else %}
+    return Shared{{ e.name }}(
+        record={{ e.name }}Read.model_validate(record), related=Shared{{ e.name }}Related()
+    )
+{% endif %}

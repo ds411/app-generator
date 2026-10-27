@@ -172,6 +172,9 @@ def used_components(
     if has_notices(definition):
         # The bell of the notices (ADR 0041).
         names.add("popover")
+    if definition.auth is not None and any(page.share for page in definition.pages.values()):
+        # The dialog of the secret links, and the shared page (ADR 0049).
+        names.update(("dialog", "input"))
     return with_dependencies(names)
 
 

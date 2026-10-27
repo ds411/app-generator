@@ -743,6 +743,39 @@ import the helpers.
   endpoints, and the text in another language when a language
   translates the text of the first notification.
 
+### The secret links of the FastAPI app
+
+The FastAPI app keeps the links of the pages with `share` in the table
+`share_links` ([ADR 0049](adr/0049-share-links.md)). `app/core/sharing.py`
+has the model `ShareLink`, the schemas `ShareLinkState` and
+`ShareLinkCreated`, and the helpers of the links.
+
+- `make_link()` makes a token of 32 random bytes (base64url), keeps its
+  SHA-256 hash, and replaces the old link of the record. Only its answer
+  has the token. `link_state()` gives `active` and `created_at`, and
+  `revoke_link()` deletes the row. `shared_id()` gives the ID of the
+  record of a token, or the error 404 of `not_shared()`.
+- `app/features/<slice>/share.py` has the endpoints
+  `GET`, `POST`, and `DELETE /<entity>/{id}/share`, with the guard of the
+  update operation and its record rules of a change, and the public
+  endpoint `GET /shared/<entity>/{token}`. The answer of the public
+  endpoint has the `record` and the `related` records, by the name of the
+  entity in snake case: the constant `RELATED` has the stages of the
+  related records that the detail view shows, and `related_records()`
+  reads them. A wrong token, a revoked token, and the token of a deleted
+  record give the same 404 answer.
+- The links have the operation IDs `read_<entity>_share_link`,
+  `create_<entity>_share_link`, `revoke_<entity>_share_link`, and
+  `read_shared_<entity>`. The generator stops with an error if an
+  operation of the definition has one of these IDs, or if an entity has
+  the table `share_links`.
+- The generated tests in `tests/features/<slice>/test_share.py` make a
+  link and read the record and its related records without a sign-in.
+  They check that a wrong token, the old token after a new link, a
+  revoked token, and the token of a deleted record give 404, and that
+  the endpoints of the links need a sign-in and the permission of the
+  update operation.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process
@@ -1057,6 +1090,44 @@ bell of the top bar.
 - The UI test `ui-tests/tests/auth.spec.ts` cancels a booking of a
   member as an administrator in the room booking example, signs in as
   the member, and opens the notice in the bell.
+
+### The secret links of the Next.js app and of the React app
+
+The front ends share a record of a page with `share` as the FastAPI app
+does ([ADR 0049](adr/0049-share-links.md)).
+
+- The detail page has the button "Share" (`ShareButton` of
+  `@/features/share-record`) in its header, for a user that may call the
+  update operation. Its dialog shows the state of the link, makes a link
+  and shows it one time with a copy button, makes a new link, and
+  revokes the link. `<entity>Sharing` of `@/entities/<entity>` is a
+  `SharingApi`: `state(id)`, `create(id)`, and `revoke(id)`.
+- The widget of the detail view has the shared view
+  `<View>SharedView` (`<view>-shared-view.tsx`): the title, the badges,
+  and the sections of the view, without the actions and without the tabs
+  of the lists and of the change log. A wrong or revoked token shows the
+  message "The link is not valid."
+- The Next.js app has the table `share_links`
+  (`src/shared/db/schema/share-links.ts`) and the helpers in
+  `src/shared/db/sharing.ts`. The server actions
+  `get<Entity>ShareLinkAction`, `create<Entity>ShareLinkAction`, and
+  `revoke<Entity>ShareLinkAction` have the access of the update
+  operation and its record rules of a change. The route group
+  `app/(shared-links)` has the shared pages, for example
+  `app/(shared-links)/shared/lessons/[token]/page.tsx`, without the app
+  shell. The server component reads the record and the related records
+  (`relatedRecords()`), and the search engines do not index the page.
+- The mock store of the React app keeps the links in the local storage
+  of the browser (`sharing()` and `shared()` of the mock store), so that
+  a link opens in another tab. The shared view reads the related records
+  from the stores. With the FastAPI app (`x-react-data: api`), the HTTP
+  store calls the endpoints, and the shared view reads the related
+  records of the answer with `fromJson()` of their stores. The route
+  `/shared/<entity>/:token` is outside `RequireAuth`, in the layout
+  `SharedLayout` (`src/app/layout/shared-layout.tsx`).
+- The UI test `ui-tests/tests/sessions.spec.ts` makes a link of a lesson
+  of the course hub as a teacher, opens it without a sign-in, revokes
+  it, and sees that the link does not open.
 
 ## Shared templates
 

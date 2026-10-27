@@ -34,11 +34,14 @@
 {% endfor %}
 {% endif %}
 {% set history_users = history and definition.auth and not react.api %}
+{# The secret links (ADR 0049): with mock data, the access of the update operation. #}
+{% set share = shares.get(name) %}
+{% set share_guard = share and not react.api and share.update not in definition.auth.public_operations %}
 {# The notices of the changes (ADR 0041): with mock data, the store adds them. #}
 {% set notify = mock_notify(notice_plans(definition, name)) if not react.api else none %}
-{% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards else []) + (["userLabel"] if history_users else []) %}
-{% set typed = not react.api and not has_files and not history and not notify %}
-{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) %}
+{% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards or share_guard else []) + (["userLabel"] if history_users else []) %}
+{% set typed = not react.api and not has_files and not history and not notify and not share %}
+{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
 {% set mock_names = notify.store if notify else [] %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
 import { {% for t in api_types %}{{ t }}, {% endfor %}{{ store }}, type ListQuery, type ListResult{% for n in mock_names %}, {{ n }}{% endfor %} } from "@/shared/api";
@@ -298,6 +301,30 @@ export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = {{ var }
   () => requireOperation({{ file_op | tojson }}), {{ trace(definition.access.id) }}
 {% endif %}
 );
+{% endif %}
+{% endif %}
+{% if share %}
+
+{% if react.api %}
+/** The secret links of {{ type }} (ADR 0049): the share endpoints of the FastAPI app. */
+export const {{ var }}Sharing: SharingApi = {{ var }}Api.sharing(); {{ trace(share.page_id) }}
+
+/** Read the record of a secret link without a sign-in. The related records stay JSON. */
+export function read{{ type }}Shared(token: string): Promise<SharedRecord<{{ type }}, unknown>> {
+  return {{ var }}Api.shared(token);
+}
+{% else %}
+/** The secret links of {{ type }} (ADR 0049): the browser keeps the links. */
+{% if share_guard %}
+export const {{ var }}Sharing: SharingApi = {{ var }}Api.sharing(() => requireOperation({{ share.update | tojson }})); {{ trace(share.page_id) }}
+{% else %}
+export const {{ var }}Sharing: SharingApi = {{ var }}Api.sharing(); {{ trace(share.page_id) }}
+{% endif %}
+
+/** Read the record of a secret link without a sign-in. */
+export function read{{ type }}Shared(token: string): Promise<SharedRecord<{{ type }}>> {
+  return {{ var }}Api.shared(token);
+}
 {% endif %}
 {% endif %}
 {% for op_name, op in ops %}

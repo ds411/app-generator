@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { type ActionResult, unwrap } from "./errors";
-import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}{{ "HistoryApi, HistoryEntry, " if has_history(definition) }}ListQuery, ListResult } from "./types";
+import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}{{ "HistoryApi, HistoryEntry, " if has_history(definition) }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState, SharingApi" if shares }} } from "./types";
 
 /** The server actions of the data access of one entity. */
 export type EntityActions<T extends EntityRecord, TInput, TPatch = Partial<TInput>> = {
@@ -123,6 +123,30 @@ export function createHistoryApi<T extends EntityRecord>(entity: string, actions
       const record = unwrap(await actions.restore(id, entryId));
       notifyChange(entity);
       return record;
+    },
+  };
+}
+{% endif %}
+{% if shares %}
+
+/** The server actions of the secret links of one entity (ADR 0049). */
+export type SharingActions = {
+  state(id: string): Promise<ActionResult<ShareLinkState>>;
+  create(id: string): Promise<ActionResult<ShareLinkCreated>>;
+  revoke(id: string): Promise<ActionResult<null>>;
+};
+
+/** Return the secret links of an entity: it calls the server actions. */
+export function createSharingApi(actions: SharingActions): SharingApi {
+  return {
+    async state(id) {
+      return unwrap(await actions.state(id));
+    },
+    async create(id) {
+      return unwrap(await actions.create(id));
+    },
+    async revoke(id) {
+      unwrap(await actions.revoke(id));
     },
   };
 }

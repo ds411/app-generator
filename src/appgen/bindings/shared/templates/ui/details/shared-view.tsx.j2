@@ -1,0 +1,219 @@
+{% import "ui/details/macros.j2" as d with context %}
+{% set plan = ui_views.detail_plan(name) %}
+{% set view = plan.view %}
+{% set share = shares.values() | selectattr("view", "equalto", name) | first %}
+{# Next.js reads the record on the server. The React app reads it with the token of the route: the FastAPI app gives the related records as JSON, the mock store gives all records. #}
+{% set next = nextjs is defined %}
+{% set server = next or ui_views.server %}
+{% set tabs = plan.tabs | rejectattr("view") | rejectattr("history") | rejectattr("gap") | selectattr("sections") | list %}
+{% set cards = plan.sections + (tabs | map(attribute="sections") | sum(start=[])) %}
+{% set titled = cards | selectattr("title") | list %}
+{% set described = cards | selectattr("description") | list %}
+{% set code = ([plan.title, plan.subtitle or ""] + plan.badges + (cards | map(attribute="fields") | sum(start=[]) | map("last") | list)) | join(" ") %}
+{% set uses_lookups = "lookups." in code %}
+{% set lookups = plan.lookups if uses_lookups else [] %}
+{% set type = plan.entity | pascal %}
+{{ trace_header(share.page_id) }}
+"use client";
+
+{% set ns = namespace(icons=[]) %}
+{% for tab in tabs if tab.icon %}{% set ns.icons = ns.icons + [(tab.icon | pascal) ~ "Icon"] %}{% endfor %}
+{% if ns.icons %}
+import { {{ ns.icons | unique | sort | join(", ") }} } from "lucide-react";
+
+{% endif %}
+{% if next %}
+import type { SharedRecord } from "@/shared/api";
+{% else %}
+import { NotFoundError } from "@/shared/api";
+{% endif %}
+{% for entity in ([plan.entity] + lookups) | unique %}
+{% set names = ([(entity | camel) ~ "Api"] if not next and entity in lookups else []) + (["read" ~ type ~ "Shared"] if not next and entity == plan.entity else []) %}
+{% if names %}
+import { {{ names | join(", ") }}, type {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% else %}
+import type { {{ entity | pascal }} } from "@/entities/{{ entity | kebab }}";
+{% endif %}
+{% endfor %}
+{% for s in cards if s.gap %}
+import { {{ s.gap.name }} } from "{{ s.gap.module }}.gen";
+{% endfor %}
+{% if "badges." in code %}
+import { badges } from "@/shared/config/badges";
+{% endif %}
+{% if "compute." in code %}
+import { compute } from "@/shared/lib/compute";
+{% endif %}
+{% if "formatValue(" in code %}
+import { formatValue } from "@/shared/lib/format";
+{% endif %}
+{% if "pageHref(" in code %}
+import { pageHref } from "@/shared/lib/pages";
+{% endif %}
+{% if lookups %}
+import { byId } from "@/shared/lib/query";
+{% endif %}
+{% if not next %}
+import { useParams } from "@/shared/lib/router";
+import { useResource } from "@/shared/lib/use-resource";
+{% endif %}
+{% if cards %}
+{% set card_names = ["Card", "CardContent"] + (["CardHeader"] if titled or described else []) + (["CardTitle"] if titled else []) + (["CardDescription"] if described else []) %}
+import { {{ card_names | sort | join(", ") }} } from "@/shared/ui/card";
+{% endif %}
+{% if tabs %}
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+{% endif %}
+{% if "<AvatarValue" in code %}
+import { AvatarValue } from "@/shared/ui/values/avatar-value";
+{% endif %}
+{% if "<BadgeValue" in code %}
+import { BadgeValue } from "@/shared/ui/values/badge-value";
+{% endif %}
+{% if "<FormattedValue" in code %}
+import { FormattedValue } from "@/shared/ui/values/formatted-value";
+{% endif %}
+{% set file_names = (["FileLink"] if "<FileLink" in code else []) + (["ImageValue"] if "<ImageValue" in code else []) %}
+{% if file_names %}
+import { {{ file_names | join(", ") }} } from "@/shared/ui/values/file-value";
+{% endif %}
+{% if not next %}
+import { ViewLoading, ViewMessage } from "@/shared/ui/view-state";
+{% endif %}
+
+{% if lookups %}
+type Lookups = {
+{% for entity in lookups %}
+  {{ entity | camel }}: Map<string, {{ entity | pascal }}>;
+{% endfor %}
+};
+
+type ViewData = { record: {{ type }}; lookups: Lookups };
+{% else %}
+type ViewData = { record: {{ type }} };
+{% endif %}
+
+{% if next %}
+/** The record of the link{% if lookups %}, and the related records that the server gave{% endif %}. */
+function viewData({ record{% if lookups %}, related{% endif %} }: SharedRecord<{{ type }}>): ViewData {
+{% if lookups %}
+  return {
+    record,
+    lookups: {
+{% for entity in lookups %}
+      {{ entity | camel }}: byId([...(related.{{ entity | camel }} ?? [])] as {{ entity | pascal }}[]),
+{% endfor %}
+    },
+  };
+{% else %}
+  return { record };
+{% endif %}
+}
+{% else %}
+/** Read the record of a token{% if lookups %}, and the related records that its fields show{% endif %}. */
+async function load(token: string): Promise<ViewData> {
+{% if lookups and server %}
+  // The FastAPI app gives the related records as JSON, by the JSON name of the entity.
+  const { record, related } = await read{{ type }}Shared(token);
+  return {
+    record,
+    lookups: {
+{% for entity in lookups %}
+      {{ entity | camel }}: byId((related.{{ entity | snake }} ?? []).map((item) => {{ entity | camel }}Api.fromJson(item))),
+{% endfor %}
+    },
+  };
+{% elif lookups %}
+  // The mock store has all records in the browser.
+  const [{ record }, {% for entity in lookups %}{{ entity | camel }}List{{ ", " if not loop.last }}{% endfor %}] = await Promise.all([
+    read{{ type }}Shared(token),
+{% for entity in lookups %}
+    {{ entity | camel }}Api.list(),
+{% endfor %}
+  ]);
+  return {
+    record,
+    lookups: { {% for entity in lookups %}{{ entity | camel }}: byId({{ entity | camel }}List.items){{ ", " if not loop.last }}{% endfor %} },
+  };
+{% else %}
+  const { record } = await read{{ type }}Shared(token);
+  return { record };
+{% endif %}
+}
+{% endif %}
+
+{% if next %}
+export type {{ name | pascal }}SharedViewProps = {
+  /** The record of the link, and its related records: the server component of the page reads them. */
+  data: SharedRecord<{{ type }}>;
+};
+
+{% endif %}
+/**
+ * The record of a secret link (ADR 0049): the detail view {{ name }}
+ * without its actions, for a guest without a sign-in. It does not show
+ * the tabs of the lists and of the change log, because the guest may not
+ * read them.{% if not next %} The token of the link is the last part of the path.{% endif +%}
+ */
+{% if next %}
+export function {{ name | pascal }}SharedView({ data }: {{ name | pascal }}SharedViewProps) {
+  const { record{% if lookups %}, lookups{% endif %} } = viewData(data);
+{% else %}
+export function {{ name | pascal }}SharedView() {
+  const { token = "" } = useParams();
+  const resource = useResource(`shared:{{ name }}:${token}`, () => load(token));
+
+  if (resource.status === "loading") {
+    return <ViewLoading indicator="skeleton" shape="detail" />;
+  }
+  if (resource.status === "error") {
+    return resource.error instanceof NotFoundError ? (
+      <ViewMessage title={{ '{' ~ tr(js("The link is not valid.")) ~ '}' }} text={{ '{' ~ tr(js("The record is not shared, or its link was revoked.")) ~ '}' }} />
+    ) : (
+      <ViewMessage tone="error" title={{ '{' ~ tr(js("Something went wrong")) ~ '}' }} />
+    );
+  }
+  const { record{% if lookups %}, lookups{% endif %} } = resource.data;
+{% endif %}
+  return (
+    <div className="space-y-6">
+      <div className="min-w-0 space-y-2">
+        <h1 className="{{ ui_plan.text_class('heading', 'text-2xl font-semibold tracking-tight') }}">{{ plan.title }}</h1>
+{% if plan.subtitle %}
+        <div className="text-muted-foreground">{{ plan.subtitle }}</div>
+{% endif %}
+{% if plan.badges %}
+        <div className="flex flex-wrap items-center gap-2">
+{% for badge in plan.badges %}
+          {{ badge }}
+{% endfor %}
+        </div>
+{% endif %}
+      </div>
+{% for s in plan.sections %}
+{{ d.section(s, 6) }}
+{% endfor %}
+{% if tabs %}
+      <Tabs defaultValue={{ js(tabs[0].name) }}>
+        <TabsList className="max-w-full justify-start overflow-x-auto">
+{% for tab in tabs %}
+          <TabsTrigger value={{ js(tab.name) }}>
+{% if tab.icon %}
+            <{{ tab.icon | pascal }}Icon />
+{% endif %}
+            {{ jsx_text(tab.label) }}
+          </TabsTrigger>
+{% endfor %}
+        </TabsList>
+{% for tab in tabs %}
+        <TabsContent value={{ js(tab.name) }} className="space-y-4"> {{ trace(tab.element_id, jsx=True) }}
+{% for s in tab.sections %}
+{{ d.section(s, 10) }}
+{% endfor %}
+        </TabsContent>
+{% endfor %}
+      </Tabs>
+{% endif %}
+    </div>
+  );
+}

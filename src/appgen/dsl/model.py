@@ -289,6 +289,15 @@ class Page(Element):
     app shell (ADR 0032)."""
     meta: PageMeta | None = None
     """The description and the image of the page for search engines and link previews."""
+    share: bool = False
+    """True if a user that may change the record of a detail page makes a secret link of it
+    (ADR 0049). A guest opens the link without a sign-in, and sees the record read-only."""
+
+    @property
+    def shared_path(self) -> str:
+        """The path of the shared page of a page with `share` (ADR 0049): `/shared` and the path
+        with the token in the place of the ID, for example `/shared/lessons/{token}`."""
+        return "/shared" + self.path.removesuffix("{id}") + "{token}"
 
 
 class App(Element):

@@ -12,7 +12,7 @@ import { hasValuesOf, type RecordAction, type RecordScope } from "@/shared/lib/p
 
 {% endif %}
 import { applyQuery } from "./query";
-{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] %}
+{% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi", "type FileValue"] if definition.storage else []) + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult", "NotFoundError"] + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 5 %}
 import {
 {% for type_name in type_names %}
@@ -289,6 +289,39 @@ type StoredEntry = Omit<HistoryEntry, "user"> & { recordId: string };
 function snapshot(record: object, members: readonly HistoryMember[]): Record<string, unknown> {
   const values = record as Record<string, unknown>;
   return Object.fromEntries(members.map(([name, key]) => [name, values[key] ?? null]));
+}
+
+{% endif %}
+{% if shares %}
+/** The key of the secret links in the browser storage (ADR 0049). */
+const SHARE_LINKS_KEY = {{ js(app.name ~ "-share-links") }};
+
+/** A secret link of the mock store: the browser keeps it, so that a guest opens it in another tab. */
+type StoredLink = { entity: string; recordId: string; token: string; createdAt: string };
+
+function storedLinks(): StoredLink[] {
+  try {
+    return JSON.parse(window.localStorage.getItem(SHARE_LINKS_KEY) ?? "[]") as StoredLink[];
+  } catch {
+    return [];
+  }
+}
+
+function storeLinks(links: readonly StoredLink[]): void {
+  try {
+    window.localStorage.setItem(SHARE_LINKS_KEY, JSON.stringify(links));
+  } catch {
+    // No storage: the browser does not keep the link.
+  }
+}
+
+/** Return a new token: 32 random bytes in base64url, as the server makes it. */
+function newToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 {% endif %}
@@ -615,6 +648,66 @@ export class MockStore<T extends EntityRecord, TInput extends object>
         return this.update(id, patch as Partial<TInput>, "restored");
       },
     };
+  }
+
+{% endif %}
+{% if shares %}
+  /**
+   * Return the secret links of the records (ADR 0049). The browser keeps
+   * the links, so that a link opens in another tab without a sign-in. A
+   * link needs the access to change the record: `guard` checks it first.
+   */
+  sharing(guard?: () => void): SharingApi {
+    const linkOf = (id: string) =>
+      storedLinks().find((link) => link.entity === this.entity && link.recordId === id);
+    const others = (id: string) =>
+      storedLinks().filter((link) => link.entity !== this.entity || link.recordId !== id);
+    return {
+      state: async (id) => {
+        guard?.();
+        await wait();
+        this.find(id{{ ', "change"' if record_rules }});
+        const link = linkOf(id);
+        return { active: link !== undefined, createdAt: link?.createdAt ?? null };
+      },
+      create: async (id) => {
+        guard?.();
+        await wait();
+        this.find(id{{ ', "change"' if record_rules }});
+        const link: StoredLink = {
+          entity: this.entity,
+          recordId: id,
+          token: newToken(),
+          createdAt: new Date().toISOString(),
+        };
+        storeLinks([...others(id), link]);
+        return { token: link.token, createdAt: link.createdAt };
+      },
+      revoke: async (id) => {
+        guard?.();
+        await wait();
+        this.find(id{{ ', "change"' if record_rules }});
+        storeLinks(others(id));
+      },
+    };
+  }
+
+  /**
+   * Return the record of a secret link, without a sign-in. A wrong token,
+   * a revoked token, and the token of a deleted record give the same
+   * NotFoundError. The page reads the related records from their stores.
+{% if record_rules %}
+   * The record rules do not apply: the link gives the record to all users.
+{% endif %}
+   */
+  async shared(token: string): Promise<SharedRecord<T>> {
+    await wait();
+    const link = storedLinks().find((item) => item.entity === this.entity && item.token === token);
+    const record = link && this.records.find((item) => item.id === link.recordId);
+    if (!record) {
+      throw new NotFoundError(this.entity, token);
+    }
+    return { record: this.show(record), related: {} };
   }
 
 {% endif %}

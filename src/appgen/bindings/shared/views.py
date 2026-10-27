@@ -323,6 +323,10 @@ class RelatedKey:
     """The camel-case name of the entity whose related records have the key, or None for the
     records of the view."""
     key: str
+    entity: str = ""
+    """The entity whose records have the key: the entity of the view if `source` is None."""
+    relation: str = ""
+    """The relation of `entity` that the key holds."""
 
 
 @dataclass(slots=True)
@@ -1510,9 +1514,11 @@ class ViewContext:
                         found += self._related_keys(current, holder, _field_paths(field))
                     break
                 if relation.kind in SINGLE_KINDS:
-                    found.append((relation.target, RelatedKey(holder, camel(segment) + "Id")))
+                    key = RelatedKey(holder, camel(segment) + "Id", current, segment)
+                    found.append((relation.target, key))
                 elif relation.kind == "many_to_many":
-                    found.append((relation.target, RelatedKey(holder, camel(segment))))
+                    key = RelatedKey(holder, camel(segment), current, segment)
+                    found.append((relation.target, key))
                 current, holder = relation.target, camel(relation.target)
         return found
 

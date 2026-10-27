@@ -505,6 +505,19 @@ export class Repository<T extends EntityRecord, TInput extends object>
     return record as T;
   }
 
+{% if shares %}
+  /** Return the records with the IDs, without the record rules: the related records of a secret link (ADR 0049). */
+  async byIds(ids: readonly string[]): Promise<T[]> {
+    const wanted = ids.filter((id) => UUID.test(id));
+    if (wanted.length === 0) {
+      return [];
+    }
+    const db = getDb();
+    const rows: Row[] = await db.select().from(this.table).where(inArray(this.table.id, wanted));
+    return this.toRecords(db, rows);
+  }
+
+{% endif %}
 {% if record_rules %}
   /** Add a record. A record out of the scope of the options gives a ForbiddenError, and is not added. */
   async create(input: TInput, options: CreateOptions{{ "<T>" if definition.auth and definition.auth.sign_up }} = {}): Promise<T> {

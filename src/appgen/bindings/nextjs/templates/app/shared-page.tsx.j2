@@ -1,0 +1,57 @@
+{% set share = shares[name] %}
+{% set route = nextjs.share_routes[name] %}
+{% set steps = share.related | sum(start=[]) %}
+{% set entities = ([name] + (steps | map(attribute="entity") | list)) | unique | sort %}
+{% set view = share.view %}
+{{ trace_header(share.page_id) }}
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+
+{% for entity in entities %}
+import { {{ entity | camel }}Repository } from "@/entities/{{ entity | kebab }}/server";
+{% endfor %}
+import { {{ "relatedRecords, " if steps }}sharedRecordId } from "@/shared/db/sharing";
+{% if i18n %}
+import { inRequestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+import { {{ view | pascal }}SharedView } from "@/widgets/{{ view | kebab }}";
+
+{% set title = definition.pages[share.page].title %}
+{% if i18n %}
+/** The title of the page, in the language of the request. A search engine does not show a link. */
+export async function generateMetadata(): Promise<Metadata> {
+  return inRequestLanguage(() => ({ title: {{ tr(js(title)) }}, robots: { index: false } }));
+}
+{% else %}
+// A search engine does not show a link.
+export const metadata: Metadata = { title: {{ title | tojson }}, robots: { index: false } };
+{% endif %}
+
+/**
+ * The page of a secret link of {{ name }} (ADR 0049): the record without a
+ * sign-in{% if steps %}, and the related records that the view shows{% endif %}. A wrong
+ * token, a revoked token, and the token of a deleted record show the
+ * not-found page.
+ */
+export default async function Route({ params }: PageProps<{{ ("/" ~ route) | tojson }}>) {
+  const { token } = await params;
+  const id = await sharedRecordId({{ ts_value(name) }}, token);
+  if (id === null || !(await {{ name | camel }}Repository.exists(id))) {
+    notFound();
+  }
+  const record = await {{ name | camel }}Repository.get(id);
+{% if steps %}
+  const related = await relatedRecords(record, [
+{% for step in steps %}
+    {
+      entity: {{ js(step.entity | camel) }},
+      keys: [{% for k in step.keys %}{ from: {{ js(k.source) if k.source else "null" }}, key: {{ js(k.key) }} }{{ ", " if not loop.last }}{% endfor %}],
+      byIds: (ids) => {{ step.entity | camel }}Repository.byIds(ids),
+    },
+{% endfor %}
+  ]);
+  return <{{ view | pascal }}SharedView data={ {{- "{ record, related }" -}} } />;
+{% else %}
+  return <{{ view | pascal }}SharedView data={ {{- "{ record, related: {} }" -}} } />;
+{% endif %}
+}

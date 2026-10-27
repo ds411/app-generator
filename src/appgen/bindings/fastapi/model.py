@@ -52,6 +52,7 @@ from appgen.bindings.fastapi.pysource import (
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.fastapi.sharing import PyShare, python_shares
 from appgen.bindings.fastapi.total_rules import fix_rule_samples, total_rule_cases
 from appgen.bindings.fastapi.totals import (
     PyTotal,
@@ -1257,6 +1258,8 @@ class PyEntity:
     have an item for each, and the repository has `change` and `remove`."""
     history: PyHistory | None = None
     """The change log of the records (ADR 0040), or None."""
+    share: PyShare | None = None
+    """The secret links of the records (ADR 0049), or None."""
     notifications: list[PyNotification] = field(default_factory=list[PyNotification])
     """The notifications of the changes of the records (ADR 0041)."""
 
@@ -2131,6 +2134,8 @@ class PyEntity:
             modules.add("files")
         if self.history_endpoints:
             modules.add("history")
+        if self.share is not None:
+            modules.add("share")
         if modules:
             lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)
@@ -2404,12 +2409,23 @@ class PyApp:
         return [n.id for n in self.notifications]
 
     @property
+    def shares(self) -> list[PyEntity]:
+        """The entities with a page with `share` (ADR 0049), in the order of the tables."""
+        return [e for e in self.entity_order() if e.share is not None]
+
+    @property
+    def share_ids(self) -> list[str]:
+        """The IDs of the pages with `share`, in the order of `shares`."""
+        return [e.share.id for e in self.shares if e.share is not None]
+
+    @property
     def user_key(self) -> bool:
         """True if the session of a request keeps the ID of the signed-in user (`USER_KEY`).
 
-        The change log (ADR 0040) and the notices (ADR 0041) name the user of a change.
+        The change log (ADR 0040) and the notices (ADR 0041) name the user of a change, and a
+        link (ADR 0049) names the user that made it.
         """
-        return self.auth and (bool(self.history) or bool(self.notifications))
+        return self.auth and (bool(self.history) or bool(self.notifications) or bool(self.shares))
 
     @property
     def me(self) -> bool:
@@ -2532,6 +2548,11 @@ class PyApp:
                 found.append((entity.history_operation, h.read.name, h.id))
             if h.update is not None and h.update.protected:
                 found.append((entity.restore_operation, h.update.name, h.id))
+        for entity in self.shares:
+            share = entity.share
+            assert share is not None
+            if share.update.protected:
+                found += [(op, share.update.name, share.id) for op in share.guarded]
         return found
 
     @property
@@ -2558,6 +2579,16 @@ class PyApp:
         for entity in self.history:
             if entity.history is not None and entity.history.read is not None:
                 found.setdefault("HistoryEntryRead", entity.history.id)
+        for entity in self.shares:
+            share = entity.share
+            assert share is not None
+            found.setdefault("ShareLinkState", share.id)
+            found.setdefault("ShareLinkCreated", share.id)
+            found[f"Shared{entity.name}"] = share.id
+            found[f"Shared{entity.name}Related"] = share.id
+            found[f"{entity.name}Read"] = entity.id
+            for step in share.related:
+                found.setdefault(f"{step.target.name}Read", step.target.id)
         for dashboard in self.dashboards.values():
             for widget in dashboard.widgets:
                 if widget.kind == "stat":
@@ -2693,6 +2724,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     total_rule_cases(definition, entities)
     _record_rules(definition, entities)
     _history(definition, entities)
+    python_shares(definition, entities)
     python_notifications(definition, entities)
     for entity in entities.values():
         for notification in entity.notifications:

@@ -15,12 +15,18 @@ export {
 {% if element.history %}
   {{ var }}History,
 {% endif %}
+{% if shares.get(name) %}
+  {{ var }}Sharing,
+{% endif %}
 {% for op in ops %}
   {{ op }},
 {% endfor %}
 {% for owner, relation_name, relation in lists %}
   list{{ relation_name | pascal }}Of{{ owner | pascal }},
 {% endfor %}
+{% if shares.get(name) %}
+  read{{ name | pascal }}Shared,
+{% endif %}
 } from "./api/{{ name | kebab }}-api";
 {% if not react.api %}
 export { {{ var }}MockData } from "./api/{{ name | kebab }}-mock-data";

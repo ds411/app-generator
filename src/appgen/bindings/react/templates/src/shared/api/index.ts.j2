@@ -47,6 +47,12 @@ export type {
   NoticeApi,
 {% endif %}
   Search,
+{% if shares %}
+  SharedRecord,
+  ShareLinkCreated,
+  ShareLinkState,
+  SharingApi,
+{% endif %}
   Sort,
   SortDirection,
 } from "./types";
