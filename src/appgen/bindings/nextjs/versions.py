@@ -73,6 +73,12 @@ A test checks that this mapping has a version for each of them.
 TABLE_PACKAGES: dict[str, str] = {"@tanstack/react-table": "8.21.3"}
 """The packages of the table views: the data table of shadcn/ui uses TanStack Table."""
 
+MAP_PACKAGES: dict[str, str] = {"leaflet": "1.9.4"}
+"""The packages of the maps (ADR 0046): the map views and the area filters use Leaflet."""
+
+MAP_DEV_PACKAGES: dict[str, str] = {"@types/leaflet": "1.9.22"}
+"""The types of Leaflet, for the type check."""
+
 REDIS_PACKAGES: dict[str, str] = {"@redis/client": "6.3.0"}
 """The packages of the rate limit in Redis (`x-nextjs-rate-limit-store: redis`, ADR 0013), and
 of the live events through Redis (`LIVE_EVENTS_URL`, ADR 0051)."""

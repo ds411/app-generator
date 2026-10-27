@@ -1,0 +1,100 @@
+{{ trace_header(*py.snapshots.ids) }}
+{% set s = py.snapshots %}
+"""The tests of the built-in job `stat_snapshots` (ADR 0042), with a fixed clock.
+
+The tests run the job on three days, with a new record of each stat
+before each run, and check the stored values and the charts of
+snapshots.
+"""
+
+{% set ns = namespace(lines=["import datetime as dt", "import pytest", "from sqlalchemy import select", "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker", "from app.core.config import Settings", "from app.core.snapshots import StatSnapshot", "from app.jobs import stat_snapshots", py.from_import("tests.factories", s.factory_names())]) %}
+{% if s.charts %}
+{% set ns.lines = ns.lines + ["from httpx import AsyncClient"] %}
+{% endif %}
+{% for d in s.stats | map(attribute="dashboard") | unique(attribute="module") %}
+{% set ns.lines = ns.lines + [py.from_import("app.features.dashboards." ~ d.module, s.stats | selectattr("dashboard.module", "eq", d.module) | map(attribute="widget.value_function") | list)] %}
+{% endfor %}
+{{ py.imports(ns.lines) }}
+
+pytestmark = pytest.mark.anyio
+
+WINDOW = dt.timedelta(hours=1)
+DAYS = [{% for day in s.test_days %}dt.date({{ day.year }}, {{ day.month }}, {{ day.day }}){{ ", " if not loop.last }}{% endfor %}]
+"""The days of the runs: each run is at 00:00 UTC."""
+
+
+async def store_three_days(
+    sessions: async_sessionmaker[AsyncSession], settings: Settings, session: AsyncSession
+) -> dict[str, list[float | None]]:
+    """Run the job on each day, after a new record of each stat.
+
+    Return the values of each stat at the times of the runs, by the key
+    `<dashboard>.<widget>`.
+    """
+    values: dict[str, list[float | None]] = {}
+    for day in DAYS:
+{% for e in s.factories() %}
+        await make_{{ e.snake }}(session)
+{% endfor %}
+        await session.commit()
+        time = dt.datetime.combine(day, dt.time(), dt.UTC)
+        async with sessions() as reader:
+{% for stat in s.stats %}
+            {{ trace(stat.widget.id) }}
+            {{ py.call("value = await ", stat.widget.value_function, stat.value_args("reader", "day", "time"), 12) }}
+            values.setdefault("{{ stat.key }}", []).append(value)
+{% endfor %}
+        # A call a few minutes after 00:00 runs the run of the day.
+        called = time + dt.timedelta(minutes=5)
+        assert await stat_snapshots.run(sessions, settings, called, WINDOW) == 1
+    return values
+
+
+async def test_each_run_stores_the_value_of_each_stat_for_its_day(
+    sessions: async_sessionmaker[AsyncSession], settings: Settings, session: AsyncSession
+) -> None:
+    values = await store_three_days(sessions, settings, session)
+
+    rows = await session.scalars(select(StatSnapshot))
+    stored: dict[str, list[tuple[dt.date, float | None]]] = {}
+    for row in sorted(rows, key=lambda row: (row.dashboard, row.widget, row.day)):
+        stored.setdefault(f"{row.dashboard}.{row.widget}", []).append((row.day, row.value))
+    assert stored == {key: list(zip(DAYS, days, strict=True)) for key, days in values.items()}
+
+
+async def test_a_call_runs_the_run_of_00_00_one_time(
+    sessions: async_sessionmaker[AsyncSession], settings: Settings, session: AsyncSession
+) -> None:
+    time = dt.datetime.combine(DAYS[0], dt.time(), dt.UTC)
+
+    assert await stat_snapshots.run(sessions, settings, time + dt.timedelta(minutes=5), WINDOW) == 1
+    assert await stat_snapshots.run(sessions, settings, time + dt.timedelta(minutes=6), WINDOW) == 0
+    # After the window, a call does not run the run of 00:00.
+    assert await stat_snapshots.run(sessions, settings, time + dt.timedelta(hours=2), WINDOW) == 0
+    rows = (await session.scalars(select(StatSnapshot))).all()
+    assert {row.day for row in rows} == {DAYS[0]}
+{% for d, w in s.charts %}
+{% set stat = s.stats | selectattr("dashboard.name", "eq", w.snapshot_of[0]) | selectattr("widget.name", "eq", w.snapshot_of[1]) | first %}
+
+
+{{ trace(w.id) }}
+async def test_the_chart_{{ w.operation_id }}_shows_the_stored_values(
+    client: AsyncClient,
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    session: AsyncSession,
+) -> None:
+    values = await store_three_days(sessions, settings, session)
+
+    {{ py.call("response = await ", "client.get", ['"' ~ d.path ~ w.path ~ '"', 'params={"today": DAYS[-1].isoformat()}'], 4) }}
+
+    assert response.status_code == 200, response.text
+{% if w.snapshot_of[2] < 3 %}
+    # The chart shows the last {{ w.snapshot_of[2] }} days.
+    days = list(zip(DAYS, values["{{ stat.key }}"], strict=True))[-{{ w.snapshot_of[2] }}:]
+{% else %}
+    days = zip(DAYS, values["{{ stat.key }}"], strict=True)
+{% endif %}
+    groups = [{"key": day.isoformat(), "value": value} for day, value in days]
+    assert response.json() == {"groups": groups}
+{% endfor %}

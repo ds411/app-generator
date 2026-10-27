@@ -9,7 +9,7 @@ import re
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping
 from typing import cast
 
-from appgen.dsl.auth import ME
+from appgen.dsl.auth import ME, has_me
 from appgen.dsl.diagnostics import Diagnostic, Location
 from appgen.dsl.element import Element
 from appgen.dsl.model import AppDefinition, Field, Operation, Page, Relation
@@ -75,6 +75,7 @@ from appgen.dsl.ui.views import (
     DetailView,
     Filter,
     ListViewBase,
+    MapView,
     NearFilter,
     Pagination,
     QueryCalendarView,
@@ -418,7 +419,11 @@ def _check_lines_column(
         problem = "is computed"
     elif isinstance(member, Field) and member.translatable:
         problem = "is translatable, and a column edits one language only"
-    elif column.relation_kind not in (None, *SINGLE_KINDS) or default_widget(column) is None:
+    elif (
+        column.relation_kind not in (None, *SINGLE_KINDS)
+        or default_widget(column) is None
+        or column.type == "point"
+    ):
         problem = f"({column.relation_kind or column.type}) has no widget in a lines editor"
     if problem is not None:
         yield _error(
@@ -510,6 +515,8 @@ def _check_view(definition: AppDefinition, view: View) -> Iterator[Diagnostic]:
             yield from _check_order_field(definition, entity, view)
         case CalendarView():
             yield from _check_calendar(definition, entity, view)
+        case MapView():
+            yield from _check_map(definition, entity, view)
         case DetailView():
             yield from _check_detail(definition, entity, view)
 
@@ -1042,7 +1049,7 @@ def check_ui_dashboards(definition: AppDefinition) -> Iterator[Diagnostic]:
                     hint="Give a widget 'period_field', a date field of its entity.",
                 )
         for widget in dashboard.widgets.values():
-            yield from _check_widget(definition, widget)
+            yield from _check_widget(definition, dashboard, widget)
             if not isinstance(widget, CustomWidget):
                 yield from _check_period_field(definition, dashboard, widget)
 
@@ -1072,6 +1079,8 @@ def _check_period_field(
     definition: AppDefinition, dashboard: Dashboard, widget: StatWidget | ChartWidget | ListWidget
 ) -> Iterator[Diagnostic]:
     """A widget shows the records of the period by a date field. A compare needs the period."""
+    if isinstance(widget, ChartWidget) and widget.snapshots is not None:
+        return  # The check of the chart of snapshots reports its 'period_field'.
     compare = isinstance(widget, StatWidget) and widget.compare is not None
     if widget.period_field is None:
         if compare:
@@ -1107,16 +1116,33 @@ def _check_period_field(
         yield from _check_suits(widget, "period_field", "A period field", target, DATE_TYPES)
 
 
-def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnostic]:
+def _check_widget(
+    definition: AppDefinition, dashboard: Dashboard, widget: Widget
+) -> Iterator[Diagnostic]:
     match widget:
+        case ChartWidget() if widget.snapshots is not None:
+            yield from _check_snapshot_chart(dashboard, widget)
         case StatWidget() | ChartWidget():
-            if widget.entity not in definition.entities:
-                yield _missing(widget, "entity", "entity", widget.entity, definition.entities)
+            if isinstance(widget, ChartWidget) and (
+                widget.entity is None or widget.group_by is None
+            ):
+                yield _error(
+                    "missing-key",
+                    "A chart needs 'entity' and 'group_by', or the 'snapshots' of a stat widget.",
+                    widget,
+                    hint="Add the keys 'entity' and 'group_by'.",
+                )
                 return
-            yield from _check_aggregate(definition, widget)
-            yield from check_record_filter(definition, widget, widget.entity, widget.filter)
+            entity = widget.entity or ""
+            if entity not in definition.entities:
+                yield _missing(widget, "entity", "entity", entity, definition.entities)
+                return
+            yield from _check_aggregate(definition, widget, entity)
+            yield from check_record_filter(definition, widget, entity, widget.filter)
             if isinstance(widget, ChartWidget):
-                yield from _check_chart_group(definition, widget)
+                yield from _check_chart_group(definition, widget, entity, widget.group_by or "")
+            elif widget.snapshots is not None:
+                yield from _check_snapshot_stat(definition, widget, entity)
         case ListWidget():
             views = definition.ui.views if definition.ui else {}
             yield from _check_list_view(views, widget, "view", widget.view, None)
@@ -1129,8 +1155,92 @@ def _check_widget(definition: AppDefinition, widget: Widget) -> Iterator[Diagnos
             pass
 
 
+_SNAPSHOT_CHART_KEYS = (
+    "entity",
+    "group_by",
+    "interval",
+    "aggregate",
+    "field",
+    "filter",
+    "badge",
+    "period_field",
+)
+"""The keys of a chart of records, which a chart of snapshots does not take."""
+
+
+def _check_snapshot_chart(dashboard: Dashboard, widget: ChartWidget) -> Iterator[Diagnostic]:
+    """A chart of snapshots is a line chart of a stat widget of its dashboard (ADR 0042)."""
+    if widget.chart != "line":
+        yield _error(
+            "invalid-value",
+            f"A chart of snapshots is a line chart, not '{widget.chart}'.",
+            widget,
+            at="chart",
+            hint="Use 'chart: line'.",
+        )
+    for key in _SNAPSHOT_CHART_KEYS:
+        if key in widget.model_fields_set:
+            yield _error(
+                "invalid-option",
+                f"A chart of snapshots shows the values of its stat widget, so it takes no "
+                f"'{key}'.",
+                widget,
+                at=key,
+                hint=f"Remove the key '{key}'.",
+            )
+    name = widget.snapshots or ""
+    stat = dashboard.widgets.get(name)
+    if stat is None:
+        stats = [n for n, w in dashboard.widgets.items() if isinstance(w, StatWidget)]
+        yield _missing(widget, "snapshots", "stat widget", name, stats)
+    elif not isinstance(stat, StatWidget) or stat.snapshots is None:
+        yield _error(
+            "unknown-reference",
+            f"The widget '{name}' has no daily snapshots: only a stat widget with "
+            "'snapshots: daily' has them.",
+            widget,
+            at="snapshots",
+            hint=f"Add 'snapshots: daily' to the stat widget '{name}'.",
+        )
+
+
+def _check_snapshot_stat(
+    definition: AppDefinition, widget: StatWidget, entity: str
+) -> Iterator[Diagnostic]:
+    """A snapshot has the value of all records of a day: the entity has no record rule, and
+    the stat has no period and no `$me` (ADR 0042)."""
+    if has_me(widget.filter):
+        yield _error(
+            "invalid-value",
+            "The snapshots of a stat have the value of all users, but its filter has $me: the "
+            "job of the snapshots has no signed-in user.",
+            widget,
+            at="filter",
+            hint="Remove $me from the filter, or remove 'snapshots'.",
+        )
+    if widget.period_field is not None:
+        yield _error(
+            "invalid-option",
+            "The snapshots of a stat have the value of a day, not of the period of the dashboard.",
+            widget,
+            at="period_field",
+            hint="Remove 'period_field', or remove 'snapshots'.",
+        )
+    roles = definition.access.roles if definition.access else {}
+    ruled = sorted(name for name, role in roles.items() if entity in role.records)
+    if ruled:
+        yield _error(
+            "invalid-option",
+            f"The snapshots of a stat have the value of all records, but a record rule of the "
+            f"role '{ruled[0]}' limits the records of '{entity}'.",
+            widget,
+            at="snapshots",
+            hint="Remove 'snapshots', or show the stat of an entity without record rules.",
+        )
+
+
 def _check_aggregate(
-    definition: AppDefinition, widget: StatWidget | ChartWidget
+    definition: AppDefinition, widget: StatWidget | ChartWidget, entity: str
 ) -> Iterator[Diagnostic]:
     if widget.aggregate == "count":
         if widget.field is not None:
@@ -1150,7 +1260,7 @@ def _check_aggregate(
             hint="Add the key 'field'.",
         )
         return
-    target = yield from _resolve(definition, widget, "field", widget.entity, widget.field)
+    target = yield from _resolve(definition, widget, "field", entity, widget.field)
     if target is not None:
         what = f"The aggregate '{widget.aggregate}'"
         yield from _check_suits(widget, "field", what, target, NUMBER_TYPES)
@@ -1178,16 +1288,26 @@ def _check_one_currency(
     )
 
 
-def _check_chart_group(definition: AppDefinition, widget: ChartWidget) -> Iterator[Diagnostic]:
-    target = yield from _resolve(definition, widget, "group_by", widget.entity, widget.group_by)
+def _check_chart_group(
+    definition: AppDefinition, widget: ChartWidget, entity: str, group_by: str
+) -> Iterator[Diagnostic]:
+    target = yield from _resolve(definition, widget, "group_by", entity, group_by)
     if target is None:
         return
     types = frozenset({"enum", *DATE_TYPES, *SINGLE_KINDS})
     yield from _check_suits(widget, "group_by", "A chart group", target, types)
+    if "days" in widget.model_fields_set:
+        yield _error(
+            "invalid-option",
+            "'days' is only for a chart of snapshots.",
+            widget,
+            at="days",
+            hint="Remove the key 'days'.",
+        )
     if "interval" in widget.model_fields_set and target.type not in DATE_TYPES:
         yield _error(
             "invalid-option",
-            f"'interval' is only for a chart group of a date, but '{widget.group_by}' has the "
+            f"'interval' is only for a chart group of a date, but '{group_by}' has the "
             f"type '{target.type}'.",
             widget,
             at="interval",
@@ -1309,6 +1429,32 @@ def _check_calendar(
             view,
             at="end",
         )
+
+
+def _check_map(definition: AppDefinition, entity: str, view: MapView) -> Iterator[Diagnostic]:
+    """The point of a map is a `point` field, and the map itself filters by its visible area."""
+    if view.label is not None:
+        yield from _check_paths(definition, view, "label", entity, [view.label])
+    target = yield from _resolve(definition, view, "point", entity, view.point)
+    if target is not None and target.type != "point":
+        yield _error(
+            "unsuitable-field",
+            f"The point of a map view must be a 'point' field, but '{view.point}' has the type "
+            f"'{target.relation_kind or target.type}'.",
+            view,
+            at="point",
+        )
+    for filter_ in view.filters.values():
+        if isinstance(filter_, AreaFilter):
+            yield _error(
+                "invalid-option",
+                "A map view filters its records by the visible area of the map, so it takes no "
+                "'area' filter.",
+                filter_,
+                hint="Remove the filter: a move of the map gives the area.",
+            )
+        else:
+            yield from _check_filter(definition, entity, filter_)
 
 
 def _check_board(definition: AppDefinition, entity: str, view: BoardView) -> Iterator[Diagnostic]:

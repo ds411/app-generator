@@ -1,0 +1,40 @@
+{{ trace_header(*nextjs.snapshots.ids) }}
+{% set s = nextjs.snapshots %}
+{% set job = s.job %}
+import "server-only";
+
+{% for line in s.imports() %}
+{{ line }}
+{% endfor %}
+
+/**
+ * The built-in job `{{ job.name }}` (ADR 0042): the daily values of the stat
+ * widgets with `snapshots: daily`.
+ *
+ * {{ (job.summary ~ " Each run stores the value of each stat at the time of the run as the value of its day, in the transaction of the run. The charts of snapshots show the stored values.") | wordwrap(72, wrapstring="\n * ") }}
+ */
+
+const NAME = "{{ job.name }}";
+/** The schedule of the job in UTC: `{{ job.schedule.expression }}`. */
+{{ job.schedule.code() }}
+{% for stat in s.stats %}
+
+/** Return the value of the stat `{{ stat.widget }}` of the dashboard `{{ stat.dashboard }}`{{ " at a time" if stat.now }}. */
+async function {{ stat.function }}({{ "now: Date" if stat.now }}): Promise<number | null> { {{ trace(stat.id) }}
+{{ stat.body }}
+}
+{% endfor %}
+
+/** Store the values of the stats for the last time of the schedule in the window, if it has not run. */
+export async function runStatSnapshots(now: Date, windowMs: number): Promise<JobResult> {
+  const time = SCHEDULE.last(now, windowMs);
+  if (time === null) {
+    return { runs: 0, failed: 0 };
+  }
+  return runDue(NAME, [{ recordId: null, time }], async (item) => {
+    const day = dateOf(item.time);
+{% for stat in s.stats %}
+    await storeSnapshot({{ stat.dashboard | tojson }}, {{ stat.widget | tojson }}, day, await {{ stat.function }}({{ "item.time" if stat.now }})); {{ trace(stat.id) }}
+{% endfor %}
+  });
+}

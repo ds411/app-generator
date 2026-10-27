@@ -17,6 +17,13 @@ export * from "./api-connections";
 // The runs of the jobs (ADR 0029).
 export * from "./job-runs";
 {% endif %}
+{% if nextjs.snapshots %}
+// The daily values of the stat widgets (ADR 0042).
+export * from "./stat-snapshots";
+{% for id in nextjs.snapshots.ids %}
+{{ trace(id) }}
+{% endfor %}
+{% endif %}
 {% if ts_webhooks %}
 export * from "./webhook-events";
 {% for w in ts_webhooks.values() %}

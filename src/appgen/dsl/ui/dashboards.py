@@ -127,16 +127,19 @@ class StatWidget(PeriodWidget):
     """A page that the tile opens."""
     compare: Literal["previous"] | None = None
     """`previous` shows the change from the period of the same length before the period."""
+    snapshots: Literal["daily"] | None = None
+    """`daily`: a job stores the value each day, for a line chart (ADR 0042)."""
 
 
 class ChartWidget(PeriodWidget):
-    """A chart of an aggregate for each group of records."""
+    """A chart of an aggregate for each group of records, or of the daily values of a stat."""
 
     kind: Literal["chart"]
     chart: Literal["bar", "line", "donut"]
-    entity: EntityName
-    group_by: FieldPath
-    """An enum, date, or relation field."""
+    entity: EntityName | None = None
+    """The entity of the records. Not with `snapshots`."""
+    group_by: FieldPath | None = None
+    """An enum, date, or relation field. Not with `snapshots`."""
     interval: Literal["day", "week", "month", "year"] = "month"
     """The interval of each group of a date or a date-time field."""
     aggregate: Aggregate = "count"
@@ -144,6 +147,11 @@ class ChartWidget(PeriodWidget):
     filter: RecordFilter = pydantic.Field(default_factory=dict[str, JsonValue])
     badge: MemberName | None = None
     """A badge set that gives the colors of the groups."""
+    snapshots: MemberName | None = None
+    """A stat widget of the dashboard with `snapshots: daily`: the line chart shows its daily
+    values (ADR 0042)."""
+    days: Annotated[int, pydantic.Field(ge=2, le=366)] = 30
+    """With `snapshots`: the count of days that the chart shows, up to today."""
 
 
 class ListWidget(PeriodWidget):

@@ -1,0 +1,43 @@
+{{ trace_header(*py.snapshots.ids) }}
+"""The daily values of the stat widgets with `snapshots: daily` (ADR 0042).
+
+The built-in job `stat_snapshots` stores the value of each stat once a
+day in the table `stat_snapshots`, and the charts of snapshots show the
+stored values. The Next.js app has the same table.
+"""
+
+import datetime as dt
+
+from sqlalchemy import String
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+class StatSnapshot(Base):
+    """The value of a stat widget on a day."""
+
+    __tablename__ = "stat_snapshots"
+
+    dashboard: Mapped[str] = mapped_column(String(63), primary_key=True)
+    widget: Mapped[str] = mapped_column(String(63), primary_key=True)
+    day: Mapped[dt.date] = mapped_column(primary_key=True)
+    """The day of the value, in UTC."""
+    value: Mapped[float | None]
+    """The value of the stat at the time of the run, or None without numbers."""
+
+
+async def store_snapshot(
+    session: AsyncSession, dashboard: str, widget: str, day: dt.date, value: float | None
+) -> None:
+    """Store the value of a stat for a day. A second value of the same day replaces the first."""
+    row = {"dashboard": dashboard, "widget": widget, "day": day, "value": value}
+    keys, new = ["dashboard", "widget", "day"], {"value": value}
+    if session.get_bind().dialect.name == "postgresql":
+        pg_insert = postgresql.insert(StatSnapshot).values(**row)
+        await session.execute(pg_insert.on_conflict_do_update(index_elements=keys, set_=new))
+    else:
+        lite_insert = sqlite.insert(StatSnapshot).values(**row)
+        await session.execute(lite_insert.on_conflict_do_update(index_elements=keys, set_=new))

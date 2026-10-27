@@ -341,10 +341,13 @@ git config core.hooksPath .githooks
   Then it builds `tests/fixtures/listings.yaml` with React, Next.js, and
   react-api, and checks the views of its queries: a table that pages the
   rows of its filters, a card list of a path parameter, and a calendar
-  (`scripts/listings_ui_test.py`). Last, it builds
+  (`scripts/listings_ui_test.py`). Then it builds
   `tests/fixtures/courses.yaml` with React, Next.js, and react-api, signs
   in as two users, and checks the widgets, the lists, the totals, and the
   forms of the signed-in user (`$me`, `scripts/sessions_ui_test.py`).
+  Last, it builds `tests/fixtures/places.yaml` with React, Next.js, and
+  react-api and a local tile server, opens the map of the places, moves
+  it, and adds a place (`scripts/places_ui_test.py`).
   It needs uv and pnpm, but not Docker. Update its approved screenshots with
   `APPGEN_UPDATE_SCREENSHOTS=1 scripts/check-auth-ui.sh`.
 - Each check script ends with the smoke test of its app

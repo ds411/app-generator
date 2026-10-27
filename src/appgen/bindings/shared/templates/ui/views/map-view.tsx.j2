@@ -1,0 +1,188 @@
+{% import "ui/views/macros.j2" as m with context %}
+{% set plan = ui_views.view_plan(name) %}
+{% set view = plan.view %}
+{% set mp = plan.map %}
+{{ trace_header(element_id) }}
+"use client";
+
+{% set ui_lines = ['import { type GeoMarker, GeoMap } from "@/shared/ui/geo-map";'] %}
+{% if mp.href %}
+{% set ui_lines = ui_lines + ['import { Link, useNavigate } from "@/shared/lib/router";'] %}
+{% endif %}
+{{ m.imports(plan, "map", ui=ui_lines) }}
+
+{{ m.data(plan) }}
+
+{{ m.actions(plan) }}
+{{ m.filters(plan) }}
+{% if plan.server %}
+
+{% if view.sort %}
+{% if plan.server.sort %}
+/** The order of the list: {{ view.sort.field }}, {{ "descending" if plan.sort_desc else "ascending" }}. */
+{% else %}
+/** The order of the list: the list endpoint cannot sort by {{ view.sort.field }}. */
+{% endif %}
+const VIEW_SORT: string[] = {{ js(plan.server.sort) }}; {{ trace(view.sort.id) }}
+{% else %}
+/** The order of the list: the label{{ "" if plan.server.sort else ", if the list endpoint can sort by it" }}. */
+const VIEW_SORT: string[] = {{ js(plan.server.sort) }};
+{% endif %}
+{% elif plan.sort %}
+{{ m.sort_function(plan) }}
+{% else %}
+
+/** Sort the records of the list by their label. */
+function sortRecords(rows: {{ plan.type }}[], {{ lookups_param(mp.label) }}: Lookups): {{ plan.type }}[] {
+  return sortBy(rows, (row) => {{ mp.label }});
+}
+{% endif %}
+
+/** Return the records with a point as the markers of the map. */
+function toMarkers(rows: {{ plan.type }}[], {{ lookups_param(mp.label ~ " " ~ mp.point.expr) }}: Lookups): GeoMarker[] {
+  return rows.flatMap((row) => {
+    const point = {{ mp.point.expr }};
+    return point ? [{ id: row.id, point, label: {{ mp.label }} }] : [];
+  });
+}
+
+{% if plan.server %}
+type ViewData = { records: {{ plan.type }}[]; lookups: Lookups };
+
+/**
+ * Load the records in the visible area of the map, and their related
+ * records. Before its first move, the map loads all records, and shows them.
+ */
+async function loadArea(params: ApiParams, box: GeoBox | null): Promise<ViewData> {
+  const records = await {{ plan.var }}Api.all({ ...params, {{ js(plan.server.area) }}: box ? boxText(box) : null }, VIEW_SORT);
+  return { records, lookups: await loadLookups(records) };
+}
+
+export type {{ name | pascal }}ViewProps = {
+  /** Query parameters of the list endpoint that the view adds, for example the records of one parent. */
+  params?: ApiParams;
+};
+{% else %}
+export type {{ name | pascal }}ViewProps = {
+  /** Show only the records that pass this test, for example the records of one parent. */
+  where?: (record: {{ plan.type }}) => boolean;
+};
+{% endif %}
+
+{% if view.title %}
+/** {{ view.title }}{% if view.description %}: {{ view.description }}{% endif %} */
+{% else %}
+/** A map with a marker for each record, and the list of the records in its visible area (ADR 0046). */
+{% endif %}
+{% if plan.server %}
+export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps) {
+{% if plan.filters %}
+{% if plan.me %}
+  const initial = initialFilters(useMe());
+{% endif %}
+  const [filters, setFilters] = useState<Filters>({{ m.initial(plan) }});
+{% endif %}
+  const [box, setBox] = useState<GeoBox | null>(null);
+  const query: ApiParams = { ...params{% if plan.filters %}, ...filterParams(filters){% endif %} };
+  const resource = useResource(JSON.stringify([query, box]), () => loadArea(query, box), subscribe, { keep: true });
+{% else %}
+export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
+  const resource = useResource({{ js(name) }}, load, subscribe);
+{% if plan.filters %}
+{% if plan.me %}
+  const initial = initialFilters(useMe());
+{% endif %}
+  const [filters, setFilters] = useState<Filters>({{ m.initial(plan) }});
+{% endif %}
+  const [box, setBox] = useState<GeoBox | null>(null);
+{% endif %}
+{% if mp.href %}
+  const navigate = useNavigate();
+{% endif %}
+{% if plan.actions %}
+{{ m.runner(plan) }}
+{% endif %}
+{% if plan.filters %}
+  const updateFilters = setFilters;
+{% endif %}
+
+{{ m.states(plan, "cards") }}
+
+{% if plan.server %}
+  // The list endpoint gives the records in the visible area of the map.
+  const { records: rows, lookups } = resource.data;
+  const visible = rows;
+{% else %}
+  const { records, lookups } = resource.data;
+  const all = where ? records.filter(where) : records;
+{% if plan.filters %}
+  const rows = all.filter((row) => matches(row, filters, lookups));
+{% else %}
+  const rows = all;
+{% endif %}
+  const visible = sortRecords(
+    rows.filter((row) => inBox({{ mp.point.expr }}, box)),
+    lookups,
+  );
+{% endif %}
+{% if plan.filters %}
+  const filtered = JSON.stringify(filters) !== JSON.stringify({{ m.initial(plan) }});
+{% if plan.filters | selectattr("options") | list %}
+  const options = filterOptions(lookups);
+{% endif %}
+{% endif %}
+
+  return (
+    <div className="space-y-4">
+{{ m.toolbar(plan) }}
+{% if not plan.server %}
+      {all.length === 0 ? (
+{{ m.empty_state(plan) | indent(2, true) }}
+      ) : (
+{% endif %}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <GeoMap
+          markers={toMarkers(rows, lookups)}
+          label={{ jsx_attr(view.title or "Map") }}
+          onMove={setBox}
+{% if mp.href %}
+          onOpen={(id) => {
+            const row = rows.find((item) => item.id === id);
+            if (row) navigate({{ mp.href }});
+          }}
+{% endif %}
+          className="h-[28rem]"
+        />
+        <section aria-label={{ jsx_attr("In the map") }} className="min-w-0 space-y-2">
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {{ jsx_format("{count} in the map", count="visible.length") }}
+          </p>
+          {visible.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{{ jsx_text("No records in this part of the map. Move the map, or zoom out.") }}</p>
+          ) : (
+            <ul className="max-h-[26rem] divide-y overflow-y-auto rounded-md border">
+              {visible.map((row) => (
+                <li key={row.id} className="px-3 py-2 text-sm">
+{% if mp.href %}
+                  <Link href={ {{- mp.href }}} className="font-medium underline-offset-4 hover:underline">
+                    { {{- mp.label }}}
+                  </Link>
+{% else %}
+                  { {{- mp.label }}}
+{% endif %}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+{% if not plan.server %}
+      )}
+{% endif %}
+{% if plan.actions %}
+      {dialog}
+{% endif %}
+{{ m.form_dialogs(plan) }}
+    </div>
+  );
+}

@@ -57,6 +57,7 @@ gives the rules.
 | 0039   | [A manual order with drag and drop](0039-manual-order.md)              | Accepted |
 | 0040   | [Change log of the records](0040-history.md)                           | Accepted |
 | 0041   | [Notices of the changes of records](0041-notifications.md)              | Accepted |
+| 0042   | [Daily snapshots of the stat widgets](0042-stat-snapshots.md)          | Accepted |
 | 0045   | [Custom queries that return a list](0045-queries.md)                    | Accepted |
 | 0046   | [Places: point fields and the geo filters](0046-geo-points.md)          | Accepted |
 | 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |

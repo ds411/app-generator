@@ -142,6 +142,24 @@ The app has mock data, so the page keeps the connections in
 
 {% endif %}
 {% endif %}
+{% if ui_views.map_tiles %}
+## Maps
+
+The map views and the area filters show the tiles of a tile server with
+Leaflet. The build variable `VITE_MAP_TILES` sets the URL of the tiles,
+with `{z}`, `{x}`, and `{y}`, and `VITE_MAP_ATTRIBUTION` sets
+their attribution as HTML. Without a value, the maps use the standard
+tiles of OpenStreetMap. Read the
+[tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+of OpenStreetMap, and use a tile server of your own or of a provider in
+production:
+
+```sh
+VITE_MAP_TILES='https://tiles.example.com/{z}/{x}/{y}.png' \
+  VITE_MAP_ATTRIBUTION='&copy; Example' pnpm build
+```
+
+{% endif %}
 {% if react.history %}
 ## Change log
 
