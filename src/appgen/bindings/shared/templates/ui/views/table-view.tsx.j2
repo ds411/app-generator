@@ -249,7 +249,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
           onRowClick={(record) => run(rowActions.{{ click.name | camel }}, [record])}
 {% endif %}
 {% if plan.order %}
-          onMove={ {{- "canMove ? " if check_order }}(id, overId) => void move(id, overId){{ " : undefined" if check_order }}}
+          onMove={ {{- "canMove ? move : undefined" if check_order else "move" }}}
 {% endif %}
         />
       )}

@@ -44,6 +44,9 @@
 <DateTimeInput id={{ id }}{{ placeholder }} value={ {{- value }}} onChange={(value) => {{ on_change }}value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "point" %}
 <PointInput id={{ id }} value={ {{- value }}} onChange={(value) => {{ on_change }}value)} disabled={busy} invalid={ {{- invalid }}} />
+{%- elif f.widget == "mentions" %}
+{% set users = ("source={" ~ f.source ~ "}") if f.source else ("options={" ~ (f.options | replace("lookups.", "related.")) ~ "}") %}
+<MentionTextarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} {{ users }} value={ {{- value }}} onChange={(value) => {{ on_change }}value)} disabled={busy} invalid={ {{- invalid }}} />
 {%- elif f.widget == "textarea" %}
 <Textarea id={{ id }}{{ placeholder }}{% if f.rows %} rows={ {{- f.rows }}}{% endif %} value={ {{- value }}} onChange={(event) => {{ on_change }}event.target.value)} disabled={busy} aria-invalid={ {{- invalid }}} />
 {%- elif f.format %}

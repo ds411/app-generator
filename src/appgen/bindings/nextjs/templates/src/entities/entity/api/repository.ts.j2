@@ -5,14 +5,18 @@
 {% set condition = nextjs.owner_conditions.get(name) %}
 {% set totals = nextjs.totals.get(name) %}
 {% set notify = nextjs.notify.get(name) %}
-{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) %}
-{% set operators = (condition.operators if condition else []) + (totals.operators if totals else []) %}
+{% set ranges = nextjs.ranges.get(name) %}
+{% set imports = [table.const] + table.lists | map(attribute="join_const") | list + table.inverse_ones | map(attribute="target_table") | list + ((condition.tables + ["getDb"]) if condition else []) + (totals.tables if totals else []) + ((notify.tables | list) + ["type Database"] if notify else []) + ((ranges.tables + ["getDb"]) if ranges else []) %}
+{% set operators = (condition.operators if condition else []) + (totals.operators if totals else []) + (ranges.operators if ranges else []) %}
 {{ trace_header(element_id) }}
 import "server-only";
 
 {% if operators %}
 import { {{ operators | unique | sort | join(", ") }} } from "drizzle-orm";
 
+{% endif %}
+{% if ranges %}
+import type { OwnerRange } from "@/shared/api";
 {% endif %}
 {% if totals and totals.me %}
 import { requestUserId } from "@/shared/auth/session";
@@ -55,9 +59,15 @@ const {{ const }}: PathStep[] = [
 
 {% endfor %}
 /**
+{% if notify.notices %}
  * Add the notices of a change of {{ type }} (ADR 0041): for each notification
  * of the change, a notice for each user at the end of its receiver paths,
  * with the values of its text.
+{% endif %}
+{% if notify.mentions %}
+ * {{ "Add a" if not notify.notices else "Also add a" }} notice for each user that a text with mentions
+ * mentions for the first time (ADR 0043).
+{% endif %}
  */
 async function {{ var }}Notify(tx: Database, row: Row, before: Row | undefined): Promise<void> {
   const id = String(row.id);
@@ -74,6 +84,9 @@ async function {{ var }}Notify(tx: Database, row: Row, before: Row | undefined):
 {% endfor %}
     });
   }
+{% endfor %}
+{% for element_id, call in notify.mentions %}
+  {{ call }}; {{ trace(element_id) }}
 {% endfor %}
 }
 
@@ -266,3 +279,24 @@ export const {{ var }}Repository = new Repository<{{ type }}, {{ type }}Input>({
   },
 {% endif %}
 });
+{% if ranges %}
+
+/**
+ * The ranges of the related records of the available filters of {{ type }}
+ * (ADR 0047), by the relation and the rule: the ID of the record, and the
+ * start and the end of each related record. The queries read all related
+ * records: a record rule of the related entity does not hide a range.
+ */
+export const {{ var }}RangeQueries: Record<string, () => Promise<OwnerRange[]>> = {
+{% for q in ranges.queries %}
+  {{ ts_value(q.rule.key) }}: async () => { {{ trace(q.rule.ids[0], scope="begin") }}
+{% for id in q.rule.ids[1:] %}
+    {{ trace(id) }}
+{% endfor %}
+{% for line in q.lines %}
+    {{ line }}
+{% endfor %}
+  }, {{ trace(q.rule.ids[0], scope="end") }}
+{% endfor %}
+};
+{% endif %}

@@ -2,6 +2,8 @@
 {% set u = py.entity(definition.auth.user_entity) %}
 {% set role = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
 {% set rules = definition.access.roles.values() | map(attribute="records") | select | list %}
+{% set m = py.memberships %}
+{% set scoped = rules or m %}
 """The permissions of the roles (ADR 0012): the operations that each role may call.
 
 The field `{{ role.name }}` of {{ u.name }} gives the role of a user. Each endpoint that
@@ -9,23 +11,35 @@ is not public checks the role of the signed-in user, by the operation ID
 of its route.{% if py.dashboards %} A dashboard widget needs the list operation of its
 entity.{% endif %}{% if rules %} The record rules (ADR 0018, ADR 0025) limit a role to some
 records: the records of its user, and the records with the values of the
-conditions.{% endif %}
+conditions.{% endif %}{% if m %} A membership record (ADR 0048) gives its user a role
+in a record of {{ m.scope_entity.name }}: the role gives operations on the records of
+this scope.{% endif %}
 """
 
-{% if rules %}
+{% if scoped %}
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 {% endif %}
 from fastapi import Request
+{% if m %}
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+{% endif %}
 
 from app.core.auth import CurrentUser
+{% if m %}
+from app.core.db import SessionDep
+{% endif %}
 from app.core.errors import ProblemError
 {% if i18n %}
 from app.core.i18n import t
 {% endif %}
-{% if rules %}
+{% if m and m.entity.name != u.name %}
+from app.features.{{ m.entity.slice }}.models import {{ m.entity.name }}
+{% endif %}
+{% if scoped %}
 from app.features.{{ u.slice }}.models import {{ u.name }}
 {% endif %}
 
@@ -47,6 +61,29 @@ PERMISSIONS: dict[str, frozenset[str]] = {
 {% endfor %}
 }
 """The operations of each role. `*` stands for all operations."""
+{% if m %}
+MEMBER_ROLES: dict[str, frozenset[str]] = {
+{% for name, ops in m.roles.items() %}
+    {{ trace(m.role_ids[name]) }}
+{% if ops %}
+    "{{ name }}": frozenset(
+        {
+{% for op_name in ops %}
+            "{{ op_name }}",
+{% endfor %}
+        }
+    ),
+{% else %}
+    "{{ name }}": frozenset[str](),
+{% endif %}
+{% endfor %}
+}
+"""The operations of each role of the memberships (ADR 0048), on the records of its scopes."""
+MEMBER_OPERATIONS = frozenset(name for names in MEMBER_ROLES.values() for name in names)
+"""The operations that a role of the memberships gives."""
+SCOPE_ENTITIES = frozenset({ {{- m.entities | map("tojson") | join(", ") -}} })
+"""The entities of the scope: the records of {{ m.scope_entity.name }}, and the records under them."""
+{% endif %}
 {% set widgets = py.dashboards.values() | map(attribute="widgets") | sum(start=[]) | selectattr("protected") | list %}
 {% set needs = py.needs %}
 {% if needs %}
@@ -100,6 +137,46 @@ def allows(role: object, operation: str) -> bool:
     return ALL in operations or operation in operations
 
 
+{% if m %}
+def operation_of(request: Request) -> str | None:
+    """Return the operation of the route of a request, or the operation that the route needs."""
+    operation = getattr(request.scope.get("route"), "operation_id", None)
+    if operation is None:
+        return None
+{% if needs %}
+    return NEEDS.get(str(operation), str(operation))
+{% else %}
+    return str(operation)
+{% endif %}
+
+
+async def member_scopes(
+    session: AsyncSession, user: UUID, operation: str | None = None
+) -> frozenset[UUID]:
+    """Return the IDs of the scopes of the memberships of a user (ADR 0048).
+
+    With an operation, only the scopes of the roles that give it.
+    """
+    statement = select({{ m.entity.name }}.{{ m.scope.fk_attr }}).where({{ m.entity.name }}.{{ m.user.fk_attr }} == user)
+    if operation is not None:
+        roles = [role for role, operations in MEMBER_ROLES.items() if operation in operations]
+        statement = statement.where({{ m.entity.name }}.{{ m.role.attr }}.in_(roles))
+    return frozenset(await session.scalars(statement))
+
+
+async def check_access(request: Request, user: CurrentUser, session: SessionDep) -> None:
+    """Give a 403 error if the role of the signed-in user may not call the operation.
+
+    A role of a membership of the user (ADR 0048) also gives its operations,
+    on the records of its scope: the repositories filter the records.
+    """
+    operation = operation_of(request)
+    if operation is not None and allows(user.{{ role.attr }}, operation):
+        return
+    if operation in MEMBER_OPERATIONS and await member_scopes(session, user.id, operation):
+        return
+    raise ProblemError(403, {{ py.message("Your role may not do this operation.") }})
+{% else %}
 async def check_access(request: Request, user: CurrentUser) -> None:
     """Give a 403 error if the role of the signed-in user may not call the operation."""
     operation = getattr(request.scope.get("route"), "operation_id", None)
@@ -109,7 +186,8 @@ async def check_access(request: Request, user: CurrentUser) -> None:
 {% endif %}
     if operation is None or not allows(user.{{ role.attr }}, str(operation)):
         raise ProblemError(403, {{ py.message("Your role may not do this operation.") }})
-{% if rules %}
+{% endif %}
+{% if scoped %}
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +200,10 @@ class RecordRule:
     """True if the records belong to the user, through the owner path of the entity."""
     where: Mapping[str, tuple[object, ...]] = field(default_factory=dict[str, tuple[object, ...]])
     """The conditions, by attribute: the records have one of the values of each attribute."""
+{% if m %}
+    member: bool = False
+    """True for the rule of the memberships (ADR 0048): the records of the scopes of the request."""
+{% endif %}
 
     def applies(self, action: str) -> bool:
         """Return True if the rule applies to an action.
@@ -132,6 +214,11 @@ class RecordRule:
         return action == "change" or action in self.actions
 
 
+{% if m %}
+MEMBER_RULE = RecordRule(actions=frozenset({"read", "change"}), member=True)
+"""The rule of a request that a role of the memberships allows: the records of its scopes."""
+{% endif %}
+{% if rules %}
 RECORD_RULES: dict[str, dict[str, RecordRule]] = {
 {% for name, r in definition.access.roles.items() if r.records %}
     "{{ name }}": {
@@ -142,6 +229,9 @@ RECORD_RULES: dict[str, dict[str, RecordRule]] = {
     },
 {% endfor %}
 }
+{% else %}
+RECORD_RULES: dict[str, dict[str, RecordRule]] = {}
+{% endif %}
 """The record rules of each role, by entity."""
 
 
@@ -153,12 +243,24 @@ class RecordScope:
     role: str
     action: str
     """`read` (a list or a read), or `change` (a create, a change, a delete, or a custom one)."""
+{% if m %}
+    scopes: frozenset[UUID] | None = None
+    """The IDs of the scopes whose memberships give the operation of the request (ADR 0048), or
+    None if the role of the user gives it."""
+    member_of: frozenset[UUID] = frozenset()
+    """The IDs of all scopes of the memberships of the user."""
+{% endif %}
 
     def rule(self, entity: str, action: str | None = None) -> RecordRule | None:
         """Return the rule of the role for the records of an entity, or None for all records.
 
-        Without an action, the rule is for the action of the request.
+        Without an action, the rule is for the action of the request.{% if m %} If a membership gives the
+        operation of the request, the records of the scope are the records of its scopes.{% endif +%}
         """
+{% if m %}
+        if self.scopes is not None and entity in SCOPE_ENTITIES:
+            return MEMBER_RULE
+{% endif %}
         rule = RECORD_RULES.get(self.role, {}).get(entity)
         return rule if rule is not None and rule.applies(action or self.action) else None
 
@@ -175,6 +277,28 @@ def record_scope(user: {{ u.name }} | None, action: str) -> RecordScope | None:
     return RecordScope(user.id, str(role), action)
 
 
+{% if m %}
+def scope_of(
+    action: str,
+) -> Callable[[Request, {{ u.name }}, AsyncSession], Awaitable[RecordScope | None]]:
+    """Return a dependency: the scope of the records that a request may use (ADR 0025).
+
+    If the role of the user does not give the operation, the memberships
+    give it (ADR 0048): the request uses the records of their scopes.
+    """
+
+    async def scope(request: Request, user: CurrentUser, session: SessionDep) -> RecordScope | None:
+        found = record_scope(user, action)
+        operation = operation_of(request)
+        if found is None or operation is None or allows(found.role, operation):
+            return found
+        if operation not in MEMBER_OPERATIONS:
+            return found
+        scopes = await member_scopes(session, found.user, operation)
+        return replace(found, scopes=scopes, member_of=await member_scopes(session, found.user))
+
+    return scope
+{% else %}
 def scope_of(action: str) -> Callable[[{{ u.name }}], Awaitable[RecordScope | None]]:
     """Return a dependency: the scope of the records that a request may use (ADR 0025)."""
 
@@ -182,4 +306,5 @@ def scope_of(action: str) -> Callable[[{{ u.name }}], Awaitable[RecordScope | No
         return record_scope(user, action)
 
     return scope
+{% endif %}
 {% endif %}

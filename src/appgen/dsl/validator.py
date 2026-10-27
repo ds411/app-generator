@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
-from appgen.dsl.access import ALL, RecordRule
+from appgen.dsl.access import ALL, Memberships, RecordRule, membership_scope
 from appgen.dsl.apis import PUBLIC_ENV_PREFIXES, RESERVED_ENV_NAMES, Api, ApiSecurity
 from appgen.dsl.auth import (
     CONNECTIONS_PATH,
@@ -462,6 +462,8 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 yield from _check_point_field(entity_name, entity, field)
             if field.sequence is not None:
                 yield from _check_sequence(field, field.sequence)
+            if field.mentions:
+                yield from _check_mentions(definition, field)
     for operation in definition.operations.values():
         for param in operation.params.values():
             yield from _check_field(param)
@@ -472,6 +474,7 @@ def check_fields(definition: AppDefinition) -> Iterator[Diagnostic]:
                 "filter",
                 "sequence",
                 "currency_field",
+                "mentions",
             ):
                 if getattr(param, key):
                     yield _error(
@@ -558,6 +561,32 @@ def _check_currency_field(
             at="currency_field",
             hint="Use the codes in lower case as the values, for example 'eur' and 'usd'.",
         )
+
+
+def _check_mentions(definition: AppDefinition, field: Field) -> Iterator[Diagnostic]:
+    """A text with mentions names the users of `auth`, and the users write it (ADR 0043)."""
+    if field.type != "text":
+        return  # `_check_field` reports the type.
+    if definition.auth is None:
+        yield _error(
+            "invalid-option",
+            "The mentions of a text name users, so they need the section 'auth'.",
+            field,
+            at="mentions",
+            hint="Add the section 'auth', or remove 'mentions'.",
+        )
+    for key, why in (
+        ("computed", "the apps compute the value"),
+        ("translatable", "a mention gives one notice, not one notice for each language"),
+    ):
+        if getattr(field, key):
+            yield _error(
+                "invalid-option",
+                f"A text with mentions cannot be {key}: {why}.",
+                field,
+                at="mentions",
+                hint=f"Remove 'mentions', or remove '{key}'.",
+            )
 
 
 def _check_sequence(field: Field, sequence: Sequence) -> Iterator[Diagnostic]:
@@ -2067,6 +2096,143 @@ def check_access(definition: AppDefinition) -> Iterator[Diagnostic]:
                     rule,
                     at="owner",
                 )
+    if access.memberships is not None:
+        yield from _check_memberships(definition, auth.user_entity, access.memberships)
+
+
+def _check_memberships(
+    definition: AppDefinition, users: str, memberships: Memberships
+) -> Iterator[Diagnostic]:
+    """The membership entity has the relations to the user and to the scope, and an enum role
+    field. The paths end at the scope entity, and the roles name operations of the scope
+    (ADR 0048)."""
+    entity = definition.entities.get(memberships.entity)
+    if entity is None:
+        yield _missing(memberships, "entity", "entity", memberships.entity, definition.entities)
+        return
+    for key, target in (("user", users), ("scope", None)):
+        name = getattr(memberships, key)
+        relation = entity.relations.get(name)
+        if relation is None:
+            yield _missing(
+                memberships, key, f"relation of '{memberships.entity}'", name, entity.relations
+            )
+        elif relation.kind != "many_to_one":
+            yield _error(
+                "unsuitable-field",
+                f"'{key}' must be a many-to-one relation, and '{memberships.entity}.{name}' is a "
+                f"'{relation.kind}' relation.",
+                memberships,
+                at=key,
+                hint="A membership record is for one user and one scope record.",
+            )
+        elif target is not None and relation.target != target:
+            yield _error(
+                "unsuitable-field",
+                f"'user' must be a relation to the user entity '{users}'.",
+                memberships,
+                at=key,
+            )
+        elif target is None and relation.target == users:
+            yield _error(
+                "unsuitable-field",
+                "'scope' must be a relation to another entity than the user entity, for example "
+                "a team or a course.",
+                memberships,
+                at=key,
+            )
+    found = _rule_field(memberships, "role_field", memberships.role_field, entity.stored_fields)
+    if isinstance(found, Diagnostic):
+        yield found
+    elif found.type != "enum" or not found.values:
+        yield _error(
+            "unsuitable-field",
+            f"The role field of the memberships must be an enum field of '{memberships.entity}'.",
+            memberships,
+            at="role_field",
+        )
+    else:
+        for name, role in memberships.roles.items():
+            if name not in found.values:
+                yield _missing(role, "", "role value", name, found.values)
+    scope = membership_scope(definition)
+    if scope is None:
+        return
+    for name, path in memberships.paths.items():
+        if name not in definition.entities:
+            yield _missing(memberships, "paths", "entity", name, definition.entities)
+        elif name == scope:
+            yield _error(
+                "invalid-value",
+                f"'{name}' is the scope entity: its records are the scopes, without a path.",
+                memberships,
+                at="paths",
+                hint=f"Remove '{name}' from 'paths'.",
+            )
+        else:
+            yield from _check_scope_path(definition, memberships, name, path, scope)
+    entities = {scope, *memberships.paths}
+    for role in memberships.roles.values():
+        for name in role.operations:
+            op = definition.operations.get(name)
+            if name == ALL:
+                continue
+            if op is None:
+                yield _missing(role, "operations", "operation", name, definition.operations)
+            elif op.kind == "query":
+                yield _error(
+                    "invalid-value",
+                    f"The query '{name}' has no record of a scope, so a role of the memberships "
+                    "cannot give it.",
+                    role,
+                    at="operations",
+                    hint="Give the query to a role of 'access.roles'.",
+                )
+            elif op.entity not in entities:
+                yield _error(
+                    "invalid-value",
+                    f"The operation '{name}' is an operation of '{op.entity}', which is not an "
+                    f"entity of the scope '{scope}'.",
+                    role,
+                    at="operations",
+                    hint=f"Add the path from '{op.entity}' to '{scope}' to 'paths'.",
+                )
+
+
+def _check_scope_path(
+    definition: AppDefinition, memberships: Memberships, name: str, path: str, scope: str
+) -> Iterator[Diagnostic]:
+    """Each step of the path to the scope is a many-to-one relation, and the last step goes to the
+    scope entity."""
+    current = name
+    for step in path.split("."):
+        entity = definition.entities.get(current)
+        if entity is None:
+            # check_references reports the target of the relation of the step before.
+            return
+        relation = entity.relations.get(step)
+        if relation is None:
+            yield _missing(memberships, "paths", f"relation of '{current}'", step, entity.relations)
+            return
+        if relation.kind != "many_to_one":
+            yield _error(
+                "unsuitable-field",
+                f"Each step of the path of '{name}' must be a many-to-one relation, and "
+                f"'{current}.{step}' is a '{relation.kind}' relation.",
+                memberships,
+                at="paths",
+                hint="A record is in the scope of the one record that its path gives.",
+            )
+            return
+        current = relation.target
+    if current != scope:
+        yield _error(
+            "unsuitable-field",
+            f"The path '{path}' of '{name}' must end with a relation to the scope entity "
+            f"'{scope}'.",
+            memberships,
+            at="paths",
+        )
 
 
 def _check_record_rule(
@@ -3457,6 +3623,7 @@ def _check_field(field: Field) -> Iterator[Diagnostic]:
         "currency": NUMBER_TYPES,
         "currency_field": NUMBER_TYPES,
         "translatable": {"string", "text"},
+        "mentions": {"text"},
         "max_size": FILE_TYPES,
         "types": FILE_TYPES,
     }

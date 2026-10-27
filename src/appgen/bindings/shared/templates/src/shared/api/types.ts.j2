@@ -54,6 +54,14 @@ export function pageOfRows<T>(rows: readonly T[], { page, pageSize }: RowsPage):
 {% endif %}
 
 export type EntityRecord = { id: string };
+{% if has_available(definition) %}
+
+/**
+ * The range of a related record of an available filter (ADR 0047): the ID
+ * of its record, its start, and its end, as a date or a date-time text.
+ */
+export type OwnerRange = [id: string, start: string | null, end: string | null];
+{% endif %}
 
 export interface EntityApi<T extends EntityRecord, TInput, TPatch = Partial<TInput>> {
   list(query?: ListQuery<T>): Promise<ListResult<T>>;

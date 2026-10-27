@@ -33,8 +33,10 @@ from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.lines import PyLines, python_lines
 from appgen.bindings.fastapi.me import PyMeTest, me_tests
+from appgen.bindings.fastapi.memberships import PyMemberships, python_memberships
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.notifications import (
+    PyMention,
     PyNotification,
     PyReceiver,
     python_notifications,
@@ -68,7 +70,7 @@ from appgen.bindings.fastapi.totals import (
 )
 from appgen.bindings.fastapi.webhooks import python_webhooks
 from appgen.bindings.shared.i18n import i18n_plan
-from appgen.dsl.access import RecordRule
+from appgen.dsl.access import RecordRule, scope_entities
 from appgen.dsl.events import EVENT_NAMES
 from appgen.dsl.expressions import (
     Binary,
@@ -1071,6 +1073,67 @@ class PyOwnerPath:
         return lines
 
 
+@dataclass(slots=True)
+class PyScopePath:
+    """The path of an entity of the scope of the memberships to the scope entity (ADR 0048).
+
+    Each step is a many-to-one relation. The scope entity has no step: its
+    records are the scopes.
+    """
+
+    entity: str
+    """The name of the entity of the path."""
+    path: str
+    """The path in the definition, for example `lesson.course`, or `""` for the scope entity."""
+    steps: list[tuple[PyEntity, PyRelation]]
+    """The entity and the relation of each step, from the entity to the scope entity."""
+
+    @property
+    def ids(self) -> list[str]:
+        """The element IDs of the relations of the path."""
+        return [rel.id for _, rel in self.steps]
+
+    def models(self, entity: PyEntity) -> list[PyEntity]:
+        """Return the other models that the condition of the path uses, in path order."""
+        unique = {e.name: e for e, _ in self.steps[1:] if e.name != entity.name}
+        return list(unique.values())
+
+    def condition(self, prefix: str, ids: str, indent: int = 4) -> str:
+        """Return `<prefix><condition>`: the records in the scope records of the IDs.
+
+        A step before the last is `has()`. The last step compares its
+        foreign key with the IDs.
+        """
+        if not self.steps:
+            return f"{prefix}{self.entity}.id.in_({ids})"
+        return self._condition(0, prefix, ids, indent)
+
+    def _condition(self, index: int, prefix: str, ids: str, indent: int) -> str:
+        entity, rel = self.steps[index]
+        if index == len(self.steps) - 1:
+            return f"{prefix}{entity.name}.{rel.fk_attr}.in_({ids})"
+        inner = self._condition(index + 1, "", ids, indent + 4)
+        return _nested_call(prefix, f"{entity.name}.{rel.attr}.has", inner, indent)
+
+    def scope_lines(self, scope: str) -> list[str]:
+        """Return the statements of a test that store the records of the path to a scope record.
+
+        The last statement returns the values of a new record in the scope,
+        for example `{"lesson_id": str(lesson.id)}`. Without a step, the
+        record is the scope record.
+        """
+        lines: list[str] = []
+        current = scope
+        for index in range(len(self.steps) - 1, 0, -1):
+            entity, rel = self.steps[index]
+            var = f"{entity.snake}_{index}"
+            lines.append(f"{var} = await make_{entity.snake}(session, {_link(rel, current)})")
+            current = f"str({var}.id)"
+        rel = self.steps[0][1]
+        lines.append(f'return {{"{rel.fk_attr}": {current}}}')
+        return lines
+
+
 def _varies(f: PyField) -> bool:
     """Return true if the test sample of a field has another value for the next `n`."""
     return re.search(r"\bn\b", f.sample) is not None
@@ -1301,6 +1364,8 @@ class PyEntity:
     """True if a record rule of a role names the entity (ADR 0018, ADR 0025)."""
     owner_path: PyOwnerPath | None = None
     """The owner path of the record rules of the entity, if a rule has `owner`."""
+    scope_path: PyScopePath | None = None
+    """The path to the scope entity of the memberships (ADR 0048), for an entity of the scope."""
     hides: list[PyRelation] = field(default_factory=list[PyRelation])
     """The embedded relations whose records a record rule can hide, also in a nested embed."""
     translated: bool = False
@@ -1328,6 +1393,8 @@ class PyEntity:
     """The notifications of the changes of the records (ADR 0041)."""
     live: PyLive | None = None
     """The live updates of the records (ADR 0051), or None."""
+    mentions: list[PyMention] = field(default_factory=list[PyMention])
+    """The `text` fields with mentions (ADR 0043)."""
 
     @property
     def guard_module(self) -> str:
@@ -1617,14 +1684,15 @@ class PyEntity:
     def before_attrs(self) -> list[str]:
         """The attributes that an update reads before the change.
 
-        They are the fields of the workflows, of the event `changed`, and of
-        the notifications of a change (ADR 0041).
+        They are the fields of the workflows, of the event `changed`, of the
+        notifications of a change (ADR 0041), and of the mentions (ADR 0043).
         """
         attrs = [w.attr for w in self.workflows]
         changed = self.changed_event
         watched = [*(changed.attrs if changed else [])]
         for notification in self.change_notifications:
             watched += notification.attrs
+        watched += [m.attr for m in self.mentions]
         for attr in watched:
             if attr not in attrs:
                 attrs.append(attr)
@@ -2046,12 +2114,14 @@ class PyEntity:
         sqlalchemy = {"select"} if self.lines else set[str]()
         if self.scoped:
             sqlalchemy |= {"Select", "select"}
-            if self.owner_path:
+            if self.owner_path or self.scope_path:
                 sqlalchemy.add("ColumnElement")
             lines.add("from app.core.access import RecordScope")
         if sqlalchemy:
             lines.add(from_import("sqlalchemy", sqlalchemy))
-        if self.scoped or self.lines:
+        if self.scope_path is not None:
+            lines.add("from collections.abc import Collection, Sequence")
+        elif self.scoped or self.lines:
             lines.add("from collections.abc import Sequence")
         line_schemas: dict[str, set[str]] = {}
         for ln in self.lines:
@@ -2073,6 +2143,10 @@ class PyEntity:
                 lines.add(f"from {module} import repository as {target.snake}_repository")
         if self.owner_path is not None:
             for model in self.owner_path.models(self):
+                lines.add(f"from app.features.{model.slice}.models import {model.name}")
+        if self.scope_path is not None:
+            lines.discard("from collections.abc import Sequence")
+            for model in self.scope_path.models(self):
                 lines.add(f"from app.features.{model.slice}.models import {model.name}")
         if self.files:
             lines.add("from app.core.storage import Storage, delete_files")
@@ -2097,14 +2171,21 @@ class PyEntity:
             target = self.target(rel)
             if target.name != self.name:
                 lines.add(f"from app.features.{target.slice}.models import {target.name}")
-        if self.notifications:
+        if self.notifications or self.mentions:
             code = "\n".join(n.body(8) for n in self.notifications)
-            names = {"add_notices"} | {
-                name for name in ("path_users", "record_text", "text_value") if name + "(" in code
+            code += "\n".join(m.call(4) for m in self.mentions)
+            names = {"add_notices"} if self.notifications else set[str]()
+            names |= {
+                name
+                for name in ("add_mentions", "path_users", "record_text", "text_value")
+                if name + "(" in code
             }
             if any(n.kind == "changed" for n in self.notifications):
                 names.add("changed")
             lines.add(from_import("app.core.notifications", names))
+            users = self.app_entities[self.mentions[0].user_entity] if self.mentions else None
+            if users is not None and users.name != self.name:
+                lines.add(f"from app.features.{users.slice}.models import {users.name}")
             for n in self.notifications:
                 for value in n.values:
                     if value.target is not None and value.label is not None:
@@ -2125,7 +2206,9 @@ class PyEntity:
         code += "\n".join(k.entry() for k in query.sort_keys)
         pagination = {"Page", "PageQuery", "sort_order"}
         pagination |= {
-            n for n in ("contains", "day_start", "lookup", "search_words") if n + "(" in code
+            n
+            for n in ("contains", "day_start", "lookup", "range_end", "search_words")
+            if n + "(" in code
         }
         search = {
             n
@@ -2147,7 +2230,11 @@ class PyEntity:
                 if self.translations_query or any("Field(" in d for d in declarations)
                 else ""
             ),
-            "from sqlalchemy import func, " + ("or_, " if query.search else "") + "select",
+            "from sqlalchemy import "
+            + ("and_, " if "and_(" in code else "")
+            + "func, "
+            + ("or_, " if query.search else "")
+            + "select",
             "from app.core.db import SessionDep",
             "from app.core.errors import problem_responses",
             from_import("app.core.pagination", pagination),
@@ -2500,6 +2587,8 @@ class PyApp:
     """The generated tests of the totals and the widgets with `$me`, the signed-in user."""
     live_tests: PyLiveTests = field(default_factory=PyLiveTests)
     """The data of the generated tests of the live updates (ADR 0051)."""
+    memberships: PyMemberships | None = None
+    """The roles of the users in the records of a scope (ADR 0048), or None."""
 
     @property
     def events(self) -> bool:
@@ -2547,13 +2636,33 @@ class PyApp:
         return [e.share.id for e in self.shares if e.share is not None]
 
     @property
+    def mentions(self) -> list[PyMention]:
+        """The `text` fields with mentions (ADR 0043), by entity in the order of the tables."""
+        return [m for e in self.entity_order() for m in e.mentions]
+
+    @property
+    def notices(self) -> bool:
+        """True if the app keeps notices: it has notifications or fields with mentions."""
+        return bool(self.notifications) or bool(self.mentions)
+
+    @property
+    def notice_ids(self) -> list[str]:
+        """The IDs of the notifications and of the fields with mentions."""
+        return self.notification_ids + [m.id for m in self.mentions]
+
+    @property
+    def notice_sample(self) -> PyNotification:
+        """The notification of the tests of the notices: the first one, else the mentions."""
+        return self.notifications[0] if self.notifications else self.mentions[0].sample()
+
+    @property
     def user_key(self) -> bool:
         """True if the session of a request keeps the ID of the signed-in user (`USER_KEY`).
 
         The change log (ADR 0040) and the notices (ADR 0041) name the user of a change, and a
         link (ADR 0049) names the user that made it.
         """
-        return self.auth and (bool(self.history) or bool(self.notifications) or bool(self.shares))
+        return self.auth and (bool(self.history) or self.notices or bool(self.shares))
 
     @property
     def me(self) -> bool:
@@ -2659,6 +2768,16 @@ class PyApp:
         """True if a list endpoint has a `near` or an `area` filter: `app/core/geo.py` has them."""
         return any(
             p.kind in ("near", "area") for e in self.entities.values() for p in e.query.params
+        )
+
+    @property
+    def free_dates(self) -> bool:
+        """True if a list endpoint has an available filter of date fields (ADR 0047):
+        `app/core/pagination.py` has `range_end`."""
+        return any(
+            p.kind == "free_from" and p.free is not None and p.free.dates
+            for e in self.entities.values()
+            for p in e.query.params
         )
 
     @property
@@ -2923,6 +3042,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         user_label_attr=_user_label_attr(definition, entities),
         me_tests=me_tests(definition, entities, dashboards),
         live_tests=_live_tests(definition, entities, rule_tests),
+        memberships=python_memberships(definition, entities),
     )
 
 
@@ -3038,6 +3158,13 @@ def _record_rules(definition: AppDefinition, entities: dict[str, PyEntity]) -> N
             entity.scoped = True
             if rule.owner is not None and users is not None:
                 entity.owner_path = _owner_path(entities, entity, rule.owner)
+    # The entities of the scope of the memberships (ADR 0048): a member uses the records of its
+    # scopes.
+    for name, path in scope_entities(definition).items():
+        entity = entities[name]
+        entity.scoped = True
+        steps = _owner_path(entities, entity, path).steps if path else []
+        entity.scope_path = PyScopePath(entity=name, path=path, steps=steps)
     for entity in entities.values():
         entity.hides = [r for r in entity.embedded if _can_hide(entities, r)]
         for rel in entity.hides:

@@ -85,6 +85,9 @@ entities:
         type: enum
         values: [requested, confirmed, cancelled]
         default: requested
+      # A note can mention members with @. A new mention gives the member
+      # a notice (ADR 0043).
+      notes: { type: text, max_length: 2000, mentions: true }
     relations:
       room:
         kind: many_to_one
@@ -335,6 +338,7 @@ ui:
         starts_at: {}
         ends_at: {}
         attendees: {}
+        notes: { widget: textarea, rows: 3, placeholder: "Type @ to mention a member." }
       rules:
         ends_after_start:
           kind: compare

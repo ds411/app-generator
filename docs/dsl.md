@@ -216,7 +216,7 @@ entities:
 | Type       | Meaning                              | Options                               |
 | ---------- | ------------------------------------ | ------------------------------------- |
 | `string`   | A short line of text.                | `min_length`, `max_length`, `pattern` |
-| `text`     | Long text with line breaks.          | `min_length`, `max_length`            |
+| `text`     | Long text with line breaks.          | `min_length`, `max_length`, `mentions` |
 | `integer`  | A whole number.                      | `min`, `max`                          |
 | `decimal`  | An exact decimal number.             | `min`, `max`, `precision`, `scale`    |
 | `boolean`  | True or false.                       |                                       |
@@ -268,6 +268,9 @@ language of `translations` (see
 
 The `file` and `image` fields hold a file (see [File fields](#file-fields)).
 A `point` field holds a place on the earth (see [Point fields](#point-fields)).
+
+`mentions: true` lets a `text` field mention users with `@` (see
+[Mentions](#mentions)).
 
 `sequence` gives a `string` or an `integer` field the next number of a
 sequence (see [Sequence numbers](#sequence-numbers)).
@@ -605,7 +608,9 @@ foreign keys). A compare rule compares two numbers, two dates, two
 date-times, or two texts. The start and the end of a `no_overlap` rule
 are two `date` or two `datetime` fields. An empty value passes a
 compare rule and a `no_overlap` rule: `required` checks it. The mock
-data keeps the compare and the unique rules.
+data keeps the compare and the unique rules. The `available` filter of a
+view keeps the records without a related record in the picked days of a
+`no_overlap` rule (see [views](#views)).
 
 A side of a compare rule can also be a total of the lines of the
 record, as in a [computed field](#computed-fields): `count(<relation>)`,
@@ -1528,6 +1533,37 @@ notifications:
   page with a detail view of the entity and one parameter in its path.
   "Mark all read" marks all notices of the user read.
 
+### Mentions
+
+A `text` field with `mentions: true` can mention users
+([ADR 0043](adr/0043-mentions.md)). It needs `auth`: the users are the
+records of the user entity. A computed or a translatable text cannot
+have mentions.
+
+```yaml
+# example: room-booking
+# in: entities.Booking.fields
+notes: { type: text, max_length: 2000, mentions: true }
+```
+
+- A mention in the stored text is `@[<display value>](<ID of the
+  user>)`: for example `@[Ann Lee]`, and then the ID of the user in
+  parentheses. The display value has no brackets and no line breaks. A client of the
+  API writes a mention in the same form.
+- The widget of the field in a form is a text area. After `@` at the
+  start of a word, a list suggests the users whose display value has
+  the text after the `@`, and a choice puts the mention into the text.
+  The list needs the permission of the list of the user entity, as a
+  relation field to the user entity does.
+- The views show a mention as `@` and the display value, with a link to
+  the first page with a detail view of the user entity, if one exists.
+- A create or a change of a record gives a notice to each user that the
+  new text mentions and the text before did not: the built-in
+  notification `@mention`, with the text "You are mentioned in
+  {record}." (the display value of the record). The user that made the
+  change, and an ID without a user, get no notice. The text of the
+  notice is a key of the [translations](#translations).
+
 ## apis
 
 The optional `apis` section names the third-party APIs that the app
@@ -2079,8 +2115,9 @@ the record) and for an `image` field (the image in a circle).
 
 A filter has `kind`: `search` (`fields`), `select` (`field`,
 `multiple`), `boolean` (`field`), `date_range` (`field`), `near`
-(`field`, `distance`), or `area` (`field`). All filters take `label`,
-and all filters except `near` and `area` take `default`. The `default`
+(`field`, `distance`), `area` (`field`), or `available` (`rule`). All
+filters take `label`, and all filters except `near`, `area`, and
+`available` take `default`. The `default`
 of a `select` filter of a relation to the user entity can be `$me`, the
 signed-in user (see [The signed-in user](#the-signed-in-user)): the view
 starts with the records of the user, and a clear of the filter shows all
@@ -2101,6 +2138,50 @@ for a filter of the field path `<path>`:
 - `area`: `<path>_area`, a box `<south>,<west>,<north>,<east>`, for
   example `38.69,-9.23,38.80,-9.09`. A box whose west is greater than
   its east crosses the antimeridian.
+
+The filter `available` keeps the records without a related record whose
+range overlaps the days that the user picks
+([ADR 0047](adr/0047-available-filter.md)), for example the rooms
+without a booking. `rule` is a relation to many records (`one_to_many`
+or `many_to_many`) and a `no_overlap` rule of the related entity, with
+a dot: the `start` and the `end` of the rule give the range of a related
+record (see [Entity rules](#entity-rules)). The filter shows the widget
+of a date range.
+
+```yaml
+# example: room-booking
+ui:
+  views:
+    free_rooms:
+      kind: table
+      entity: Room
+      columns: { name: {}, capacity: {} }
+      filters:
+        free: { kind: available, rule: bookings.no_double_booking, label: Free on }
+```
+
+- The range of a related record is from its start up to its end: a
+  range that ends when another starts does not overlap it, as for the
+  rule. A related record without a start or an end has no range.
+- On date fields, the picked days are the range of a new related
+  record: from the first day up to the end day, for example a check-in
+  and a check-out. A record is free on the day that a booking ends.
+  Without an end day after the first day, the range is the first day.
+- On date-time fields, the picked days are whole days in UTC: from the
+  start of the first day to the end of the last day.
+- Without a first day, the filter keeps all records.
+- The list endpoint of the FastAPI app takes `<relation>_free_from` and
+  `<relation>_free_to`, for example
+  `?bookings_free_from=2026-03-06&bookings_free_to=2026-03-09`. The
+  Next.js app and the React app with mock data read the ranges of the
+  related records with the access of the list of the records, and filter
+  in the browser. The ranges come from all related records: a record
+  rule that hides the bookings of another user does not make a room
+  free.
+- `appgen validate` reports a relation that does not exist or is not to
+  many records (`unknown-reference`, `unsuitable-field`), and a rule
+  that does not exist or is not a `no_overlap` rule (`unknown-reference`,
+  `invalid-option`).
 
 `pagination.mode` is `pages` (the default: page buttons) or `scroll`.
 A list with `scroll` shows `page_size` records, and shows the next page
@@ -3046,6 +3127,59 @@ forms do not show the owner field of one relation and the fields of a
 condition with one value: a new record belongs to the user, and gets
 the value of the condition.
 
+### Memberships
+
+`memberships` gives a user a role in one record of a scope entity, for
+example a team or a course ([ADR 0048](adr/0048-memberships.md)). A
+record of the membership entity has the user, the scope record, and the
+role. A user can be a teacher in one course and a student in another.
+
+```yaml
+# not valid alone: the entities Course, Lesson, and Enrollment are not in the base example
+memberships:
+  entity: Enrollment
+  user: person
+  scope: course
+  role_field: role
+  roles:
+    teacher:
+      label: Teacher
+      operations: [update_course, create_lesson, update_lesson]
+    student:
+      label: Student
+      operations: [read_course, list_lessons, read_lesson]
+  paths:
+    Lesson: course
+```
+
+- `entity` is the membership entity. `user` is its `many_to_one`
+  relation to the user entity, and `scope` its `many_to_one` relation
+  to the scope entity. The scope entity is not the user entity.
+- `role_field` is an `enum` field of the membership entity. Each key of
+  `roles` is a value of that field.
+- `operations` names the operations that the role gives on the records
+  of its scopes, or `*` for all operations of the entities of the scope.
+  An operation is an operation of the scope entity or of an entity in
+  `paths`, and not a query.
+- `paths` gives the other entities of the scope: for each entity, the
+  path of `many_to_one` relations with dots to the scope entity, for
+  example `lesson.course`. The scope entity has no path: its records are
+  the scopes. The membership entity can have a path too, for example
+  `course`: then a role can list the memberships of its scopes.
+
+The role of `roles` comes first: if it gives the operation, the
+memberships do not apply. Else a membership of the user with a role
+that gives the operation lets the user call it, on the records of the
+scopes of these memberships only. The FastAPI app gives 403 for an
+operation that no role of the user gives. A list gives the records of
+these scopes. A read, a change, or a delete of a record in another
+scope of the user gives 403, and of a record out of all scopes of the
+user gives 404. A create or a change that puts a record out of these
+scopes gives 403, and the record does not change. The front ends do not
+apply the memberships yet: the trace check of the Next.js app reports
+them as gaps, and the trace check of the React app as uncovered
+elements.
+
 ## translations
 
 The optional `translations` section gives the UI text in more than one
@@ -3283,6 +3417,9 @@ use in the app does not show.
 - The bell of the notices (see [notifications](#notifications)):
   `Notices`, `Notices: {count} unread`, `Mark all read`,
   `No notices yet.`.
+- The mentions (see [Mentions](#mentions)): `Users` (the list of the
+  suggestions), and the text of the notice
+  `You are mentioned in {record}.`.
 - The change log of a record (see [History](#history)): `History`,
   `Created`, `Changed`, `Deleted`, `Restored`, `Restore`, `Newer`,
   `Older`, `No changes yet.`, `The history did not load.`,
@@ -3391,6 +3528,7 @@ to translate one. The rules and the workflows give their own messages.
   `The current password is not correct.`,
   `Your role may not do this operation.`,
   `Your role may not give a record these values.`,
+  `Your role in the scope of the record may not do this operation.`,
   `The server has no AUTH_SECRET.`,
   `If the user name exists, the user gets a message with a reset link.`,
   `The reset link is not valid, was used, or has ended.`.
@@ -3399,6 +3537,7 @@ to translate one. The rules and the workflows give their own messages.
   `Confirm the email address first: open the link in the message.`,
   `If the user name needs a confirmation, the user gets a message with a link.`,
   `The link is not valid, or has ended.`.
+- The secret links of the records: `The link is not valid.`.
 - The second factor: `The code is not correct.`,
   `Too many wrong codes. Try again later.`,
   `The sign-in has ended. Sign in again.`,

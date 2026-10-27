@@ -112,6 +112,9 @@ import { OptionSelect } from "@/shared/ui/form-widgets/option-select";
 {% if relation_names %}
 import { {{ relation_names | join(", ") }} } from "@/shared/ui/form-widgets/relation-select";
 {% endif %}
+{% if "mentions" in widgets %}
+import { MentionTextarea } from "@/shared/ui/form-widgets/mention-textarea";
+{% endif %}
 {% for f in editors %}
 
 /** A row of the lines editor {{ f.label }} (ADR 0035): a line of the record, or a new line. */
@@ -137,7 +140,7 @@ type Values = {
 };
 
 type RouteParams = Readonly<Record<string, string | undefined>>;
-{% for f in plan.widget_fields if f.options and not f.target %}
+{% for f in plan.widget_fields if f.options and not f.target and not f.mentions %}
 
 const {{ f.options_const }} = {{ f.options }};
 {% endfor %}

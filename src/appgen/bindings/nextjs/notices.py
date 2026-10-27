@@ -3,14 +3,15 @@
 The repository of an entity with a notification calls `<entity>Notify`
 after a change: for each notification of the change, it finds the users
 at the end of the receiver paths, and adds a notice for each one, with
-the values of the text.
+the values of the text. For each field with mentions (ADR 0043), it adds
+a notice for each user that the text mentions for the first time.
 """
 
 from dataclasses import dataclass, field
 
 from appgen.bindings.nextjs.db import Table
 from appgen.bindings.shared.auth import PathStep
-from appgen.bindings.shared.notices import NoticePlan, NoticeReceiver
+from appgen.bindings.shared.notices import MentionPlan, NoticePlan, NoticeReceiver
 from appgen.bindings.shared.typescript import ts_value
 from appgen.gen.naming import camel
 from appgen.gen.render import GenerationError
@@ -38,6 +39,8 @@ class TsNotify:
     """The function `<entity>Notify` of the repository of an entity."""
 
     notices: list[TsNotice]
+    mentions: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    """The fields with mentions (ADR 0043): the element ID and the call of `addMentions`."""
     paths: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
     """The receiver paths of many steps or of a many-to-many step: the constant and its steps."""
     tables: set[str] = field(default_factory=set[str])
@@ -63,11 +66,25 @@ def check_notice_table(tables: dict[str, Table]) -> None:
             )
 
 
-def ts_notify(plans: list[NoticePlan], tables: dict[str, Table]) -> TsNotify | None:
-    """Return the notices of an entity as TypeScript code, or None without notifications."""
-    if not plans:
+def ts_notify(
+    plans: list[NoticePlan], tables: dict[str, Table], mentions: list[MentionPlan] | None = None
+) -> TsNotify | None:
+    """Return the notices of an entity as TypeScript code, or None without notifications and
+    mentions."""
+    if not plans and not mentions:
         return None
-    result = TsNotify(notices=[], helpers={"addNotices"})
+    result = TsNotify(notices=[], helpers={"addNotices"} if plans else set[str]())
+    for mention in mentions or []:
+        result.helpers.add("addMentions")
+        label = "id"
+        if mention.label is not None:
+            result.helpers.add("textValue")
+            label = f"textValue(row.{mention.label})"
+        call = (
+            f"await addMentions(tx, {ts_value(mention.entity)}, id, {label}, "
+            f"row.{mention.key}, before?.{mention.key})"
+        )
+        result.mentions.append((mention.id, call))
     for plan in plans:
         notice = TsNotice(
             name=plan.name,

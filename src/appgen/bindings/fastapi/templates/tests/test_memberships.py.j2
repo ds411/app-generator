@@ -1,0 +1,133 @@
+{% set m = py.memberships %}
+{{ trace_header(m.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+{% set role_field = u.fields | selectattr("name", "eq", definition.access.role_field) | first %}
+{% set s = m.scope_entity %}
+{% set paths = {} %}
+{% for t in m.tests if t.entity.scope_path.steps %}
+{% set _ = paths.update({t.entity.name: t.entity}) %}
+{% endfor %}
+{# A request for one record of the list `records`. #}
+{% macro call(kind, index) -%}
+{% if kind == "update" -%}
+await anonymous_client.patch(f"{path}{records[{{ index }}].id}", json={}, headers=headers)
+{%- elif kind == "delete" -%}
+await anonymous_client.delete(f"{path}{records[{{ index }}].id}", headers=headers)
+{%- else -%}
+await anonymous_client.get(f"{path}{records[{{ index }}].id}", headers=headers)
+{%- endif %}
+{%- endmacro %}
+"""The tests of the memberships (ADR 0048): a role gives its operations in its scopes only.
+
+A user has one role in a {{ s.name }} record, another role in a second one,
+and no membership in a third one. An operation of the first role gives
+403 in the second record, and 404 in the third.
+"""
+
+{% if paths %}
+from typing import Any
+
+{% endif %}
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import make_token
+{% for e in [s, m.entity] | unique(attribute="name") | sort(attribute="slice") %}
+from app.features.{{ e.slice }}.models import {{ e.name }}
+{% endfor %}
+{% set factories = ["make_" ~ u.snake, "make_" ~ s.snake, "make_" ~ m.entity.snake] %}
+{% for t in m.tests %}
+{% set _ = factories.append("make_" ~ t.entity.snake) %}
+{% if t.creating %}
+{% set _ = factories.append(t.entity.snake ~ "_input") %}
+{% endif %}
+{% for step_entity, _ in t.entity.scope_path.steps[1:] %}
+{% set _ = factories.append("make_" ~ step_entity.snake) %}
+{% endfor %}
+{% endfor %}
+{{ py.from_import("tests.factories", factories | unique | list) }}
+from tests.problems import assert_problem
+
+pytestmark = pytest.mark.anyio
+
+
+{{ py.signature("async def _member", ["session: AsyncSession", "role: str", "*roles: str"], " -> tuple[dict[str, str], list[" ~ s.name ~ "], list[" ~ m.entity.name ~ "]]:") }}
+    """Store a user with a role, a {{ s.name }} for each role of a membership, and one more.
+
+    Return the headers with a token of the user, the {{ s.name }} records, and
+    the memberships. The user has no membership in the last {{ s.name }}.
+    """
+    {{ py.call("user = await ", "make_" ~ u.snake, ["session", role_field.name ~ "=role"]) }}
+    scopes = [await make_{{ s.snake }}(session) for _ in range(len(roles) + 1)]
+    members = [
+        {{ py.call("await ", "make_" ~ m.entity.snake, ["session", m.user.fk_attr ~ "=str(user.id)", m.scope.fk_attr ~ "=str(scope.id)", m.role.name ~ "=name"], 8) }}
+        for scope, name in zip(scopes, roles, strict=False)
+    ]
+    return {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}, scopes, members
+{% for e in paths.values() %}
+
+
+{% for id in e.scope_path.ids %}
+{{ trace(id) }}
+{% endfor %}
+async def _{{ e.snake }}_in(session: AsyncSession, scope: {{ s.name }}) -> dict[str, Any]:
+    """Store the records of the path `{{ e.scope_path.path }}`, and return the values of a {{ e.name }}."""
+{% for line in e.scope_path.scope_lines("str(scope.id)") %}
+    {{ line }}
+{% endfor %}
+{% endfor %}
+{% for t in m.tests %}
+{% set e = t.entity %}
+{% set op = t.operation %}
+{% set members = e.name == m.entity.name and t.listing %}
+
+
+{{ trace(m.role_ids[t.allowed]) }}
+{{ trace(m.role_ids[t.other]) }}
+async def test_a_role_of_a_membership_gives_{{ op.name }}_in_its_scope(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    {{ py.call("headers, scopes, " ~ ("members" if members else "_") ~ " = await ", "_member", ["session", py.string(t.app_role), py.string(t.allowed), py.string(t.other)]) }}
+    {{ t.records() }}
+
+    path = "{{ e.path }}{{ op.path | replace('{id}', '') }}"
+    response = {{ call(op.kind, 0) }}
+    assert response.status_code == {{ op.status }}, response.text
+    # The role of the second scope does not give the operation, and the user has no
+    # membership in the third scope.
+    response = {{ call(op.kind, 1) }}
+    assert_problem(response, 403)
+    response = {{ call(op.kind, 2) }}
+    assert_problem(response, 404)
+{% if t.listing %}
+{% set ns = namespace(items=[]) %}
+{% for role in t.listed %}
+{% set index = 0 if role == t.allowed else 1 %}
+{% set ns.items = ns.items + ["records[" ~ index ~ "]"] + (["members[" ~ index ~ "]"] if members else []) %}
+{% endfor %}
+
+    # The list has the records of the scopes whose role gives the list.
+    response = await anonymous_client.get("{{ e.path }}{{ t.listing.path }}", headers=headers)
+    assert response.status_code == 200, response.text
+    found = {item["id"] for item in response.json()["items"]}
+    assert found == {str(record.id) for record in ({{ ns.items | join(", ") }}{{ "," if ns.items | length == 1 }})}
+{% endif %}
+{% if t.creating %}
+
+    path = "{{ e.path }}{{ t.creating.path }}"
+    {{ py.call("payload = await ", e.snake ~ "_input", ["session", "**await _" ~ e.snake ~ "_in(session, scopes[0])"]) }}
+    response = await anonymous_client.post(path, json=payload, headers=headers)
+    assert response.status_code == {{ t.creating.status }}, response.text
+    for scope in scopes[1:]:
+        {{ py.call("payload = await ", e.snake ~ "_input", ["session", "**await _" ~ e.snake ~ "_in(session, scope)"], 8) }}
+        assert_problem(await anonymous_client.post(path, json=payload, headers=headers), 403)
+{% endif %}
+{% if t.denied %}
+
+    # No role of the user gives {{ t.denied.name }}.
+    path = "{{ e.path }}{{ t.denied.path | replace('{id}', '') }}"
+    response = {{ call(t.denied.kind, 0) }}
+    assert_problem(response, 403)
+{% endif %}
+{% endfor %}

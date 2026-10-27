@@ -179,13 +179,43 @@ class AreaFilter(Element):
 type GeoFilter = NearFilter | AreaFilter
 """The filters of a `point` field (ADR 0046)."""
 
+type RuleRef = Annotated[
+    str, StringConstraints(pattern=MEMBER_NAME_PATTERN[:-1] + r"\." + MEMBER_NAME_PATTERN[1:])
+]
+"""A relation and a rule of its entity, for example `bookings.no_double_booking`."""
+
+
+class AvailableFilter(Element):
+    """The records without a related record whose time range overlaps the picked days (ADR 0047).
+
+    `rule` is a relation to many records and a `no_overlap` rule of their
+    entity, for example `bookings.no_double_booking`: the start and the end
+    of the rule give the range of a related record.
+    """
+
+    kind: Literal["available"]
+    rule: RuleRef
+    label: Text | None = None
+
+    @property
+    def relation(self) -> str:
+        """The relation of the entity of the view, for example `bookings`."""
+        return self.rule.split(".", 1)[0]
+
+    @property
+    def rule_name(self) -> str:
+        """The `no_overlap` rule of the related entity, for example `no_double_booking`."""
+        return self.rule.split(".", 1)[1]
+
+
 type Filter = Annotated[
     Annotated[SearchFilter, Tag("tag-search")]
     | Annotated[SelectFilter, Tag("tag-select")]
     | Annotated[BooleanFilter, Tag("tag-boolean")]
     | Annotated[DateRangeFilter, Tag("tag-date_range")]
     | Annotated[NearFilter, Tag("tag-near")]
-    | Annotated[AreaFilter, Tag("tag-area")],
+    | Annotated[AreaFilter, Tag("tag-area")]
+    | Annotated[AvailableFilter, Tag("tag-available")],
     Discriminator(kind_tag),
 ]
 

@@ -4,7 +4,8 @@
 // (ADR 0017), a user of a record rule sees only the records of the rule
 // (ADR 0018, ADR 0025), a user signs in with a provider (ADR 0020), a
 // user turns on a second factor and signs in with a code (ADR 0024), and
-// the receiver of a change gets a notice in the bell (ADR 0041).
+// the receiver of a change gets a notice in the bell (ADR 0041), and a
+// user that a text mentions gets one too (ADR 0043).
 // scripts/auth_ui_test.py starts the room booking example, and runs this
 // file. Without the values of the sign-in (`expected.auth`), the tests
 // skip.
@@ -368,4 +369,38 @@ test("the receiver of a change finds the notice in the bell of the top bar", asy
   await item.click();
   await page.waitForURL((url) => url.pathname === notice.path);
   await expect(count).toHaveCount(0);
+});
+
+test("a mention in a text shows as a link, and gives the user a notice in the bell", async ({ page }, testInfo) => {
+  const mention = auth?.mention;
+  test.skip(!mention || testInfo.project.name !== "light", "One check in the light mode.");
+  if (!mention) return;
+  const password = auth?.password ?? "";
+  await signIn(page, mention.actor, password);
+  await page.goto(mention.path);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  const sheet = page.getByRole("dialog");
+  const text = sheet.getByRole("textbox", { name: mention.field, exact: true });
+  // After @, the text area suggests the users. A choice puts the mention into the text.
+  await text.fill(`Please check @${mention.name.slice(0, 3)}`);
+  await page.getByRole("option", { name: `@${mention.name}`, exact: true }).click();
+  await expect(text).toHaveValue(/^Please check @\[.+\]\([0-9a-f-]{36}\) $/);
+  await sheet.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  if (mention.userPath) {
+    const link = page.getByRole("link", { name: `@${mention.name}`, exact: true });
+    await expect(link).toHaveAttribute("href", mention.userPath);
+  } else {
+    await expect(page.getByText(`@${mention.name}`, { exact: true })).toBeVisible();
+  }
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL((url) => url.pathname === "/sign-in");
+  await signIn(page, mention.receiver, password);
+  await page.getByRole("button", { name: /^Notices/ }).click();
+  const item = page.getByRole("list", { name: "Notices", exact: true }).getByRole("button").filter({ hasText: mention.text });
+  await expect(item).toBeVisible();
+  await item.click();
+  await page.waitForURL((url) => url.pathname === mention.path);
 });

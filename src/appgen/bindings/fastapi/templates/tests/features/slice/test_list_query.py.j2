@@ -9,6 +9,7 @@
 {% set tested = query.params | selectattr("test") | list %}
 {% set sorted_keys = query.view_sort_keys | selectattr("test") | list %}
 {% set selects = query.params | selectattr("kind", "eq", "in") | list %}
+{% set free = query.params | selectattr("kind", "eq", "free_from") | selectattr("free") | list %}
 """The tests of the filters, the search, and the sort of `{{ op.name }}`: GET {{ url }}.
 
 The parameters and the sort keys come from the fields and the views of the entity {{ e.name }}.
@@ -27,6 +28,9 @@ The parameters and the sort keys come from the fields and the views of the entit
 {% if t.target %}
 {% set ns.factories = ns.factories + ["make_" ~ t.target.snake] %}
 {% endif %}
+{% endfor %}
+{% for p in free %}
+{% set ns.factories = ns.factories + ["make_" ~ p.free.target.snake] %}
 {% endfor %}
 {% set search_tests = [query.search.test, query.search.hop_test] | select | list if query.search else [] %}
 {% if (tested | map(attribute="test") | selectattr("attr") | list) or search_tests %}
@@ -164,6 +168,42 @@ async def _ids(client: AsyncClient, params: dict[str, Any]) -> list[str]:
         response = await client.get("{{ url }}", params={area: value})
         assert response.status_code == 422, value
 {% endif %}
+{% endfor %}
+{% for p in free %}
+{% set r = p.free %}
+{% set time = "" if r.dates else "T10:00:00Z" %}
+{% set range = [r.start.name ~ '="2030-03-02' ~ time ~ '"', r.end.name ~ '="2030-03-06' ~ time ~ '"'] %}
+
+
+{% for id in p.ids %}
+{{ trace(id) }}
+{% endfor %}
+{{ sig("test_" ~ op.name ~ "_filters_by_the_free_days_of_" ~ p.attr[:-10], "client: AsyncClient, session: AsyncSession") }}    first, end = "{{ p.name }}", "{{ p.name[:-5] ~ "_to" }}"
+    free = str((await make_{{ e.snake }}(session)).id)
+{% if r.link %}
+    busy = str((await make_{{ e.snake }}(session)).id)
+    {{ py.call("await ", "make_" ~ r.target.snake, ["session", r.link ~ "=busy"] + range) }}
+{% else %}
+    {{ py.call("related = await ", "make_" ~ r.target.snake, ["session"] + range) }}
+    busy = str((await make_{{ e.snake }}(session, {{ r.ids }}=[str(related.id)])).id)
+{% endif %}
+
+    ids = await _ids(client, {first: "2030-03-03", end: "2030-03-05"})
+
+    assert free in ids
+    assert busy not in ids
+{% if r.dates %}
+    # A range ends before its end day: the next range can start on that day.
+    assert busy in await _ids(client, {first: "2030-03-06", end: "2030-03-09"})
+    assert busy in await _ids(client, {first: "2030-02-27", end: "2030-03-02"})
+{% else %}
+    # The days are whole days, from the start of the first day to the end of the last day.
+    assert busy not in await _ids(client, {first: "2030-03-06", end: "2030-03-09"})
+    assert busy in await _ids(client, {first: "2030-03-07", end: "2030-03-09"})
+    assert busy in await _ids(client, {first: "2030-02-27", end: "2030-03-01"})
+{% endif %}
+    # Without an end, the range is one day.
+    assert busy not in await _ids(client, {first: "2030-03-05"})
 {% endfor %}
 {% if query.search %}
 {% set s = query.search %}

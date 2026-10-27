@@ -1,0 +1,43 @@
+{{ trace_header(*(mention_plans(definition) | map(attribute="id"))) }}
+{% set link = mention_link(definition) %}
+import { mentionParts } from "@/shared/lib/mentions";
+{% if link %}
+import { pageHref } from "@/shared/lib/pages";
+import { Link } from "@/shared/lib/router";
+{% endif %}
+import { cn } from "@/shared/lib/utils";
+
+/**
+ * A text with mentions of users (ADR 0043). A mention shows as `@` and
+ * the name of the user{{ ", with a link to the page of the user" if link }}. An empty text shows a
+ * dash.
+ */
+export function MentionText({ text, className }: { text: unknown; className?: string }) {
+  if (typeof text !== "string" || text === "") {
+    return <span className={cn("text-muted-foreground", className)}>—</span>;
+  }
+  return (
+    <span className={cn("whitespace-pre-line", className)}>
+      {mentionParts(text).map((part, index) =>
+        "id" in part ? (
+{% if link %}
+          <Link
+            key={index}
+            href={pageHref({{ js(link[0] | camel) }}, { {{ link[1] }}: part.id })}
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            onClick={(event) => event.stopPropagation()}
+          >
+            @{part.name}
+          </Link>
+{% else %}
+          <span key={index} className="font-medium text-primary">
+            @{part.name}
+          </span>
+{% endif %}
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </span>
+  );
+}

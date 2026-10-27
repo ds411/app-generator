@@ -140,7 +140,7 @@ def test_an_empty_seed_gives_no_target_to_an_optional_relation() -> None:
         # The values of the translatable fields in German (ADR 0026) and the budget lines
         # (ADR 0035) are not in the screenshots.
         ("project-tracker", "34805d1946f52d76c58ca8da61cd9850980fffb6f8cbf1606223a930df00acf3"),
-        ("room-booking", "abcb48e23d20a6069a9f52da0f235bfb0dc9ec0c52da839c5be0836343aca506"),
+        ("room-booking", "58ef3f2df463a929983f3535326131ffd185696da1c7d27a25d2698e6e1457ae"),
     ],
 )
 def test_a_definition_without_a_seed_keeps_its_mock_data(example: str, digest: str) -> None:

@@ -161,6 +161,11 @@ BINDING = Binding(
             path="tests/test_access.py",
             when="definition.access",
         ),
+        Output(
+            template="tests/test_memberships.py.j2",
+            path="tests/test_memberships.py",
+            when="py.memberships and py.memberships.tests",
+        ),
         Output(template="tests/test_auth.py.j2", path="tests/test_auth.py", when="definition.auth"),
         Output(template="tests/test_me.py.j2", path="tests/test_me.py", when="py.me_tests"),
         Output(
@@ -299,8 +304,8 @@ BINDING = Binding(
         *(
             Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
             for module, when in (
-                ("notifications", "py.notifications"),
-                ("notices", "py.notifications"),
+                ("notifications", "py.notices"),
+                ("notices", "py.notices"),
             )
         ),
         Output(template="app/core/jobs.py.j2", path="app/core/jobs.py", when="py.jobs"),
@@ -355,7 +360,7 @@ BINDING = Binding(
         Output(
             template="tests/test_notices.py.j2",
             path="tests/test_notices.py",
-            when="py.notifications",
+            when="py.notices",
         ),
         Output(template="tests/test_live.py.j2", path="tests/test_live.py", when="py.live"),
         Output(
@@ -363,6 +368,12 @@ BINDING = Binding(
             path=_TESTS + "/test_notifications.py",
             for_each="entity",
             when="py.entity(name).notifications",
+        ),
+        Output(
+            template="tests/features/slice/test_mentions.py.j2",
+            path=_TESTS + "/test_mentions.py",
+            for_each="entity",
+            when="py.entity(name).mentions",
         ),
         Output(
             template="tests/features/slice/test_schemas.py.j2",
@@ -553,7 +564,7 @@ BINDING = Binding(
         | {"entity_compare_rule", "entity_unique_rule", "entity_overlap_rule"}
         | {"workflow", "transition"}
         | {"auth", "sign_up", "email_verification", "password_reset", "provider", "second_factor"}
-        | {"access", "role", "record_rule"}
+        | {"access", "role", "record_rule", "memberships", "membership_role"}
         | {"api", "api_operation"}
         | {"webhook"}
         | {"translations", "language"}
