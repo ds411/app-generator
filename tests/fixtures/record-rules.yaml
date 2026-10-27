@@ -63,6 +63,9 @@ entities:
   Task:
     # Enough tasks for done tasks in the mock data: the reviewer sees them.
     x-mock-count: 20
+    # The open views show the changes of the tasks at once (ADR 0051). The
+    # events of a task go only to the users that may read the task.
+    live: true
     crud:
       views: [table, detail]
       forms: [create, update]

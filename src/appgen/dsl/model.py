@@ -16,6 +16,7 @@ from appgen.dsl.element import is_extension_key as is_extension_key
 from appgen.dsl.events import EventInput, EventName
 from appgen.dsl.history import HistoryInput
 from appgen.dsl.jobs import Job
+from appgen.dsl.live import LiveInput
 from appgen.dsl.notifications import Notification
 from appgen.dsl.rules import EntityRule
 from appgen.dsl.seed import EntitySeed
@@ -194,6 +195,8 @@ class Entity(Element):
     """The custom operations that run after a record is created, changed, or deleted (ADR 0031)."""
     history: HistoryInput = None
     """The change log of the records (ADR 0040)."""
+    live: LiveInput = None
+    """The live updates of the records: the apps push the changes to the open views (ADR 0051)."""
 
     @property
     def stored_fields(self) -> dict[str, Field]:

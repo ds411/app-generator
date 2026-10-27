@@ -1399,6 +1399,30 @@ def check_history(definition: AppDefinition) -> Iterator[Diagnostic]:
                 )
 
 
+def check_live(definition: AppDefinition) -> Iterator[Diagnostic]:
+    """A live entity has a list or a read operation (ADR 0051).
+
+    The events of a record go to the users that may read the record, so
+    the entity needs an operation that reads its records.
+    """
+    for entity_name, entity in definition.entities.items():
+        if entity.live is None:
+            continue
+        reads = (
+            op
+            for op in definition.operations.values()
+            if op.entity == entity_name and op.kind in ("list", "read")
+        )
+        if next(reads, None) is None:
+            yield _error(
+                "missing-key",
+                f"The live entity '{entity_name}' has no list or read operation. The events of "
+                "a record go to the users that may read the record.",
+                entity.live,
+                hint="Add a list or a read operation of the entity, for example with 'crud'.",
+            )
+
+
 def check_notifications(definition: AppDefinition) -> Iterator[Diagnostic]:
     """A notification has a change of its entity, receivers that are users, and known values.
 
@@ -3309,6 +3333,7 @@ CHECKS: list[Check] = [
     check_jobs,
     check_events,
     check_history,
+    check_live,
     check_notifications,
     check_auth,
     check_access,

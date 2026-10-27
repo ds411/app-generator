@@ -634,6 +634,8 @@ BINDING = Binding(
         | {"storage"}
         | {"history", "notification"}
     ),
+    # The live updates of the Next.js app follow with its events route (#405).
+    excludes=frozenset({"live"}),
     gap_rule=Output(template="gaps/gap.ts.j2", path="src/gaps/{{ element_id }}.ext.ts"),
     context=context,
     finish=finish,

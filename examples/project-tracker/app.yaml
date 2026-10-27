@@ -108,6 +108,8 @@ entities:
       changed: { operation: record_completion, fields: [status] }
     # The apps keep a change log of the tasks, with a restore (ADR 0040).
     history: true
+    # The open views show the changes of the tasks at once (ADR 0051).
+    live: true
 
   Comment:
     crud: [create, list, delete]

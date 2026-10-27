@@ -235,6 +235,12 @@ of the entity in snake case, for example `bookings`.
   `notifications` (ADR 0041), except for the user of the change. A
   custom operation that changes records with these functions gives the
   notices too. A change with SQL gives none.
+- An entity with `live` gives an event to the open views after each
+  commit that creates, changes, or deletes one of its records
+  (ADR 0051). The listeners of the database sessions find the changes,
+  so a custom operation and a job give the events too. An `update` or a
+  `delete` statement of many records gives none: change the records one
+  by one through the session if the open views must show the change.
 - The factories of `tests/factories.py` (`make_<entity>(session, **values)`)
   give a value to each field, also to the optional fields, and the
   values change with each call. In a test of your logic, give each value

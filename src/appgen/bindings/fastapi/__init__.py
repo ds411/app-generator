@@ -288,6 +288,7 @@ BINDING = Binding(
             when="name in py.dashboards",
         ),
         Output(template="app/core/history.py.j2", path="app/core/history.py", when="py.history"),
+        Output(template="app/core/live.py.j2", path="app/core/live.py", when="py.live"),
         *(
             Output(template=f"app/core/{module}.py.j2", path=f"app/core/{module}.py", when=when)
             for module, when in (
@@ -334,6 +335,7 @@ BINDING = Binding(
             path="tests/test_notices.py",
             when="py.notifications",
         ),
+        Output(template="tests/test_live.py.j2", path="tests/test_live.py", when="py.live"),
         Output(
             template="tests/features/slice/test_notifications.py.j2",
             path=_TESTS + "/test_notifications.py",
@@ -529,7 +531,7 @@ BINDING = Binding(
         | {"webhook"}
         | {"translations", "language"}
         | {"entity_seed", "seed_record"}
-        | {"job", "event", "history", "notification"}
+        | {"job", "event", "history", "notification", "live"}
         | {"storage"}
     ),
     excludes=frozenset({"page", "ui"}),

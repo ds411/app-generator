@@ -245,7 +245,8 @@ git config core.hooksPath .githooks
   project tracker with the FastAPI binding, and runs `uv sync`, Ruff,
   pyright, the generated tests, `docker build`, and `appgen check` on
   the output. It also starts two processes of the app with Redis, and
-  checks that they share the rate limit, and it validates the
+  checks that they share the rate limit and that both send the live
+  events of the changes of each process (`scripts/check_live_events.py`), and it validates the
   deployment files of each target against their schemas (it downloads
   the schemas once). Then it generates the room booking example
   (sign-in, sign-up, roles, and a provider) and

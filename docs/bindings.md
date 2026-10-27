@@ -743,6 +743,52 @@ import the helpers.
   endpoints, and the text in another language when a language
   translates the text of the first notification.
 
+### The live updates of the FastAPI app
+
+The FastAPI app sends the changes of the records of the entities with
+`live` as server-sent events ([ADR 0051](adr/0051-live-updates.md)).
+`app/core/live.py` has the table `LIVE` of the live entities, the
+listeners of the sessions, the broker, and the endpoint `GET /live`.
+
+- `create_app()` makes the broker (`app.state.live`) with
+  `LIVE_EVENTS_URL`, and puts it in the `info` of the sessions
+  (`BROKER_KEY`). The listeners do nothing in a session without a
+  broker. The worker of the jobs makes its own broker only with
+  `LIVE_EVENTS_URL`, because its changes go to the streams only through
+  Redis.
+- `after_flush` keeps the creates, the changes, and the deletes of the
+  live records in `session.info` (`PENDING_KEY`). `after_commit` gives
+  them to the broker as `Change` values, and `after_rollback` drops
+  them.
+- With a record rule for the reads of a live entity, `before_flush`
+  keeps the audience of each changed or deleted record before its first
+  change (`_audience()`: the roles whose conditions the record meets,
+  and the users at the end of the owner path), and `after_flush` the
+  audience after the change. `Viewer.sees()` compares them with the
+  role and the user of the stream.
+- `live_viewer()` reads the token without the dependency of the user,
+  in a session of its own, so that a stream holds no database
+  connection. It gives 401 or 403 for an entity that the client may not
+  read.
+- The broker gives each stream a `Subscription`: a queue of at most 100
+  events. A full queue gives `reset`. With Redis, a task sends the
+  changes to the channel `<package>:live`, and another task gives the
+  changes of the channel to the subscriptions. When Redis fails, the
+  broker logs a warning, and gives the changes to the subscriptions of
+  the process until the listener connects again. Then each subscription
+  gets `reset`.
+- `end_streams_on_exit()` ends the streams at SIGINT and SIGTERM, and
+  then calls the signal handler of the server, because the server waits
+  for the open requests before it stops.
+- The generated tests in `tests/test_live.py` read the stream from the
+  ASGI messages of the app, because the HTTP client of the other tests
+  gives a response only at its end. They check the events of a create, a
+  change, and a delete, a rollback, 401 and 403, the events of the
+  record rules, `reset`, the end of the streams, and the broker without
+  Redis. `scripts/check_live_events.py` starts two processes with
+  Redis, and checks that both streams get the changes of each process
+  in less than 2 s.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process
