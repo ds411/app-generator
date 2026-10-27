@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq{{ ", sql" if verify }} } from "drizzle-orm";
 {% endif %}
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect{{ ", unstable_rethrow" if nextjs.me_totals }} } from "next/navigation";
 
 {% if definition.auth.password %}
 import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
@@ -88,6 +88,23 @@ export async function sessionUserId(): Promise<string | null> {
   return token ? readToken(token) : null;
 }
 
+{% if nextjs.me_totals %}
+/**
+ * Return the ID of the signed-in user of the request, or null: the totals
+ * of `$me` read it. Out of a request, for example in a script, no user is
+ * signed in.
+ */
+export async function requestUserId(): Promise<string | null> {
+  try {
+    return await sessionUserId();
+  } catch (error) {
+    // Next.js stops the render of a static page with an error: the page is dynamic.
+    unstable_rethrow(error);
+    return null;
+  }
+}
+
+{% endif %}
 /** Return the ID of the signed-in user. Throw an UnauthorizedError without a session. */
 export async function requireUser(): Promise<string> {
   const userId = await sessionUserId();

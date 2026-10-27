@@ -78,7 +78,10 @@ export type {{ name | pascal }}ViewProps = {
 {% if plan.server %}
 export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps) {
 {% if plan.filters %}
-  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+{% if plan.me %}
+  const initial = initialFilters(useMe());
+{% endif %}
+  const [filters, setFilters] = useState<Filters>({{ m.initial(plan) }});
 {% endif %}
 {% if plan.scroll %}
   const [sorting, setSorting] = useState<ServerPages["sorting"]>([]);
@@ -121,7 +124,7 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
   const [{ items: rows, total }, lookups] = resource.data;
 {{ m.action_lookups(plan) -}}
 {% if plan.filters %}
-  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+  const filtered = JSON.stringify(filters) !== JSON.stringify({{ m.initial(plan) }});
 {% if plan.filters | selectattr("options") | list %}
   const options = filterOptions(lookups);
 {% endif %}
@@ -130,7 +133,10 @@ export function {{ name | pascal }}View({ params }: {{ name | pascal }}ViewProps
 export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps) {
   const resource = useResource({{ js(name) }}, load, subscribe);
 {% if plan.filters %}
-  const [filters, updateFilters] = useState<Filters>(INITIAL_FILTERS);
+{% if plan.me %}
+  const initial = initialFilters(useMe());
+{% endif %}
+  const [filters, updateFilters] = useState<Filters>({{ m.initial(plan) }});
 {% endif %}
 {% if plan.actions or plan.row_actions or plan.bulk_actions %}
 {{ m.runner(plan) }}
@@ -147,7 +153,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
   const all = where ? records.filter(where) : records;
 {{ m.action_lookups(plan) -}}
 {% if plan.filters %}
-  const filtered = JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+  const filtered = JSON.stringify(filters) !== JSON.stringify({{ m.initial(plan) }});
 {% set options = plan.filters | selectattr("options") | list %}
 {% if options %}
   const options = filterOptions(lookups);
@@ -195,7 +201,7 @@ export function {{ name | pascal }}View({ where }: {{ name | pascal }}ViewProps)
           title={{ jsx_attr("No matching records") }}
           text={{ jsx_attr("Change or reset the filters.") }}
           action={
-            <Button variant="outline" size="sm" onClick={() => updateFilters(INITIAL_FILTERS)}>
+            <Button variant="outline" size="sm" onClick={() => updateFilters({{ m.initial(plan) }})}>
               {{ jsx_text("Reset the filters") }}
             </Button>
           }

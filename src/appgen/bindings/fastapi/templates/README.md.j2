@@ -334,6 +334,12 @@ Each endpoint needs a bearer token (`Authorization: Bearer <token>`),
 except `/health`, the sign-in{{ " and the sign-up" if definition.auth.sign_up }}, and the public
 operations of the definition. `AUTH_SECRET` signs the tokens: set it to
 a long random text in each environment.
+{% if py.me %}
+
+The totals and the widgets with `$me` count the records of the user of
+the token of each request, also on a public endpoint. Without a token,
+`$me` is a value that no record has.
+{% endif %}
 
 {% if password %}
 - `POST /auth/sign-in` gives a token for a user name and a password.

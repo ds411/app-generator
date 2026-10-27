@@ -7,7 +7,7 @@ import { Providers } from "@/app/providers";
 {% if definition.access %}
 import { currentRole } from "@/shared/auth/access";
 {% endif %}
-{% if record_rules %}
+{% if record_rules or me %}
 import { sessionUserId } from "@/shared/auth/session";
 {% endif %}
 import { appConfig } from "@/shared/config";
@@ -17,6 +17,11 @@ import { AccessProvider } from "@/shared/lib/access";
 {% if i18n %}
 import { dirOf, localeOf } from "@/shared/lib/i18n";
 import { inRequestLanguage, requestLanguage } from "@/shared/lib/i18n-server";
+{% endif %}
+{% if me %}
+import { MeProvider } from "@/shared/lib/me";
+{% endif %}
+{% if i18n %}
 
 /** The title and the description of the pages, in the language of the request. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -51,10 +56,16 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const role = await currentRole(); {{ trace(definition.access.id) }}
 {% else %}
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default {{ "async " if me }}function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
 {% endif %}
-{% if record_rules %}
+{% if record_rules and me %}
+  // The forms apply the record rules of the user (ADR 0018, ADR 0025), and the values `$me` are the user.
+  const userId = await sessionUserId();
+{% elif record_rules %}
   // The forms apply the record rules of the user (ADR 0018, ADR 0025).
+  const userId = await sessionUserId();
+{% elif me %}
+  // The values `$me` of the filters and of the defaults are the signed-in user.
   const userId = await sessionUserId();
 {% endif %}
 {% set providers = "Providers language={language}" if i18n else "Providers" %}
@@ -66,7 +77,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en" suppressHydrationWarning>
 {% endif %}
       <body className="min-h-svh antialiased">
-{% if definition.access %}
+{% if definition.access and me %}
+        <{{ providers }}>
+          <AccessProvider role={role}{{ " userId={userId}" if record_rules }}>
+            <MeProvider me={userId}>{children}</MeProvider>
+          </AccessProvider>
+        </Providers>
+{% elif definition.access %}
         <{{ providers }}>
 {% if record_rules %}
           <AccessProvider role={role} userId={userId}>
@@ -75,6 +92,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
 {% else %}
           <AccessProvider role={role}>{children}</AccessProvider>
 {% endif %}
+        </Providers>
+{% elif me %}
+        <{{ providers }}>
+          <MeProvider me={userId}>{children}</MeProvider>
         </Providers>
 {% else %}
         <{{ providers }}>{children}</Providers>

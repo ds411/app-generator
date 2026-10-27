@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pydantic import JsonValue
 
 from appgen.bindings.nextjs.db import Table, TsCall, TsChain, TsCode, format_ts
+from appgen.dsl.auth import ME
 from appgen.dsl.cron import Cron, parse_cron
 from appgen.dsl.model import AppDefinition, Field, Relation
 from appgen.gen.naming import camel, kebab
@@ -75,6 +76,8 @@ class TsFilter:
     """The tables of `@/shared/db` that the condition reads."""
     today: bool = False
     now: bool = False
+    me: bool = False
+    """True if the condition reads `me`, the ID of the signed-in user or null (`$me`)."""
 
 
 @dataclass(slots=True)
@@ -570,6 +573,8 @@ class FilterBuilder:
         """Return the condition of one operator on a column, as the FastAPI app does."""
         field_type = f.type if f is not None else "uuid"
         operands = operand if isinstance(operand, list) else [operand]
+        if operands and all(o == ME for o in operands):
+            return self.me(column, op)
         if field_type == "datetime" and all(_is_day(o) for o in operands if o is not None):
             days = [self.literal(f, o, day=True) for o in operands if o is not None]
             return self.by_day(column, op, days)
@@ -598,6 +603,15 @@ class FilterBuilder:
         if operand is None:
             return self.sql("false")
         return TsCall(op, [column, self.literal(f, operand)])
+
+    def me(self, column: str, op: str) -> TsCode:
+        """Return the condition of `$me`: without a signed-in user, no record has the value."""
+        self.found.me = True
+        if op in ("eq", "in"):
+            same = format_ts(TsCall("eq", [column, "me"]), 0)
+            return f"me === null ? {self.sql('false')} : {same}"
+        other = TsCall("or", [TsCall("isNull", [column]), TsCall("ne", [column, "me"])])
+        return f"me === null ? {self.sql('true')} : {format_ts(other, 0)}"
 
     def by_day(self, column: str, op: str, days: list[str]) -> TsCode:
         """Return a condition of a date-time column and dates: the days in UTC."""

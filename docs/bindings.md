@@ -591,6 +591,26 @@ A computed field with a total of a relation, for example
   (`test_<operation>_lines.py`) send two lines that keep the rules, and
   two lines that break each rule (`total_rules.py` finds the values).
 
+### The signed-in user in the FastAPI app
+
+The value `$me` is the signed-in user in the filters of the totals and
+of the widgets (M36).
+
+- `app/core/db.py` has the context variable `SIGNED_IN` and the
+  function `me()`: a parameter of the SQL whose value the database
+  driver reads at each run of a statement. So a `column_property` of a
+  total with `$me` gives the value of the user of each request.
+- The app dependency `remember_user` of `app/core/auth.py` reads the
+  token of each request, also of a public endpoint, and sets
+  `SIGNED_IN`: the ID of the user, or None without a valid token. It
+  does not add a security scheme, so the OpenAPI document stays the
+  same.
+- Without a user, `$me` is null in SQL: `eq` keeps no records, and `ne`
+  keeps all records (`is_distinct_from`).
+- The generated tests in `tests/test_me.py` store records of two users,
+  and read each total and each stat or list widget with the token of
+  each user and without a token.
+
 ### The lines of the FastAPI app
 
 A create or an update operation with `lines` writes the record and its
@@ -884,6 +904,34 @@ for example `sum(lines.amount)`, from the same data as the FastAPI app
   project of the project tracker (`task_count`) in the table of the
   projects, in the detail view, and in the pagination of the tasks of
   the project, in both front ends.
+
+### The signed-in user in the Next.js app and in the React app
+
+The value `$me` is the signed-in user in the filters of the views, the
+widgets, and the totals, and in the defaults of the forms (M36).
+
+- `src/shared/lib/me` has the hook `useMe`: the ID of the signed-in
+  user, or null. In the Next.js app, the root layout reads the session,
+  and gives the ID to `MeProvider`. In the React app, the session of the
+  browser tab gives it.
+- A view with the default `$me` has the function `initialFilters(me)`
+  instead of the constant `INITIAL_FILTERS`. A form with the default
+  `$me` gives `me` to `initialValues`. The function of a widget with
+  `$me` in its filter takes `me`, and a missing user is a value that no
+  record has.
+- The Next.js repository of an entity with a total of `$me` has the
+  option `me` (`requestUserId` of `src/shared/auth/session.ts`), and
+  gives the ID to the subqueries of `totals`. Out of a request, for
+  example in a script, no user is signed in.
+- The mock store of the React app reads the user at each read: the
+  value of the condition is a function.
+- With the FastAPI app (`x-react-data: api`), the API reads the user of
+  the token for the totals and the widgets.
+- `scripts/sessions_ui_test.py` (run by `scripts/check-auth-ui.sh`)
+  signs in to the app of `tests/fixtures/courses.yaml` as two users in
+  the three front ends, and runs `ui-tests/tests/sessions.spec.ts`: the
+  stat widgets, the list of the submissions, the student of a new
+  submission, and the totals of the lessons of each user.
 
 ### The lines of the Next.js app and of the React app
 

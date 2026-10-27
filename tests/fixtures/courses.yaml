@@ -1,0 +1,244 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+# The users and the sessions of M36: courses, their lessons, and the
+# submissions of the students. The value `$me` is the signed-in user: the
+# table of the submissions shows the submissions of the user first, the
+# dashboard counts them, a lesson counts the submissions of the user, and
+# a new submission belongs to the user. scripts/check-fastapi.sh checks
+# the FastAPI app of this definition, and scripts/sessions_ui_test.py
+# signs in to the front ends.
+version: 0
+
+app:
+  name: course-hub
+  title: Course Hub
+  description: Courses, their lessons, and the work of the students.
+
+entities:
+  Person:
+    plural_label: People
+    crud:
+      views: [table]
+      forms: [create]
+    display_field: name
+    fields:
+      name: { type: string, required: true, max_length: 120 }
+      email: { type: email, required: true, unique: true }
+      role: { type: enum, values: [admin, member], default: member }
+    relations:
+      submissions: { kind: one_to_many, target: Submission, inverse: student }
+
+  Course:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, unique: true, max_length: 120 }
+    relations:
+      lessons: { kind: one_to_many, target: Lesson, inverse: course }
+
+  Lesson:
+    crud:
+      views: [table, detail]
+      forms: [create, update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      body: { type: text }
+      # A total of the records of the signed-in user: the submissions of the
+      # user for the lesson.
+      my_submissions:
+        type: integer
+        label: My submissions
+        computed: count(submissions)
+        filter: { student: $me }
+    relations:
+      course:
+        kind: many_to_one
+        target: Course
+        required: true
+        on_delete: cascade
+        inverse: lessons
+      submissions: { kind: one_to_many, target: Submission, inverse: lesson }
+
+  Submission:
+    crud:
+      views: [detail]
+      forms: [update]
+    display_field: title
+    fields:
+      title: { type: string, required: true, max_length: 120 }
+      grade: { type: integer, min: 1, max: 6 }
+    relations:
+      lesson:
+        kind: many_to_one
+        target: Lesson
+        required: true
+        on_delete: cascade
+        inverse: submissions
+      student:
+        kind: many_to_one
+        target: Person
+        required: true
+        on_delete: cascade
+        inverse: submissions
+
+pages:
+  home:
+    path: /
+    title: Home
+    content: { dashboard: home }
+  courses:
+    path: /courses
+    title: Courses
+    entity: Course
+    content: { view: course_table }
+    actions:
+      new_course: { kind: form, form: new_course, label: New course, icon: plus }
+  course_detail:
+    path: "/courses/{id}"
+    title: Course
+    entity: Course
+    content: { view: course_detail }
+  lessons:
+    path: /lessons
+    title: Lessons
+    entity: Lesson
+    content: { view: lesson_table }
+    actions:
+      new_lesson: { kind: form, form: new_lesson, label: New lesson, icon: plus }
+  lesson_detail:
+    path: "/lessons/{id}"
+    title: Lesson
+    entity: Lesson
+    content: { view: lesson_detail }
+  submissions:
+    path: /submissions
+    title: Submissions
+    entity: Submission
+    content: { view: submission_table }
+    actions:
+      new_submission: { kind: form, form: new_submission, label: New submission, icon: plus }
+  submission_detail:
+    path: "/submissions/{id}"
+    title: Submission
+    entity: Submission
+    content: { view: submission_detail }
+  people:
+    path: /people
+    title: People
+    entity: Person
+    content: { view: person_table }
+    actions:
+      new_person: { kind: form, form: new_person, label: New person, icon: user-plus }
+
+ui:
+  navigation:
+    main:
+      items:
+        home: { page: home, icon: house }
+        courses: { page: courses, icon: book-open }
+        lessons: { page: lessons, icon: notebook-pen }
+        submissions: { page: submissions, icon: inbox }
+        people: { page: people, icon: users }
+  layouts:
+    app_shell:
+      sidebar: { navigation: main, title: Course Hub, icon: graduation-cap }
+  defaults:
+    layout: app_shell
+  views:
+    # The submissions of the signed-in user first. A clear of the filter
+    # shows all submissions.
+    submission_table:
+      kind: table
+      entity: Submission
+      columns:
+        title: { link: submission_detail }
+        lesson: {}
+        student: {}
+        grade: {}
+      sort: { field: title }
+      filters:
+        student: { kind: select, field: student, default: $me }
+  forms:
+    new_submission:
+      entity: Submission
+      operation: create_submission
+      title: New submission
+      fields:
+        title: {}
+        lesson: {}
+        student: {}
+      # A new submission belongs to the signed-in user.
+      defaults: { student: $me }
+  dashboards:
+    home:
+      title: Home
+      widgets:
+        my_submissions:
+          kind: stat
+          label: My submissions
+          entity: Submission
+          filter: { student: $me }
+          icon: inbox
+          link: submissions
+        graded:
+          kind: stat
+          label: My graded submissions
+          entity: Submission
+          filter: { student: $me, grade: { gte: 1 } }
+          icon: badge-check
+        lessons:
+          kind: stat
+          label: Lessons
+          entity: Lesson
+          icon: notebook-pen
+          link: lessons
+
+auth:
+  user_entity: Person
+  username_field: email
+
+# An admin may do all. A member reads the courses and the lessons, and
+# hands in submissions.
+access:
+  role_field: role
+  roles:
+    admin:
+      label: Admin
+      operations: ["*"]
+      pages: ["*"]
+    member:
+      label: Member
+      operations:
+        - list_people
+        - list_courses
+        - read_course
+        - list_lessons
+        - read_lesson
+        - list_submissions
+        - read_submission
+        - create_submission
+        - update_submission
+      pages: [home, courses, course_detail, lessons, lesson_detail, submissions, submission_detail]
+
+seed:
+  Person:
+    records:
+      ada: { name: Ada Admin, email: ada@example.com, role: admin }
+      ben: { name: Ben Brown, email: ben@example.com }
+      cleo: { name: Cleo Clark, email: cleo@example.com }
+  Course:
+    records:
+      algebra: { title: Algebra }
+      biology: { title: Biology }
+  Lesson:
+    records:
+      equations: { title: Equations, course: algebra }
+      fractions: { title: Fractions, course: algebra }
+      cells: { title: Cells, course: biology }
+  Submission:
+    records:
+      ben_equations: { title: Ben on equations, lesson: equations, student: ben, grade: 2 }
+      ben_cells: { title: Ben on cells, lesson: cells, student: ben }
+      cleo_equations: { title: Cleo on equations, lesson: equations, student: cleo, grade: 1 }

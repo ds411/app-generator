@@ -32,6 +32,7 @@ from appgen.bindings.fastapi.integrations import (
 from appgen.bindings.fastapi.jobs import TABLE as JOBS_TABLE
 from appgen.bindings.fastapi.jobs import PyJob, python_jobs
 from appgen.bindings.fastapi.lines import PyLines, python_lines
+from appgen.bindings.fastapi.me import PyMeTest, me_tests
 from appgen.bindings.fastapi.names import attribute, plural, singular
 from appgen.bindings.fastapi.notifications import (
     PyNotification,
@@ -2374,6 +2375,8 @@ class PyApp:
     """The storage of the files of the file fields (ADR 0027), or None without `storage`."""
     user_label_attr: str | None = None
     """The attribute of the user entity that names a user, for example in the change log."""
+    me_tests: list[PyMeTest] = field(default_factory=list[PyMeTest])
+    """The generated tests of the totals and the widgets with `$me`, the signed-in user."""
 
     @property
     def events(self) -> bool:
@@ -2407,6 +2410,16 @@ class PyApp:
         The change log (ADR 0040) and the notices (ADR 0041) name the user of a change.
         """
         return self.auth and (bool(self.history) or bool(self.notifications))
+
+    @property
+    def me(self) -> bool:
+        """True if a total or a dashboard widget uses `$me`, the signed-in user of a request.
+
+        The app then keeps the user of the token of each request (`SIGNED_IN` of
+        `app.core.db`), also for the public endpoints, and the SQL reads it with `me()`.
+        """
+        totals = any(t.me for e in self.entities.values() for t in e.totals)
+        return totals or any(w.me for d in self.dashboards.values() for w in d.widgets)
 
     @property
     def full_text(self) -> bool:
@@ -2701,6 +2714,7 @@ def python_app(definition: AppDefinition) -> PyApp:
         entity.full_text = search_config is not None
         entity.query = list_query(definition, entity)
         entity.totals_test = totals_test(definition, entity)
+    dashboards = python_dashboards(definition, entities)
     return PyApp(
         name=definition.app.name,
         package=snake(definition.app.name),
@@ -2718,13 +2732,14 @@ def python_app(definition: AppDefinition) -> PyApp:
         smtp=bool(_message_elements(definition))
         and definition.auth is not None
         and definition.auth.delivery == "smtp",
-        dashboards=python_dashboards(definition, entities),
+        dashboards=dashboards,
         access=definition.access is not None,
         auth=auth is not None,
         search_config=search_config,
         jobs=_jobs(definition, entities, operations),
         storage=_storage(definition, entities),
         user_label_attr=_user_label_attr(definition, entities),
+        me_tests=me_tests(definition, entities, dashboards),
     )
 
 

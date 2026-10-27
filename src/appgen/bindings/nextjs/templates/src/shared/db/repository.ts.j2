@@ -219,7 +219,13 @@ export type RepositoryOptions<T> = {
    * The totals of the related records (ADR 0034): the subquery of each key
    * of the records, of the table of the records with the name `record`.
    */
+{% if nextjs.me_totals %}
+  totals?: (record: { id: PgColumn }, me: string | null) => Record<string, SQL<number | null>>;
+  /** The ID of the signed-in user of the request, or null: the totals of `$me` read it. */
+  me?: () => Promise<string | null>;
+{% else %}
   totals?: (record: { id: PgColumn }) => Record<string, SQL<number | null>>;
+{% endif %}
 {% endif %}
 {% if nextjs.total_rules %}
   /**
@@ -364,6 +370,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.totals %}
   private readonly totals: RepositoryOptions<T>["totals"];
+{% if nextjs.me_totals %}
+  private readonly me: RepositoryOptions<T>["me"];
+{% endif %}
 {% endif %}
 {% if nextjs.total_rules %}
   private readonly totalRules: CompareRule[];
@@ -398,6 +407,9 @@ export class Repository<T extends EntityRecord, TInput extends object>
 {% endif %}
 {% if nextjs.totals %}
     this.totals = options.totals;
+{% if nextjs.me_totals %}
+    this.me = options.me;
+{% endif %}
 {% endif %}
 {% if nextjs.total_rules %}
     this.totalRules = options.totalRules ?? [];
@@ -937,7 +949,12 @@ export class Repository<T extends EntityRecord, TInput extends object>
     const record = alias(this.table, "record");
     const columns = getTableColumns(record);
     const recordId = columns.id as PgColumn;
+{% if nextjs.me_totals %}
+    const me = (await this.me?.()) ?? null;
+    const subqueries = { ...this.totals?.({ id: recordId }, me), ...this.ruleTotals?.({ id: recordId }) };
+{% else %}
     const subqueries = { ...this.totals?.({ id: recordId }), ...this.ruleTotals?.({ id: recordId }) };
+{% endif %}
     const rows: Row[] = await db
       .select({ ...columns, ...subqueries })
       .from(record)
@@ -1182,8 +1199,14 @@ export class Repository<T extends EntityRecord, TInput extends object>
       // of a relation of the entity to itself tells the record from its related records.
       const record = alias(this.table, "record");
       const id = getTableColumns(record).id as PgColumn;
+{% if nextjs.me_totals %}
+      const me = (await this.me?.()) ?? null;
+      const rows: Row[] = await db
+        .select({ id, ...this.totals({ id }, me) })
+{% else %}
       const rows: Row[] = await db
         .select({ id, ...this.totals({ id }) })
+{% endif %}
         .from(record)
         .where(inArray(id, ids));
       const totals = new Map(rows.map((row) => [String(row.id), row]));

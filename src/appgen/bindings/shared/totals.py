@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
+from appgen.dsl.auth import ME, has_me
 from appgen.dsl.expressions import Total, expression_totals, parse_expression
 from appgen.dsl.model import AppDefinition, Field
 from appgen.dsl.rules import EntityCompareRule, is_total_operand
@@ -62,20 +63,31 @@ class TsTotal:
     """The filter of the related records: the filter of the computed field."""
     ids: list[str] = field(default_factory=list[str])
     """The computed fields that use the total, for the traces."""
+    relations: frozenset[str] = frozenset()
+    """The relations of the related records in the filter: a filter of `$me` (ADR 0034)."""
+
+    @property
+    def me(self) -> bool:
+        """True if the filter has `$me`: the total counts the records of the signed-in user."""
+        return has_me(self.filter)
 
     def conditions(self) -> list[tuple[str, str, JsonValue]]:
-        """Return the conditions of the filter: the key of a field, an operator, and a value.
+        """Return the conditions of the filter: the key of a member, an operator, and a value.
 
-        A value gives `eq`, and a list of values gives `in`.
+        A value gives `eq`, and a list of values gives `in`. The key of a
+        relation is its foreign key, for example `studentId`. A list of
+        only `$me` is the one value `$me`.
         """
         found: list[tuple[str, str, JsonValue]] = []
         for path, condition in (self.filter or {}).items():
-            if isinstance(condition, dict):
-                found += [(camel(path), op, operand) for op, operand in condition.items()]
-            else:
-                found.append(
-                    (camel(path), "in" if isinstance(condition, list) else "eq", condition)
-                )
+            key = camel(path) + "Id" if path in self.relations else camel(path)
+            items = condition.items() if isinstance(condition, dict) else [("eq", condition)]
+            for op, operand in items:
+                if isinstance(operand, list) and operand and all(v == ME for v in operand):
+                    op, operand = {"eq": "eq", "in": "eq", "ne": "ne"}.get(op, "ne"), ME
+                elif op == "eq" and isinstance(operand, list):
+                    op = "in"
+                found.append((key, op, operand))
         return found
 
 
@@ -110,6 +122,11 @@ def entity_totals(definition: AppDefinition, entity_name: str) -> list[TsTotal]:
                     inverse=relation.inverse,
                     number=total.field,
                     filter=spec.filter,
+                    relations=frozenset(
+                        p
+                        for p in spec.filter or {}
+                        if p in definition.entities[relation.target].relations
+                    ),
                 )
             if spec.id not in found[key].ids:
                 found[key].ids.append(spec.id)
