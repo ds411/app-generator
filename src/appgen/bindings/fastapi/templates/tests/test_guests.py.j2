@@ -1,0 +1,112 @@
+{% set g = py.guests %}
+{{ trace_header(g.id) }}
+{% set u = py.entity(definition.auth.user_entity) %}
+"""The tests of the guests (ADR 0050): a guest uses its own records, and they move to a user.
+
+A guest token of `POST /auth/guest` gives the guest operations on the
+records of the guest. Another guest does not see them, and a request
+without a token gets 401. `POST /auth/guest/move` gives them to the
+signed-in user.
+"""
+
+{% if g.tested %}
+from uuid import UUID
+
+{% endif %}
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import make_token
+{% for t in g.tested | sort(attribute="entity.entity.slice") %}
+from app.features.{{ t.entity.entity.slice }}.models import {{ t.entity.entity.name }}
+{% endfor %}
+{% set factories = ["make_" ~ u.snake] %}
+{% for t in g.tested %}
+{% set _ = factories.append(t.entity.entity.snake ~ "_input") %}
+{% endfor %}
+{{ py.from_import("tests.factories", factories | unique | sort | list) }}
+from tests.problems import assert_problem
+
+pytestmark = pytest.mark.anyio
+
+
+async def _guest(client: AsyncClient) -> tuple[str, dict[str, str]]:
+    """Return a new guest token, and the headers with it."""
+    response = await client.post("/auth/guest")
+    assert response.status_code == 201, response.text
+    token = response.json()["access_token"]
+    return token, {"Authorization": f"Bearer {token}"}
+{% for t in g.tested %}
+{% set e = t.entity.entity %}
+{% set owner = t.entity.owner %}
+
+
+{{ trace(t.create.id) }}
+{{ trace(t.list.id) }}
+async def test_a_guest_uses_its_own_{{ e.snake }}_records(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    _, guest = await _guest(anonymous_client)
+    _, other = await _guest(anonymous_client)
+    user = await make_{{ u.snake }}(session)
+    # A guest cannot give its record to a user.
+    {{ py.call("payload = await ", e.snake ~ "_input", ["session", owner.fk_attr ~ "=str(user.id)"]) }}
+    {{ py.call("response = await ", "anonymous_client.post", [py.string(e.path ~ t.create.path), "json=payload", "headers=guest"]) }}
+    assert response.status_code == {{ t.create.status }}, response.text
+    record = response.json()
+    assert record["{{ owner.fk_attr }}"] is None
+
+    response = await anonymous_client.get("{{ e.path }}{{ t.list.path }}", headers=guest)
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [record["id"]]
+    response = await anonymous_client.get("{{ e.path }}{{ t.list.path }}", headers=other)
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+{% if t.read %}
+    path = "{{ e.path }}{{ t.read.path | replace('{id}', '') }}"
+    assert_problem(await anonymous_client.get(f"{path}{record['id']}", headers=other), 404)
+{% endif %}
+    assert_problem(await anonymous_client.get("{{ e.path }}{{ t.list.path }}"), 401)
+
+
+{{ trace(t.create.id) }}
+async def test_the_{{ e.snake }}_records_of_a_guest_move_to_the_user(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    token, guest = await _guest(anonymous_client)
+    payload = await {{ e.snake }}_input(session)
+    {{ py.call("response = await ", "anonymous_client.post", [py.string(e.path ~ t.create.path), "json=payload", "headers=guest"]) }}
+    assert response.status_code == {{ t.create.status }}, response.text
+    record = response.json()
+    user = await make_{{ u.snake }}(session)
+    headers = {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+
+    {{ py.call("response = await ", "anonymous_client.post", ['"/auth/guest/move"', 'json={"guest_token": token}', "headers=headers"]) }}
+    assert response.status_code == 200, response.text
+    assert response.json() == {"records": 1}
+    found = await session.get({{ e.name }}, UUID(record["id"]), populate_existing=True)
+    assert found is not None
+    assert found.{{ owner.fk_attr }} == user.id
+    assert found.guest_id is None
+    # The record belongs to the user now, and not to the guest.
+    response = await anonymous_client.get("{{ e.path }}{{ t.list.path }}", headers=guest)
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+{% endfor %}
+
+
+async def test_the_move_needs_a_valid_guest_token_and_a_user(
+    anonymous_client: AsyncClient, session: AsyncSession
+) -> None:
+    token, _ = await _guest(anonymous_client)
+    user = await make_{{ u.snake }}(session)
+    headers = {"Authorization": f"Bearer {make_token(b'test-secret', user.id)}"}
+    {{ py.call("response = await ", "anonymous_client.post", ['"/auth/guest/move"', 'json={"guest_token": "not-a-token"}', "headers=headers"]) }}
+    assert_problem(response, 400)
+    # A guest token is not the token of a user.
+    response = await anonymous_client.post("/auth/guest/move", json={"guest_token": token})
+    assert_problem(response, 401)
+    headers = {"Authorization": f"Bearer {token}"}
+    {{ py.call("response = await ", "anonymous_client.post", ['"/auth/guest/move"', 'json={"guest_token": token}', "headers=headers"]) }}
+    assert_problem(response, 401)

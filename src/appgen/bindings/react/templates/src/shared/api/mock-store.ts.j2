@@ -54,6 +54,13 @@ export type RecordRules = {
   path: readonly OwnerStep[];
   /** The key of an owner of one many-to-one relation: a new record of a user of the rule belongs to the user. */
   owner?: string;
+{% if guests %}
+  /**
+   * The key of the owner relation of a record of a guest (ADR 0050): a new
+   * record of a guest has no owner, and the key `guestId` has the guest.
+   */
+  guest?: string;
+{% endif %}
 {% if memberships %}
   /** The operation of each call of the store: a membership gives an operation in its scopes (ADR 0048). */
   operations?: Readonly<Partial<Record<CallKind, string>>>;
@@ -124,6 +131,46 @@ export function pathIds(record: object, path: readonly PathStep[]): string[] {
     records = (recordsByEntity.get(step.target)?.() ?? []).filter((item) => ids.includes(item.id));
   }
   return [];
+}
+
+{% endif %}
+{% if guests %}
+/** The moves of the stores of the entities of the guests (ADR 0050). */
+const guestMoves = new Set<(guest: string, user: string) => void>();
+
+/** The key of the records of the guests in the browser storage (ADR 0050). */
+const GUEST_RECORDS_KEY = {{ js(app.name ~ "-guest-records") }};
+
+/**
+ * Return the records of the guests that the browser keeps for the tab, by
+ * entity: the records of a guest, and the records that moved from a guest
+ * to a user. The sign-in and the sign-up load the page again, and the
+ * records stay.
+ */
+function storedGuestRecords(): Record<string, EntityRecord[]> {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(GUEST_RECORDS_KEY) ?? "{}") as Record<string, EntityRecord[]>;
+  } catch {
+    return {};
+  }
+}
+
+function storeGuestRecords(entity: string, records: readonly EntityRecord[]): void {
+  try {
+    window.sessionStorage.setItem(GUEST_RECORDS_KEY, JSON.stringify({ ...storedGuestRecords(), [entity]: records }));
+  } catch {
+    // No storage: the records of the guests stay in memory only.
+  }
+}
+
+/**
+ * Give the records of a guest to a user: the user becomes the owner of
+ * each record (ADR 0050). The sign-in and the sign-up call it.
+ */
+export function moveGuestRecords(guest: string, user: string): void {
+  for (const move of guestMoves) {
+    move(guest, user);
+  }
 }
 
 {% endif %}
@@ -420,11 +467,23 @@ function wait(): Promise<void> {
  * field, and gives the records in the selected language (ADR 0026).
 {% endif %}
  */
+{% macro guest_check() %}
+{% if guests %}
+    if (scope.guest) {
+      // A guest uses only its own records (ADR 0050).
+      return (record as Record<string, unknown>).guestId === scope.user;
+    }
+{% endif %}
+{%- endmacro %}
 export class MockStore<T extends EntityRecord, TInput extends object>
   implements EntityApi<T, TInput>
 {
   private records: T[];
   private readonly listeners = new Set<() => void>();
+{% if guests %}
+  /** The IDs of the records that the browser keeps: the records of the guests (ADR 0050). */
+  private readonly kept = new Set<string>();
+{% endif %}
 {% if react.events %}
   private events: Events<T> = {};
 {% endif %}
@@ -459,6 +518,17 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     this.records = data.map((record) => ({ ...record }));
 {% if reads_others %}
     recordsByEntity.set(entity, () => this.records);
+{% endif %}
+{% if guests %}
+    if (rules?.guest !== undefined) {
+      const known = new Set(this.records.map((record) => record.id));
+      const kept = (storedGuestRecords()[entity] ?? []).filter((record) => !known.has(record.id));
+      this.records = [...this.records, ...(kept as T[])];
+      for (const record of kept) {
+        this.kept.add(record.id);
+      }
+      guestMoves.add((guest, user) => this.moveGuest(guest, user));
+    }
 {% endif %}
 {% if lines_ops %}
     snapshots.add(() => this.snapshot());
@@ -928,7 +998,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
    * scope has them.
    */
   private inScope(record: T, scope: RecordScope): boolean {
-    return (
+{{ guest_check() }}    return (
       hasValuesOf(scope, record) &&
       (!scope.owner || this.ownersOf(record).includes(scope.user)) &&
       (scope.scopes === undefined || this.inScopes(record, scope.scopes))
@@ -955,7 +1025,7 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 
   /** Return true if a record has the values of a scope, and belongs to its user if the scope has an owner. */
   private inScope(record: T, scope: RecordScope): boolean {
-    return hasValuesOf(scope, record) && (!scope.owner || this.ownersOf(record).includes(scope.user));
+{{ guest_check() }}    return hasValuesOf(scope, record) && (!scope.owner || this.ownersOf(record).includes(scope.user));
   }
 {% endif %}
 {% if record_rules %}
@@ -964,6 +1034,43 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   private ownersOf(record: T): string[] {
     return pathIds(record, this.rules?.path ?? []);
   }
+{% if guests %}
+
+  /** Give the records of a guest to a user (ADR 0050): the owner relation has the user, and the guest goes. */
+  private moveGuest(guest: string, user: string): void {
+    const key = this.rules?.guest;
+    const moved = this.records.filter((record) => (record as Record<string, unknown>).guestId === guest);
+    if (key === undefined || moved.length === 0) {
+      return;
+    }
+    this.records = this.records.map((record) => {
+      if (!moved.includes(record)) return record;
+      const values: Record<string, unknown> = { ...record, [key]: user };
+      delete values.guestId;
+      return values as unknown as T;
+    });
+    this.notify();
+  }
+
+  /**
+   * Keep the records of the guests of the store in the browser storage
+   * (ADR 0050): the records of a guest, and the records that moved from a
+   * guest to a user.
+   */
+  private keepGuestRecords(): void {
+    if (this.rules?.guest === undefined) {
+      return;
+    }
+    for (const record of this.records) {
+      if ((record as Record<string, unknown>).guestId !== undefined) {
+        this.kept.add(record.id);
+      }
+    }
+    if (this.kept.size > 0) {
+      storeGuestRecords(this.entity, this.records.filter((record) => this.kept.has(record.id)));
+    }
+  }
+{% endif %}
 
   /** Throw a RecordRuleError if a new or changed record is not part of the record rule of the user. */
 {% if memberships %}
@@ -977,10 +1084,25 @@ export class MockStore<T extends EntityRecord, TInput extends object>
     }
   }
 
+{% if guests %}
+  /**
+   * Return the owner of a new or changed record: the user of an owner rule
+   * of one relation, or nothing. A record of a guest has no owner until it
+   * moves to a user, and the key `guestId` has the guest (ADR 0050).
+   */
+  private ownerValues(): Record<string, string | null> {
+    const scope = this.rules?.scopeOf("change") ?? null;
+    const guest = this.rules?.guest;
+    if (scope?.guest && guest !== undefined) {
+      return { [guest]: null, guestId: scope.user };
+    }
+    const key = this.rules?.owner;
+{% else %}
   /** Return the owner of a new or changed record: the user of an owner rule of one relation, or nothing. */
   private ownerValues(): Record<string, string> {
     const scope = this.rules?.scopeOf("change") ?? null;
     const key = this.rules?.owner;
+{% endif %}
     return key === undefined || scope === null || !scope.owner ? {} : { [key]: scope.user };
   }
 
@@ -1143,6 +1265,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
 {% if react.totals %}
   /** Notify the listeners of the store, and of the stores with totals of its records. */
   private notify(): void {
+{% if guests %}
+    this.keepGuestRecords();
+{% endif %}
     this.notifyListeners();
     for (const notify of dependents.get(this.entity) ?? []) {
       notify();
@@ -1156,6 +1281,9 @@ export class MockStore<T extends EntityRecord, TInput extends object>
   }
 {% else %}
   private notify(): void {
+{% if guests %}
+    this.keepGuestRecords();
+{% endif %}
     for (const listener of this.listeners) {
       listener();
     }

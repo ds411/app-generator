@@ -9,6 +9,17 @@
 {% set history_users = (has_history(definition) or has_notices(definition)) and not react.api %}
 {% set label_key = history_user_key(definition) if history_users else none %}
 {% set label_key = none if label_key == key else label_key %}
+{# A guest (no user) may call the guest operations, on its own records (ADR 0050). #}
+{% set may_call = "visitorMayCall(currentRole(), currentUserId(), operation)" if guests else "roleMayCall(currentRole(), operation)" %}
+{% set mock_moves = guests and definition.auth.password and not react.api %}
+{% macro guest_scope() %}
+{% if guests %}
+  if (currentUserId() === null && GUEST_ENTITIES.includes(entity)) {
+    // A guest uses only its own records (ADR 0050).
+    return { user: guestId, owner: false, where: {}, guest: true };
+  }
+{% endif %}
+{%- endmacro %}
 {% set user_type = "{ id: string; username: string" ~ ("; role: string | null" if role_key else "") ~ ("; label?: string | null" if label_key else "") ~ ("; passwordHash?: string" if sign_up else "") ~ " }" %}
 {{ trace_header(definition.auth.id) }}
 {% if react.api %}
@@ -17,10 +28,10 @@
 // browser tab.{% if role_key %} The checks of the roles in the browser only hide what the
 // API refuses: the API checks each request.{% endif %}
 
-import { {{ "API_URL, " if definition.auth.providers }}{{ "ApiError, " if verify }}apiRequest, setAccessToken } from "@/shared/api";
+import { {{ "API_URL, " if definition.auth.providers }}{{ "ApiError, " if verify or guests }}apiRequest{{ ", guestToken" if guests }}, setAccessToken{{ ", setGuestToken" if guests }} } from "@/shared/api";
 {% if role_key %}
 import type { PageName } from "@/shared/config/pages";
-import { {{ "MEMBER_OPERATIONS, " if memberships }}roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
+import { {{ "MEMBER_OPERATIONS, " if memberships }}{{ "roleMayOpenPage, visitorMayCall" if guests else "roleMayCall, roleMayOpenPage" }} } from "@/shared/lib/permissions";
 {% endif %}
 
 const STORAGE_KEY = {{ (app.name ~ "-session") | tojson }};
@@ -62,12 +73,16 @@ const SIGN_OUT_PROVIDERS = new Set([
 {% endif %}
 
 {% if role_key %}
-{% if memberships %}
-import { recordsOf } from "@/shared/api";
+{% set api_names = (["moveGuestRecords"] if mock_moves else []) + (["recordsOf"] if memberships else []) %}
+{% if api_names %}
+import { {{ api_names | join(", ") }} } from "@/shared/api";
 {% endif %}
 import type { PageName } from "@/shared/config/pages";
 {% if memberships %}
 import {
+{% if guests %}
+  GUEST_ENTITIES,
+{% endif %}
   MEMBER_OPERATIONS,
   type Membership,
   type RecordAction,
@@ -77,14 +92,25 @@ import {
   roleMayOpenPage,
   SCOPE_ENTITIES,
   scopesOf,
+{% if guests %}
+  visitorMayCall,
+{% endif %}
 } from "@/shared/lib/permissions";
 {% elif record_rules and not react.api %}
 import {
+{% if guests %}
+  GUEST_ENTITIES,
+{% endif %}
   type RecordAction,
   type RecordScope,
   recordScopeOf,
+{% if guests %}
+  roleMayOpenPage,
+  visitorMayCall,
+{% else %}
   roleMayCall,
   roleMayOpenPage,
+{% endif %}
 } from "@/shared/lib/permissions";
 {% else %}
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
@@ -112,6 +138,40 @@ const users: {{ user_type }}[] = [
   { id: {{ record.id | tojson }}, username: {{ record[key] | tojson }}{% if role_key %}, role: {{ record[role_key] | tojson }}{% endif %}{% if label_key %}, label: {{ record[label_key] | tojson }}{% endif %} },
 {% endfor %}
 ];
+{% if guests %}
+
+{{ trace(guests.element_id) }}
+/** The key of the guest ID of the tab in the browser storage (ADR 0050). */
+const GUEST_KEY = {{ (app.name ~ "-guest-id") | tojson }};
+
+/**
+ * Return the guest ID of the tab (ADR 0050): a visitor without a sign-in is
+ * a guest. The browser keeps the guest ID and the records of the guest for
+ * the tab, so that they stay when the page loads again, for example after
+ * the sign-in. With `renew`, a new guest starts.
+ */
+function tabGuestId(renew = false): string {
+  try {
+    const known = renew ? null : window.sessionStorage.getItem(GUEST_KEY);
+    if (known) return known;
+    const id = crypto.randomUUID();
+    window.sessionStorage.setItem(GUEST_KEY, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+{{ 'let' if mock_moves else 'const' }} guestId = tabGuestId();
+{% if mock_moves %}
+
+/** Give the records of the guest of the tab to a user, and start a new guest for the next visitor of the tab. */
+function moveGuestRecordsTo(userId: string): void {
+  moveGuestRecords(guestId, userId);
+  guestId = tabGuestId(true);
+}
+{% endif %}
+{% endif %}
 {% if sign_up %}
 
 /** The users of the sign-up in this browser tab (ADR 0016). */
@@ -154,6 +214,10 @@ export async function addMockUser(username: string, password: string): Promise<v
   } catch {
     throw new Error({{ tr(js("The browser does not keep the session.")) }});
   }
+{% if mock_moves %}
+  // The records of the guest of the page move to the new user (ADR 0050).
+  moveGuestRecordsTo(user.id);
+{% endif %}
 }
 {% endif %}
 {% endif %}
@@ -204,7 +268,7 @@ function membershipsOf(userId: string): Membership[] {
  * operations, on the records of its scopes: the store filters the records.
  */
 export function requireOperation(operation: string): void {
-  if (roleMayCall(currentRole(), operation)) {
+  if ({{ may_call }}) {
     return;
   }
   const userId = currentUserId();
@@ -222,7 +286,7 @@ export function requireOperation(operation: string): void {
  * demonstration: an app with a back end applies the rules on the server.
  */
 export function recordScope(entity: string, action: RecordAction, operation?: string): RecordScope | null {
-  const role = currentRole();
+{{ guest_scope() }}  const role = currentRole();
   const userId = currentUserId();
   if (
     userId !== null &&
@@ -243,14 +307,14 @@ export function recordScope(entity: string, action: RecordAction, operation?: st
  * passes: the API checks the memberships of the user in each request.
  */
 export function requireOperation(operation: string): void {
-  if (!roleMayCall(currentRole(), operation) && MEMBER_OPERATIONS[operation] === undefined) {
+  if (!{{ may_call }} && MEMBER_OPERATIONS[operation] === undefined) {
     throw new ForbiddenError();
   }
 }
 {% else %}
-/** Throw a ForbiddenError if the signed-in user may not call an operation (ADR 0012). */
+/** Throw a ForbiddenError if the signed-in user may not call an operation (ADR 0012).{{ " A guest may call a guest operation (ADR 0050)." if guests }} */
 export function requireOperation(operation: string): void {
-  if (!roleMayCall(currentRole(), operation)) {
+  if (!{{ may_call }}) {
     throw new ForbiddenError();
   }
 }
@@ -264,7 +328,7 @@ export function requireOperation(operation: string): void {
  * a demonstration: an app with a back end applies the rules on the server.
  */
 export function recordScope(entity: string, action: RecordAction): RecordScope | null {
-  return recordScopeOf(currentRole(), currentUserId(), entity, action);
+{{ guest_scope() }}  return recordScopeOf(currentRole(), currentUserId(), entity, action);
 }
 {% endif %}
 {% endif %}
@@ -298,8 +362,22 @@ export type AuthResult<T> = { ok: true; value: T } | { ok: false; message: strin
 
 {% endif %}
 {% if react.api %}
-{% if signs_out %}
+{% if signs_out and guests %}
+/**
+ * Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user, and the provider of the sign-in.
+ * The records of the guest token move to the user (ADR 0050).
+ */
+{% elif signs_out %}
 /** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user, and the provider of the sign-in. */
+{% elif guests %}
+/**
+ * Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user.
+ * The records of the guest token move to the user (ADR 0050).
+ */
+{% else %}
+/** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
+{% endif %}
+{% if signs_out %}
 export async function startSession(token: string, provider: string | null = null): Promise<void> {
   setAccessToken(token);
   try {
@@ -311,7 +389,6 @@ export async function startSession(token: string, provider: string | null = null
       window.sessionStorage.setItem(PROVIDER_KEY, provider);
     }
 {% else %}
-/** Keep the session of a token of the API: the ID{% if role_key %} and the role{% endif %} of the user. */
 export async function startSession(token: string): Promise<void> {
   setAccessToken(token);
   try {
@@ -325,7 +402,34 @@ export async function startSession(token: string): Promise<void> {
     setAccessToken(null);
     throw error;
   }
+{% if guests %}
+  await moveGuestRecords();
+{% endif %}
 }
+{% if guests %}
+
+{{ trace(guests.element_id) }}
+/**
+ * Give the records of the guest token to the signed-in user, and delete the
+ * guest token (`POST /auth/guest/move`). A guest token that is not valid, or
+ * that has ended, has no records to move. After another error, the guest
+ * token stays for the next sign-in.
+ */
+async function moveGuestRecords(): Promise<void> {
+  const guest = guestToken();
+  if (guest === null) {
+    return;
+  }
+  try {
+    await apiRequest("POST", "/auth/guest/move", { guest_token: guest });
+    setGuestToken(null);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      setGuestToken(null);
+    }
+  }
+}
+{% endif %}
 
 {% if definition.auth.password %}
 /**
@@ -597,6 +701,10 @@ export async function signIn(username: string, password: string): Promise<SignIn
   } catch {
     return { status: "error", message: {{ tr(js("The browser does not keep the session.")) }} };
   }
+{% if mock_moves %}
+  // The records of the guest of the page move to the user (ADR 0050).
+  moveGuestRecordsTo(user.id);
+{% endif %}
   return { status: "signed-in" };
 }
 {% endif %}
@@ -676,6 +784,10 @@ function startMockSession(userId: string): string | null {
   } catch {
     return {{ tr(js("The browser does not keep the session.")) }};
   }
+{% if mock_moves %}
+  // The records of the guest of the page move to the user (ADR 0050).
+  moveGuestRecordsTo(userId);
+{% endif %}
   return null;
 }
 

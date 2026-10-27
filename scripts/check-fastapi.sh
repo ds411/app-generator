@@ -64,10 +64,12 @@
 # check it and run its tests on Postgres and SQLite. Then generate
 # tests/fixtures/courses.yaml (the users and the sessions of M36: the
 # totals and the widgets of the signed-in user, `$me`), and check it and
-# run its tests on Postgres and SQLite. Last, generate
+# run its tests on Postgres and SQLite. Then generate
 # tests/fixtures/places.yaml (the point fields and the filters `near` and
 # `area`, ADR 0046), and check it and run its tests on Postgres and
-# SQLite.
+# SQLite. Last, generate tests/fixtures/shop.yaml (the records of the
+# guests of M36, ADR 0050), and check it and run its tests on Postgres
+# and SQLite.
 # The pre-push hook runs only the sections of this script that a push
 # changes (scripts/check_plan.py). Run it by hand from the repository
 # root, to run all sections:
@@ -86,9 +88,9 @@
 # "<output folder>-jira", "<output folder>-jira-accounts",
 # "<output folder>-totals", "<output folder>-invoices",
 # "<output folder>-listings", "<output folder>-courses",
-# "<output folder>-places", "<output folder>-rate-limit" (the app of
-# the rate limit check), and "<output folder>-live-events" (the app of
-# the live events check). The
+# "<output folder>-places", "<output folder>-shop",
+# "<output folder>-rate-limit" (the app of the rate limit check), and
+# "<output folder>-live-events" (the app of the live events check). The
 # generated tests run on Postgres (Docker, or a database in
 # TEST_DATABASE_URL), then on SQLite.
 #
@@ -121,6 +123,7 @@ invoices_definition=tests/fixtures/invoices.yaml
 listings_definition=tests/fixtures/listings.yaml
 courses_definition=tests/fixtures/courses.yaml
 places_definition=tests/fixtures/places.yaml
+shop_definition=tests/fixtures/shop.yaml
 root=$(pwd)
 
 if [ $# -gt 0 ]; then
@@ -128,7 +131,7 @@ if [ $# -gt 0 ]; then
     mkdir -p "$out"
 else
     out=$(mktemp -d "${TMPDIR:-/tmp}/appgen-fastapi.XXXXXX")
-    trap 'rm -rf "$out" "$out-room-booking" "$out-room-booking-ses" "$out-room-booking-ses.yaml" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-jira" "$out-jira-accounts" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-rate-limit" "$out-live-events"' EXIT
+    trap 'rm -rf "$out" "$out-room-booking" "$out-room-booking-ses" "$out-room-booking-ses.yaml" "$out-provider-sign-in" "$out-cognito-sign-in" "$out-account-security" "$out-seed-data" "$out-record-rules" "$out-webhooks" "$out-jobs" "$out-files" "$out-inbound-email" "$out-api-connections" "$out-jira" "$out-jira-accounts" "$out-totals" "$out-invoices" "$out-listings" "$out-courses" "$out-places" "$out-shop" "$out-rate-limit" "$out-live-events"' EXIT
 fi
 auth_out="$out-room-booking"
 ses_out="$out-room-booking-ses"
@@ -149,6 +152,7 @@ invoices_out="$out-invoices"
 listings_out="$out-listings"
 courses_out="$out-courses"
 places_out="$out-places"
+shop_out="$out-shop"
 
 step() {
     echo "check-fastapi: $*"
@@ -617,6 +621,25 @@ if section fastapi:places; then
     step "places: pytest"
     uv run pytest -q
     step "places: pytest on SQLite"
+    TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
+    rm -f test.db
+    cd "$root"
+fi
+
+if section fastapi:shop; then
+    step "generate $shop_definition in $shop_out"
+    rm -rf "$shop_out"
+    uv run --locked appgen generate "$shop_definition" -b fastapi -o "$shop_out" >/dev/null
+    uv run --locked appgen check "$shop_definition" "$shop_out"
+    cd "$shop_out"
+    step "shop: uv sync, ruff, pyright"
+    uv sync --quiet
+    uv run ruff check
+    uv run ruff format --check
+    uv run pyright
+    step "shop: pytest"
+    uv run pytest -q
+    step "shop: pytest on SQLite"
     TEST_DATABASE_URL=sqlite+aiosqlite:///./test.db uv run pytest -q
     rm -f test.db
     cd "$root"

@@ -5,6 +5,10 @@
 {{ trace_header(definition.access.id) }}
 import "server-only";
 
+{% if guests %}
+import { randomUUID } from "node:crypto";
+
+{% endif %}
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
@@ -15,6 +19,10 @@ import type { PageName } from "@/shared/config/pages";
 import { getDb, {{ ([table.const] + ([member_table.const] if m else [])) | unique | sort | join(", ") }} } from "@/shared/db";
 {% if m %}
 import {
+{% if guests %}
+  GUEST_ENTITIES,
+  GUEST_OPERATIONS,
+{% endif %}
   MEMBER_OPERATIONS,
   type Membership,
   onRecord,
@@ -28,6 +36,10 @@ import {
 } from "@/shared/lib/permissions";
 {% elif record_rules %}
 import {
+{% if guests %}
+  GUEST_ENTITIES,
+  GUEST_OPERATIONS,
+{% endif %}
   type RecordAction,
   type RecordScope,
   recordScopeOf,
@@ -38,7 +50,7 @@ import {
 import { roleMayCall, roleMayOpenPage } from "@/shared/lib/permissions";
 {% endif %}
 
-import { requirePageUser, requireUser, sessionUserId } from "./session";
+import { {{ "guestId, " if guests }}requirePageUser, requireUser, sessionUserId{{ ", startGuestSession" if guests }} } from "./session";
 
 // The checks of the permissions on the server (ADR 0012). The field
 // `{{ definition.access.role_field }}` of {{ definition.auth.user_entity }} gives the role of a user. The table of
@@ -52,6 +64,27 @@ export class ForbiddenError extends Error {
   }
 }
 
+{% macro guest_check() %}
+{% if guests %}
+  if (GUEST_OPERATIONS.includes(operation) && (await sessionUserId()) === null) {
+    // A guest calls a guest operation on its own records (ADR 0050).
+    return;
+  }
+{% endif %}
+{%- endmacro %}
+{% if guests %}
+{{ trace(guests.element_id) }}
+/**
+ * Return the records of the guest of the visitor (ADR 0050). A change
+ * starts a guest session if the visitor has none. A read without a guest
+ * session has a new guest ID: no record has it.
+ */
+async function guestScope(action: RecordAction): Promise<RecordScope> {
+  const user = action === "change" ? await startGuestSession() : ((await guestId()) ?? randomUUID());
+  return { user, owner: false, where: {}, guest: true };
+}
+
+{% endif %}
 async function roleOf(userId: string): Promise<string | null> {
   const rows = await getDb()
     .select({ role: {{ table.const }}.{{ role.key }} })
@@ -83,7 +116,7 @@ export async function membershipsOf(userId: string): Promise<Membership[]> {
  * on the records of its scopes: the data access filters the records.
  */
 export async function requireOperation(operation: string): Promise<void> {
-  const userId = await requireUser();
+{{ guest_check() }}  const userId = await requireUser();
   if (roleMayCall(await roleOf(userId), operation)) {
     return;
   }
@@ -92,9 +125,9 @@ export async function requireOperation(operation: string): Promise<void> {
   }
 }
 {% else %}
-/** Throw a ForbiddenError if the signed-in user may not call an operation. */
+/** Throw a ForbiddenError if the signed-in user may not call an operation.{{ " A guest may call a guest operation." if guests }} */
 export async function requireOperation(operation: string): Promise<void> {
-  const role = await roleOf(await requireUser());
+{{ guest_check() }}  const role = await roleOf(await requireUser());
   if (!roleMayCall(role, operation)) {
     throw new ForbiddenError();
   }
@@ -112,7 +145,12 @@ export async function requireOperation(operation: string): Promise<void> {
 export async function recordScope(entity: string, action: RecordAction, operation?: string): Promise<RecordScope | null> {
   const userId = await sessionUserId();
   if (userId === null) {
+{% if guests %}
+    // A guest uses only its own records (ADR 0050).
+    return GUEST_ENTITIES.includes(entity) ? guestScope(action) : null;
+{% else %}
     return null;
+{% endif %}
   }
   const role = await roleOf(userId);
   if (operation !== undefined && !roleMayCall(role, operation) && SCOPE_ENTITIES.includes(entity) && MEMBER_OPERATIONS[operation] !== undefined) {
@@ -162,7 +200,12 @@ export async function memberPermissions(
 export async function recordScope(entity: string, action: RecordAction): Promise<RecordScope | null> {
   const userId = await sessionUserId();
   if (userId === null) {
+{% if guests %}
+    // A guest uses only its own records (ADR 0050).
+    return GUEST_ENTITIES.includes(entity) ? guestScope(action) : null;
+{% else %}
     return null;
+{% endif %}
   }
   return recordScopeOf(await roleOf(userId), userId, entity, action);
 }

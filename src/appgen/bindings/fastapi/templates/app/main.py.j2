@@ -25,6 +25,9 @@ from app.core.connections import router as connections_router
 {% endif %}
 from app.core.db import make_engine, make_sessions
 from app.core.errors import add_problem_handlers
+{% if py.guests %}
+from app.core.guests import router as guests_router
+{% endif %}
 from app.core.health import router as health_router
 {% if i18n %}
 from app.core.i18n import LanguageMiddleware
@@ -199,6 +202,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {% if sf %}
     {{ trace(sf.id) }}
     app.include_router(second_factor_router)
+{% endif %}
+{% if py.guests %}
+    {{ trace(py.guests.id) }}
+    app.include_router(guests_router)
 {% endif %}
 {% for e in py.entity_order() %}
     {{ trace(e.id) }}

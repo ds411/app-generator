@@ -1034,6 +1034,17 @@
           },
           "title": "Providers",
           "type": "object"
+        },
+        "guests": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guests"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -4126,6 +4137,47 @@
         }
       },
       "title": "GridOverride",
+      "type": "object"
+    },
+    "Guests": {
+      "additionalProperties": false,
+      "description": "The records of the guests: the visitors without a sign-in (ADR 0050).\n\nA guest gets a guest token from the app, and owns the records that it\nmakes with the guest operations, for example the items of a cart. A\nsigned-in user can move the records of a guest token to itself: the\nfront ends do it at the sign-in and at the sign-up. Then the owner\nrelation of each record is the user.",
+      "patternProperties": {
+        "^x-": {}
+      },
+      "properties": {
+        "entities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/EntityName"
+          },
+          "title": "Entities",
+          "type": "object"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/MemberName"
+          },
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        },
+        "token_days": {
+          "default": 30,
+          "maximum": 365,
+          "minimum": 1,
+          "title": "Token Days",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entities",
+        "operations"
+      ],
+      "title": "Guests",
       "type": "object"
     },
     "HeaderName": {

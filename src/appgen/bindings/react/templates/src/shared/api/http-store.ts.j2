@@ -1,5 +1,5 @@
 {{ trace_header("app") }}
-import { ApiError, apiRequest } from "./http";
+import { ApiError, apiRequest{{ ", startGuestSession" if guests }} } from "./http";
 {% set type_names = ["type EntityApi", "type EntityRecord"] + (["type FileApi"] if definition.storage else []) + ["type Filter"] + (["type HistoryAction", "type HistoryApi", "type HistoryEntry"] if react.history else []) + ["type ListQuery", "type ListResult"] + (["type MemberPermissions"] if memberships else []) + ["NotFoundError"] + (["type PresenceApi", "type PresentUser"] if presences else []) + (["type RowsPage"] if query_operations(definition) else []) + (["type SharedRecord", "type SharingApi"] if shares else []) %}
 {% if type_names | length > 6 %}
 import {
@@ -28,6 +28,10 @@ export type ApiShape = {
    * for the values of all languages (`translations=all`), for the forms.
    */
   translations?: boolean;
+{% if guests %}
+  /** True for an entity of the guests (ADR 0050): a visitor without a sign-in gets a guest token first. */
+  guest?: boolean;
+{% endif %}
 };
 
 /** A choice of a record: its ID and its text. */
@@ -471,6 +475,11 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
     if (this.shape.translations) {
       search.set("translations", "all");
     }
+{% if guests %}
+    if (this.shape.guest) {
+      await startGuestSession();
+    }
+{% endif %}
     const items: T[] = [];
     let total = 0;
     while (items.length < count) {
@@ -508,6 +517,11 @@ export class HttpStore<T extends EntityRecord, TInput extends object>
 
   private async request(method: string, id: string | null, body?: unknown, suffix = "", query = ""): Promise<unknown> {
     const path = (id === null ? this.path : `${this.path}/${encodeURIComponent(id)}${suffix}`) + query;
+{% if guests %}
+    if (this.shape.guest) {
+      await startGuestSession();
+    }
+{% endif %}
     try {
       return await apiRequest(method, path, body);
     } catch (error) {

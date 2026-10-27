@@ -24,6 +24,9 @@ from app.core.auth import current_user
 {% endif %}
 from app.core.config import Settings
 from app.core.db import Base
+{% if py.guests %}
+from app.core.guests import check_guest_access, current_visitor
+{% endif %}
 {% set event_entities = py.entity_order() | selectattr("events") | sort(attribute="slice") | list %}
 {% for e in event_entities %}
 from app.features.{{ e.slice }} import repository as {{ e.snake }}_repository
@@ -180,6 +183,11 @@ def settings(migrated_url: str, files_folder: Path) -> Settings:
     app.dependency_overrides[current_user] = lambda: None
 {% if definition.access %}
     app.dependency_overrides[check_access] = lambda: None
+{% endif %}
+{% if py.guests %}
+    # The guest operations (ADR 0050): `tests/test_guests.py` tests the guests.
+    app.dependency_overrides[check_guest_access] = lambda: None
+    app.dependency_overrides[current_visitor] = lambda: None
 {% endif %}
 {% for api in py_apis.values() %}
     app.dependency_overrides[{{ api.dependency }}] = {{ api.mock_dependency }}

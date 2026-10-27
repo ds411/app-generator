@@ -1,20 +1,27 @@
 {% set table = nextjs.tables_by_entity[definition.auth.user_entity] %}
 {% set username = table.columns | selectattr("element_id", "eq", definition.entities[definition.auth.user_entity].fields[definition.auth.username_field].id) | first %}
 {% set verify = definition.auth.sign_up.verify_email if definition.auth.sign_up else none %}
+{% set guest_tables = [] %}
+{% for name in (guests.names if guests else []) %}
+{% set _ = guest_tables.append(nextjs.tables_by_entity[name].const) %}
+{% endfor %}
+{% set db_names = ((["credentialsTable", table.const] if definition.auth.password else []) + guest_tables) | unique | list %}
 {% set signs_out = definition.auth.providers.values() | selectattr("sign_out") | list %}
 {{ trace_header(definition.auth.id) }}
 import "server-only";
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, {{ "randomUUID, " if guests }}timingSafeEqual } from "node:crypto";
 
-{% if definition.auth.password %}
+{% if definition.auth.password or guests %}
 import { eq{{ ", sql" if verify }} } from "drizzle-orm";
 {% endif %}
 import { cookies } from "next/headers";
 import { redirect{{ ", unstable_rethrow" if nextjs.me_totals }} } from "next/navigation";
 
+{% if db_names %}
+import { {{ (db_names + ["getDb"]) | sort | join(", ") }} } from "@/shared/db";
+{% endif %}
 {% if definition.auth.password %}
-import { credentialsTable, getDb, {{ table.const }} } from "@/shared/db";
 
 import { hashPassword, verifyPassword } from "./password";
 {% endif %}
@@ -57,9 +64,6 @@ export function makeToken(userId: string, provider?: string): string {
   return `${body}.${sign(body)}`;
 }
 
-/** Set the session cookie of a user: the user is signed in. `provider` is the provider of the sign-in. */
-export async function startSession(userId: string, provider?: string): Promise<void> {
-  (await cookies()).set(SESSION_COOKIE, makeToken(userId, provider), {
 {% else %}
 /** Return a signed session token for a user. */
 export function makeToken(userId: string): string {
@@ -68,6 +72,20 @@ export function makeToken(userId: string): string {
   return `${body}.${sign(body)}`;
 }
 
+{% endif %}
+{% if guests %}
+/**
+ * Set the session cookie of a user: the user is signed in.{{ " `provider` is the provider of the sign-in." if signs_out }} The
+ * records of the guest of the guest cookie move to the user (ADR 0050).
+ */
+export async function startSession(userId: string{{ ", provider?: string" if signs_out }}): Promise<void> {
+  await moveGuestRecords(userId);
+  (await cookies()).set(SESSION_COOKIE, makeToken(userId{{ ", provider" if signs_out }}), {
+{% elif signs_out %}
+/** Set the session cookie of a user: the user is signed in. `provider` is the provider of the sign-in. */
+export async function startSession(userId: string, provider?: string): Promise<void> {
+  (await cookies()).set(SESSION_COOKIE, makeToken(userId, provider), {
+{% else %}
 /** Set the session cookie of a user: the user is signed in. */
 export async function startSession(userId: string): Promise<void> {
   (await cookies()).set(SESSION_COOKIE, makeToken(userId), {
@@ -80,6 +98,28 @@ export async function startSession(userId: string): Promise<void> {
   });
 }
 
+{% if guests %}
+/** Return the fields of a signed text with a valid signature that has not ended, else null. */
+function readSigned(token: string): { sub?: unknown; guest?: unknown } | null {
+  const [body = "", signature = ""] = token.split(".");
+  const expected = sign(body);
+  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as { sub?: unknown; guest?: unknown; exp?: unknown };
+    return typeof payload.exp === "number" && payload.exp * 1000 > Date.now() ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Return the user ID of a valid token that has not ended, else null. A guest token has no user ID. */
+export function readToken(token: string): string | null {
+  const sub = readSigned(token)?.sub;
+  return typeof sub === "string" ? sub : null;
+}
+{% else %}
 /** Return the user ID of a valid token that has not ended, else null. */
 export function readToken(token: string): string | null {
   const [body = "", signature = ""] = token.split(".");
@@ -95,12 +135,79 @@ export function readToken(token: string): string | null {
     return null;
   }
 }
+{% endif %}
 
 /** Return the ID of the signed-in user, or null. */
 export async function sessionUserId(): Promise<string | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return token ? readToken(token) : null;
 }
+{% if guests %}
+
+{{ trace(guests.element_id) }}
+// A visitor without a sign-in is a guest (ADR 0050): the guest cookie has
+// a signed text with a random guest ID and the end of its time. The guest
+// calls the guest operations on its own records: the column `guest_id` of
+// {{ guests.names | join(", ") }} holds the guest of a record. At the sign-in and at the
+// sign-up, the records of the guest move to the user.
+
+export const GUEST_COOKIE = "guest";
+export const GUEST_SECONDS = {{ guests.days * 86400 }};
+
+/** Return a signed guest token for a guest ID. A session token has a user ID, not a guest ID. */
+function makeGuestToken(guestId: string): string {
+  const exp = Math.floor(Date.now() / 1000) + GUEST_SECONDS;
+  const body = Buffer.from(JSON.stringify({ guest: guestId, exp })).toString("base64url");
+  return `${body}.${sign(body)}`;
+}
+
+/** Return the guest ID of the guest cookie, or null without a valid guest cookie. */
+export async function guestId(): Promise<string | null> {
+  const token = (await cookies()).get(GUEST_COOKIE)?.value;
+  const guest = token ? readSigned(token)?.guest : undefined;
+  return typeof guest === "string" ? guest : null;
+}
+
+/**
+ * Return the guest ID of the visitor. Without a guest cookie, start a guest
+ * session: a new guest cookie with a random guest ID. Only a server action
+ * or a route handler may set a cookie.
+ */
+export async function startGuestSession(): Promise<string> {
+  const known = await guestId();
+  if (known !== null) {
+    return known;
+  }
+  const guest = randomUUID();
+  (await cookies()).set(GUEST_COOKIE, makeGuestToken(guest), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: GUEST_SECONDS,
+  });
+  return guest;
+}
+
+/**
+ * Give the records of the guest of the guest cookie to a user, and delete
+ * the guest cookie: the user becomes the owner of each record. The move
+ * changes only the owner and the guest of the records.
+ */
+async function moveGuestRecords(userId: string): Promise<void> {
+  const guest = await guestId();
+  if (guest === null) {
+    return;
+  }
+  await getDb().transaction(async (tx) => {
+{% for item in guests.entities %}
+{% set guest_table = nextjs.tables_by_entity[item.entity].const %}
+    await tx.update({{ guest_table }}).set({ {{ item.owner_key }}: userId, guestId: null }).where(eq({{ guest_table }}.guestId, guest));
+{% endfor %}
+  });
+  (await cookies()).delete(GUEST_COOKIE);
+}
+{% endif %}
 {% if signs_out %}
 
 /** Return the provider of the session of the signed-in user, or null: for example after a sign-in with a password. */

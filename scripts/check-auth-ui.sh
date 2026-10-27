@@ -16,9 +16,11 @@
 # sign in to the course hub of tests/fixtures/courses.yaml as each user
 # with records, and check the values of the signed-in user (`$me`) in the
 # widgets, the lists, the totals, and the forms
-# (scripts/sessions_ui_test.py, M36). Last, open the map of the places of
+# (scripts/sessions_ui_test.py, M36). Then open the map of the places of
 # tests/fixtures/places.yaml with a local tile server, and move it
-# (scripts/places_ui_test.py, ADR 0046).
+# (scripts/places_ui_test.py, ADR 0046). Last, fill a cart of the shop
+# of tests/fixtures/shop.yaml as a guest, sign up or sign in, and find
+# the cart (scripts/guests_ui_test.py, ADR 0050).
 # The pre-push hook runs only the sections of this script that a push
 # changes (scripts/check_plan.py). Run it by hand from the repository
 # root, to run all sections:
@@ -70,3 +72,4 @@ run_test connections connection_ui_test.py "$@"
 run_test listings listings_ui_test.py "$@"
 run_test courses sessions_ui_test.py "$@"
 run_test places places_ui_test.py "$@"
+run_test shop guests_ui_test.py "$@"
