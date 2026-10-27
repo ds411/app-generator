@@ -52,6 +52,7 @@ from appgen.bindings.fastapi.pysource import (
 from appgen.bindings.fastapi.queries import PyListQuery, PySearchIndex, list_query
 from appgen.bindings.fastapi.samples import PatternError, pattern_samples
 from appgen.bindings.fastapi.seed import python_seed
+from appgen.bindings.fastapi.presence import PyPresence, python_presences
 from appgen.bindings.fastapi.sharing import PyShare, python_shares
 from appgen.bindings.fastapi.total_rules import fix_rule_samples, total_rule_cases
 from appgen.bindings.fastapi.totals import (
@@ -1327,6 +1328,8 @@ class PyEntity:
     """The notifications of the changes of the records (ADR 0041)."""
     live: PyLive | None = None
     """The live updates of the records (ADR 0051), or None."""
+    presence: PyPresence | None = None
+    """The endpoints of the users on the pages of the records (ADR 0052), or None."""
 
     @property
     def guard_module(self) -> str:
@@ -2223,6 +2226,8 @@ class PyEntity:
             modules.add("history")
         if self.share is not None:
             modules.add("share")
+        if self.presence is not None:
+            modules.add("presence")
         if modules:
             lines.add(from_import(f"app.features.{self.slice}", modules))
         return import_block(lines)
@@ -2449,6 +2454,9 @@ class PyLiveTests:
     """A live entity, and a role that may not read it: its stream gives 403."""
     rules: list[PyRuleTest] = field(default_factory=list[PyRuleTest])
     """The tests of the record rules (ADR 0025) of the reads of the live entities."""
+    presence: list[PyLiveReader] = field(default_factory=list[PyLiveReader])
+    """Each entity with a page with `presence` (ADR 0052), with a role that reads all its
+    records (None without roles). An entity without such a role has no test."""
 
 
 @dataclass(slots=True)
@@ -2532,6 +2540,16 @@ class PyApp:
     def notification_ids(self) -> list[str]:
         """The IDs of the notifications, in the order of `notifications`."""
         return [n.id for n in self.notifications]
+
+    @property
+    def presences(self) -> list[PyEntity]:
+        """The entities with a page with `presence` (ADR 0052), in the order of the tables."""
+        return [e for e in self.entity_order() if e.presence is not None]
+
+    @property
+    def presence_ids(self) -> list[str]:
+        """The IDs of the pages with `presence`, in the order of `presences`."""
+        return [i for e in self.presences if e.presence is not None for i in e.presence.ids]
 
     @property
     def shares(self) -> list[PyEntity]:
@@ -2696,6 +2714,11 @@ class PyApp:
             assert share is not None
             if share.update.protected:
                 found += [(op, share.update.name, share.id) for op in share.guarded]
+        for entity in self.presences:
+            presence = entity.presence
+            assert presence is not None
+            if presence.read.protected:
+                found += [(op, presence.read.name, presence.id) for op in presence.guarded]
         return found
 
     @property
@@ -2869,6 +2892,7 @@ def python_app(definition: AppDefinition) -> PyApp:
     _history(definition, entities)
     python_shares(definition, entities)
     _live(definition, entities)
+    python_presences(definition, entities, _user_label_attr(definition, entities))
     python_notifications(definition, entities)
     for entity in entities.values():
         for notification in entity.notifications:
@@ -3466,6 +3490,21 @@ def _live_tests(
             if tests.denied is None and not live.public and not reads:
                 tests.denied = (entity, name)
     tests.readers.sort(key=lambda item: item[0].snake)
+    for entity in entities.values():
+        presence = entity.presence
+        if presence is None:
+            continue
+        if access is None:
+            tests.presence.append((entity, None))
+            continue
+        for name, role in access.roles.items():
+            rule = role.records.get(entity.name)
+            if role.allows_operation(presence.read.name) and (
+                rule is None or "read" not in rule.operations or not presence.scope
+            ):
+                tests.presence.append((entity, name))
+                break
+    tests.presence.sort(key=lambda item: item[0].snake)
     tests.rules = [
         t
         for t in rule_tests

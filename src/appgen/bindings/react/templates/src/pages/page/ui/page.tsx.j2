@@ -16,12 +16,17 @@
 {% set description_field = description[8:] if description and description.startswith("$record.") else none %}
 {# The button "Share" of the secret links (ADR 0049). #}
 {% set share = shares.get(element.entity) if detail and element.share else none %}
-{% set entity_names = ([(element.entity | camel) ~ "Api"] if description_field else []) + ([(element.entity | camel) ~ "Sharing"] if share else []) %}
+{# The other users on the record (ADR 0052): only with the FastAPI app. #}
+{% set presence = presences.get(name) if detail else none %}
+{% set entity_names = ([(element.entity | camel) ~ "Api"] if description_field else []) + ([(element.entity | camel) ~ "Presence"] if presence else []) + ([(element.entity | camel) ~ "Sharing"] if share else []) %}
 {% if entity_names %}
 import { {{ entity_names | join(", ") }} } from "@/entities/{{ element.entity | kebab }}";
 {% endif %}
 {% if form %}
 import { {{ form | pascal }}FormPage } from "@/features/{{ form | kebab }}-form";
+{% endif %}
+{% if presence %}
+import { RecordPresence } from "@/features/record-presence";
 {% endif %}
 {% if share %}
 import { ShareButton } from "@/features/share-record";
@@ -80,8 +85,10 @@ export function {{ name | pascal }}Page() {
 {% elif params and not view and not dashboard and not api_view and not query_view %}
   const { {% for param in params %}{{ param }}{% if param != param | camel %}: {{ param | camel }}{% endif %}{{ ", " if not loop.last }}{% endfor %} } = useParams();
 {% endif %}
-{% set regions = page_regions(element, page_actions | length > 0 or share is not none) %}
+{% set regions = page_regions(element, page_actions | length > 0 or share is not none or presence is not none) %}
 {% set share_button %}{% if share %}<ShareButton sharing={ {{- element.entity | camel }}Sharing} id={ {{- id_param | camel }} ?? ""} path={{ js(share.shared_prefix) }}{% if definition.access %} operation={{ js(share.update) }}{% endif %} />{% endif %}{% endset %}
+{% set presence_bar %}{% if presence %}<RecordPresence presence={ {{- element.entity | camel }}Presence} id={ {{- id_param | camel }} ?? ""} />{% endif %}{% endset %}
+{% set header_items = ([presence_bar] if presence else []) + (["<" ~ (name | pascal) ~ "PageActions />"] if page_actions else []) + ([share_button] if share else []) %}
 {% set content %}
 {% if custom %}
 <{{ name | pascal }}Content{% if element.entity %} params={params}{% endif %} />
@@ -120,12 +127,9 @@ export function {{ name | pascal }}Page() {
       />
 {% elif region.name == "actions" %}
       <div className={{ js(region.classes) }}>
-{% if page_actions %}
-        <{{ name | pascal }}PageActions />
-{% endif %}
-{% if share %}
-        {{ share_button }}
-{% endif %}
+{% for item in header_items %}
+        {{ item }}
+{% endfor %}
       </div>
 {% else %}
       <div className={{ js(region.classes) }}>
@@ -143,17 +147,16 @@ export function {{ name | pascal }}Page() {
 {% if element.description %}
         description={{ jsx_attr(element.description) }}
 {% endif %}
-{% if page_actions and share %}
+{% if header_items | length > 1 %}
         actions={
           <>
-            <{{ name | pascal }}PageActions />
-            {{ share_button }}
+{% for item in header_items %}
+            {{ item }}
+{% endfor %}
           </>
         }
-{% elif share %}
-        actions={ {{- share_button -}} }
-{% elif page_actions %}
-        actions={<{{ name | pascal }}PageActions />}
+{% elif header_items %}
+        actions={ {{- header_items[0] -}} }
 {% endif %}
       />
 {{ content | indent(6, true) }}    </>

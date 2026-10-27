@@ -12,6 +12,9 @@ export {
 {% if element.history %}
   {{ var }}History,
 {% endif %}
+{% if presences.values() | selectattr("entity", "eq", name) | list %}
+  {{ var }}Presence,
+{% endif %}
 {% if shares.get(name) %}
   {{ var }}Sharing,
 {% endif %}

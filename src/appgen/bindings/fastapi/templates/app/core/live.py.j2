@@ -1,5 +1,6 @@
-{{ trace_header(*py.live_ids) }}
+{{ trace_header(*(py.live_ids + py.presence_ids)) }}
 {% set scoped = py.live | selectattr("scoped") | list %}
+{% set presences = py.presences %}
 {% set auth = definition.auth %}
 {% set access = definition.access %}
 {% set u = py.entity(auth.user_entity) if auth else none %}
@@ -20,6 +21,14 @@
 With the setting `LIVE_EVENTS_URL`, the processes send the events
 through Redis, so that each replica gets the events of all replicas.
 Without it, each process sends only its own events.
+{% if presences %}
+
+The broker also keeps the signed-in users on the pages of the records
+(ADR 0052). A page notes its user each few seconds, and the broker
+forgets a user after PRESENCE_SECONDS without a call. A change of the
+users on a record gives the event `presence` to the other users on it.
+With Redis, the calls of the pages go through the channel too.
+{% endif %}
 """
 
 {% set ns = namespace(lines=[
@@ -84,6 +93,10 @@ QUEUE_SIZE = 100
 {% if auth %}
 TICKET_SECONDS = 30
 """The time of a ticket of the stream, in seconds: a client opens the stream with it at once."""
+{% endif %}
+{% if presences %}
+PRESENCE_SECONDS = 15
+"""The time after the last call of a page when the broker forgets its user, in seconds."""
 {% endif %}
 
 type Action = Literal["created", "changed", "deleted"]
@@ -171,11 +184,104 @@ class Change:
 {% else %}
         return cls(data["entity"], UUID(data["id"]), data["action"])
 {% endif %}
+{% if presences %}
+
+
+@dataclass(frozen=True, slots=True)
+class Here:
+    """A call of the page of a record: its user is on the record, or left it (ADR 0052)."""
+
+    entity: str
+    id: UUID
+    user: UUID
+    name: str = ""
+    typing: bool = False
+    left: bool = False
+
+    def to_json(self) -> str:
+        """Return the call as JSON, for the Redis channel."""
+        data = {"entity": self.entity, "id": str(self.id), "user": str(self.user)}
+        state = {"name": self.name, "typing": self.typing, "left": self.left}
+        return json.dumps({"presence": {**data, **state}})
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> Here:
+        """Return a call of the Redis channel, from the value of its key `presence`."""
+        return cls(
+            data["entity"],
+            UUID(data["id"]),
+            UUID(data["user"]),
+            data["name"],
+            data["typing"],
+            data["left"],
+        )
+
+
+type Message = Change | Here
+"""A message of the Redis channel: a change of a record, or a call of a record page."""
+
+
+def message_of(text: str | bytes) -> Message:
+    """Return a message of the Redis channel."""
+    data = json.loads(text)
+    if "presence" in data:
+        return Here.from_data(data["presence"])
+    return Change.from_json(text)
+
+
+class PresentUser(BaseModel):
+    """A signed-in user on the page of a record."""
+
+    id: UUID
+    name: str = Field(description="The name of the user.")
+    typing: bool = Field(description="True if the user types in a form on the page.")
+
+
+class PresenceInput(BaseModel):
+    """The state of the signed-in user on the page of a record."""
+
+    typing: bool = Field(default=False, description="True if the user types in a form on the page.")
+
+
+class Presence(BaseModel):
+    """The other signed-in users on the page of a record."""
+
+    users: list[PresentUser]
+
+
+@dataclass(slots=True)
+class _Present:
+    """A user on the page of a record: its name, its typing, and the end of its presence."""
+
+    name: str
+    typing: bool
+    until: float
+    """The time of `time.monotonic()` when the broker forgets the user."""
+{% else %}
+
+type Message = Change
+"""A message of the Redis channel: a change of a record."""
+
+
+def message_of(text: str | bytes) -> Message:
+    """Return a message of the Redis channel."""
+    return Change.from_json(text)
+{% endif %}
 
 
 class LiveEvent(BaseModel):
     """An event of the stream of `GET /live`."""
 
+{% if presences %}
+    type: Literal["open", "created", "changed", "deleted", "reset", "presence"] = Field(
+        description=(
+            "`open`: the stream is open, and the changes from now on follow. `created`, "
+            "`changed`, `deleted`: a change of a record. `reset`: the stream lost events, "
+            "so read all records again. `presence`: the other users on the page of a record "
+            "changed."
+        )
+    )
+{% else %}
     type: Literal["open", "created", "changed", "deleted", "reset"] = Field(
         description=(
             "`open`: the stream is open, and the changes from now on follow. `created`, "
@@ -183,8 +289,14 @@ class LiveEvent(BaseModel):
             "so read all records again."
         )
     )
+{% endif %}
     entity: str | None = Field(default=None, description="The entity of the record.")
     id: UUID | None = Field(default=None, description="The ID of the record.")
+{% if presences %}
+    users: list[PresentUser] | None = Field(
+        default=None, description="`presence`: the other users on the page of the record."
+    )
+{% endif %}
 {% if auth %}
 
 
@@ -249,6 +361,13 @@ class Subscription:
     def reset(self) -> None:
         """Tell the client to read all records again, for example after a loss of events."""
         self._put(LiveEvent(type="reset"))
+{% if presences %}
+
+    def show(self, entity: str, id: UUID, users: list[PresentUser]) -> None:
+        """Add the users on the page of a record to the queue, without the user of the client."""
+        others = [user for user in users if user.id != self.viewer.user]
+        self._put(LiveEvent(type="presence", entity=entity, id=id, users=others))
+{% endif %}
 
     def end(self) -> None:
         """End the stream. The client opens a new one, for example at another replica."""
@@ -286,20 +405,32 @@ class Broker:
     another task gives the events of the channel to the subscriptions, so
     that each replica gets the events of all replicas. The tasks start
     with the first change or subscription.
+{% if presences %}
+
+    `here` and `leave` send the calls of the record pages in the same way.
+    Each broker keeps the users on the records from the calls, and forgets
+    a user after PRESENCE_SECONDS without a call.
+{% endif %}
     """
 
     def __init__(self, url: str | None = None) -> None:
         self.url = url or None
         self.subscriptions: set[Subscription] = set()
-        self.outbox: asyncio.Queue[Change] = asyncio.Queue()
+        self.outbox: asyncio.Queue[Message] = asyncio.Queue()
         self.redis: Redis | None = None
         self.tasks: list[asyncio.Task[None]] = []
         self.available = True
         """False after an error of Redis, until the next success: one warning for each loss."""
         self.ended = False
         """True when the server stops: the streams end."""
+{% if presences %}
+        self.present: dict[tuple[str, UUID], dict[UUID, _Present]] = {}
+        """The users on the pages of the records, by entity and ID."""
+        self.sweeper: asyncio.Task[None] | None = None
+        """The task that forgets the users without a call."""
+{% endif %}
 
-    def publish(self, changes: Iterable[Change]) -> None:
+    def publish(self, changes: Iterable[Message]) -> None:
         """Send the changes of a transaction after its commit."""
         if self.url is None:
             self.deliver(changes)
@@ -308,11 +439,78 @@ class Broker:
         for change in changes:
             self.outbox.put_nowait(change)
 
-    def deliver(self, changes: Iterable[Change]) -> None:
-        """Give changes to the subscriptions of the process."""
-        for change in changes:
+    def deliver(self, messages: Iterable[Message]) -> None:
+        """Give the messages to the subscriptions of the process."""
+        for message in messages:
+{% if presences %}
+            if isinstance(message, Here):
+                self.arrive(message)
+                continue
+{% endif %}
             for subscription in list(self.subscriptions):
-                subscription.offer(change)
+                subscription.offer(message)
+{% if presences %}
+
+    def here(self, entity: str, id: UUID, user: UUID, name: str, typing: bool) -> list[PresentUser]:
+        """Note a user on the page of a record, and return the other users on the record."""
+        self.publish([Here(entity, id, user, name, typing)])
+        return [other for other in self.users(entity, id) if other.id != user]
+
+    def leave(self, entity: str, id: UUID, user: UUID) -> None:
+        """End the presence of a user on a record: the page closed."""
+        self.publish([Here(entity, id, user, left=True)])
+
+    def users(self, entity: str, id: UUID) -> list[PresentUser]:
+        """Return the users on the page of a record."""
+        present = self.present.get((entity, id), {})
+        return [PresentUser(id=u, name=p.name, typing=p.typing) for u, p in present.items()]
+
+    def arrive(self, here: Here) -> None:
+        """Note a call of a page in the users on its record, and tell the other users of a change."""
+        key = (here.entity, here.id)
+        present = self.present.setdefault(key, {})
+        before = present.pop(here.user, None)
+        if not here.left:
+            until = time.monotonic() + PRESENCE_SECONDS
+            present[here.user] = _Present(here.name, here.typing, until)
+        if not present:
+            del self.present[key]
+        if before is None and here.left:
+            return
+        if before is None or here.left or (before.name, before.typing) != (here.name, here.typing):
+            self._tell(key, {here.user})
+        if self.sweeper is None:
+            self.sweeper = asyncio.create_task(self._sweep())
+
+    def forget(self, now: float | None = None) -> None:
+        """Forget the users without a call in PRESENCE_SECONDS, and tell the other users."""
+        now = time.monotonic() if now is None else now
+        for key, present in list(self.present.items()):
+            gone = {user for user, state in present.items() if state.until <= now}
+            if not gone:
+                continue
+            for user in gone:
+                del present[user]
+            if not present:
+                del self.present[key]
+            self._tell(key, gone)
+
+    def _tell(self, key: tuple[str, UUID], changed: set[UUID]) -> None:
+        """Send the users on a record to the streams of its other users."""
+        entity, id = key
+        users = self.users(entity, id)
+        others = {user.id for user in users} - changed
+        for subscription in list(self.subscriptions):
+            viewer = subscription.viewer
+            if viewer.user in others and entity in viewer.entities:
+                subscription.show(entity, id, users)
+
+    async def _sweep(self) -> None:
+        """Forget the users without a call, each second."""
+        while True:
+            await asyncio.sleep(1)
+            self.forget()
+{% endif %}
 
     def subscribe(self, viewer: Viewer) -> Subscription:
         """Return a new subscription of a client."""
@@ -350,19 +548,19 @@ class Broker:
             logger.warning("The Redis of the live events is not available: %s", error)
 
     async def _send(self) -> None:
-        """Send the changes of the outbox to the channel. Without Redis, give them to the process."""
+        """Send the messages of the outbox to the channel. Without Redis, give them to the process."""
         assert self.redis is not None
         while True:
-            change = await self.outbox.get()
+            message = await self.outbox.get()
             try:
                 if not self.available:
                     # The listener tries Redis again each second.
-                    self.deliver([change])
+                    self.deliver([message])
                     continue
-                await self.redis.publish(CHANNEL, change.to_json())  # pyright: ignore[reportUnknownMemberType]
+                await self.redis.publish(CHANNEL, message.to_json())  # pyright: ignore[reportUnknownMemberType]
             except RedisError as error:
                 self._failed(error)
-                self.deliver([change])
+                self.deliver([message])
             finally:
                 self.outbox.task_done()
 
@@ -379,18 +577,24 @@ class Broker:
                         for subscription in list(self.subscriptions):
                             subscription.reset()
                     while True:
-                        message = cast(
+                        received = cast(
                             dict[str, Any] | None,
                             await pubsub.get_message(ignore_subscribe_messages=True, timeout=None),
                         )
-                        if message is not None:
-                            self.deliver([Change.from_json(message["data"])])
+                        if received is not None:
+                            self.deliver([message_of(received["data"])])
             except RedisError as error:
                 self._failed(error)
                 await asyncio.sleep(1)
 
     async def close(self, timeout: float = 5) -> None:
         """Send the waiting changes, stop the tasks, and close the connection of Redis."""
+{% if presences %}
+        if self.sweeper is not None:
+            self.sweeper.cancel()
+            await asyncio.gather(self.sweeper, return_exceptions=True)
+            self.sweeper = None
+{% endif %}
         if self.tasks:
             try:
                 await asyncio.wait_for(self.outbox.join(), timeout)

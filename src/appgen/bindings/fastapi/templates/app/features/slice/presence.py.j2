@@ -1,0 +1,61 @@
+{{ trace_header(*py.entity(name).presence.ids) }}
+{% set e = py.entity(name) %}
+{% set p = e.presence %}
+{% set ops = p.operations %}
+{% set deps = "    dependencies=[Depends(check_access)],\n" if p.read.protected and e.guard == "check_access" else "" %}
+{% set scope = ", scope" if p.scope else "" %}
+{% set scope_param = "    scope: ReadScope,\n" if p.scope else "" %}
+{{ p.doc() }}
+
+{{ p.imports() }}
+
+router = APIRouter()
+{% if p.scope %}
+
+ReadScope = Annotated[RecordScope | None, Depends(scope_of("read"))]
+"""The records that the request may read (the record rules of the role, ADR 0025), or all."""
+{% endif %}
+
+
+{% for id in p.ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.put(
+    "{{ e.path }}/{id}/presence",
+    responses=problem_responses(401, 404),
+    summary="Note the user on the page of a {{ e.snake | replace('_', ' ') }}",
+    operation_id="{{ ops.here }}",
+{{ deps }})
+async def {{ ops.here }}(
+    id: UUID,
+    body: PresenceInput,
+    request: Request,
+    session: SessionDep,
+    user: CurrentUser,
+{{ scope_param }}) -> Presence:
+    """Note that the signed-in user is on the page of a record, and return the other users on it.
+
+    The page calls it when it opens, when the user starts or stops to type,
+    and each few seconds. The other users on the record get the changes in
+    the event `presence` of `GET /live`.
+    """
+    record = await repository.get(session, id{{ scope }})
+    broker: Broker = request.app.state.live
+    users = broker.here("{{ e.name }}", record.id, user.id, str(user.{{ p.user_label }}), body.typing)
+    return Presence(users=users)
+
+
+{% for id in p.ids %}
+{{ trace(id) }}
+{% endfor %}
+@router.delete(
+    "{{ e.path }}/{id}/presence",
+    status_code=204,
+    responses=problem_responses(401),
+    summary="Remove the user from the page of a {{ e.snake | replace('_', ' ') }}",
+    operation_id="{{ ops.leave }}",
+{{ deps }})
+async def {{ ops.leave }}(id: UUID, request: Request, user: CurrentUser) -> None:
+    """End the presence of the signed-in user on a record, when the page closes."""
+    broker: Broker = request.app.state.live
+    broker.leave("{{ e.name }}", id, user.id)

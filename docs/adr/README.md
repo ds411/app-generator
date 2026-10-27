@@ -61,3 +61,4 @@ gives the rules.
 | 0046   | [Places: point fields and the geo filters](0046-geo-points.md)          | Accepted |
 | 0049   | [Secret links that share a record](0049-share-links.md)                 | Accepted |
 | 0051   | [Live updates of the records](0051-live-updates.md)                     | Accepted |
+| 0052   | [The other users on a record page](0052-presence.md)                    | Accepted |

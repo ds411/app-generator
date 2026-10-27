@@ -42,6 +42,8 @@ entities:
       views: [table, detail]
       forms: [create, update]
     display_field: title
+    # The page of a lesson shows the other users on it (ADR 0052).
+    live: true
     fields:
       title: { type: string, required: true, max_length: 120 }
       body: { type: text }
@@ -109,13 +111,15 @@ pages:
       new_lesson: { kind: form, form: new_lesson, label: New lesson, icon: plus }
   # An admin shares a lesson with a guest: a secret link opens it
   # without a sign-in (ADR 0049). A member may not change a lesson, so
-  # a member sees no button "Share".
+  # a member sees no button "Share". The page shows the other users on
+  # the lesson, and a note when one of them types (ADR 0052).
   lesson_detail:
     path: "/lessons/{id}"
     title: Lesson
     entity: Lesson
     content: { view: lesson_detail }
     share: true
+    presence: true
   submissions:
     path: /submissions
     title: Submissions

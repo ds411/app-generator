@@ -222,6 +222,18 @@ export type ExpectedSessions = {
     /** The text that a revoked link shows. */
     invalid: string;
   } | null;
+  /**
+   * The other users on a record page (ADR 0052): the admin types in the
+   * form of the button "Edit", and the member reads the record. The page of
+   * a list is a link away from the record page.
+   */
+  presence: {
+    admin: { username: string; name: string; initials: string };
+    member: { username: string; name: string; initials: string };
+    path: string;
+    title: string;
+    away: { label: string; path: string };
+  } | null;
 };
 
 export type Expected = {
