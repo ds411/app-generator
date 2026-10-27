@@ -26,8 +26,9 @@
 # type check, appgen check, and the test of the events
 # (scripts/events_test.py) on it.
 # Then generate tests/fixtures/record-rules.yaml (a live entity with
-# record rules, ADR 0051), and run lint, type check, appgen check, and
-# the test of the stream of the live updates with Redis
+# record rules, ADR 0051, and a page with the users on a task, ADR
+# 0052), and run lint, type check, appgen check, and the test of the
+# stream of the live updates and of the users on a task with Redis
 # (scripts/live_test.py) on it.
 # Then generate tests/fixtures/invoices.yaml (the small DSL additions of
 # M33), and run lint, type check, appgen check, the sequence test

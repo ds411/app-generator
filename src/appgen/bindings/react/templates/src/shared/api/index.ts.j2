@@ -65,6 +65,10 @@ export type {
 {% if has_available(definition) %}
   OwnerRange,
 {% endif %}
+{% if presences %}
+  PresenceApi,
+  PresentUser,
+{% endif %}
   Search,
 {% if shares %}
   SharedRecord,

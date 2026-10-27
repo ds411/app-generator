@@ -19,11 +19,15 @@ of the forms. This test proves it for tests/fixtures/courses.yaml:
    Then a member sees no button "Share" on the page of a lesson, and an
    admin makes a secret link of the lesson (ADR 0049). A guest opens the
    link without a sign-in, the admin revokes it, and the link opens
-   nothing. Last, a user with two roles in two courses (ADR 0048) sees
-   and uses the button "Edit" on a lesson of the course whose role
-   gives the change, and not on a lesson of the other course. The
-   button "New lesson" shows for this user, and not for a user whose
-   roles do not give the create.
+   nothing. In Next.js and react-api, a member and an admin open the page
+   of a lesson in two browsers, and each sees the other (ADR 0052). The
+   member sees a note while the admin types in the form "Edit", and sees
+   no other user after the admin leaves the page or closes the browser.
+   Last, a user with two roles in two courses (ADR 0048) sees and uses
+   the button "Edit" on a lesson of the course whose role gives the
+   change, and not on a lesson of the other course. The button "New
+   lesson" shows for this user, and not for a user whose roles do not
+   give the create.
 
 Run it from the repository root:
 
@@ -61,6 +65,7 @@ from smoke_test import expected_ui
 
 from appgen.bindings.react.api_client import DATA_KEY
 from appgen.bindings.shared.mock_data import mock_data
+from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.views import definition_display, label
 from appgen.dsl import AppDefinition, load_definition
@@ -307,6 +312,57 @@ def expected_share(binding: str, definition: AppDefinition) -> dict[str, Any] | 
     }
 
 
+def expected_presence(binding: str, definition: AppDefinition) -> dict[str, Any] | None:
+    """Return the values of the test of the users on a record page (ADR 0052), or None.
+
+    The React app with mock data shows no users. The admin may call the
+    update operation of the entity, so the admin types in the form of the
+    button "Edit". The member reads the record. The page of the list of the
+    entity is a link away from the record page.
+    """
+    plans = presence_plans(definition)
+    auth, access, ui = definition.auth, definition.access, definition.ui
+    if binding == "react" or not plans or auth is None or access is None or ui is None:
+        return None
+    plan = next(iter(plans.values()))
+    data = mock_data(definition)
+    users = data[auth.user_entity]
+    default = definition.entities[auth.user_entity].fields[access.role_field].default
+    update = next(
+        name
+        for name, op in definition.operations.items()
+        if op.entity == plan.entity and op.kind == "update"
+    )
+
+    def may(user: Record, operation: str) -> bool:
+        role = str(user.get(access.role_field) or default)
+        return Permissions(definition, role).operation(operation)
+
+    admin = next(u for u in users if may(u, update))
+    member = next(u for u in users if may(u, plan.read) and not may(u, update))
+    record = data[plan.entity][0]
+    display = definition_display(definition.entities[auth.user_entity])
+    page = definition.pages[plan.page]
+    away = next(
+        p
+        for p in definition.pages.values()
+        if p.entity == plan.entity and "{" not in p.path and p.content and p.content.view
+    )
+
+    def user(value: Record) -> dict[str, str]:
+        name = str(value[display])
+        initials = "".join(word[0].upper() for word in name.split()[:2])
+        return {"username": value[auth.username_field], "name": name, "initials": initials}
+
+    return {
+        "admin": user(admin),
+        "member": user(member),
+        "path": page.path.replace("{id}", str(record["id"])),
+        "title": str(record[definition_display(definition.entities[plan.entity])]),
+        "away": {"label": str(away.title), "path": away.path},
+    }
+
+
 def member_record_test(
     definition: AppDefinition, data: dict[str, list[Record]], page: Page, operation: str
 ) -> dict[str, Any] | None:
@@ -432,6 +488,7 @@ def expected_sessions(binding: str, definition: AppDefinition) -> dict[str, Any]
         "password": PASSWORDS["nextjs" if binding == "react-api" else binding],
         "users": users,
         "share": expected_share(binding, definition),
+        "presence": expected_presence(binding, definition),
         "memberships": expected_memberships(definition),
     }
 

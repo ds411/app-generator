@@ -1,8 +1,29 @@
-{{ trace_header(*(definition.entities.values() | selectattr("live") | map(attribute="live.id"))) }}
+{{ trace_header(*((definition.entities.values() | selectattr("live") | map(attribute="live.id") | list) + (presences.values() | map(attribute="page_id") | list))) }}
+{% if presences %}
+import type { PresentUser } from "@/shared/api";
+
+{% endif %}
 // The client of the live updates (ADR 0051). It reads the server-sent
 // events of the stream of the server with EventSource, and opens the
 // stream again after an error. After the changes of the records of an
 // entity, the open views of the entity load their data again.
+{% if presences %}
+// The events `presence` go to the pages of their records (ADR 0052).
+
+/**
+ * An event of the stream. `open`: the stream is open. `created`, `changed`,
+ * `deleted`: a change of a record. `reset`: the stream lost events, so the
+ * views load all their data again. `presence`: the other users on the page
+ * of a record changed.
+ */
+export type LiveEvent = {
+  type: "open" | "created" | "changed" | "deleted" | "reset" | "presence";
+  entity?: string;
+  id?: string;
+  /** `presence`: the other users on the page of the record. */
+  users?: PresentUser[];
+};
+{% else %}
 
 /**
  * An event of the stream. `open`: the stream is open. `created`, `changed`,
@@ -14,6 +35,7 @@ export type LiveEvent = {
   entity?: string;
   id?: string;
 };
+{% endif %}
 
 /**
  * The first wait before the stream opens again after an error, in
@@ -122,3 +144,55 @@ export function batched(notify: (entity?: string) => void): (event: LiveEvent) =
     }, BATCH_MS);
   };
 }
+{% if presences %}
+
+/**
+ * A listener of the other users on the page of a record: it gets the users,
+ * or null after `reset`, when it asks the server for the users.
+ */
+type PresenceListener = (users: PresentUser[] | null) => void;
+
+/** The listeners of the pages of the records, by entity and ID (`<entity>:<id>`). */
+const presenceListeners = new Map<string, Set<PresenceListener>>();
+
+/**
+ * Give the other users on the page of a record to `listener` after each
+ * change. Return the function that stops it.
+ */
+export function watchPresence(entity: string, id: string, listener: PresenceListener): () => void {
+  const key = `${entity}:${id}`;
+  const listeners = presenceListeners.get(key) ?? new Set<PresenceListener>();
+  listeners.add(listener);
+  presenceListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      presenceListeners.delete(key);
+    }
+  };
+}
+
+/**
+ * Return a function that gives each event `presence` to the listeners of
+ * its record, and the other events to `changes`. After `reset`, the
+ * listeners ask the server for the users again.
+ */
+export function liveEvents(changes: (event: LiveEvent) => void): (event: LiveEvent) => void {
+  return (event) => {
+    if (event.type === "presence") {
+      for (const listener of presenceListeners.get(`${event.entity}:${event.id}`) ?? []) {
+        listener(event.users ?? []);
+      }
+      return;
+    }
+    if (event.type === "reset") {
+      for (const listeners of presenceListeners.values()) {
+        for (const listener of listeners) {
+          listener(null);
+        }
+      }
+    }
+    changes(event);
+  };
+}
+{% endif %}

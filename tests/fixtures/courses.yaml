@@ -46,6 +46,8 @@ entities:
       views: [table, detail]
       forms: [create, update]
     display_field: title
+    # The page of a lesson shows the other users on it (ADR 0052).
+    live: true
     fields:
       title: { type: string, required: true, max_length: 120 }
       body: { type: text }
@@ -136,13 +138,15 @@ pages:
   # without a sign-in (ADR 0049). A member may not change a lesson, so
   # a member sees no button "Share", unless the member teaches the course
   # of the lesson: a teacher edits and shares the lessons of the course
-  # (ADR 0048).
+  # (ADR 0048). The page shows the other users on the lesson, and a note
+  # when one of them types in the form "Edit" (ADR 0052).
   lesson_detail:
     path: "/lessons/{id}"
     title: Lesson
     entity: Lesson
     content: { view: lesson_detail }
     share: true
+    presence: true
     actions:
       edit_lesson: { kind: form, form: edit_lesson, label: Edit, icon: pencil, variant: outline }
   submissions:

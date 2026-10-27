@@ -47,7 +47,8 @@
 {% set ranges_guard = ranges and definition.access and list_op and list_op not in definition.auth.public_operations %}
 {% set auth_names = (["currentUserId"] if history_users or totals | selectattr("me") | list else []) + (["recordScope"] if rule else []) + (["requireOperation"] if guarded or (has_files and file_guard and not react.api) or history_guards or share_guard or ranges_guard else []) + (["userLabel"] if history_users else []) %}
 {% set typed = not react.api and not has_files and not history and not notify and not share and not member and not ranges %}
-{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type MemberPermissions"] if member else []) + (["type OwnerRange"] if ranges else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
+{% set presence = presences.values() | selectattr("entity", "eq", name) | list %}
+{% set api_types = (["type EntityApi"] if typed else []) + (["type FileApi"] if has_files else []) + (["type HistoryApi"] if history else []) + (["type MemberPermissions"] if member else []) + (["type OwnerRange"] if ranges else []) + (["type PresenceApi"] if presence else []) + (["type SharedRecord", "type SharingApi"] if share else []) %}
 {% set mock_names = (notify.store | list if notify else []) + (["type RangeSpec"] if ranges else []) %}
 {% if lists or ops | selectattr("1.kind", "eq", "list") | list %}
 import { {% for t in api_types %}{{ t }}, {% endfor %}{{ store }}, type ListQuery, type ListResult{% for n in mock_names %}, {{ n }}{% endfor %} } from "@/shared/api";
@@ -340,6 +341,11 @@ export const {{ var }}Files: FileApi<{{ type }}, {{ type }}FileField> = {{ var }
 {% endif %}
 );
 {% endif %}
+{% endif %}
+{% if presence %}
+
+/** The other users on the pages of the records of {{ type }} (ADR 0052): the endpoints of the FastAPI app. */
+export const {{ var }}Presence: PresenceApi = {{ var }}Api.presence(); {{ trace(presence[0].page_id) }}
 {% endif %}
 {% if share %}
 

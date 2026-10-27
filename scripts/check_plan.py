@@ -153,6 +153,8 @@ def fastapi_sections() -> Iterator[Section]:
             tracker("fastapi"),
             tracker("fastapi", **{"x-fastapi-rate-limit-store": "redis"}),
             *deploy("fastapi"),
+            # scripts/check_live_events.py runs two brokers of this app with one Redis.
+            fixture("record-rules", "fastapi"),
         ),
         (
             "api_calls.py",

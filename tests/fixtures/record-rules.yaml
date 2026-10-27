@@ -120,6 +120,9 @@ pages:
     path: "/tasks/{id}"
     title: Task
     entity: Task
+    # The page shows the other users on the task (ADR 0052): only the users
+    # that may read the task.
+    presence: true
     content: { view: task_detail }
     actions:
       edit: { kind: form, form: edit_task, label: Edit, icon: pencil, variant: outline }

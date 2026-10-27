@@ -1,10 +1,11 @@
 // The front ends show the values of the signed-in user (M36): the value
 // `$me` of the filters of the widgets and the views, of the totals, and of
 // the defaults of the forms. A user shares a record with a secret link
-// (ADR 0049). The actions of a page follow the role of the user in the
-// scope of the record (ADR 0048). scripts/sessions_ui_test.py starts the
-// app of tests/fixtures/courses.yaml, and runs this file. Without the
-// values of the users (`expected.sessions`), the tests skip.
+// (ADR 0049). The page of a record shows the other users on it, in two
+// browsers (ADR 0052). The actions of a page follow the role of the user
+// in the scope of the record (ADR 0048). scripts/sessions_ui_test.py
+// starts the app of tests/fixtures/courses.yaml, and runs this file.
+// Without the values of the users (`expected.sessions`), the tests skip.
 import { expect, type Page, test } from "@playwright/test";
 
 import { expected } from "./expected";
@@ -132,6 +133,64 @@ test("a guest opens the secret link of a record without a sign-in", async ({ pag
   await page.goto(link.pathname);
   await expect(page.getByText(share.invalid, { exact: true })).toBeVisible();
   await expect(heading).toHaveCount(0);
+});
+
+test("the page of a record shows the other users on it, and their typing", async ({ page, browser }, testInfo) => {
+  const presence = sessions?.presence;
+  test.skip(!presence || testInfo.project.name !== "light", "The app has no page with `presence`.");
+  if (!presence) return;
+  test.setTimeout(120_000);
+  const password = sessions?.password ?? "";
+  const heading = (on: Page) => on.getByRole("heading", { name: presence.title, exact: true });
+  const users = (on: Page) => on.getByRole("list", { name: "Other users on this page" });
+  const typing = page.getByText(`${presence.admin.name} is typing.`, { exact: true });
+
+  // The member opens the record in the first browser, and sees no other user. The test of
+  // the secret links leaves the admin on the page: the server forgets the admin some seconds
+  // after the last call.
+  await signIn(page, presence.member.username, password);
+  await page.goto(presence.path);
+  await expect(heading(page)).toBeVisible();
+  await expect(users(page)).toHaveCount(0, { timeout: 30_000 });
+
+  // The admin opens it in a second browser: each browser shows the other user.
+  const other = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    colorScheme: testInfo.project.use.colorScheme,
+    locale: "en-US",
+    timezoneId: "UTC",
+  });
+  const admin = await other.newPage();
+  try {
+    await signIn(admin, presence.admin.username, password);
+    await admin.goto(presence.path);
+    await expect(heading(admin)).toBeVisible();
+    await expect(users(page)).toContainText(presence.admin.initials);
+    await expect(users(page)).toContainText(presence.admin.name);
+    await expect(users(admin)).toContainText(presence.member.name);
+
+    // The admin types in the form of the button "Edit": the member sees a note, which ends
+    // some seconds after the last input.
+    await admin.getByRole("button", { name: "Edit", exact: true }).first().click();
+    const field = admin.getByRole("dialog").getByRole("textbox", { name: /^Title/ }).first();
+    await field.pressSequentially(" draft", { delay: 50 });
+    await expect(typing).toBeVisible();
+    await expect(typing).toBeHidden();
+    await admin.keyboard.press("Escape");
+
+    // The admin goes to another page: the member sees no other user.
+    await admin.getByRole("link", { name: presence.away.label, exact: true }).first().click();
+    await expect.poll(() => new URL(admin.url()).pathname).toBe(presence.away.path);
+    await expect(users(page)).toHaveCount(0);
+
+    // The admin comes back, and closes the browser: the server forgets the admin at the
+    // latest some seconds after the last call.
+    await admin.goto(presence.path);
+    await expect(users(page)).toContainText(presence.admin.name);
+  } finally {
+    await other.close();
+  }
+  await expect(users(page)).toHaveCount(0, { timeout: 30_000 });
 });
 
 test("the actions of a page follow the role of the user in the scope of the record", async ({ page }, testInfo) => {

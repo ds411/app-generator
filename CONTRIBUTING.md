@@ -278,7 +278,9 @@ git config core.hooksPath .githooks
   pyright, the generated tests, `docker build`, and `appgen check` on
   the output. It also starts two processes of the app with Redis, and
   checks that they share the rate limit and that both send the live
-  events of the changes of each process (`scripts/check_live_events.py`), and it validates the
+  events of the changes of each process (`scripts/check_live_events.py`,
+  which also checks that two brokers with one Redis know the users on a
+  record of both), and it validates the
   deployment files of each target against their schemas (it downloads
   the schemas once). Then it generates the room booking example
   (sign-in, sign-up, roles, and a provider) and
@@ -320,8 +322,8 @@ git config core.hooksPath .githooks
   `tests/fixtures/listings.yaml`, whose test calls the server actions of
   the queries with PGlite (`scripts/queries_test.py`), and
   `tests/fixtures/record-rules.yaml`, whose test reads the stream of the
-  live updates of each user with PGlite, and with two brokers and one
-  Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
+  live updates of each user and the users on a task page with PGlite,
+  and with two brokers and one Redis (`scripts/live_test.py`). It needs pnpm and Docker. Run it by hand
   with `scripts/check-nextjs.sh [output folder]`.
 - The hook runs the selected sections of `scripts/check-react.sh`. The
   script generates the project tracker with the React binding, and runs
@@ -374,6 +376,9 @@ git config core.hooksPath .githooks
   `tests/fixtures/courses.yaml` with React, Next.js, and react-api, signs
   in as two users, and checks the widgets, the lists, the totals, and the
   forms of the signed-in user (`$me`, `scripts/sessions_ui_test.py`).
+  In Next.js and react-api, it also opens the page of a lesson in two
+  browsers, and checks the other users on the page and their typing
+  (ADR 0052).
   Last, it builds `tests/fixtures/places.yaml` with React, Next.js, and
   react-api and a local tile server, opens the map of the places, moves
   it, and adds a place (`scripts/places_ui_test.py`).

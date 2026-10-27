@@ -9,7 +9,8 @@
 # search and its migration on Postgres (scripts/check_full_text_search.py),
 # the rate limit that two processes share in Redis
 # (scripts/check_shared_rate_limit.py), the live events that two
-# processes send through Redis (scripts/check_live_events.py),
+# processes send through Redis, and the users on a record that two
+# brokers know through Redis (scripts/check_live_events.py),
 # and the deployment files of each target against their schemas
 # (scripts/check_deploy_files.py). Then generate the room booking
 # example, which has the sign-in, the sign-up, the roles, and a

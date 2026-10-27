@@ -1,6 +1,6 @@
 {{ trace_header("app") }}
 import { type ActionResult, unwrap } from "./errors";
-import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}{{ "HistoryApi, HistoryEntry, " if has_history(definition) }}ListQuery, ListResult{{ ", ShareLinkCreated, ShareLinkState, SharingApi" if shares }} } from "./types";
+import type { EntityApi, EntityRecord, {{ "FileApi, " if definition.storage }}{{ "HistoryApi, HistoryEntry, " if has_history(definition) }}ListQuery, ListResult{{ ", PresenceApi, PresentUser" if presences }}{{ ", ShareLinkCreated, ShareLinkState, SharingApi" if shares }} } from "./types";
 
 /** The server actions of the data access of one entity. */
 export type EntityActions<T extends EntityRecord, TInput, TPatch = Partial<TInput>> = {
@@ -147,6 +147,27 @@ export function createSharingApi(actions: SharingActions): SharingApi {
     },
     async revoke(id) {
       unwrap(await actions.revoke(id));
+    },
+  };
+}
+{% endif %}
+{% if presences %}
+
+/** The server actions of the users on the records of one entity (ADR 0052). */
+export type PresenceActions = {
+  here(id: string, typing: boolean): Promise<ActionResult<PresentUser[]>>;
+  leave(id: string): Promise<ActionResult<null>>;
+};
+
+/** Return the users on the records of an entity: it calls the server actions. */
+export function createPresenceApi(entity: string, actions: PresenceActions): PresenceApi {
+  return {
+    entity,
+    async here(id, typing) {
+      return unwrap(await actions.here(id, typing));
+    },
+    async leave(id) {
+      unwrap(await actions.leave(id));
     },
   };
 }

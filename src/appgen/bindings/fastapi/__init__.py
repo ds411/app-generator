@@ -276,6 +276,12 @@ BINDING = Binding(
             when="py.entity(name).scope_path is not none",
         ),
         Output(
+            template="app/features/slice/presence.py.j2",
+            path=_SLICE + "/presence.py",
+            for_each="entity",
+            when="py.entity(name).presence",
+        ),
+        Output(
             template="app/features/slice/validation_ext.py.j2",
             path=_SLICE + "/validation_ext.py",
             for_each="entity",

@@ -144,6 +144,21 @@ export type MemberPermissions = {
 };
 
 {% endif %}
+{% if presences %}
+/** A signed-in user on the page of a record (ADR 0052). */
+export type PresentUser = { id: string; name: string; typing: boolean };
+
+/** The other users on the pages of the records of an entity (ADR 0052). */
+export interface PresenceApi {
+  /** The entity: the events `presence` of the stream name it. */
+  entity: string;
+  /** Note the signed-in user on the page of a record, and return the other users on it. */
+  here(id: string, typing: boolean): Promise<PresentUser[]>;
+  /** End the presence of the signed-in user on a record: the page closed. */
+  leave(id: string): Promise<void>;
+}
+
+{% endif %}
 {% if has_notices(definition) %}
 /** A notice for the signed-in user: a change of a record that concerns the user (ADR 0041). */
 export type Notice = {

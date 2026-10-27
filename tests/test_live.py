@@ -284,7 +284,11 @@ def test_the_nextjs_events_follow_the_record_rules() -> None:
     assert '      "member": { owner: true, where: { status: ["open", "in_progress"] } },\n' in live
     assert '      "reviewer": { where: { status: ["done"] } },\n' in live
     assert "      [personTeamsTable, personTeamsTable.teamId, personTeamsTable.personId],\n" in live
-    assert 'import { personTeamsTable, projectTable, taskTable } from "./schema";\n' in live
+    # The task page shows the other users (ADR 0052): the broker reads their names.
+    assert (
+        'import { personTable, personTeamsTable, projectTable, taskTable } from "./schema";\n'
+        in live
+    )
     assert "export async function liveAudience(" in live
     # The notices and the live events share the steps of the paths.
     assert "export async function pathUsers(" in files["src/shared/db/paths.ts"]

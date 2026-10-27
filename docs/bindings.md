@@ -894,6 +894,33 @@ listeners of the sessions, the broker, and the endpoint `GET /live`.
   Redis, and checks that both streams get the changes of each process
   in less than 2 s.
 
+### The users on the record pages in the FastAPI app
+
+The slice of an entity with a page with `presence` has `presence.py`
+([ADR 0052](adr/0052-presence.md)): `PUT <path>/{id}/presence` notes
+the signed-in user on the record and returns the other users, and
+`DELETE <path>/{id}/presence` ends the presence of the user. The
+endpoints need the permission of the read operation of the entity
+(`NEEDS` of `app/core/access.py`), and the PUT reads the record with its
+record rules, so a record that the user may not read gives 404.
+
+- The broker of `app/core/live.py` keeps the users on each record in
+  `present`, by entity and ID. `here()` and `leave()` send a `Here`
+  message: without Redis to the broker itself, with Redis through the
+  channel of the changes, so that each replica knows the users of all
+  replicas. `arrive()` notes the message, and a change of the users (a
+  new user, a change of the typing, a user that left) gives the event
+  `presence` to the subscriptions of the other users on the record.
+- A task of the broker calls `forget()` each second: it removes the
+  users without a call in `PRESENCE_SECONDS` (15), and tells the other
+  users on their records.
+- The generated tests in `tests/test_live.py` note two users on a
+  record, and check the answers and the events of the stream, 401 and
+  404, the users that the broker forgets, and the messages of Redis.
+  `scripts/check_live_events.py` runs two brokers of the app of
+  `tests/fixtures/record-rules.yaml` with one Redis: a user on a task of
+  one broker gets a new user on the other broker in less than 2 s.
+
 ### The worker of the FastAPI app
 
 The FastAPI app runs the `jobs` of the definition in a worker process
@@ -1477,6 +1504,43 @@ records of the entities with `live` ([ADR 0051](adr/0051-live-updates.md)).
   checks that the task board of the first browser shows each change in
   less than 2 s: in the Next.js app, and in the React app with the
   FastAPI app (`scripts/api_client_test.py`).
+
+### The users on the record pages in the Next.js app and in the React app
+
+A page with `presence` shows the other users on its record in its
+header ([ADR 0052](adr/0052-presence.md)).
+
+- The shared component `src/features/record-presence/ui/record-presence.tsx`
+  calls `PresenceApi.here()` when the page opens, each 5 seconds, and
+  when the user starts or stops to type in a form of the page (an
+  `input` event in a `form`, and 3 seconds without one). At the end of
+  the page, and at `pagehide`, it calls `leave()`. It shows an avatar
+  with the initials of each user, the name for screen readers and as a
+  tooltip, and the note `<name> is typing.` in a `status` region.
+- `watchPresence()` of `src/shared/lib/live.ts` gives the events
+  `presence` of the stream to the component of the record, and
+  `liveEvents()` sends the other events to `batched()`. After `reset`,
+  the component asks the server again. An answer of `here()` that left
+  before the last event does not replace the users of the event.
+- In the Next.js app, `here<Entity>PresenceAction()` and
+  `leave<Entity>PresenceAction()` of the entity check the read
+  operation and its record rules, as the endpoints of the FastAPI app.
+  The broker of `src/shared/db/live.ts` keeps the users as the broker
+  of the FastAPI app does, with `PRESENCE_MS` and a timer.
+  `notePresence()` reads the name of the user.
+- The React app with the FastAPI app calls the endpoints through
+  `HttpStore.presence()`. The React app with mock data has no
+  component.
+- `scripts/live_test.py` calls the server actions of the task page of
+  `tests/fixtures/record-rules.yaml` as two users with PGlite: the
+  answers, the events, the errors of the users that may not read the
+  task, the users that the broker forgets, and two brokers with one
+  Redis.
+- `scripts/sessions_ui_test.py` opens the page of a lesson of
+  `tests/fixtures/courses.yaml` in two browsers (`sessions.spec.ts`):
+  each browser shows the other user, the member sees the note while the
+  admin types in the form "Edit", and the avatar goes away when the
+  admin goes to another page or closes the browser.
 
 ## Shared templates
 

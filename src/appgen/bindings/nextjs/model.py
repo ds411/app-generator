@@ -32,6 +32,7 @@ from appgen.bindings.shared.notices import (
     mention_plans,
     notice_plans,
 )
+from appgen.bindings.shared.presence import presence_plans
 from appgen.bindings.shared.sharing import share_plans
 from appgen.bindings.shared.theme import build_theme
 from appgen.bindings.shared.totals import total_keys
@@ -362,6 +363,8 @@ def context(definition: AppDefinition) -> dict[str, Any]:
         "memberships": member_plan(definition),
         # The pages with `share` by entity: the secret links of the records (ADR 0049).
         "shares": shares,
+        # The pages with `presence` by name: the other users on the records (ADR 0052).
+        "presences": presence_plans(definition),
         # The values `$me` of the filters and of the defaults: the hook `useMe`.
         "me": uses_me(definition),
         # The keys of the totals in the records (ADR 0034), by entity.
